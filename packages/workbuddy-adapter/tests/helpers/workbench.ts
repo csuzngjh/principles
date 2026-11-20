@@ -78,6 +78,9 @@ export function makeGovernance(home: string, options: GovernanceOptions = {}): s
   const config = getDefaultPdConfig();
   if (config.features['host.workbuddy']) config.features['host.workbuddy'].enabled = options.workbuddyFlag ?? false;
   if (config.features['principle_receipt_ledger']) config.features['principle_receipt_ledger'].enabled = options.receiptLedgerFlag ?? false;
+  // B-class automatic Pain submissions need the workspace opt-in (fail-closed
+  // default). Governance fixtures represent authorized workspaces.
+  config.features.automatic_pain_submission = { category: 'quiet', enabled: true };
   if (options.ruleContextV2Flag !== undefined && config.features['rulecode_context_v2']) config.features['rulecode_context_v2'].enabled = options.ruleContextV2Flag;
   if (options.readyRuntime) {
     (config.runtimeProfiles as Record<string, unknown>)[WB_READY_PROFILE_ID] = {

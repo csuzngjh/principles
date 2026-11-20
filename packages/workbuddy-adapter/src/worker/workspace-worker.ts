@@ -49,6 +49,7 @@ import {
   createSignalClassifierForWorkspace,
   createGovernanceTrajectoryTurnReader,
   createHostIntentDocReader,
+  isAutomaticPainSubmissionAuthorized,
   saveHostToolDeclaration,
   HOST_TOOL_DECLARATION_VERSION,
   type InternalizationConsumerCycleOutcome,
@@ -249,6 +250,9 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
             // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
             // turns from the workspace's own consent-tiered governance store.
             trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+            // SPEC §9.6: lazy probe — a revoked flag stops persisted
+            // automatic_hook tasks at the bridge's execution boundary.
+            isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
           });
           const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
           diagnostician = {

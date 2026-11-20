@@ -10,7 +10,7 @@
 import { createPainSignalBridge } from './pain-signal-runtime-factory.js';
 import { recordPainSignalObservability } from './pain-signal-observability.js';
 import { FAILURE_CATEGORY_MAP } from './error-categories.js';
-import { createDiagnosticianTaskId, persistPendingPainSignal } from './pain-signal-bridge.js';
+import { createDiagnosticianTaskId, inferProvenance, persistPendingPainSignal } from './pain-signal-bridge.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import type { PainDetectedData, PainSignalBridgeResult, PainProvenance, PainEvidenceEntry, PainProgressReport, PainCandidateOutcome } from './pain-signal-bridge.js';
 import type { PainIngressV1Payload } from './pain-ingress-payload.js';
@@ -67,6 +67,14 @@ export interface PainToPrincipleServiceOptions {
    * Absent = pre-Option-A behavior (unsubscribed storeEmitter singleton).
    */
   telemetrySink?: { emitTelemetry: (event: TelemetryEvent) => void };
+  /**
+   * Pain Ingress SPEC §9.6: lazy Workspace-level `automatic_pain_submission`
+   * authorization probe. Consulted per recordPain call — BEFORE any pending
+   * task persistence (async mode) or bridge submission (sync mode) — so
+   * Owner revocation takes effect immediately. Absent = fail-closed for
+   * automatic_hook provenance.
+   */
+  isAutoPainSubmissionAuthorized?: () => boolean;
 }
 
 export interface PainToPrincipleInput {
@@ -192,6 +200,26 @@ export class PainToPrincipleService {
       ...(input.anchor ? { anchor: input.anchor } : {}),
     };
 
+    // SPEC §9.6: B-class authorization is enforced BEFORE the submission
+    // chain — ahead of the async pending-task persist AND the synchronous
+    // bridge path. Unauthorized automatic_hook produces no pending
+    // diagnosis, no task mutation, no run. The observation-only record is
+    // the caller's responsibility (the hook logs PAIN_INGRESS_UNAUTHORIZED).
+    if ((painData.provenance ?? inferProvenance(painData)) === 'automatic_hook'
+        && !(this.opts.isAutoPainSubmissionAuthorized?.() ?? false)) {
+      return {
+        status: 'skipped',
+        painId,
+        taskId,
+        candidateIds: [],
+        ledgerEntryIds: [],
+        observabilityWarnings: [],
+        latencyMs: Date.now() - startTime,
+        message: 'auto_pain_unauthorized',
+        nextAction: 'Enable features.automatic_pain_submission in this workspace .pd/config.yaml to allow automatic Pain submission.',
+      };
+    }
+
     try {
       // ── Async mode: create task as pending, return immediately ──
       if (this.opts.asyncMode) {
@@ -248,6 +276,7 @@ export class PainToPrincipleService {
         trajectoryTurnReader: this.opts.trajectoryTurnReader,
         // PRI-939 Option A: workspace-scoped persistence for allowlisted events.
         ...(this.opts.telemetrySink ? { telemetrySink: this.opts.telemetrySink } : {}),
+        isAutoPainSubmissionAuthorized: this.opts.isAutoPainSubmissionAuthorized,
       });
 
       const bridgeResult = await bridge.onPainDetected(painData);

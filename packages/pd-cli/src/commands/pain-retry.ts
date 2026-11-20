@@ -767,6 +767,10 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         eventEmitter: createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir)),
         // PRI-720: honor the Owner's full-prompt-pipeline switch on replay seeds.
         fullPipelinePromptSeeds: resolvePromptFullPipelineSeedMode(workspaceDir) === 'full_chain',
+        // SPEC §9.6: lazy probe — the CLI pre-check above is the primary
+        // refuse; this closes any residual bridge-level execution window
+        // (e.g. a flag revoked between the check and onPainDetected).
+        isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
       });
 
       let bridgeResult: PainSignalBridgeResult;

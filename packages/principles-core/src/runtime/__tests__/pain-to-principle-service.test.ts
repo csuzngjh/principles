@@ -71,7 +71,7 @@ const SUCCEEDED: PainSignalBridgeResult = {
 };
 
 function makeOpts(overrides?: Partial<PainToPrincipleServiceOptions>): PainToPrincipleServiceOptions {
-  return { workspaceDir: '/tmp/ws', stateDir: '/tmp/st', ledgerAdapter: {} as LedgerAdapter, ...overrides };
+  return { workspaceDir: '/tmp/ws', stateDir: '/tmp/st', ledgerAdapter: {} as LedgerAdapter, isAutoPainSubmissionAuthorized: () => true, ...overrides };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────

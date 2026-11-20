@@ -70,6 +70,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner: runner,
       intakeService: undefined as never,
@@ -108,6 +109,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner: runner,
       intakeService: undefined as never,
@@ -141,6 +143,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner: runner,
       intakeService: undefined as never,
@@ -174,6 +177,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner: runner,
       intakeService: undefined as never,
@@ -203,6 +207,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner: runner,
       intakeService: undefined as never,
@@ -233,6 +238,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner: runner,
       intakeService: undefined as never,
@@ -276,6 +282,7 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner: runner,
       intakeService: undefined as never,
@@ -317,6 +324,7 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner: runner,
       intakeService: undefined as never,
@@ -357,6 +365,7 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner: runner,
       intakeService: undefined as never,

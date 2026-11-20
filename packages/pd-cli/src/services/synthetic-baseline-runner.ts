@@ -15,6 +15,7 @@ import {
 import { SqliteDiagnosticianCommitter } from '@principles/core/runtime';
 import { TestDoubleRuntimeAdapter } from '@principles/core/runtime';
 import { PainSignalBridge } from '@principles/core/runtime';
+import { isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 import { CandidateIntakeService } from '@principles/core/runtime';
 import { PrincipleTreeLedgerAdapter } from '@principles/core/runtime';
 import { auditCandidateLedgerConsistency } from '@principles/core/runtime';
@@ -214,6 +215,9 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineRunnerOptions)
       intakeService,
       ledgerAdapter,
       autoIntakeEnabled: true,
+      // SPEC §9.6: the synthetic signal infers automatic_hook provenance —
+      // the baseline tool honors the same Workspace authorization.
+      isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
     });
 
     const bridgeResult = await bridge.onPainDetected({

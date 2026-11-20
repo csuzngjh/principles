@@ -59,6 +59,7 @@ function createBridge(task: TaskRecord | null, runResult: RunnerResult) {
   const run = vi.fn(async () => runResult);
   const runner: DiagnosticianRunnerLike = { run };
   const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
     stateManager,
     runner,
     intakeService: {} as CandidateIntakeService,

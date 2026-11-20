@@ -85,6 +85,7 @@ describe('PainSignalBridge retried with empty candidates', () => {
     mocks._runMock.mockResolvedValue(makeRetriedResult());
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager: mocks.stateManager,
       runner: mocks.runner,
       intakeService: mocks.intakeService,
@@ -120,6 +121,7 @@ describe('PainSignalBridge retried with empty candidates', () => {
     mocks._runMock.mockResolvedValue(makeRetriedResult());
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager: mocks.stateManager,
       runner: mocks.runner,
       intakeService: mocks.intakeService,
@@ -161,6 +163,7 @@ describe('PainSignalBridge retried with empty candidates', () => {
     mocks._runMock.mockResolvedValue(makeRetriedResult());
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager: mocks.stateManager,
       runner: mocks.runner,
       intakeService: mocks.intakeService,

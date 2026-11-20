@@ -15,6 +15,7 @@ import {
 import { SqliteDiagnosticianCommitter } from '@principles/core/runtime';
 import { TestDoubleRuntimeAdapter } from '@principles/core/runtime';
 import { PainSignalBridge } from '@principles/core/runtime';
+import { isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 import { CandidateIntakeService } from '@principles/core/runtime';
 import { PrincipleTreeLedgerAdapter } from '@principles/core/runtime';
 import { makeDeterministicDiagnosticianOutput } from '@principles/core/runtime';
@@ -316,6 +317,9 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
       intakeService,
       ledgerAdapter,
       autoIntakeEnabled: true,
+      // SPEC §9.6: simulated signals infer automatic_hook provenance — the
+      // flood tool honors the same Workspace authorization as real hooks.
+      isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
     });
 
     // ── Scenario 1: Identical flood ──────────────────────────────────────────────

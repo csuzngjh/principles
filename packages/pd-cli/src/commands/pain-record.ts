@@ -37,7 +37,7 @@ import {
   DEFAULT_PAIN_SCORE,
 } from '@principles/core/runtime';
 import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation, PainEvidenceBundle } from '@principles/core/runtime';
-import { createHostIntentDocReader } from '@principles/host-runtime';
+import { createHostIntentDocReader, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
@@ -466,6 +466,9 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     // zero filesystem access inside the reader; language resolution is lazy
     // (zh-CN file first, then en) and only happens after the flag gate.
     intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }),
+    // SPEC §9.6: lazy Workspace authorization probe for automatic_hook
+    // provenance (manual submissions are exempt by provenance, not by flag).
+    isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
   });
 
   const result = await service.recordPain({

@@ -167,6 +167,9 @@ export async function runPendingDiagnosticianOnce(
         // PRI-1265: the auto-run path sees the bound session's ORIGINAL turns
         // like every other diagnosis entry.
         trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir: options.workspaceDir }),
+        // SPEC §9.6: lazy probe — a flag revoked between candidate pick and
+        // execution still stops the run at the bridge boundary.
+        isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(options.workspaceDir),
       });
       const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
       if (executed.status === 'failed') {

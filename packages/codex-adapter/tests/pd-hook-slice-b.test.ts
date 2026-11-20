@@ -47,6 +47,7 @@ function sliceBWorkspace(): SliceBWorkspace {
   const config = getDefaultPdConfig();
   config.features['host.codex'].enabled = true;
   config.features['codex_conversation_ingestion'].enabled = true;
+  config.features.automatic_pain_submission = { category: 'quiet', enabled: true };
   // ADR-0029: the shipped default pi-ai profile is deliberately needs_setup; Slice B
   // admission must reach the Diagnostician, so declare a ready profile.
   (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {

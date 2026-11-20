@@ -67,6 +67,9 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
     // delegating to safeReadIntentDoc (which owns the flag-first check).
     intentDocReader: createIntentDocReader(wctx.workspaceDir, resolveIntentLang(wctx.workspaceDir)),
     trajectoryTurnReader,
+    // SPEC §9.6: lazy per-call probe — Owner revocation takes effect on the
+    // very next submission/execution attempt, even on cached bridges.
+    isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(wctx.workspaceDir),
   });
 }
 
@@ -149,21 +152,22 @@ export async function emitPainDetectedEvent(
       // B-class authorization gate (Pain Ingress SPEC §9.6): an automatic
       // signal that passed every structural check may still not submit —
       // submission requires the Workspace's own
-      // features.automatic_pain_submission opt-in. Unauthorized ⇒ degrade to
-      // the observation-only record: the pain event stays observable, but
-      // recordPain sees empty evidence so no LLM run, no diagnostician task
-      // and no pending-diagnosis persistence can follow. owner_manual is
-      // never gated here — it carries its own Owner authorization.
-      let authorizedEvidence = decision.legacy.evidence;
+      // features.automatic_pain_submission opt-in. Unauthorized ⇒ entry-level
+      // refusal: recordPain is NEVER invoked, so no LLM run, no diagnostician
+      // task, no pending-diagnosis persistence, and no existing-task reset/
+      // re-trigger can follow — regardless of bridge state. The observation-
+      // only record is this log plus the upstream event/trajectory writers.
+      // owner_manual is never gated here — it carries its own Owner
+      // authorization.
       if (!isManual && decision.action === 'submit'
         && !isAutomaticPainSubmissionAuthorized(wctx.workspaceDir)) {
         SystemLogger.log(wctx.workspaceDir, 'PAIN_INGRESS_UNAUTHORIZED', JSON.stringify({
           painId: painData.painId,
           source: painData.source,
-          reason: 'features.automatic_pain_submission is not enabled for this workspace',
+          reasonCode: 'auto_pain_unauthorized',
           nextAction: 'Observation-only record kept; enable features.automatic_pain_submission in .pd/config.yaml to allow automatic Pain submission.',
         }));
-        authorizedEvidence = [];
+        return;
       }
       if (decision.action === 'degrade') {
         // rc-9: funnel-level degradation disclosures must be observable even
@@ -203,7 +207,7 @@ export async function emitPainDetectedEvent(
         traceId: decision.legacy.traceId,
         provenance: decision.legacy.provenance,
         hostKind: decision.legacy.hostKind,
-        evidence: authorizedEvidence,
+        evidence: decision.legacy.evidence,
         painIngress: decision.legacy.painIngress,
         // PRI-844: forward the producer's verbatim Owner correction so the
         // pain bridge can ride it as first-class evidence (PHASE 1.5). The

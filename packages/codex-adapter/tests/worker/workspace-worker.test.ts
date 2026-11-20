@@ -67,6 +67,7 @@ function writeConfig(ws: WorkerWorkspace, overrides: { ingestion?: boolean; cons
   config.features['host.codex'].enabled = overrides.hostCodex ?? true;
   config.features.codex_conversation_ingestion.enabled = overrides.ingestion ?? true;
   config.features.internalization_auto_consumer.enabled = overrides.consumer ?? true;
+  config.features.automatic_pain_submission = { category: 'quiet', enabled: true };
   // PRI-638 P1-C: canonical Diagnostician capability switch.
   config.internalAgents = config.internalAgents ?? { defaultRuntime: 'pd.default', agents: {} };
   config.internalAgents.agents = config.internalAgents.agents ?? {};
