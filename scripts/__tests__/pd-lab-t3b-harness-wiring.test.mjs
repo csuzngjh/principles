@@ -26,7 +26,7 @@ import { runRepoScript } from './helpers/pd-lab-t3b-run-entry.mjs';
 import {
   useExperimentConfig, loadDataset, validateRunId, runDir,
   deriveExperimentConfigObject, deriveExperimentConfig, diffArmConfigs,
-  classifyTerminal, detectDeferOnly, buildIngressArgs, decideHostArg,
+  classifyTerminal, detectDeferOnly, verifyCandidateLinkage, buildIngressArgs, decideHostArg,
   materializeWorkspace, armWorkspaceDir, experimentRoot, loadExperimentConfig,
 } from '../../experiment/prompt-v2/scripts/ab/ab-lib.mjs';
 
@@ -351,28 +351,64 @@ describe('T3b §5.11 — full-dataset redaction probe covers EVERY sample', () =
   });
 });
 
-describe('T3b §5.10 — legitimate terminal states are not harness failures', () => {
+describe('T3b §5.10 + PRI-1256 r3/r4 — terminal classification: legitimate outcomes vs persistence anomalies', () => {
   const chainTrue = { diagnoseOk: true, routerTaskSucceeded: true, routerRunSucceeded: true, stageArtifactsSchemaValid: true };
-  it('done-no-candidate: chain verified, zero candidates → ok true, not failed', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesPresent: false, admissionRefused: false, deferOnly: false });
-    expect(t.status).toBe('done-no-candidate');
+
+  // The classifier requires candidates for EVERY legitimate terminal —
+  // `done-no-candidate` is retired as a producible state (historical
+  // persisted records still resume; covered by the runtime-safety suite).
+  it('current: router succeeded + candidates → done (ok)', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false });
+    expect(t.status).toBe('done');
     expect(t.ok).toBe(true);
-    expect(t.legitimateTerminal).toBe('no-candidate');
+    expect(t.legitimateTerminal).toBeNull();
   });
-  it('done-deferred: every router recommendation is a defer → ok true', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesPresent: false, admissionRefused: false, deferOnly: true });
+  it('current: router succeeded + NO candidates → incomplete, never done-no-candidate', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: false, admissionRefused: false, deferOnly: false });
+    expect(t.status).toBe('incomplete');
+    expect(t.ok).toBe(false);
+    expect(t.legitimateTerminal).toBeNull();
+  });
+  it('current: router succeeded + all-defer + NO candidates → incomplete (defer cannot rescue missing candidates)', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: false, admissionRefused: false, deferOnly: true });
+    expect(t.status).toBe('incomplete');
+    expect(t.ok).toBe(false);
+    expect(t.legitimateTerminal).toBeNull();
+  });
+  it('current: router succeeded + all-defer + candidates → done-deferred', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: true });
     expect(t.status).toBe('done-deferred');
     expect(t.ok).toBe(true);
+    expect(t.legitimateTerminal).toBe('deferred');
   });
-  it('done-admission-refused stays a legitimate terminal (PRI-1222 semantics)', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesPresent: false, admissionRefused: true, deferOnly: false });
+  it('current: router succeeded + admission refused + candidates → done-admission-refused (PRI-1222)', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: true, deferOnly: false });
     expect(t.status).toBe('done-admission-refused');
     expect(t.ok).toBe(true);
+    expect(t.legitimateTerminal).toBe('admission-refused');
   });
-  it('classic outcomes keep their meaning: done / incomplete / failed', () => {
-    expect(classifyTerminal({ ...chainTrue, candidatesPresent: true, admissionRefused: false, deferOnly: false }).status).toBe('done');
-    expect(classifyTerminal({ ...chainTrue, candidatesPresent: true, admissionRefused: false, deferOnly: false, stageArtifactsSchemaValid: false }).status).toBe('incomplete');
-    expect(classifyTerminal({ ...chainTrue, candidatesPresent: true, admissionRefused: false, deferOnly: false, routerTaskSucceeded: false }).status).toBe('failed');
+  it('current: router succeeded + admission refused + NO candidates → incomplete (refusal never bypasses the persistence check)', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: false, admissionRefused: true, deferOnly: false });
+    expect(t.status).toBe('incomplete');
+    expect(t.ok).toBe(false);
+    expect(t.legitimateTerminal).toBeNull();
+  });
+  it('task/run success alone never certifies completion: no check combination yields done-no-candidate', () => {
+    for (const candidatesComplete of [true, false]) {
+      for (const admissionRefused of [true, false]) {
+        for (const deferOnly of [true, false]) {
+          for (const stageArtifactsSchemaValid of [true, false]) {
+            const t = classifyTerminal({ ...chainTrue, stageArtifactsSchemaValid, candidatesComplete, admissionRefused, deferOnly });
+            expect(t.status).not.toBe('done-no-candidate');
+            if (!candidatesComplete) expect(t.ok).toBe(false);
+          }
+        }
+      }
+    }
+  });
+  it('classic outcomes keep their meaning: incomplete / failed', () => {
+    expect(classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false, stageArtifactsSchemaValid: false }).status).toBe('incomplete');
+    expect(classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false, routerTaskSucceeded: false }).status).toBe('failed');
   });
   it('detectDeferOnly never guesses defer: unparseable/empty/mixed recommendations are false', () => {
     const mk = (content) => [{ source_task_id: 'diag_router-t1', content_json: typeof content === 'string' ? content : JSON.stringify(content) }];
@@ -382,6 +418,96 @@ describe('T3b §5.10 — legitimate terminal states are not harness failures', (
     expect(detectDeferOnly(mk({}))).toBe(false);
     expect(detectDeferOnly([{ source_task_id: 'diag_router-t1', content_json: 'not-json' }])).toBe(false);
     expect(detectDeferOnly([])).toBe(false);
+  });
+
+  // PRI-1256 r4/r5 — the 1:1 recommendation↔candidate linkage check itself
+  // (matrix coverage through REAL ab-grid/ab-run orchestration lives in
+  // pd-lab-smoke.test.mjs).
+  describe('verifyCandidateLinkage — recommendation↔candidate 1:1', () => {
+    // The expected set is read from the COMMITTED artifact (artifacts table,
+    // kind diagnostician_output) — the row commitSync persisted atomically
+    // with the candidates. The pi_artifact is consulted ONLY for the r5
+    // dual-write consistency check — it can never shrink the expected set.
+    const recs = ['r0', 'r1', 'r2'].map((ref) => ({ kind: 'principle', recommendationRef: ref, description: 'x' }));
+    const commitArt = { artifact_id: 'art-1', run_id: 'run-1', task_id: 'diag_router-t1', content_json: JSON.stringify({ recommendations: recs }) };
+    // r5 (P2-01): the dual-write copy + the actually-succeeded router run.
+    const ctx = { piArtifact: { content_json: commitArt.content_json }, succeededRouterRunId: 'run-1' };
+    const mkCand = (rec, i) => ({
+      candidate_id: `cand-${i}`, task_id: 'diag_router-t1', status: 'pending',
+      artifact_id: 'art-1', source_run_id: 'run-1', recommendation_kind: rec.kind,
+      source_recommendation_json: JSON.stringify(rec),
+    });
+    const mkRec = (ref) => ({ kind: 'principle', recommendationRef: ref, description: 'x' });
+    it('3 committed recommendations / 3 well-linked candidates → complete', () => {
+      const r = verifyCandidateLinkage(commitArt, recs.map((rec, i) => mkCand(rec, i)), ctx);
+      expect(r.ok).toBe(true);
+      expect(r.expected).toBe(3);
+      expect(r.actual).toBe(3);
+      expect(r.problems).toHaveLength(0);
+    });
+    it.each([[2], [1], [0]])('3 committed recommendations / %i candidates → incomplete', (keep) => {
+      const r = verifyCandidateLinkage(commitArt, recs.slice(0, keep).map((rec, i) => mkCand(rec, i)), ctx);
+      expect(r.ok).toBe(false);
+      expect(r.expected).toBe(3);
+      expect(r.actual).toBe(keep);
+    });
+    it('3 candidates with a duplicated link (one recommendation unpersisted) → incomplete', () => {
+      const r = verifyCandidateLinkage(commitArt, [mkCand(recs[0], 0), mkCand(recs[1], 1), mkCand(recs[1], 2)], ctx);
+      expect(r.ok).toBe(false);
+    });
+    it('3 candidates but one links a non-existent recommendation → incomplete', () => {
+      const r = verifyCandidateLinkage(commitArt, [mkCand(recs[0], 0), mkCand(recs[1], 1), mkCand(mkRec('rX'), 2)], ctx);
+      expect(r.ok).toBe(false);
+    });
+    it('candidate linked to the wrong artifact / run → incomplete', () => {
+      const bad = { ...mkCand(recs[2], 2), artifact_id: 'art-OTHER' };
+      expect(verifyCandidateLinkage(commitArt, [mkCand(recs[0], 0), mkCand(recs[1], 1), bad], ctx).ok).toBe(false);
+      const bad2 = { ...mkCand(recs[2], 2), source_run_id: 'run-OTHER' };
+      expect(verifyCandidateLinkage(commitArt, [mkCand(recs[0], 0), mkCand(recs[1], 1), bad2], ctx).ok).toBe(false);
+    });
+    it('candidate task_id not owned by the commit task → incomplete (P2-01/A)', () => {
+      const bad = { ...mkCand(recs[2], 2), task_id: 'diagnosis_t5-parent' };
+      const r = verifyCandidateLinkage(commitArt, [mkCand(recs[0], 0), mkCand(recs[1], 1), bad], ctx);
+      expect(r.ok).toBe(false);
+      expect(r.problems.join('\n')).toContain('task_id');
+    });
+    it('commit artifact bound to a different run than the succeeded router run → incomplete (P2-01/C)', () => {
+      const cands = recs.map((rec, i) => mkCand(rec, i));
+      expect(verifyCandidateLinkage(commitArt, cands, { ...ctx, succeededRouterRunId: 'run-OTHER' }).ok).toBe(false);
+      // No succeeded router run at all: the commit artifact cannot be bound.
+      expect(verifyCandidateLinkage(commitArt, cands, { ...ctx, succeededRouterRunId: null }).ok).toBe(false);
+    });
+    it('commit artifact diverges from the router pi_artifact → incomplete (P2-01/B)', () => {
+      const cands = recs.map((rec, i) => mkCand(rec, i));
+      const thinPi = { content_json: JSON.stringify({ recommendations: [recs[0]] }) };
+      expect(verifyCandidateLinkage(commitArt, cands, { ...ctx, piArtifact: thinPi }).ok).toBe(false);
+      expect(verifyCandidateLinkage(commitArt, cands, { ...ctx, piArtifact: null }).ok).toBe(false);
+      const badPi = { content_json: 'not json' };
+      expect(verifyCandidateLinkage(commitArt, cands, { ...ctx, piArtifact: badPi }).ok).toBe(false);
+    });
+    it('correct recommendationRef over tampered content / kind → incomplete (P2-01 neg3)', () => {
+      const tampered = { ...recs[2], description: 'x [tampered]' };
+      const bad = { ...mkCand(tampered, 2) }; // same ref, divergent source json
+      expect(verifyCandidateLinkage(commitArt, [mkCand(recs[0], 0), mkCand(recs[1], 1), bad], ctx).ok).toBe(false);
+      const badKind = { ...mkCand(recs[2], 2), recommendation_kind: 'defer' };
+      expect(verifyCandidateLinkage(commitArt, [mkCand(recs[0], 0), mkCand(recs[1], 1), badKind], ctx).ok).toBe(false);
+    });
+    it('a candidate linked to a DIFFERENT artifact can never slip through — commit artifact is always required', () => {
+      // Devin Review r4 #2: when the commit artifact is missing the check
+      // must fail, not silently skip the anchor comparisons.
+      expect(verifyCandidateLinkage(null, [mkCand(recs[0], 0)], ctx).ok).toBe(false);
+      expect(verifyCandidateLinkage(null, [], ctx).ok).toBe(false);
+      // ...and when it is present, counts alone do not suffice.
+      const wrongArt = { ...mkCand(recs[0], 0), artifact_id: 'art-OTHER' };
+      const loose = { artifact_id: 'art-1', run_id: 'run-1', task_id: 'diag_router-t1', content_json: JSON.stringify({ recommendations: [recs[0]] }) };
+      expect(verifyCandidateLinkage(loose, [wrongArt], ctx).ok).toBe(false);
+    });
+    it('missing commit artifact / unparseable committed payload → incomplete', () => {
+      const badJson = { ...commitArt, content_json: 'not json' };
+      expect(verifyCandidateLinkage(badJson, [mkCand(recs[0], 0)], ctx).ok).toBe(false);
+      const noRef = { ...commitArt, content_json: JSON.stringify({ recommendations: [{ kind: 'principle', description: 'x' }] }) };
+      expect(verifyCandidateLinkage(noRef, [], ctx).ok).toBe(false);
+    });
   });
 });
 
