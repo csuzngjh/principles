@@ -161,3 +161,30 @@ Revert 本 PR 的新增/修改文件；`alignment-report.mjs`/`admission-probe.m
 ## 13.6 第三轮结论
 
 **Verdict: PASS_WITH_LIMITATIONS。** 6×P1 + 4×P2 全部修复且有对应负向/边界/集成测试；遗留限制仍为外部前置条件（D2/D5/D6 授权），非代码缺陷。PR 未合并。
+
+---
+
+# 14. 第四轮：Devin/CodeRabbit 对第三轮交付的复审修复（2026-11-22，commit `d544a8e26`）
+
+第三轮推送后 Devin Review + CodeRabbit 对新交付提出 19 个评审线程（17 个独立 finding，2 组跨工具重复）。逐项处置：**16 项代码修复**、1 项语义说明（DV1）、1 项部分修复+披露（CR10）。
+
+| 线程 | 问题 | 处置 | 测试 |
+|---|---|---|---|
+| DV1 | 裁判一致率 ≠ 确认性区间精度 | 语义说明：precisionTarget 是 T7a 校准层精度（HANDOFF T7a「Owner 校准达到预注册标准」）；来源组统计精度由 n≥n_min(α)+最低组数双门槛覆盖，区间精度属 T6 运行时分析 | — |
+| DV2/CR8 | UNSTABLE 复评可通过 | `allRecheckStable = recheckStable === sampleCount` | t6 round-4 用例 |
+| DV3 | UNKNOWN 交换稀释翻转率 | flip 分母只含 determinate 判定 | t6 round-4 用例（两分支） |
+| DV4/CR7 | 同包重复评审抬样本量 | 评审单元 = (packageId, displayOrder)，重复即 invalid | t6 round-4 用例 |
+| DV5/CR9 | 旧探测报告配新 D6 决策 | `realDataProbe.d6Decision.sha256 === 绑定 artifact 摘要`；probeScope 为权威读取源 | t6 round-4 用例 |
+| DV6 | FAILED 调用绕过模型核验 | FAILED invocation 同样核对 model === judgeModel | t6 round-4 用例 |
+| DV7 | JSON null 证据崩溃 | 参数核对 isPlainObject 守卫，降级 BLOCKED 不抛异常 | t6 round-4 用例 |
+| DV8 | D6 不限制快照 | 可选 `trajectoryDbSha256` 钉定：probe 打开 trajectory.db 后不匹配即 fail-closed；probeScope 回显实际快照摘要；T6 引擎侧同步核对 | admission-probe DV8 两用例 + t6 引擎用例 |
+| CR1 | 非数组 arbitrations 被吞 | `--out` 创建前 exit 2 | judge-protocol CR1 |
+| CR2 | 诊断标签 String() 风险 | `diagnosticId()` 安全标签（非字符串 → 占位） | 既有闭集回归 |
+| CR3 | 同包双判被误配为交换 | counterKey 排除同 packageId | judge-protocol CR3 |
+| CR4 | FAILED 侧交换计 consistent | `neitherFailed` → undetermined | judge-protocol CR4 |
+| CR5 | 重复 truncatedSide 覆盖 | 结构校验 + digest 规范化器同规则拒绝 | judge-protocol CR5 |
+| CR6 | modelCallCount 按成功数核对 | checkClaim 改用 auditCallCount（总调用） | t6 round-4 用例（两分支） |
+| CR10 | 换 prereg 文件复用证据 | 可选 `preregistrationSha256` 绑定 + `PREREGISTRATION_IDENTITY_UNBOUND` 披露；强制绑定属 Owner/SPEC 决策（follow-up） | t6 round-4 用例 |
+| CR11 | 结构验证先于证据读取 | CLI 解析后立即 `validateQualificationInput` exit 1 | 既有 P2-4 用例 |
+
+全部 19 线程已逐条回复并 resolve（引用 `d544a8e26`）。测试总量：judge-protocol 79、t6 82（+1 环境性 skip）、admission-probe 155（+1 环境性 skip）。真实研究状态不变（D2/D5/D6 未批准、真实调用 0、盲评 0、真实资格 BLOCKED）。
