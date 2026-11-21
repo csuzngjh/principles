@@ -22,6 +22,7 @@ import type { DiagnosticianRunnerLike } from '../pain-signal-bridge.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { createDiagnosticianTaskId } from '../pain-signal-bridge.js';
 import { checkIngressTopLevelConsistency, parsePainIngressV1Payload } from '../pain-ingress-payload.js';
+import type { PainIngressV1Payload } from '../pain-ingress-payload.js';
 import {
   validatePainSubmitReceipt,
   recoverTaskIdentityFromReceipt,
@@ -43,15 +44,15 @@ function makeBridge(): PainSignalBridge {
 
 /** The exact unbound MCP ingress shape `pd_submit_pain` persists when the
  * request carried no trusted `_meta` (see submitPainCapability). */
-function unboundMcpIngress(evidenceCount = 0) {
+function unboundMcpIngress(evidenceCount = 0): PainIngressV1Payload {
   return {
     version: 'v1',
     origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
     correlation: { status: 'unbound', reason: 'missing_host_session' },
-    ...(evidenceCount > 0
-      ? { evidenceClass: { status: 'available', entryCount: evidenceCount } }
-      : { evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' } }),
-  } as const;
+    evidenceClass: evidenceCount > 0
+      ? { status: 'available', entryCount: evidenceCount }
+      : { status: 'unavailable', reason: 'not_applicable_unbound' },
+  };
 }
 
 async function persistUnboundPain(painId: string, evidence: { sourceRef: string; note: string }[] = []): Promise<string> {

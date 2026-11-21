@@ -294,12 +294,12 @@ describe('T6 — the assembler reads EXACTLY the named target turn (never 11/12)
   it('a reader without by-turn-id support yields NO substitution — observable note, empty window', async () => {
     const payload = await assembleWith(makeReader(false), 'turn-10');
     expect(payload.conversationWindow.length).toBe(0);
-    expect(payload.ambiguityNotes.some((note) => note.includes('session-wide substitution skipped'))).toBe(true);
+    expect((payload.ambiguityNotes ?? []).some((note) => note.includes('session-wide substitution skipped'))).toBe(true);
   });
 
   it('a named target whose text is missing yields no substitution either (waiting is the honest state)', async () => {
     const payload = await assembleWith(makeReader(true), 'turn-99');
     expect(payload.conversationWindow.length).toBe(0);
-    expect(payload.ambiguityNotes.some((note) => note.includes('turn-99') && note.includes('no readable text'))).toBe(true);
+    expect((payload.ambiguityNotes ?? []).some((note) => note.includes('turn-99') && note.includes('no readable text'))).toBe(true);
   });
 });
