@@ -267,8 +267,6 @@ function resolveCandidateRecommendation(
 
 export async function handleCandidateList(opts: CandidateListOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  // PRI-1283 R2: latest-consent gate for admission re-verification.
-  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
@@ -622,8 +620,6 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
 
 export async function handleCandidateShow(opts: CandidateShowOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  // PRI-1283 R2: latest-consent gate for admission re-verification.
-  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
@@ -1840,8 +1836,6 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
  */
 export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  // PRI-1283 R2: latest-consent gate for admission re-verification.
-  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
 
   try {
     const dbPath = resolveStateDbPath(workspaceDir);
@@ -2510,8 +2504,6 @@ interface CandidateRouteOptions {
  */
 export async function handleCandidateRoute(opts: CandidateRouteOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  // PRI-1283 R2: latest-consent gate for admission re-verification.
-  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
