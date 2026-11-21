@@ -62,11 +62,19 @@ export interface CoordinatorEnvView {
    */
   readonly ignoredIdentityEnvVars: readonly string[];
   /**
-   * Host-root overrides present in the inherited env. These DID steer
-   * workspace discovery (P1-2) but cannot move pdHome — listed here so an
-   * operator can tell a custom-root run apart from a default-root run.
+   * Host-root overrides present in the inherited env. In the default (Phase 1
+   * dry-run) mode these DID steer workspace discovery (P1-2) but cannot move
+   * pdHome. In `canonicalHostRootsOnly` mode they did NOT steer anything —
+   * see `ignoredHostRootEnvVars`.
    */
   readonly inheritedHostRootEnvVars: readonly string[];
+  /**
+   * Host-root overrides that were present in the inherited env but did NOT
+   * steer host-root resolution (always empty in the default mode; the present
+   * list in `canonicalHostRootsOnly` mode). Recorded so a polluted run is
+   * observable, never silent (rc-9).
+   */
+  readonly ignoredHostRootEnvVars: readonly string[];
 }
 
 export interface InstallIdentity {
@@ -105,6 +113,18 @@ export interface ResolveInstallIdentityOptions {
    * When omitted the OS account record is consulted.
    */
   readonly trustedHomeDir?: string;
+  /**
+   * Resolve host roots from the trusted home ONLY (canonical
+   * `<home>/.openclaw` / `<home>/.codex` / `<home>/.workbuddy` defaults),
+   * ignoring inherited `OPENCLAW_STATE_DIR` / `OPENCLAW_HOME` /
+   * `CODEX_HOME` / `WORKBUDDY_CONFIG_DIR` overrides (recorded as
+   * `ignoredHostRootEnvVars`). The Phase 2 shadow coordinator sets this: a
+   * real cycle must never be discovered from — nor pinned to — an
+   * experiment/custom root an inherited env happened to name (TD §5.2). The
+   * Phase 1 dry-run keeps the shared production precedence (env honored for
+   * discovery, P1-2) because it starts nothing.
+   */
+  readonly canonicalHostRootsOnly?: boolean;
 }
 
 /** Strip the experiment-root switch, keeping every other variable intact. */
@@ -120,6 +140,9 @@ export function stripExperimentRoot(
   const base = {
     ignoredIdentityEnvVars,
     inheritedHostRootEnvVars,
+    // Overridden by resolveCoordinatorInstallIdentity when host-root
+    // resolution ignores the inherited overrides (canonicalHostRootsOnly).
+    ignoredHostRootEnvVars: [] as readonly string[],
   };
   const raw = env[PD_EXPERIMENT_ROOT];
   if (raw === undefined) {
@@ -203,10 +226,17 @@ export function resolveCoordinatorInstallIdentity(
         'Fix the OS account home directory, or reinstall PD with `npx create-principles-disciple`.',
     };
   }
-  // HOME/USERPROFILE are deliberately NOT removed from `stripped`: the env is
-  // also consulted for host-root overrides (P1-2), and the trusted home is
-  // passed explicitly so the vars can never steer identity.
-  const resolution = resolvePdHome({ env: stripped, homeDir });
+  // canonicalHostRootsOnly: host-root resolution sees an EMPTY env — the
+  // overrides resolve to the trusted-home defaults — while the inherited
+  // presence is recorded as ignored (rc-9). HOME/USERPROFILE stay in
+  // `stripped` (they are never consulted for host roots anyway).
+  const ignoredHostRootEnvVars = options.canonicalHostRootsOnly === true
+    ? view.inheritedHostRootEnvVars
+    : [];
+  const resolution = resolvePdHome({
+    env: options.canonicalHostRootsOnly === true ? {} : stripped,
+    homeDir,
+  });
   if (!resolution.ok) {
     return {
       ok: false,
@@ -228,7 +258,7 @@ export function resolveCoordinatorInstallIdentity(
         workbuddyConfigDir: resolution.workbuddyConfigDir,
       },
       mode: 'production',
-      environment: view,
+      environment: { ...view, ignoredHostRootEnvVars },
     },
   };
 }
