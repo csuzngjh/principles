@@ -92,6 +92,8 @@ const APPROVAL_DOC = (approved: boolean, scope: string) => ({
 });
 
 const DATASET_SHA = "b".repeat(64);
+const GROUPS_DIGEST = `sha256:${"c".repeat(64)}`;
+const PRECISION_TARGET = 0.9;
 
 /** Synthetic resolved evidence docs matching a granted input's claims. */
 function resolvedFor(input: Record<string, any>) {
@@ -115,6 +117,7 @@ function resolvedFor(input: Record<string, any>) {
       document: {
         schema: "pd-lab-source-groups.v1",
         datasetSha256: DATASET_SHA,
+        digest: GROUPS_DIGEST,
         groups: cases,
       },
     },
@@ -128,6 +131,11 @@ function resolvedFor(input: Record<string, any>) {
         snapshot: { consistencyStatus: "CONSISTENT_WITHIN_WINDOW" },
         invalidPlan: [],
         realDataProbe: { status: "RAN_WITH_D6" },
+        sourceGroups: {
+          digest: GROUPS_DIGEST,
+          groupCount: Object.keys(cases).length,
+          independentSourceGroupCount: Object.keys(cases).length,
+        },
         perSample,
       },
     },
@@ -140,6 +148,7 @@ function resolvedFor(input: Record<string, any>) {
           alpha: input.analysisPolicy.alpha,
           minimumIndependentSourceGroups:
             input.analysisPolicy.minimumIndependentSourceGroups,
+          precisionTarget: PRECISION_TARGET,
         },
         exploratory: false,
       },
@@ -154,6 +163,7 @@ function resolvedFor(input: Record<string, any>) {
           { length: input.judgeModelCalibration.modelCallCount },
           (_, i) => ({ invocationId: `inv-${i + 1}`, status: "SUCCEEDED" }),
         ),
+        precisionTarget: PRECISION_TARGET,
         precisionTargetMet: input.analysisPolicy.precisionTargetMet,
       },
     },
@@ -548,6 +558,7 @@ describe("qualifyT6 states", () => {
     const result = qualifyT6(notRunInput());
     expect(result.status).toBe("BLOCKED");
     expect(result.blockedReasons).toEqual([
+      "EVIDENCE_MISSING_FOR_CLAIM",
       "DATA_PATH_AUTHORIZATION_INVALID",
       "DATA_INTEGRITY_UNPROVEN",
       "NO_READY_SOURCE_GROUPS",
@@ -855,6 +866,91 @@ describe("qualifyT6 states", () => {
     expect(result.ok).toBe(false);
     expect(result.status).toBeNull();
     expect(result.inputProblems.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Evidence semantics — review-hardening regression cases.
+// ---------------------------------------------------------------------------
+
+describe("evidence semantics hardening", () => {
+  it("PASSED calibration with all-failed invocations is not success evidence", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    for (const inv of ev.judgeCalibration.document.invocations)
+      inv.status = "FAILED";
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_CLAIM_MISMATCH");
+  });
+
+  it("failed invocations still count as unauthorized calls without D2", () => {
+    const input = grantedInput();
+    input.authorization.d2Approved = false;
+    const ev = resolvedFor(input) as Record<string, any>;
+    for (const inv of ev.judgeCalibration.document.invocations)
+      inv.status = "FAILED";
+    ev.approvals.d2.document.approved = false;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain(
+      "UNAUTHORIZED_MODEL_CALLS_RECORDED",
+    );
+  });
+
+  it("a D5-scope approval record bound to the d2 slot is rejected", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.approvals.d2.document.scope = "d5";
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("an unbound preregistration blocks confirmatory qualification", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    delete ev.preregistration;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_MISSING_FOR_CLAIM");
+  });
+
+  it("precision evidence must be anchored to the preregistered target", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.judgeCalibration.document.precisionTarget = 0.5;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_CLAIM_MISMATCH");
+    delete ev.judgeCalibration.document.precisionTarget;
+    const unanchored = qualifyT6(input, ev as never);
+    expect(unanchored.status).toBe("BLOCKED");
+    expect(unanchored.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("data-path authorization requires the agreed RAN_WITH_D6 probe state", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.admissionReport.document.realDataProbe.status = "NOT_RUN_WITHOUT_D6";
+    const result = qualifyT6(input, ev as never);
+    expect(result.blockedReasons).toContain("EVIDENCE_CLAIM_MISMATCH");
+    ev.admissionReport.document.realDataProbe.status = "anything-else";
+    expect(qualifyT6(input, ev as never).blockedReasons).toContain(
+      "EVIDENCE_CLAIM_MISMATCH",
+    );
+  });
+
+  it("source-groups must be the grouping the admission run recorded", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.sourceGroups.document.digest = `sha256:${"d".repeat(64)}`;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+    expect(
+      result.evidenceCheck.artifacts.readySourceGroups.groupingBindingMismatch,
+    ).toBe(true);
   });
 });
 

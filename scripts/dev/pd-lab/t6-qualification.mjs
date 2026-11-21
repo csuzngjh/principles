@@ -334,14 +334,17 @@ export function validateQualificationInput(input) {
 
 // A structured approval record — never a bare boolean (P0-1 §3.2.6). The
 // shape follows the established owner-decision.json precedent.
-function approvalFromRecord(document) {
+function approvalFromRecord(document, expectedScope) {
   if (!isPlainObject(document) || document.kind !== "owner-decision")
     return { interpretable: false, approved: false };
+  // The decision's scope must match the evidence slot it is bound to — a
+  // D5 approval record cannot be re-read as a D2 authorization.
   if (
     typeof document.approved !== "boolean" ||
     !isNonEmptyString(document.decidedBy) ||
     !isNonEmptyString(document.decidedAt) ||
-    !isNonEmptyString(document.scope)
+    !isNonEmptyString(document.scope) ||
+    document.scope !== expectedScope
   )
     return { interpretable: false, approved: false };
   return { interpretable: true, approved: document.approved };
@@ -370,6 +373,15 @@ function deriveReadySourceGroups(sourceGroupsDoc, admissionDoc) {
     sourceGroupsDoc.datasetSha256 !== admissionDoc.dataset?.sha256
   )
     return { interpretable: false, datasetBindingMismatch: true };
+  // The mapping must also be the grouping the admission run actually
+  // recorded — two well-formed files for the same dataset can still carry
+  // different merge decisions, and both layers of the binding must hold.
+  if (
+    !isNonEmptyString(sourceGroupsDoc.digest) ||
+    !isNonEmptyString(admissionDoc.sourceGroups?.digest) ||
+    sourceGroupsDoc.digest !== admissionDoc.sourceGroups.digest
+  )
+    return { interpretable: false, groupingBindingMismatch: true };
   const perSample = new Map();
   for (const entry of admissionDoc.perSample) {
     if (isPlainObject(entry) && isNonEmptyString(entry.caseId))
@@ -413,18 +425,30 @@ function deriveCalibrationFacts(document) {
     !Array.isArray(document.invocations)
   )
     return { interpretable: false };
-  const invocationIds = new Set();
+  // Calibration evidence = unique SUCCEEDED invocations. Failed calls stay
+  // in auditCallCount — they happened and are auditable, but they are not
+  // calibration success evidence: PASSED requires real successful calls.
+  const succeededIds = new Set();
   let invocationCount = 0;
   for (const invocation of document.invocations) {
-    if (isPlainObject(invocation) && isNonEmptyString(invocation.invocationId))
-      invocationIds.add(invocation.invocationId);
+    if (
+      isPlainObject(invocation) &&
+      isNonEmptyString(invocation.invocationId) &&
+      invocation.status === "SUCCEEDED"
+    )
+      succeededIds.add(invocation.invocationId);
     invocationCount += 1;
   }
   return {
     interpretable: true,
     status: document.status,
-    modelCallCount:
-      invocationIds.size > 0 ? invocationIds.size : invocationCount,
+    modelCallCount: succeededIds.size,
+    auditCallCount: invocationCount,
+    precisionTarget:
+      typeof document.precisionTarget === "number" &&
+      Number.isFinite(document.precisionTarget)
+        ? document.precisionTarget
+        : null,
     precisionTargetMet:
       typeof document.precisionTargetMet === "boolean"
         ? document.precisionTargetMet
@@ -476,6 +500,11 @@ function derivePreregistrationFacts(document) {
     alpha: policy.alpha,
     minimumIndependentSourceGroups: policy.minimumIndependentSourceGroups,
     exploratory: document.exploratory === true,
+    precisionTarget:
+      typeof policy.precisionTarget === "number" &&
+      Number.isFinite(policy.precisionTarget)
+        ? policy.precisionTarget
+        : null,
   };
 }
 
@@ -491,7 +520,9 @@ function deriveDataPathAuthorization(d6Approved, admissionDoc) {
     !isNonEmptyString(admissionDoc.realDataProbe.status)
   )
     return false;
-  return admissionDoc.realDataProbe.status !== "NOT_RUN_WITHOUT_D6";
+  // Fail-closed on the agreed positive state only — NOT_RUN_WITHOUT_D6 is
+  // rejected, and so is any other value the producer never agreed to emit.
+  return admissionDoc.realDataProbe.status === "RAN_WITH_D6";
 }
 
 // Data integrity is proven only by a verified admission report whose
@@ -564,13 +595,13 @@ export function qualifyT6(input, resolvedEvidence = null) {
       : null;
 
   const d2Approval = boundApproval("d2")
-    ? approvalFromRecord(boundApproval("d2").document)
+    ? approvalFromRecord(boundApproval("d2").document, "d2")
     : null;
   const d5Approval = boundApproval("d5")
-    ? approvalFromRecord(boundApproval("d5").document)
+    ? approvalFromRecord(boundApproval("d5").document, "d5")
     : null;
   const d6Approval = boundApproval("d6")
-    ? approvalFromRecord(boundApproval("d6").document)
+    ? approvalFromRecord(boundApproval("d6").document, "d6")
     : null;
   const admission = bound("admissionReport");
   const sourceGroups = bound("sourceGroups");
@@ -676,9 +707,11 @@ export function qualifyT6(input, resolvedEvidence = null) {
     calibrationFacts && calibrationFacts.interpretable
       ? calibrationFacts.status
       : calibration.status;
+  // The unauthorized-call check runs on the audit total: even an all-failed
+  // calibration made real model calls that required D2.
   const calCount =
     calibrationFacts && calibrationFacts.interpretable
-      ? calibrationFacts.modelCallCount
+      ? calibrationFacts.auditCallCount
       : calibration.modelCallCount;
   const revStatus =
     reviewFacts && reviewFacts.interpretable
@@ -774,6 +807,22 @@ export function qualifyT6(input, resolvedEvidence = null) {
     } else {
       if (calibrationFacts.precisionTargetMet !== policy.precisionTargetMet)
         addBlocked("EVIDENCE_CLAIM_MISMATCH");
+      // A met-precision claim must be anchored to the FROZEN preregistered
+      // target — a bare boolean proves nothing about which target was met.
+      if (calibrationFacts.precisionTargetMet === true) {
+        if (
+          calibrationFacts.precisionTarget === null ||
+          !preregFacts ||
+          !preregFacts.interpretable ||
+          preregFacts.precisionTarget === null
+        ) {
+          addBlocked("EVIDENCE_ARTIFACT_INVALID");
+        } else if (
+          calibrationFacts.precisionTarget !== preregFacts.precisionTarget
+        ) {
+          addBlocked("EVIDENCE_CLAIM_MISMATCH");
+        }
+      }
       precisionEffective = calibrationFacts.precisionTargetMet;
     }
   } else if (policy.precisionTargetMet === true) {
@@ -820,6 +869,7 @@ export function qualifyT6(input, resolvedEvidence = null) {
         bound: true,
         verdict: "artifact_invalid",
         datasetBindingMismatch: groupFacts.datasetBindingMismatch === true,
+        groupingBindingMismatch: groupFacts.groupingBindingMismatch === true,
       };
     } else {
       if (groupFacts.count !== declaredN) addBlocked("EVIDENCE_CLAIM_MISMATCH");
@@ -876,6 +926,9 @@ export function qualifyT6(input, resolvedEvidence = null) {
       minimumGroups = preregFacts.minimumIndependentSourceGroups;
     }
   } else {
+    // The declared alpha / minimum-group policy is an affirmative claim: a
+    // confirmatory qualification must never run on unverified parameters.
+    addBlocked("EVIDENCE_MISSING_FOR_CLAIM");
     evidenceCheck.artifacts.preregistration = {
       bound: false,
       verdict: "not_bound",

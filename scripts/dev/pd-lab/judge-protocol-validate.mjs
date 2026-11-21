@@ -547,6 +547,17 @@ function main() {
   const swapPairs = [];
   const seenSwap = new Set();
   const pairedPackageIds = new Set();
+  // Register every explicit swap relationship before inference: a package
+  // that declared its partner, or was declared as a target, is reserved and
+  // must never be silently inferred as someone else's counterpart.
+  const declaringIds = new Set();
+  const declaredTargetIds = new Set();
+  for (const e of bundle.entries) {
+    if (!isPlainObject(e?.blindPackage) || !isNonEmptyString(e.swapOf))
+      continue;
+    declaringIds.add(String(e.blindPackage.packageId));
+    declaredTargetIds.add(e.swapOf);
+  }
   for (const entry of bundle.entries) {
     if (!isPlainObject(entry?.blindPackage)) continue;
     const pkg = entry.blindPackage;
@@ -572,6 +583,9 @@ function main() {
       });
       continue;
     }
+    // A package already bound as a partner and carrying no declaration of
+    // its own is done — it must not start a second inference.
+    if (pairedPackageIds.has(pkgId)) continue;
     const counterKey = (candidate) =>
       candidate &&
       candidate !== entry &&
@@ -581,8 +595,28 @@ function main() {
       candidate.blindPackage.context === pkg.context;
     let resolved = partner;
     if (!resolved) {
-      resolved = bundle.entries.find((candidate) => counterKey(candidate));
-      if (!resolved) continue;
+      // Inference only among packages that are unpaired, undeclaring and
+      // unclaimed; ambiguity must be declared, not silently picked.
+      const candidates = bundle.entries.filter((candidate) => {
+        if (!counterKey(candidate)) return false;
+        const cid = String(candidate.blindPackage.packageId);
+        return (
+          !pairedPackageIds.has(cid) &&
+          !declaringIds.has(cid) &&
+          !declaredTargetIds.has(cid)
+        );
+      });
+      if (candidates.length === 0) continue;
+      if (candidates.length > 1) {
+        report({
+          packageId: pkgId,
+          judgmentId,
+          code: "SWAP_OF_INVALID",
+          message: `${candidates.length} unpaired counter-image candidates for ${pkgId} — declare swapOf explicitly`,
+        });
+        continue;
+      }
+      resolved = candidates[0];
     } else if (!counterKey(partner)) {
       report({
         packageId: pkgId,

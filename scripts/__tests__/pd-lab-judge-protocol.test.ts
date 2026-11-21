@@ -1603,6 +1603,29 @@ describe("complete semantic swap verification via real CLI (P0-2)", () => {
     );
     expect(codes(malformed.report)).toContain("SWAP_OF_INVALID");
   });
+
+  it("two independent swaps over identical content both pair cleanly", () => {
+    // Regression: explicit declarations are registered before inference, so
+    // an undeclared arm never steals another pair's already-bound partner.
+    const a = healthyPackage();
+    const aSwap = swapJudgePackage(a.blindPackage, a.secretBinding, "pkg-1:swap");
+    const b = healthyPackage({ packageId: "pkg-2" });
+    const bSwap = swapJudgePackage(b.blindPackage, b.secretBinding, "pkg-2:swap");
+    const { run, report } = validateBundle(
+      "swap-two-pairs-same-content",
+      bundle([
+        entryOf(a, "A_BETTER", "j-1", { swapOf: "pkg-1:swap" }),
+        entryOf(aSwap, "B_BETTER", "j-2"),
+        entryOf(b, "A_BETTER", "j-3", { swapOf: "pkg-2:swap" }),
+        entryOf(bSwap, "B_BETTER", "j-4"),
+      ]),
+    );
+    expect(codes(report).filter((c: string) => c.startsWith("SWAP_"))).toEqual(
+      [],
+    );
+    expect(report.positionExchange.evaluatedPairs).toBe(2);
+    expect(report.positionExchange.invalidPairs).toBe(0);
+  });
 });
 
 describe("arbitration binding parity with T4 (P0-3)", () => {
