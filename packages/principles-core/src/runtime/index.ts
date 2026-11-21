@@ -466,6 +466,38 @@ export type {
   PainIngressEvidenceClassV1,
   PainIngressV1ParseResult,
 } from './pain-ingress-payload.js';
+// PRI-1274 (B1): the unified host-generated MCP request submission context —
+// the trusted identity normalizer shared by the pd-mcp-server prebind path
+// and (via PRI-1275/1276) the other hosts' _meta producers.
+export {
+  HOST_SUBMISSION_CONTEXT_SOURCE,
+  PD_HOST_CONTEXT_META_KEY,
+  resolveHostSubmissionContext,
+  hostSessionClaimConflictsWithContext,
+} from './host-submission-context.js';
+export type {
+  HostSubmissionContext,
+  HostSubmissionContextResolution,
+  HostSubmissionHostKind,
+} from './host-submission-context.js';
+// PRI-1274 (B1): structured-receipt fallback — restores the SAME original
+// task's submission identity via the expected-value CAS; never a second
+// Pain/Task, queue, lease or evidence store.
+export {
+  PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
+  validatePainSubmitReceipt,
+  recoverTaskIdentityFromReceipt,
+} from './pain-receipt-recovery.js';
+export type {
+  PainRecoveryState,
+  PainRecoveryDisposition,
+  PainRecoveryReceiptRef,
+  ValidatedPainSubmitReceipt,
+  PainSubmitReceiptValidation,
+  ReceiptEventIdentity,
+  PainReceiptRecoveryOutcome,
+  ReceiptRecoveryAuthorization,
+} from './pain-receipt-recovery.js';
 // PRI-642 SPEC §8: THE shared ingress semantic evaluator — one authority
 // for every adapter (OpenClaw funnel, pd-cli, Codex).
 export {

@@ -300,6 +300,14 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'End-to-end evidence that WorkBuddy observations reach governance_observations with real Owner utterances, consent UX verified on installed path, no privacy/lineage P1, and an explicit Owner default-on decision',
     retirementCriteria: 'WorkBuddy conversation ingestion descoped, or graduated and observability confirms stable default-on (flag collapses into host.workbuddy contract)',
   },
+  host_identity_minimal_metadata: {
+    decision: 'KEEP_QUIET',
+    consumers: ['pd-mcp-server/src/submit-assembly.ts prebind authorization gate', 'codex-adapter/src/ingestion/pain-receipt-fallback.ts receipt fallback authorization gate'],
+    evidence: 'PRI-1274 B1 (SPEC-PD-FEEDBACK-RESILIENCE-001 v0.7 §G2): the one-time Workspace-level minimal identity-metadata disclosure/authorization, deliberately SEPARATE from codex_conversation_ingestion and automatic_pain_submission; default-off = submissions stay legally unbound (blocked_by_consent) and no identity metadata is persisted from _meta prebind or the PostToolUse receipt fallback',
+    decided: '2026-11-21',
+    graduationCriteria: 'B1 T1/T2 acceptance green on an isolated install with the flag enabled plus revoked-path evidence; Owner default-on decision after dogfooding confirms the metadata-only scope holds (no content persisted)',
+    retirementCriteria: 'Identity prebind becomes an unconditional part of the pd_submit_pain contract (Owner decides the disclosure step adds no safety), or the B1 binding design is replaced',
+  },
   workbuddy_live_keyword_pain: {
     decision: 'KEEP_QUIET',
     consumers: ['workbuddy-adapter/src/pd-hook.ts', 'host-runtime/src/governance-signal-admission.ts'],

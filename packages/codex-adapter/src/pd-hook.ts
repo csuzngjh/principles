@@ -14,6 +14,7 @@ import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
 import { runGovernanceAdmission } from './ingestion/admission.js';
+import { attemptPainReceiptFallback, painReceiptFallbackDiagnostic, PAIN_SUBMIT_TOOL_NAME } from './ingestion/pain-receipt-fallback.js';
 import { parseOwnerStatementPrefix, recordExplicitOwnerStatement } from './ingestion/explicit-owner-statement.js';
 import { writeCurrentTurnContext, clearCurrentTurnContext } from './ingestion/turn-context.js';
 import { recordCodexPromptDeliveryEvidence, recordCodexDenyEvidence } from './codex-evidence-recorder.js';
@@ -1027,7 +1028,39 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         evidenceDiagnostics.push(diagnostic(`codex_evidence_deny_failed:${errorMessage(error)}`, 'The deny decision was already encoded; evidence replay from the durable source is safe.'));
       }
     }
-    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics, ...adaptiveDiagnostics, ...toolSemanticsDiagnostics, ...backgroundDiagnostics];
+    // PRI-1274 (B1): PostToolUse structured-receipt fallback. When a
+    // pd_submit_pain MCP request carried no trusted host `_meta`, its
+    // original Pain/Task was legally persisted unbound; the host completion
+    // event's own structured receipt + host-authoritative identity now
+    // restores the SAME task via the Core CAS recovery. Independent of
+    // codex_conversation_ingestion (no transcript read; ids only), gated by
+    // the Workspace-level host_identity_minimal_metadata authorization.
+    // Fail-open: a fallback failure never changes the host decision.
+    const receiptDiagnostics: string[] = [];
+    if (event.kind === 'after_tool_call'
+      && event.context.toolName === PAIN_SUBMIT_TOOL_NAME
+      && event.context.toolCallId !== undefined) {
+      try {
+        const fallback = await attemptPainReceiptFallback({
+          workspaceDir: resolution.workspaceDir,
+          toolName: event.context.toolName,
+          toolResponse: event.context.toolOutput,
+          identity: {
+            sessionId: event.context.sessionId,
+            ...(event.context.turnId !== undefined ? { turnId: event.context.turnId } : {}),
+            toolCallId: event.context.toolCallId,
+          },
+          minimalMetadataGranted: flags.host_identity_minimal_metadata?.enabled === true,
+        });
+        const line = painReceiptFallbackDiagnostic(fallback);
+        if (line !== null) {
+          receiptDiagnostics.push(diagnostic(line, 'The pain submission identity recovery outcome is recorded on the original task; no resubmission is needed.'));
+        }
+      } catch (error: unknown) {
+        receiptDiagnostics.push(diagnostic(`pain_receipt_fallback_failed:${errorMessage(error)}`, 'The hook decision is unaffected; the workspace worker re-evaluates recovery on the next cycle.'));
+      }
+    }
+    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics, ...adaptiveDiagnostics, ...toolSemanticsDiagnostics, ...backgroundDiagnostics, ...receiptDiagnostics];
     return { stdout: encoded, exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;
