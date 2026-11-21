@@ -479,7 +479,13 @@ describe('round-5 lock lifecycle (P0/P1)', () => {
     // lock — the honest contract is only that the result reports the failure
     // and no FOREIGN body is ever displaced.
     expect(releaseServiceRunLock({ lockPath, token: 'mine', body: foreignBody }, { injectEndFailure: true })).toBe('failed_unwritable');
-    if (existsSync(lockPath)) expect(readFileSync(lockPath, 'utf8')).toBe(foreignBody);
+    let survivingBody: string | undefined;
+    try {
+      survivingBody = readFileSync(lockPath, 'utf8');
+    } catch {
+      survivingBody = undefined;
+    }
+    if (survivingBody !== undefined) expect(survivingBody).toBe(foreignBody);
     rmSync(lockPath, { force: true });
     // not_owned again once the file is simply gone.
     expect(releaseServiceRunLock({ lockPath, token: 'mine', body: 'x y z' })).toBe('not_owned');
@@ -549,7 +555,9 @@ describe('round-5 lock lifecycle (P0/P1)', () => {
     };
     const deadMtx = seed(`${path.basename(lockPath)}.mtx`, '424242 m 2026-01-01T00:00:00.000Z', true);
     const liveTake = seed(`${path.basename(lockPath)}.take-live`, '424243 t 2026-01-01T00:00:00.000Z', true);
-    const freshRel = seed(`${path.basename(lockPath)}.rel-fresh`, '424242 r 2026-01-01T00:00:00.000Z', false);
+    // Fresh = the BODY's recorded createdAt is recent (staleness reads the
+    // recorded timestamp, never mtime) — a dead pid alone is not enough.
+    const freshRel = seed(`${path.basename(lockPath)}.rel-fresh`, `424242 r ${new Date().toISOString()}`, false);
     const junk = seed(`${path.basename(lockPath)}.take-junk`, 'unparseable', true);
     const gateShm = seed('service-run-gate.db-shm', 'x', true);
     const result = acquireServiceRunLock(home, {

@@ -208,6 +208,18 @@ function lockBody(token: string): string {
  * a body we cannot attribute is treated as corrupt (fail-closed), never as
  * takeover evidence.
  */
+/**
+ * Parse the recorded creation timestamp out of a lock/sidecar body
+ * (`<pid> <token> <createdAtISO>`); undefined when unverifiable.
+ */
+function holderCreatedAtOf(body: string): number | undefined {
+  const parts = body.trim().split(/\s+/);
+  const stamp = parts.length >= 3 ? parts[2] : undefined;
+  if (stamp === undefined) return undefined;
+  const parsed = Date.parse(stamp);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 function holderPidOf(body: string): number | undefined {
   const firstSpace = body.indexOf(' ');
   const pidText = firstSpace === -1 ? body : body.slice(0, firstSpace);
@@ -335,15 +347,19 @@ function sweepOrphanSidecars(
     if (entry !== `${base}.mtx` && !entry.startsWith(`${base}.take-`) && !entry.startsWith(`${base}.rel-`)) continue;
     const sidecar = path.join(dir, entry);
     try {
-      if (fs.statSync(sidecar).mtimeMs >= Date.now() - staleMs) continue;
       // Ownership check before any deletion: a dead recorded owner makes
       // the orphan provably unheld; anything else is kept, never assumed.
+      // Staleness comes from the body's own createdAt, not an mtime stat —
+      // a stat-then-delete pair is a real check-then-act race (CodeQL
+      // js/file-system-race) and mtime never proved ownership anyway.
       let sidecarBody: string;
       try {
         sidecarBody = fs.readFileSync(sidecar, 'utf8');
       } catch {
         continue;
       }
+      const recordedAt = holderCreatedAtOf(sidecarBody);
+      if (recordedAt === undefined || recordedAt >= Date.now() - staleMs) continue;
       const pid = holderPidOf(sidecarBody);
       if (pid === undefined) continue;
       let liveness: HolderLiveness;

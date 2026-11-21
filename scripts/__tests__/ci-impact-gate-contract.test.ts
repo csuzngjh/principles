@@ -112,7 +112,10 @@ describe('ci.yml impact scope-gate contract', () => {
     // 2026-11-18 (CI runtime): 11 -> 10. `build-openclaw-plugin` folded into
     // `test-openclaw-plugin-coverage` — identical scope gate (`scopes.plugin`),
     // identical install + `npm run build`, every step preserved.
-    expect(gated.length).toBe(10);
+    // 2026-11-21 (PRI-1279 round 5): 10 -> 11. `test-pd-cli-windows` runs the
+    // real better-sqlite3 Service Host lock protocol on windows-latest under
+    // the same `scopes.cli` gate — same fail-open shape, no new scope.
+    expect(gated.length).toBe(11);
     for (const [id, job] of gated) {
       const expr = job.if ?? '';
       // The ${{ }} wrapper matters as much as the status function: a bare
