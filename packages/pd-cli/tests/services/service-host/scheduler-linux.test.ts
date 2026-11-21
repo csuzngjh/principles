@@ -96,7 +96,7 @@ function makeRegistration(): SchedulerRegistration {
   const pdHome = `${LINUX_HOME}/.pd`;
   const cliEntry = `${LINUX_HOME}/tools/pd-cli/index.js`;
   const nodePath = `${LINUX_HOME}/tools/bin/node`;
-  return { pdHome, cliEntry, nodePath, intervalMs: 120_000, identity: schedulerIdentityFor(pdHome) };
+  return { pdHome, homeDir: path.dirname(pdHome), cliEntry, nodePath, intervalMs: 120_000, identity: schedulerIdentityFor(pdHome) };
 }
 
 function unitPaths(registration: SchedulerRegistration): { serviceFile: string; timerFile: string } {

@@ -34,7 +34,7 @@ function makeRegistration(overrides: {
   const cliEntry = overrides.cliEntry ?? path.join(BASE_DIR, 'releases', 'active', 'index.js');
   const nodePath = overrides.nodePath ?? path.join(BASE_DIR, 'runtime', 'node.exe');
   const intervalMs = overrides.intervalMs ?? DEFAULT_SCHEDULER_INTERVAL_MS;
-  return { pdHome, cliEntry, nodePath, intervalMs, identity: schedulerIdentityFor(pdHome) };
+  return { pdHome, homeDir: path.dirname(pdHome), cliEntry, nodePath, intervalMs, identity: schedulerIdentityFor(pdHome) };
 }
 
 describe('schedulerIdentityFor', () => {
@@ -101,7 +101,7 @@ describe('validateSchedulerIntervalMs', () => {
 });
 
 describe('schedulerInvocationArgs', () => {
-  it('is the exact managed-run command line shared by every platform', () => {
+  it('is the exact managed-run command line shared by every platform (--pd-home carries the HOME ROOT)', () => {
     const registration = makeRegistration();
     expect(schedulerInvocationArgs(registration)).toEqual([
       registration.cliEntry,
@@ -111,8 +111,11 @@ describe('schedulerInvocationArgs', () => {
       '--trigger',
       'scheduler',
       '--pd-home',
-      registration.pdHome,
+      registration.homeDir,
     ]);
+    // The CLI derives <home>/.pd from the trusted home itself — passing the
+    // .pd dir would resolve to <home>/.pd/.pd.
+    expect(registration.homeDir).not.toBe(registration.pdHome);
   });
 });
 
@@ -124,7 +127,7 @@ describe('buildWindowsTaskXml', () => {
     // The cliEntry is quoted in the argument string; the quotes are part of
     // the XML text and therefore serialized as &quot; entities.
     expect(xml).toContain(
-      `<Arguments>&quot;${registration.cliEntry}&quot; service run-once --json --trigger scheduler --pd-home ${registration.pdHome}</Arguments>`,
+      `<Arguments>&quot;${registration.cliEntry}&quot; service run-once --json --trigger scheduler --pd-home ${registration.homeDir}</Arguments>`,
     );
     expect(xml).toContain(`<WorkingDirectory>${registration.pdHome}</WorkingDirectory>`);
     expect(xml).toContain(`<Description>PD Service Host managed run-once trigger for pdHome ${registration.pdHome}.`);
@@ -176,7 +179,7 @@ describe('buildLinuxServiceUnit / buildLinuxTimerUnit', () => {
     const unit = buildLinuxServiceUnit(registration);
     expect(unit).toContain('Type=oneshot');
     expect(unit).toContain(
-      'ExecStart="C:\\\\node\\\\bin\\\\node.exe" "/opt/PD Dir/cli/index.js" "service" "run-once" "--json" "--trigger" "scheduler" "--pd-home" "/home/pd user/.pd"',
+      'ExecStart="C:\\\\node\\\\bin\\\\node.exe" "/opt/PD Dir/cli/index.js" "service" "run-once" "--json" "--trigger" "scheduler" "--pd-home" "/home/pd user"',
     );
     expect(unit).toContain('WorkingDirectory=/home/pd user/.pd');
   });

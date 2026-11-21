@@ -124,7 +124,10 @@ export async function runServiceHostCli(pdHome: string, args: readonly string[],
       nextAction: 'The pd CLI is not present in the runtime — nothing was registered; run `pd service install` manually after repairing the install.',
     };
   }
-  const outcome = await spawnCli(entry, [...args, '--json', '--pd-home', pdHome], probes.spawnFn);
+  // `--pd-home` carries the HOME ROOT — the CLI derives <home>/.pd itself,
+  // so passing pdHome would resolve to <home>/.pd/.pd. For the canonical
+  // layout getPdDir() IS <home>/.pd, hence dirname.
+  const outcome = await spawnCli(entry, [...args, '--json', '--pd-home', path.dirname(pdHome)], probes.spawnFn);
   if (outcome.timedOut === true) {
     return {
       ok: false,

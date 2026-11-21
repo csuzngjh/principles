@@ -98,14 +98,15 @@ function makeRegistration(): SchedulerRegistration {
   const pdHome = path.join(BASE_DIR, 'home-a', '.pd');
   const cliEntry = path.join(BASE_DIR, 'releases', 'active', 'index.js');
   const nodePath = path.join(BASE_DIR, 'runtime', 'node.exe');
-  return { pdHome, cliEntry, nodePath, intervalMs: 120_000, identity: schedulerIdentityFor(pdHome) };
+  return { pdHome, homeDir: path.dirname(pdHome), cliEntry, nodePath, intervalMs: 120_000, identity: schedulerIdentityFor(pdHome) };
 }
 
 /** Exported task XML the ownership check accepts as OURS (entry + pdHome). */
 function oursXml(registration: SchedulerRegistration, triggers = ''): string {
   return (
     `<Task><Actions><Exec><Command>${registration.nodePath}</Command>` +
-    `<Arguments>"${registration.cliEntry}" service run-once --json --trigger scheduler --pd-home ${registration.pdHome}</Arguments>` +
+    `<Arguments>"${registration.cliEntry}" service run-once --json --trigger scheduler --pd-home ${registration.homeDir}</Arguments>` +
+    `<WorkingDirectory>${registration.pdHome}</WorkingDirectory>` +
     `</Exec></Actions>${triggers}</Task>`
   );
 }
@@ -375,6 +376,7 @@ describe('createWindowsSchedulerAdapter', () => {
     const cliEntry = `${BASE_DIR}${path.sep}Tom's D&I 项目${path.sep}runtime${path.sep}pd-cli${path.sep}dist${path.sep}index.js`;
     const registration: SchedulerRegistration = {
       pdHome,
+      homeDir: path.dirname(pdHome),
       cliEntry,
       nodePath: path.join(BASE_DIR, 'node.exe'),
       intervalMs: 120_000,
@@ -382,10 +384,13 @@ describe('createWindowsSchedulerAdapter', () => {
     };
     const escapeXml = (value: string): string =>
       value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c] ?? c);
-    // The query returns the definition in Task-Scheduler's ESCAPED form.
+    // The query returns the definition in Task-Scheduler's ESCAPED form; the
+    // pdHome rides along in the escaped Arguments (homeDir) AND the escaped
+    // WorkingDirectory so the ownership check finds BOTH facts.
     const escapedXml =
       `<Task><Actions><Exec><Command>${escapeXml(registration.nodePath)}</Command>` +
-      `<Arguments>${escapeXml(`"${registration.cliEntry}" service run-once --json --trigger scheduler --pd-home ${registration.pdHome}`)}</Arguments>` +
+      `<Arguments>${escapeXml(`"${registration.cliEntry}" service run-once --json --trigger scheduler --pd-home ${registration.homeDir}`)}</Arguments>` +
+      `<WorkingDirectory>${escapeXml(registration.pdHome)}</WorkingDirectory>` +
       `</Exec></Actions></Task>`;
     const { runner } = sequentialRunner([psResult({ found: true, state: 'Ready', xml: escapedXml, lastResult: 0 })]);
     const adapter = createWindowsSchedulerAdapter({ runner, fileIo: new FakeFileIo() });

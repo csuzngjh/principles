@@ -4,15 +4,15 @@
  * collide with any real PD install). Everything else is the REAL OS:
  * powershell.exe, the ScheduledTasks module and the task store.
  *
- * This host is HARDENED: unelevated (medium-integrity) task registration is
- * denied by machine policy — verified live. That fact is itself asserted as
- * the honesty contract (task §5: permission denial must NEVER read as "not
- * installed"). The full real lifecycle (install → installed_disabled →
- * enable → REAL OS start of the registered command → disable → uninstall →
- * idempotent re-uninstall) then runs the SAME adapter scripts through an
- * elevated PowerShell bridge (silent-elevation host; on standard user
- * machines the unelevated production path is the default and this bridge is
- * unnecessary).
+ * TWO real regimes, auto-detected once:
+ *  - STANDARD hosts (incl. CI runners): the UNELEVATED production path works
+ *    end-to-end — the whole lifecycle uses the real spawn runner.
+ *  - HARDENED hosts (this dev box: machine policy denies unelevated task
+ *    registration — verified live): that denial is first asserted as the
+ *    honesty contract (task §5: permission denial must NEVER read as "not
+ *    installed"), then the SAME adapter scripts run through an elevated
+ *    PowerShell bridge (silent-elevation host) for the rest of the
+ *    lifecycle. On standard machines the bridge is never used.
  */
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import * as os from 'node:os';
@@ -20,7 +20,7 @@ import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
-import { schedulerIdentityFor, type SchedulerCommandResult, type SchedulerCommandRunner, type SchedulerRegistration } from '../../../src/services/service-host/scheduler/contract.js';
+import { schedulerIdentityFor, type SchedulerAdapter, type SchedulerCommandResult, type SchedulerCommandRunner, type SchedulerRegistration } from '../../../src/services/service-host/scheduler/contract.js';
 import { createWindowsSchedulerAdapter } from '../../../src/services/service-host/scheduler/windows.js';
 import { createSpawnSchedulerRunner, nodeSchedulerFileIo } from '../../../src/services/service-host/scheduler/runtime-io.js';
 
@@ -30,6 +30,7 @@ const pdHome = path.join(home, '.pd');
 // test, not a real PD run (the real install acceptance does that).
 const registration: SchedulerRegistration = {
   pdHome,
+  homeDir: path.dirname(pdHome),
   cliEntry: path.join(pdHome, 'runtime', 'pd-cli', 'dist', 'index.js'),
   nodePath: process.execPath,
   intervalMs: 60_000,
@@ -41,11 +42,14 @@ const unelevatedAdapter = createWindowsSchedulerAdapter({
   fileIo: nodeSchedulerFileIo,
 });
 
+/** Set by the regime probe (first test): which adapter the lifecycle uses. */
+let lifecycleAdapter: SchedulerAdapter = unelevatedAdapter;
+
 /**
- * Elevated PowerShell bridge: runs the EXACT script the adapter produced
- * inside an elevated process (this host denies unelevated registration by
- * policy) and returns its stdout. Output crosses the boundary via a temp
- * file because an elevated child cannot inherit our stdio pipes.
+ * Elevated PowerShell bridge (HARDENED hosts only): runs the EXACT script
+ * the adapter produced inside an elevated process and returns its stdout.
+ * Output crosses the boundary via a temp file because an elevated child
+ * cannot inherit our stdio pipes.
  */
 function createElevatedRunner(scratchDir: string): SchedulerCommandRunner {
   return {
@@ -55,12 +59,11 @@ function createElevatedRunner(scratchDir: string): SchedulerCommandRunner {
       const scriptFile = path.join(scratchDir, `op-${id}.ps1`);
       const outFile = path.join(scratchDir, `op-${id}.out`);
       // The wrapper re-exports the adapter's extraEnv (PD_TASK_XML) because
-      // the elevated process does not inherit our environment.
+      // the elevated process does not inherit our environment; the & { … }
+      // wrap keeps the pipe bound to the whole multi-statement script.
       const envLines = extraEnv === undefined
         ? ''
         : Object.entries(extraEnv).map(([k, v]) => `$env:${k} = '${v.replace(/'/g, "''")}'`).join('; ') + '; ';
-      // & { … } wrap: a bare multi-statement script would bind the pipe to
-      // its LAST statement only (operator precedence) and lose the rest.
       writeFileSync(scriptFile, `& { ${envLines}${script} } | Out-File -FilePath '${outFile}' -Encoding utf8`, 'utf8');
       const code = await new Promise<number | null>((resolve) => {
         const child = spawn('powershell.exe', [
@@ -87,39 +90,42 @@ const elevatedAdapter = createWindowsSchedulerAdapter({
 });
 
 afterAll(() => {
-  // Unconditional cleanup: the temp identity's task must not survive the
-  // suite even when an assertion failed earlier.
-  void elevatedAdapter.uninstall(registration).finally(() => {
-    rmSync(home, { recursive: true, force: true });
-  });
+  // Unconditional cleanup with BOTH adapters: the temp identity's task must
+  // not survive the suite even when an assertion failed earlier.
+  void elevatedAdapter.uninstall(registration)
+    .then(() => unelevatedAdapter.uninstall(registration))
+    .finally(() => {
+      rmSync(home, { recursive: true, force: true });
+    });
 });
 
 describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecycle (isolated identity)', () => {
   it(
-    'unelevated registration denial is NEVER reported as "not installed" (honesty contract, verified live on this hardened host)',
-    { timeout: 120_000 },
+    'regime probe: unelevated install either works (standard host → unelevated lifecycle) or is denied WITHOUT reading as "not installed" (hardened host → elevated bridge)',
+    { timeout: 240_000 },
     async () => {
       const result = await unelevatedAdapter.install(registration);
       if (result.ok) {
-        // A standard host allows the unelevated path — nothing to assert
-        // here beyond the honest facts; cleanup still runs in afterAll.
+        // Standard host: the unelevated production path registered the task.
+        lifecycleAdapter = unelevatedAdapter;
         expect(result.facts.registered).toBe(true);
+        expect(result.facts.enabled).toBe(false);
         return;
       }
-      // This host denies it: the denial must be a structured command
-      // failure carrying the access-denied identity — registered stays
-      // unreadable/null-adjacent, never "false, all good".
+      // Hardened host: the denial must be a structured command failure
+      // carrying the failure identity — registered is never "false, all good".
       expect(result.kind).toBe('command_failed');
       expect(result.reason).toContain('scheduler_mutation_failed');
       expect(result.nextAction).not.toContain('not installed');
+      lifecycleAdapter = elevatedAdapter;
     },
   );
 
   it(
-    'install (elevated bridge) → registered + DISABLED (installed_disabled)',
-    { timeout: 180_000 },
+    'install → registered + DISABLED (installed_disabled)',
+    { timeout: 240_000 },
     async () => {
-      const result = await elevatedAdapter.install(registration);
+      const result = await lifecycleAdapter.install(registration);
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.changed).toBe(true);
@@ -131,9 +137,9 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
 
   it(
     're-install is idempotent and PRESERVES the disabled state',
-    { timeout: 180_000 },
+    { timeout: 240_000 },
     async () => {
-      const result = await elevatedAdapter.install(registration);
+      const result = await lifecycleAdapter.install(registration);
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.changed).toBe(false);
@@ -143,14 +149,14 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
 
   it(
     'enable → enabled; status reads it back from the OS',
-    { timeout: 180_000 },
+    { timeout: 240_000 },
     async () => {
-      const enabled = await elevatedAdapter.enable(registration);
+      const enabled = await lifecycleAdapter.enable(registration);
       expect(enabled.ok).toBe(true);
       if (!enabled.ok) return;
       expect(enabled.facts.enabled).toBe(true);
 
-      const status = await elevatedAdapter.status(registration);
+      const status = await lifecycleAdapter.status(registration);
       expect(status.ok).toBe(true);
       if (!status.ok) return;
       expect(status.facts.registered).toBe(true);
@@ -161,24 +167,25 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
 
   it(
     'the OS REALLY starts the registered command (Start-ScheduledTask → non-null LastRunTime/LastTaskResult)',
-    { timeout: 240_000 },
+    { timeout: 300_000 },
     async () => {
-      // Drive the OS-side start exactly like a trigger would.
+      // Drive the OS-side start exactly like a trigger would — unelevated
+      // works for OUR own task on both regimes.
       await new Promise<void>((resolve, reject) => {
         const child = spawn('powershell.exe', [
           '-NoProfile', '-NonInteractive', '-Command',
-          `$p = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -PassThru -Wait -ArgumentList @('-NoProfile','-Command',\"Start-ScheduledTask -TaskName '${registration.identity.windowsTaskName}'; Start-Sleep -Seconds 3\"); exit $p.ExitCode`,
+          `Start-ScheduledTask -TaskName '${registration.identity.windowsTaskName}'; Start-Sleep -Seconds 3`,
         ], { stdio: 'ignore', windowsHide: true });
-        child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`elevated Start-ScheduledTask exited ${code ?? 'null'}`))));
+        child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`Start-ScheduledTask exited ${code ?? 'null'}`))));
         child.on('error', (error) => reject(error));
       });
-      const status = await elevatedAdapter.status(registration);
+      const status = await lifecycleAdapter.status(registration);
       expect(status.ok).toBe(true);
       if (!status.ok) return;
-      // LastRunTime left the 1899 sentinel and LastTaskResult is a real
-      // exit code — the missing CLI entry makes it non-zero (node could not
-      // load the module), which is exactly the honest evidence that the OS
-      // ran OUR command line.
+      // LastRunTime left the sentinel and LastTaskResult is a real exit
+      // code — the missing CLI entry makes it non-zero (node could not load
+      // the module), which is exactly the honest evidence that the OS ran
+      // OUR command line.
       expect(status.facts.lastRunAt).not.toBeNull();
       expect(status.facts.lastResult).not.toBeNull();
       expect(Number(status.facts.lastResult)).not.toBe(0);
@@ -187,27 +194,28 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
 
   it(
     'disable → disabled; uninstall → registration gone; re-uninstall is a no-op',
-    { timeout: 180_000 },
+    { timeout: 240_000 },
     async () => {
-      const disabled = await elevatedAdapter.disable(registration);
+      const disabled = await lifecycleAdapter.disable(registration);
       expect(disabled.ok).toBe(true);
       if (!disabled.ok) return;
       expect(disabled.facts.enabled).toBe(false);
 
-      const removed = await elevatedAdapter.uninstall(registration);
+      const removed = await lifecycleAdapter.uninstall(registration);
       expect(removed.ok).toBe(true);
       if (!removed.ok) return;
       expect(removed.changed).toBe(true);
 
-      const status = await elevatedAdapter.status(registration);
+      const status = await lifecycleAdapter.status(registration);
       expect(status.ok).toBe(true);
       if (!status.ok) return;
       expect(status.facts.registered).toBe(false);
 
-      const again = await elevatedAdapter.uninstall(registration);
+      const again = await lifecycleAdapter.uninstall(registration);
       expect(again.ok).toBe(true);
       if (!again.ok) return;
       expect(again.changed).toBe(false);
     },
   );
 });
+

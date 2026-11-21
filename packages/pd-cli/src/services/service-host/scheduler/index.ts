@@ -179,6 +179,7 @@ export async function runSchedulerLifecycle(
     }
     const registration: SchedulerRegistration = {
       pdHome: identity.pdHome,
+      homeDir: identity.homeDir,
       cliEntry: entry.entry,
       nodePath: probes?.nodePath ?? process.execPath,
       intervalMs: interval.intervalMs,
@@ -193,6 +194,7 @@ export async function runSchedulerLifecycle(
   // interval is not consulted outside install.
   const registration: SchedulerRegistration = {
     pdHome: identity.pdHome,
+    homeDir: identity.homeDir,
     cliEntry: entry.entry,
     nodePath: probes?.nodePath ?? process.execPath,
     intervalMs: DEFAULT_SCHEDULER_INTERVAL_MS,

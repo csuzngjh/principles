@@ -106,7 +106,7 @@ function makeRegistration(home: string): SchedulerRegistration {
   const pdHome = path.join(home, '.pd');
   const cliEntry = path.join(home, 'tools', 'pd-cli', 'index.js');
   const nodePath = path.join(home, 'tools', 'bin', 'node');
-  return { pdHome, cliEntry, nodePath, intervalMs: 120_000, identity: schedulerIdentityFor(pdHome) };
+  return { pdHome, homeDir: path.dirname(pdHome), cliEntry, nodePath, intervalMs: 120_000, identity: schedulerIdentityFor(pdHome) };
 }
 
 function plistPathFor(registration: SchedulerRegistration): string {

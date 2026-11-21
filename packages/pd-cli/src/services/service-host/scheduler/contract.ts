@@ -63,8 +63,15 @@ export function validateSchedulerIntervalMs(raw: number | undefined): IntervalVa
 
 /** The full install-bound registration definition an adapter registers. */
 export interface SchedulerRegistration {
-  /** Canonical, trusted PD home this registration belongs to. */
+  /** Canonical, trusted PD home this registration belongs to (`<home>/.pd`). */
   readonly pdHome: string;
+  /**
+   * The trusted HOME root (`dirname(pdHome)`): the value the registered
+   * command passes as `--pd-home` — the CLI treats that flag as the trusted
+   * home DIRECTORY and derives `<home>/.pd` itself, so passing pdHome here
+   * would resolve to `<home>/.pd/.pd`.
+   */
+  readonly homeDir: string;
   /** Absolute installed CLI entry (active release), resolved by the coordinator. */
   readonly cliEntry: string;
   /** Absolute node executable that runs the entry. */
@@ -104,7 +111,9 @@ export function schedulerIdentityFor(pdHome: string): SchedulerIdentity {
 
 /**
  * The exact managed-run invocation arguments registered with the OS. Kept in
- * ONE place so every platform registers the identical command line.
+ * ONE place so every platform registers the identical command line. NOTE:
+ * `--pd-home` carries the trusted HOME root (registration.homeDir), matching
+ * the CLI flag's semantics (the CLI derives `<home>/.pd` itself).
  */
 export function schedulerInvocationArgs(registration: SchedulerRegistration): readonly string[] {
   return [
@@ -113,7 +122,7 @@ export function schedulerInvocationArgs(registration: SchedulerRegistration): re
     'run-once',
     '--json',
     '--trigger', 'scheduler',
-    '--pd-home', registration.pdHome,
+    '--pd-home', registration.homeDir,
   ];
 }
 
