@@ -1,5 +1,79 @@
 # @principles/pd-cli
 
+## 2.10.0
+
+### Minor Changes
+
+- 5e30d93: PD Service Host Phase 1 (PRI-1279, SPEC-PD-SERVICE-HOST-001 §11 Phase 1 /
+  ADR-0020 §11.6): new `pd service run-once --dry-run [--json]` coordinator with
+  the read-only Service Host pipeline — install identity (production-forced with
+  PD_EXPERIMENT_ROOT stripping, recorded), two-source workspace discovery over
+  the canonical install manifest and validated per-host claims
+  (`collectHostWorkspaceClaims` / `findForeignWorkspaceOwner` reused), realpath
+  identity dedupe, read-only `backgroundExecutions` owner projection, the
+  install-level single-instance run lock (SQLite `BEGIN IMMEDIATE` arbitration
+  over `<pdHome>/service/service-run-gate.db` — acquire, PID-verified takeover and
+  ownership-checked release all decided inside one transaction; zero-wait
+  immediate `already_running`; fully fail-closed on gate/busy errors; release
+  reports a structured outcome — released / not_owned / failed_busy /
+  failed_unwritable — where unreadable lock files (EACCES/EPERM/EIO) are real
+  failures, never misread as released or not_owned),
+  and the versioned operational status file under
+  `<pdHome>/service/run-once-status.json`. Phase 1 starts no Worker and changes
+  no consumer ownership; a run without `--dry-run` refuses
+  (`dry_run_required_phase1`).
+  
+  Placement note (TD §2.1 deviation): the coordinator lives inside pd-cli
+  (`src/services/service-host/`) instead of a separate `@principles/service-host`
+  package — a new pd-cli workspace dependency would enter the self-contained
+  release asset (ERR-196 class) and require payload-component staging, staged
+  manifest rewrites and release-lock regeneration that cannot be fully exercised
+  outside the release pipeline. Extraction into a dedicated package remains a
+  Phase 2 (PRI-1280) decision with its own release-onboarding work.
+  
+  install-layout (patch): re-export `resolveRealUserHome` — the shared home
+  precedence authority — so the coordinator reuses the single identity
+  resolution instead of re-deriving it; add the authoritative Active Release
+  record parser (`active-release.ts`: `ACTIVE_RELEASE_SCHEMA_VERSION`,
+  `ActiveReleaseRecord`, `ActiveReleaseVerdict`, `parseActiveReleaseRecord`,
+  `readActiveReleaseRecord`, `activeReleaseRecordPath`) — the single schema
+  owner the service-host coordinator validates against (P1 defect fix:
+  strict validation replaces lenient any-object parsing).
+
+### Patch Changes
+
+- 2e91fdf: B-class automatic Pain submission authorization + Service Host handover safety (Pain Ingress SPEC §9.6 / Service Host SPEC §8.4).
+  
+  - New quiet flag `automatic_pain_submission` (default off, per-Workspace `.pd/config.yaml` `features:`) is the independent Owner authorization for automatic_hook Pain submissions — deliberately distinct from `signal_collector` and `internalization_auto_consumer`.
+  - Gates: SignalCollectorHost suppresses STRONG routing, Stage-2 LLM enqueue/invocation and batch confirmation while unauthorized; `emitPainDetectedEvent` degrades unauthorized automatic submissions to observation-only; `runPendingDiagnosticianOnce` skips persisted `automatic_hook` candidates; `pd pain retry` refuses `automatic_hook` dead-letter replays.
+  - Companion Supervisor reads manifest `backgroundExecutions`: `handover_preparing`/`rollback_pending`/`service_host_owned` forbid legacy worker start/restart (running workers drain+stop; restarts cannot resurrect); stable `legacy_owned` re-allows.
+- 2e91fdf: P0: enforce `automatic_pain_submission` authorization BEFORE the Pain
+  submission chain — `PainSignalBridge.onPainDetected` refuses
+  `automatic_hook` right after provenance resolution (ahead of
+  capabilityDisabled ensure and every existing-task path), and
+  `PainToPrincipleService.recordPain` / `admitGovernanceSignals` apply the
+  same lazy probe so unauthorized signals never create, reset, re-execute
+  or mutate a diagnosis task (observation-only stays the only record).
+  The `authorizedEvidence` evidence-emptiness mechanism is removed.
+  
+  P1: fix the Companion restart-timer race — entering
+  `handover_preparing`/`rollback_pending`/`service_host_owned` now retires
+  entries without a live child (stopped + drain/restart handles cleared),
+  and `spawnFor` re-verifies stopped state, the ownershipBlocked set, and
+  registry entry identity at the final launch point so a stale crash
+  restart can never resurrect a legacy worker mid-transition.
+- Updated dependencies [2e91fdf]
+- Updated dependencies [2e91fdf]
+- Updated dependencies [2e91fdf]
+- Updated dependencies [2e91fdf]
+- Updated dependencies [5e30d93]
+  - @principles/core@8.0.1
+  - @principles/host-runtime@4.5.1
+  - principles-disciple@4.2.1
+  - @principles/codex-adapter@0.13.1
+  - @principles/workbuddy-adapter@0.7.1
+  - @principles/install-layout@0.9.1
+
 ## 2.9.1
 
 ### Patch Changes

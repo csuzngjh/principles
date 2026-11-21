@@ -1,5 +1,47 @@
 # @principles/install-layout
 
+## 0.9.1
+
+### Patch Changes
+
+- 2e91fdf: Workspace 归属发现补齐 OpenClaw 自身持久化绑定：`collectHostWorkspaceClaims` 现在同样读取 `<openclawHome>/extensions/principles-disciple/mcp-binding.json`，且只有经 `validateMcpBinding` 全量校验（host/schemaVersion/workspaceDir/runtimeDir/canonical serverEntry）的 binding 才能形成 workspace claim；launcher.cjs 同步同一严格规则与新增 OpenClaw 绑定源。install manifest 新增可选 `backgroundExecution` 所有权记录（state/effectiveOwner/generation/operationId/previousOwner/targetOwner/updatedAt），解析 fail-closed，为 SPEC-PD-SERVICE-HOST-001 §8.4 CAS 所有权契约的 schema 支撑。
+- 2e91fdf: Workspace 所有权记录升级为逐 Workspace 独立表达：`InstallManifest.backgroundExecutions` 为以 canonical workspaceDir 为 key 的 `BackgroundExecutionRecord` 映射（替换单数 `backgroundExecution`），含 per-state 语义校验（handover_preparing/rollback_pending 必须 operationId+正确的 previous/target、generation ≥ 1；legacy_owned/service_host_owned 禁止携带交接字段）；旧单记录仅在 `workspaces.length === 1` 时迁移，多 Workspace 歧义 fail-closed；新增 `setInstallManifestBackgroundExecution` 单键写入器。Pain Ingress 收紧 `automatic_hook` 信任边界：已绑定宿主报告的来源必须落在宿主来源词汇表（codex: `codex:*`；workbuddy: `workbuddy:*`；openclaw: `after_tool_call`），不可信来源降级 `observation_only`（`untrusted_automatic_source`），不再产生 LLM/Task。
+- 5e30d93: PD Service Host Phase 1 (PRI-1279, SPEC-PD-SERVICE-HOST-001 §11 Phase 1 /
+  ADR-0020 §11.6): new `pd service run-once --dry-run [--json]` coordinator with
+  the read-only Service Host pipeline — install identity (production-forced with
+  PD_EXPERIMENT_ROOT stripping, recorded), two-source workspace discovery over
+  the canonical install manifest and validated per-host claims
+  (`collectHostWorkspaceClaims` / `findForeignWorkspaceOwner` reused), realpath
+  identity dedupe, read-only `backgroundExecutions` owner projection, the
+  install-level single-instance run lock (SQLite `BEGIN IMMEDIATE` arbitration
+  over `<pdHome>/service/service-run-gate.db` — acquire, PID-verified takeover and
+  ownership-checked release all decided inside one transaction; zero-wait
+  immediate `already_running`; fully fail-closed on gate/busy errors; release
+  reports a structured outcome — released / not_owned / failed_busy /
+  failed_unwritable — where unreadable lock files (EACCES/EPERM/EIO) are real
+  failures, never misread as released or not_owned),
+  and the versioned operational status file under
+  `<pdHome>/service/run-once-status.json`. Phase 1 starts no Worker and changes
+  no consumer ownership; a run without `--dry-run` refuses
+  (`dry_run_required_phase1`).
+  
+  Placement note (TD §2.1 deviation): the coordinator lives inside pd-cli
+  (`src/services/service-host/`) instead of a separate `@principles/service-host`
+  package — a new pd-cli workspace dependency would enter the self-contained
+  release asset (ERR-196 class) and require payload-component staging, staged
+  manifest rewrites and release-lock regeneration that cannot be fully exercised
+  outside the release pipeline. Extraction into a dedicated package remains a
+  Phase 2 (PRI-1280) decision with its own release-onboarding work.
+  
+  install-layout (patch): re-export `resolveRealUserHome` — the shared home
+  precedence authority — so the coordinator reuses the single identity
+  resolution instead of re-deriving it; add the authoritative Active Release
+  record parser (`active-release.ts`: `ACTIVE_RELEASE_SCHEMA_VERSION`,
+  `ActiveReleaseRecord`, `ActiveReleaseVerdict`, `parseActiveReleaseRecord`,
+  `readActiveReleaseRecord`, `activeReleaseRecordPath`) — the single schema
+  owner the service-host coordinator validates against (P1 defect fix:
+  strict validation replaces lenient any-object parsing).
+
 ## 0.9.0
 
 ### Minor Changes
