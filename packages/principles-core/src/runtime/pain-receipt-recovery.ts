@@ -40,7 +40,7 @@ import {
   SUBMIT_PAIN_CAPABILITY_ID,
   SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
 } from './pain-submit-capability.js';
-import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION } from './pain-admission-disposition.js';
+import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, targetEvidenceWaitRequired } from './pain-admission-disposition.js';
 import type { PainRecoveryDisposition, PainRecoveryReceiptRef } from './pain-admission-disposition.js';
 
 // Re-exported for the existing consumers of this module's surface (the
@@ -421,14 +421,30 @@ function evaluateRecoveryPass(input: {
     // block; without it this is not that task — fail closed, no mutation.
     return { action: 'report', outcome: { status: 'rejected', reasonCode: 'diagnostic_payload_invalid:pain_ingress_missing', painId: receipt.painId, taskId: receipt.taskId } };
   }
-  // P1-3: the host event's turn is the submission turn; without an explicit
-  // target named on the original submission (not carried by the receipt),
-  // the submission turn IS the target (the tool's documented semantics).
-  // Never inferred further — no target turn means session-level policy.
-  const targetTurnId = identity.submissionTurnId;
+  // P1-3 (r2b, devin finding 0001): the target is the original submission's
+  // EXPLICIT request when it named one (persisted as the unverified
+  // `requestedTargetTurnId` hint), else the host event's submission turn (the
+  // tool's documented default). Never inferred further — no target turn
+  // means session-level policy.
+  const requestedRaw = isRecord(diagnostic.record.painIngress)
+    ? diagnostic.record.painIngress.requestedTargetTurnId
+    : undefined;
+  const requestedTargetTurnId = typeof requestedRaw === 'string' && requestedRaw.trim().length > 0 && requestedRaw.length <= 200
+    ? requestedRaw
+    : undefined;
+  const targetTurnId = requestedTargetTurnId ?? identity.submissionTurnId;
   const evidenceCount = countEvidence(diagnostic);
-  const targetTextMissing = targetTurnId !== undefined
-    && evidenceCount === 0
+  // r2b (devin finding 0004): the SAME waiting rule the submit path applies
+  // — an explicit Owner statement (`owner_expectation` anchor) or any
+  // submitted evidence is independently admissible and never waits.
+  const {anchor} = diagnostic.record;
+  const hasOwnerStatement = isRecord(anchor) && anchor.type === 'owner_expectation';
+  const targetTextMissing = targetEvidenceWaitRequired({
+    hasVerifiedSession: true,
+    targetTurnId,
+    submittedEvidenceCount: evidenceCount,
+    hasOwnerStatement,
+  }) && targetTurnId !== undefined
     && (targetTurnTextAvailable === undefined || !targetTurnTextAvailable(identity.sessionId, targetTurnId));
   const disposition: PainRecoveryDisposition = {
     schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,

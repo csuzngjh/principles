@@ -94,6 +94,21 @@ function parseDiagnosticJsonObject(raw: string | null | undefined): Record<strin
   return candidate as Record<string, unknown>;
 }
 
+/**
+ * PRI-1274 r2b: is this diagnostician task explicitly waiting for its named
+ * target turn's text (the persisted admission disposition)? Read-only; a
+ * malformed payload simply reads as "not waiting" — the admission gates
+ * elsewhere fail closed on the same payload.
+ */
+function waitingTargetEvidenceState(diagnosticJson: string | null | undefined): boolean {
+  const {recovery} = parseDiagnosticJsonObject(diagnosticJson);
+  if (typeof recovery !== 'object' || recovery === null || Array.isArray(recovery)) return false;
+  // runtime-contract-exempt: ERR-001 the guards above narrow `recovery` to a
+  // non-null non-array object; the single field read below is typeof-checked.
+  const {state} = (recovery as Record<string, unknown>);
+  return state === 'waiting_for_target_evidence';
+}
+
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === 'string');
@@ -252,6 +267,31 @@ export class SplitDiagnosticianRunner {
     const deadline = this.monotonicClock() + this.executionTiming.parentBudgetMs;
     if (isParentBudgetExhausted(deadline, this.monotonicClock)) {
       return this.budgetExhaustedBeforeLeaseFailure(parentTaskId);
+    }
+
+    // PRI-1274 r2b (devin finding 0003): a task explicitly waiting for its
+    // target turn's text is not admissible on ANY execution path. The
+    // bridge's executePendingDiagnosis refuses it for the automatic cycle;
+    // this runner is the other entry (manual `pd diagnose run` / split
+    // pipeline), so the guard sits BEFORE the lease: no lease, no run
+    // record, no provider call — the task stays pending for the reconcile.
+    let waitingForTargetEvidence;
+    try {
+      const task = await this.stateManager.getTask(parentTaskId);
+      waitingForTargetEvidence = task !== null && waitingTargetEvidenceState(task.diagnosticJson);
+    } catch {
+      // Not authoritative here: the lease acquisition below re-reads the
+      // task and reports store failures through its own error path.
+      waitingForTargetEvidence = false;
+    }
+    if (waitingForTargetEvidence) {
+      return {
+        status: 'failed',
+        taskId: parentTaskId,
+        errorCategory: 'input_invalid',
+        failureReason: 'target_evidence_pending: the task waits for its named target turn text; the workspace worker reconcile flips it once the evidence exists',
+        attemptCount: 0,
+      };
     }
 
     // Bug-N fix: acquire lease on the parent task so markTaskSucceeded (called

@@ -34,7 +34,7 @@ import {
 import { deriveProvenanceFromIngressFacts } from './pain-ingress-payload.js';
 // PRI-1274: leaf import — the disposition schema version lives beside its
 // types, with no cycle back into this module.
-import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION } from './pain-admission-disposition.js';
+import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, targetEvidenceWaitRequired } from './pain-admission-disposition.js';
 import type { GovernanceHostKind } from './pain-signal-bridge.js';
 import type { PainAnchor, PainAnchorType } from './context-payload.js';
 
@@ -56,6 +56,15 @@ export interface PainSubmitInput {
   readonly anchorType: PainSubmitAnchorType;
   readonly anchorRef: string;
   readonly painType?: PainSubmitPainType;
+  /**
+   * PRI-1274 r2b: the caller's EXPLICIT target turn, if named. Model-visible
+   * input — shape-validated only, NEVER trusted for binding. On the verified
+   * path the assembly resolves it into the trusted verification; on an
+   * UNBOUND submission it is persisted as the `requestedTargetTurnId` hint
+   * so the receipt recovery can honor the explicit earlier turn instead of
+   * defaulting to the submission turn.
+   */
+  readonly targetTurnId?: string;
 }
 
 export interface PainSubmitCapabilityOptions {
@@ -493,19 +502,20 @@ export async function submitPainCapability(
     }
     : verification ?? { status: 'absent' };
 
-  // PRI-1274 (B1 / P1-3): a session-bound submission that NAMED a target
-  // turn whose text is not yet collectable waits for that exact turn — the
-  // diagnosis must never substitute other turns of the session. An explicit
-  // Owner statement (the `owner_expectation` anchor) is independently
-  // admissible evidence: existing admission policy continues, no waiting.
-  // Every other submission (unbound, or no known target) is unaffected.
+  // PRI-1274 (B1 / P1-3, r2b): ONE waiting rule shared with the receipt
+  // fallback recovery (pain-admission-disposition.targetEvidenceWaitRequired)
+  // — a session-bound submission that NAMED a target turn whose text is not
+  // yet collectable waits for that exact turn; an explicit Owner statement
+  // (`owner_expectation` anchor) is independently admissible and never waits.
   const submittedTurnEvidenceCount = verification?.status === 'verified' && verification.inputEvidence !== undefined
     ? verification.inputEvidence.length
     : 0;
-  const waitingForTargetEvidence = sessionAssociation.status === 'verified'
-    && sessionAssociation.targetTurnId !== undefined
-    && submittedTurnEvidenceCount === 0
-    && input.anchorType !== 'owner_expectation';
+  const waitingForTargetEvidence = targetEvidenceWaitRequired({
+    hasVerifiedSession: sessionAssociation.status === 'verified',
+    targetTurnId: sessionAssociation.status === 'verified' ? sessionAssociation.targetTurnId : undefined,
+    submittedEvidenceCount: submittedTurnEvidenceCount,
+    hasOwnerStatement: input.anchorType === 'owner_expectation',
+  });
   const admissionDisposition: PainDetectedData['admissionDisposition'] = waitingForTargetEvidence
     ? {
       schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
@@ -514,6 +524,18 @@ export async function submitPainCapability(
       attemptCount: 1,
       lastCheckedAt: new Date().toISOString(),
     }
+    : undefined;
+  // PRI-1274 r2b (devin finding 0001): an UNBOUND submission keeps its
+  // explicit target as a shape-validated, explicitly-UNVERIFIED hint inside
+  // the versioned ingress block — the receipt recovery honors it after the
+  // host-authoritative session binding. Absent when the caller named no
+  // target; never written on the verified path (the trusted
+  // verifiedHostSession.targetTurnId is the authority there).
+  const requestedTargetTurnId = sessionAssociation.status !== 'verified'
+    && typeof input.targetTurnId === 'string'
+    && input.targetTurnId.trim().length > 0
+    && input.targetTurnId.length <= 200
+    ? input.targetTurnId
     : undefined;
 
   const anchorCheck = validateSubmissionAnchor({
@@ -608,7 +630,10 @@ export async function submitPainCapability(
         ...(verification?.status === 'verified' && verification.inputEvidence !== undefined && verification.inputEvidence.length > 0
           ? { evidenceClass: { status: 'available' as const, entryCount: verification.inputEvidence.length } }
           : {}) }
-        : decision.painIngress,
+        : {
+          ...decision.painIngress,
+          ...(requestedTargetTurnId !== undefined ? { requestedTargetTurnId } : {}),
+        },
       // §6.7: keep observability ON so Console and Recall see this pain.
       recordObservability: true,
       ...(deviationAnchor ? { deviationAnchor } : {}),

@@ -44,7 +44,10 @@ function workspace(): string {
 afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 
 /** Create the original unbound task through the REAL Core capability — the
- * exact row shape the MCP server persists when the request had no `_meta`. */
+ * exact row shape the MCP server persists when the request had no `_meta`.
+ * `agent_instruction` anchor: this submission has no independently
+ * admissible Owner statement, so the recovered task WAITs for its target
+ * turn's text (the r2 default-path coverage). */
 async function persistUnboundPain(workspaceDir: string, painId: string): Promise<string> {
   const taskId = deriveSubmitTaskId(painId);
   const receipt = await submitPainCapability(
@@ -58,9 +61,9 @@ async function persistUnboundPain(workspaceDir: string, painId: string): Promise
       verifyHostSession: () => ({ status: 'unverified', detail: 'codex_host_metadata_missing' }),
     },
     {
-      reason: 'Anchor: owner expectation. Observed: behavior. Deviation: mismatch.',
-      anchorType: 'owner_expectation',
-      anchorRef: 'Owner statement in this conversation',
+      reason: 'Anchor: agent instruction. Observed: behavior. Deviation: mismatch.',
+      anchorType: 'agent_instruction',
+      anchorRef: 'AGENTS.md#safety',
       painType: 'user_frustration',
     },
   );

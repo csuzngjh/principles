@@ -35,6 +35,8 @@ import { SqliteRunStore } from '../store/run/sqlite-run-store.js';
 import { SqliteHistoryQuery } from '../store/history/sqlite-history-query.js';
 import { SqliteContextAssembler } from '../store/context/sqlite-context-assembler.js';
 import type { TrajectoryTurnReader, TrajectoryUserTurn } from '../store/context/trajectory-turn-reader.js';
+import { validatePainSubmitReceipt, recoverTaskIdentityFromReceipt } from '../pain-receipt-recovery.js';
+import { parsePainIngressV1Payload } from '../pain-ingress-payload.js';
 
 let tmpDir: string;
 let stateManager: RuntimeStateManager;
@@ -301,5 +303,232 @@ describe('T6 — the assembler reads EXACTLY the named target turn (never 11/12)
     const payload = await assembleWith(makeReader(true), 'turn-99');
     expect(payload.conversationWindow.length).toBe(0);
     expect((payload.ambiguityNotes ?? []).some((note) => note.includes('turn-99') && note.includes('no readable text'))).toBe(true);
+  });
+});
+
+// ── r2b (devin review round): explicit-target hint, waiting fairness, manual-run guard ──
+
+describe('r2b (0001) — the receipt recovery honors the EXPLICIT target the unbound submission named', () => {
+  it('an unbound submission naming turn 10 recovers with turn 10 as target — never the submission turn 12', async () => {
+    const painId = 'mcp_1700000000061_9f000061';
+    const receipt = await submitPainCapability(
+      {
+        workspaceDir: tmpDir,
+        stateDir: path.join(tmpDir, '.state'),
+        painId,
+        taskId: createDiagnosticianTaskId(painId),
+        hostKind: 'codex',
+        verifyHostSession: () => ({ status: 'unverified', detail: 'codex_host_metadata_missing' }),
+      },
+      {
+        reason: 'Anchor: agent instruction. Observed: behavior. Deviation: mismatch.',
+        anchorType: 'agent_instruction',
+        anchorRef: 'AGENTS.md#safety',
+        painType: 'user_frustration',
+        targetTurnId: 'turn-10',
+      },
+    );
+    expect(receipt.status).toBe('submitted');
+
+    // The unbound task keeps the shape-validated (NOT host-verified) hint.
+    const taskId = createDiagnosticianTaskId(painId);
+    const persisted = await readDiagnostic(taskId);
+    const ingress = parsePainIngressV1Payload(persisted.painIngress);
+    expect(ingress.ok).toBe(true);
+    if (!ingress.ok) return;
+    expect(ingress.payload.requestedTargetTurnId).toBe('turn-10');
+
+    // The PostToolUse event carries the submission turn (12); recovery must
+    // bind the session AND restore the EXPLICIT target (10).
+    const validated = validatePainSubmitReceipt({
+      schemaVersion: 'pd.pain-submit-receipt.v1',
+      capability: 'pd_submit_pain',
+      status: 'submitted',
+      painId,
+      taskId,
+      workspaceDir: tmpDir,
+      sessionAssociation: { status: 'unverified', detail: 'codex_host_metadata_missing' },
+    }, { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: { sessionId: 'rollout-hint', submissionTurnId: 'turn-12', toolCallId: 'call-hint-1' },
+      authorization: { minimalMetadataGranted: true },
+    });
+    expect(outcome.status).toBe('recovered');
+    const diagnostic = await readDiagnostic(taskId);
+    const verified = parsePainIngressV1Payload(diagnostic.painIngress);
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.payload.verifiedHostSession).toEqual({
+      status: 'verified', sessionId: 'rollout-hint', submissionTurnId: 'turn-12', targetTurnId: 'turn-10',
+    });
+    // Turn 10's text is absent → the SAME explicit turn is what it waits for.
+    const recovery = diagnostic.recovery as Record<string, unknown>;
+    expect(recovery.state).toBe('waiting_for_target_evidence');
+  });
+
+  it('r2b (0004): an owner_expectation submission recovers straight to ready_for_diagnosis (one shared waiting rule)', async () => {
+    const painId = 'mcp_1700000000062_8e000062';
+    const receipt = await submitPainCapability(
+      {
+        workspaceDir: tmpDir,
+        stateDir: path.join(tmpDir, '.state'),
+        painId,
+        taskId: createDiagnosticianTaskId(painId),
+        hostKind: 'codex',
+        verifyHostSession: () => ({ status: 'unverified', detail: 'codex_host_metadata_missing' }),
+      },
+      {
+        reason: 'Anchor: owner expectation. Observed: behavior. Deviation: mismatch.',
+        anchorType: 'owner_expectation',
+        anchorRef: 'Owner statement in this conversation',
+        painType: 'user_frustration',
+        targetTurnId: 'turn-10',
+      },
+    );
+    expect(receipt.status).toBe('submitted');
+    const taskId = createDiagnosticianTaskId(painId);
+    const validated = validatePainSubmitReceipt({
+      schemaVersion: 'pd.pain-submit-receipt.v1',
+      capability: 'pd_submit_pain',
+      status: 'submitted',
+      painId,
+      taskId,
+      workspaceDir: tmpDir,
+      sessionAssociation: { status: 'unverified', detail: 'codex_host_metadata_missing' },
+    }, { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: { sessionId: 'rollout-owner', submissionTurnId: 'turn-12', toolCallId: 'call-owner-1' },
+      authorization: { minimalMetadataGranted: true },
+    });
+    expect(outcome.status).toBe('recovered');
+    if (outcome.status !== 'recovered') return;
+    // Explicit Owner statement = independently admissible: the submit path
+    // and the recovery share ONE rule (targetEvidenceWaitRequired), so the
+    // recovered task never waits for text that will not come.
+    expect(outcome.disposition.state).toBe('ready_for_diagnosis');
+  });
+});
+
+describe('r2b (0002) — the waiting reconcile rotates; the oldest five cannot starve the sixth', () => {
+  it('a full page advances the cursor, the next pass reaches the sixth task and flips it', async () => {
+    // Six waiting tasks, each naming its own target turn; only turn-06 has text.
+    for (let index = 1; index <= 6; index += 1) {
+      const painId = `mcp_170000000007${index}_a000006${index}`;
+      const receipt = await submitPainCapability(
+        {
+          workspaceDir: tmpDir,
+          stateDir: path.join(tmpDir, '.state'),
+          painId,
+          taskId: createDiagnosticianTaskId(painId),
+          hostKind: 'codex',
+          verifyHostSession: () => ({ status: 'verified', sessionId: `rollout-fair-${index}`, targetTurnId: `turn-0${index}` }),
+        },
+        {
+          reason: 'Anchor: agent instruction. Observed: behavior. Deviation: mismatch.',
+          anchorType: 'agent_instruction',
+          anchorRef: 'AGENTS.md#safety',
+          painType: 'user_frustration',
+        },
+      );
+      expect(receipt.status).toBe('submitted');
+    }
+    const probe = (_sessionId: string, turnId: string): boolean => turnId === 'turn-06';
+
+    // Default limit 5: the first pass sees the five OLDEST (no text).
+    const first = await reconcileWaitingTargetEvidenceTasks({ stateManager, targetTurnTextAvailable: probe, nowIso: new Date().toISOString() });
+    expect(first.checked).toBe(5);
+    expect(first.flipped).toBe(0);
+    expect(first.stillWaiting).toBe(5);
+
+    // Second pass rotates past them and reaches the sixth — which flips.
+    const second = await reconcileWaitingTargetEvidenceTasks({ stateManager, targetTurnTextAvailable: probe, nowIso: new Date().toISOString() });
+    expect(second.checked).toBe(1);
+    expect(second.flipped).toBe(1);
+  });
+});
+
+describe('r2b (0003) — the split pipeline (manual pd diagnose run) refuses waiting tasks before the lease', () => {
+  it('returns a structured refusal with zero lease, zero runs and the task still pending', async () => {
+    const { SplitDiagnosticianRunner } = await import('../internalization/split-diagnostician-runner.js');
+    const { DiagRootCauseRunner } = await import('../internalization/diag-rootcause-runner.js');
+    const { DiagDistillerRunner } = await import('../internalization/diag-distiller-runner.js');
+    const { DiagRouterRunner } = await import('../internalization/diag-router-runner.js');
+    const { PiAiRuntimeAdapter } = await import('../adapter/pi-ai-runtime-adapter.js');
+    const { SqliteDiagnosticianCommitter } = await import('../store/commit/diagnostician-committer.js');
+    const { DefaultDiagRootCauseValidator } = await import('../diagnostician/diag-rootcause-output.js');
+    const { DefaultDiagDistillerValidator } = await import('../diagnostician/diag-distiller-output.js');
+
+    const taskId = 'diagnosis_waiting_manual_1';
+    await stateManager.createTask({
+      taskId,
+      taskKind: 'diagnostician',
+      inputRef: 'pain_waiting_manual_1',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        sourcePainId: 'pain_waiting_manual_1',
+        reasonSummary: 'waiting fixture',
+        provenance: 'host_context_bound',
+        hostKind: 'codex',
+        workspaceDir: tmpDir,
+        evidence: [],
+        painIngress: {
+          version: 'v1',
+          origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
+          correlation: { status: 'unbound', reason: 'missing_host_session' },
+          evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+          verifiedHostSession: { status: 'verified', sessionId: 'rollout-manual', targetTurnId: 'turn-manual-1' },
+        },
+        recovery: { schemaVersion: 1, state: 'waiting_for_target_evidence', reasonCode: 'target_turn_text_pending', attemptCount: 1, lastCheckedAt: new Date().toISOString() },
+      }),
+    });
+
+    const eventEmitter: { emitTelemetry: () => void } = { emitTelemetry: () => undefined };
+    const runtimeAdapter = new PiAiRuntimeAdapter({
+      provider: 'openrouter',
+      model: 'test-model',
+      apiKeyEnv: 'PD_TEST_UNUSED_KEY',
+      outputPathStrategy: 'free_form_only',
+      systemPrompt: 'test',
+    });
+    const options = { owner: 'test-owner', runtimeKind: 'openclaw', pollIntervalMs: 10, timeoutMs: 1000 };
+    const contextAssembler = new SqliteContextAssembler(
+      stateManager.taskStore,
+      new SqliteHistoryQuery(stateManager.connection),
+      stateManager.runStore,
+    );
+    const committer = new SqliteDiagnosticianCommitter(stateManager.connection);
+    const splitRunner = new SplitDiagnosticianRunner({
+      rootCauseRunner: new DiagRootCauseRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+        options,
+      ),
+      distillerRunner: new DiagDistillerRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+        options,
+      ),
+      routerRunner: new DiagRouterRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) } },
+        options,
+      ),
+      stateManager,
+      committer,
+    });
+
+    const result = await splitRunner.run(taskId);
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') return;
+    expect(result.failureReason).toContain('target_evidence_pending');
+    expect(result.attemptCount).toBe(0);
+    // No lease was taken and no run record exists — the task is untouched.
+    const task = await stateManager.getTask(taskId);
+    expect(task?.status).toBe('pending');
+    expect(task?.leaseOwner ?? null).toBeNull();
+    expect(await stateManager.runStore.listRunsByTask(taskId)).toEqual([]);
   });
 });

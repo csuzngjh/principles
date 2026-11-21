@@ -23,6 +23,17 @@ import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, type PainRecoveryDisposition 
 /** Bounded per-cycle work: waiting tasks examined per reconcile run. */
 export const TARGET_EVIDENCE_RECONCILE_LIMIT = 5;
 
+/**
+ * r2b (devin finding 0002): rotation cursor scope. A fixed oldest-first
+ * window would let permanently-textless tasks (e.g. submitted while
+ * ingestion was off) starve every later waiting task. The scan resumes
+ * AFTER the last task of the previous full page and wraps to the start
+ * whenever a page comes back short — the same reconciliation-cursor
+ * authority the fair-share picker uses, with `lastUpdatedAt`/`lastTaskId`
+ * holding the (updatedAt, taskId) tuple of the last task examined.
+ */
+export const TARGET_EVIDENCE_RECONCILE_SCOPE = 'target-evidence-reconcile';
+
 export interface TargetEvidenceReconcileReport {
   /** Waiting tasks examined this run (bounded by `limit`). */
   readonly checked: number;
@@ -35,7 +46,7 @@ export interface TargetEvidenceReconcileReport {
 }
 
 export interface ReconcileWaitingTargetEvidenceInput {
-  readonly stateManager: Pick<RuntimeStateManager, 'listTasks' | 'updateTaskIfDiagnosticJsonUnchanged'>;
+  readonly stateManager: Pick<RuntimeStateManager, 'listTasks' | 'updateTaskIfDiagnosticJsonUnchanged' | 'getDiagnosticianServiceCursor' | 'setDiagnosticianServiceCursor'>;
   /** Host-adapter probe: does the authorized store hold readable text for
    * the exact (session, target turn)? Owns host/workspace semantics. */
   readonly targetTurnTextAvailable: (sessionId: string, targetTurnId: string) => boolean;
@@ -124,13 +135,31 @@ export async function reconcileWaitingTargetEvidenceTasks(
   let stillWaiting = 0;
   const errors: string[] = [];
 
+  // r2b (devin finding 0002): rotate through the waiting set — resume after
+  // the last examined task of the previous FULL page; a short page means the
+  // set's tail was reached, so the cursor resets and the next pass wraps to
+  // the oldest again. No waiting task can permanently occupy the window.
+  const cursor = await input.stateManager.getDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE);
+  const resumeAfter = cursor !== null && cursor.lastUpdatedAt.length > 0
+    ? { updatedAt: cursor.lastUpdatedAt, taskId: cursor.lastTaskId }
+    : undefined;
   const waiting = await input.stateManager.listTasks({
     taskKind: 'diagnostician',
     status: 'pending',
     recoveryState: 'waiting_for_target_evidence',
     orderBy: 'updated_at_asc',
+    ...(resumeAfter !== undefined ? { afterCursor: resumeAfter } : {}),
     limit,
   });
+  if (waiting.length > 0) {
+    const last = waiting[waiting.length - 1];
+    if (last === undefined) throw new Error('unreachable: non-empty page has a last element');
+    // Full page → continue after it next cycle; short page → wrap to start.
+    const nextCursor = waiting.length === limit
+      ? { lastUpdatedAt: last.updatedAt, lastTaskId: last.taskId }
+      : { lastUpdatedAt: '', lastTaskId: '' };
+    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE, nextCursor);
+  }
 
   for (const task of waiting) {
     checked += 1;

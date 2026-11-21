@@ -449,6 +449,17 @@ export interface PainIngressV1Payload {
    * historical rows and on submissions with no verified claim.
    */
   verifiedHostSession?: { status: 'verified'; sessionId: string; submissionTurnId?: string; targetTurnId?: string };
+  /**
+   * PRI-1274 r2b (devin finding 0001): the caller's EXPLICIT target turn,
+   * shape-validated but NOT host-verified, persisted when the submission
+   * could not bind a session (no trusted `_meta`). The PostToolUse receipt
+   * recovery re-reads it after binding the host-authoritative session and
+   * honors it as the target — an explicit earlier turn is never replaced by
+   * the submission turn. Absent when the caller omitted a target; NEVER
+   * written on the verified path (verifiedHostSession.targetTurnId is the
+   * authority there).
+   */
+  requestedTargetTurnId?: string;
 }
 
 export type PainIngressV1ParseResult =
@@ -521,7 +532,22 @@ export function parsePainIngressV1Payload(value: unknown): PainIngressV1ParseRes
       ...(targetTurnId === undefined ? {} : { targetTurnId }),
     };
   }
-  return { ok: true, payload: { version: PAIN_INGRESS_PAYLOAD_VERSION, origin, correlation: correlation.value, evidenceClass, ...(verifiedHostSession !== undefined ? { verifiedHostSession } : {}) } };
+  // PRI-1274 r2b: the unverified explicit-target hint — same shape rule as
+  // the verified turn ids; a PRESENT but malformed one fails closed (rc-3),
+  // it is never silently dropped.
+  let requestedTargetTurnId: string | undefined;
+  if (value.requestedTargetTurnId !== undefined) {
+    const hint = value.requestedTargetTurnId;
+    if (typeof hint !== 'string' || hint.trim().length === 0 || hint.length > 200) {
+      return { ok: false, reasonCode: 'ingress_requested_target_turn_invalid' };
+    }
+    requestedTargetTurnId = hint;
+  }
+  return { ok: true, payload: {
+    version: PAIN_INGRESS_PAYLOAD_VERSION, origin, correlation: correlation.value, evidenceClass,
+    ...(verifiedHostSession !== undefined ? { verifiedHostSession } : {}),
+    ...(requestedTargetTurnId !== undefined ? { requestedTargetTurnId } : {}),
+  } };
 }
 
 /**

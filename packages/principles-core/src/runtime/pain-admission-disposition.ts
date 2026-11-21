@@ -53,3 +53,24 @@ export interface PainRecoveryDisposition {
   readonly receiptRef?: PainRecoveryReceiptRef;
   readonly resolvedAt?: string;
 }
+
+/**
+ * PRI-1274 r2b (devin finding 0004): THE one waiting rule, shared by the
+ * submit path (`pd_submit_pain` prebind) and the receipt fallback recovery —
+ * two paths, one admission semantics. A session-bound submission that named
+ * a target turn waits for that turn's text ONLY when it carries no
+ * independently admissible evidence; an explicit Owner statement
+ * (`owner_expectation` anchor) is independently admissible under the
+ * existing admission policy and never waits.
+ */
+export function targetEvidenceWaitRequired(input: {
+  readonly hasVerifiedSession: boolean;
+  readonly targetTurnId: string | undefined;
+  readonly submittedEvidenceCount: number;
+  readonly hasOwnerStatement: boolean;
+}): boolean {
+  return input.hasVerifiedSession
+    && input.targetTurnId !== undefined
+    && input.submittedEvidenceCount === 0
+    && !input.hasOwnerStatement;
+}

@@ -37,9 +37,11 @@ async function persistUnboundPain(workspaceDir: string, painId: string): Promise
   const receipt = await submitPainCapability(
     { workspaceDir, stateDir: path.join(workspaceDir, '.state'), painId, taskId, hostKind: 'codex' },
     {
-      reason: 'Anchor: owner expectation. Observed: behavior. Deviation: mismatch.',
-      anchorType: 'owner_expectation',
-      anchorRef: 'Owner statement in this conversation',
+      // agent_instruction: no independently admissible Owner statement, so
+      // the recovered task WAITs for its target turn's text (r2 default path).
+      reason: 'Anchor: agent instruction. Observed: behavior. Deviation: mismatch.',
+      anchorType: 'agent_instruction',
+      anchorRef: 'AGENTS.md#safety',
       painType: 'user_frustration',
     },
   );
