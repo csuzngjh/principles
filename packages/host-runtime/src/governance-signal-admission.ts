@@ -66,6 +66,7 @@ import {
   hasProductionPainSchema,
 } from './production-pain-evidence.js';
 import { promoteGovernanceEvidence, ensureGovernanceSchema, type ObservationDatabaseFactory } from './governance-observation-store.js';
+import { readSourceMaterialAuthorization } from './source-material-authorization.js';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { isAutomaticPainSubmissionAuthorized } from './auto-pain-authorization.js';
 import { createHostIntentDocReader } from './intent-doc-reader.js';
@@ -2441,9 +2442,15 @@ export async function ensureGovernanceContinuation(input: EnsureGovernanceContin
     // continuation cannot begin diagnosis before the eligible evidence window
     // has been promoted. A promotion failure is retained as a degradation,
     // but never prevents the task from being durably ensured.
-    const codexConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
+    // PRI-1283 R2: the caller-supplied flag is necessary but NOT sufficient —
+    // the consent LEDGER is re-read here so a revocation recorded against a
+    // still-enabled flag cannot keep promoting old observations (the flag is
+    // runtime authority for ingestion; the ledger is the governance record).
+    const codexFlagConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
       ? input.codexConversationIngestionEnabled
       : input.conversationIngestionEnabled === true;
+    const codexLedgerConsent = readSourceMaterialAuthorization({ workspaceDir, hostKind: 'codex' });
+    const codexConsent = codexFlagConsent && codexLedgerConsent.status === 'authorized';
     const promoted = codexConsent
       ? promoteAdmittedGovernanceEvidence({
         workspaceDir,
@@ -2513,9 +2520,14 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
   const workspaceDir = path.resolve(input.workspaceDir);
   // Accept the pre-rename field too: an older caller paired with this runtime
   // must not silently lose Codex evidence promotion (P2 review).
-  const codexConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
+  // PRI-1283 R2: the flag input is ANDed with a LIVE consent-ledger read —
+  // reconciliation must stop promoting observations the moment the ledger
+  // records a revocation, even if the runtime flag lags behind.
+  const codexFlagConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
     ? input.codexConversationIngestionEnabled
     : input.conversationIngestionEnabled === true;
+  const codexLedgerConsent = readSourceMaterialAuthorization({ workspaceDir, hostKind: 'codex' });
+  const codexConsent = codexFlagConsent && codexLedgerConsent.status === 'authorized';
   const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
   if (!('db' in opened)) {
     return { ok: false, reason: opened.reason, nextAction: opened.nextAction, tasksEnsured: 0, linksRepaired: 0, pendingTails: 0, completedTails: 0, staleTails: 0, degradations: [opened.reason] };

@@ -30,6 +30,18 @@ import {
 import { assembleSubmitResult } from '../envelope.js';
 import { assembleSubmitCapability } from '../submit-assembly.js';
 import { ingestGovernanceObservations } from '@principles/host-runtime';
+import { recordConversationIngestionConsent } from '@principles/host-runtime';
+
+/** PRI-1283 R2 fixture: grant codex conversation-ingestion consent. */
+function recordCodexConsent(workspaceDir: string): void {
+  const recorded = recordConversationIngestionConsent(workspaceDir, 'codex', {
+    decision: 'granted',
+    decidedVia: 'pd_codex_setup',
+    decidedAt: new Date().toISOString(),
+    disclosureVersion: 'g2b-2026-11-12',
+  });
+  if (!recorded.ok) throw new Error(recorded.reason);
+}
 import { evaluateAdmission, RuntimeStateManager } from '@principles/core/runtime';
 import {
   deriveSubmitTaskId,
@@ -227,6 +239,8 @@ describe('input contract (§5.3) — rejected before any write', () => {
     try {
       await state.initialize();
       await mkdir(join(workspaceDir, '.state'), { recursive: true });
+      // PRI-1283 R2: target-turn evidence reads require granted consent.
+      recordCodexConsent(workspaceDir);
       await writeFile(join(workspaceDir, '.state', 'trajectory.db'), '');
       for (const { session, turn, text } of [
         { session: 'thread-a', turn: 'target', text: 'Exact preceding evidence' },
@@ -316,6 +330,8 @@ describe('input contract (§5.3) — rejected before any write', () => {
     try {
       await state.initialize();
       await mkdir(join(workspaceDir, '.state'), { recursive: true });
+      // PRI-1283 R2: target-turn evidence reads require granted consent.
+      recordCodexConsent(workspaceDir);
       await writeFile(join(workspaceDir, '.state', 'trajectory.db'), '');
       const ingested = ingestGovernanceObservations({
         workspaceDir,

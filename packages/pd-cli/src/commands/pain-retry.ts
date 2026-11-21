@@ -47,7 +47,7 @@ import {
   type DeadLetterRow,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime';
-import { createGovernanceTrajectoryTurnReader, createHostIntentDocReader, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
+import { createGovernanceTrajectoryTurnReader, createConsentLedgerSourceMaterialAuthorization, createHostIntentDocReader, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 import type { Command } from 'commander';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
@@ -634,9 +634,15 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
     // PRI-1265: same authorized trajectory reader as `pd diagnose run` — the
     // retried diagnosis must see the bound session's original turns too.
+    // PRI-1283 R2: one port per command invocation; every consumption
+    // surface below (assembler + all three stage runners) shares it.
+    const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {
       sourceTraceLocator,
-      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization }),
+      // PRI-1283 R2: latest-consent gate — governance-sourced evidence and
+      // conversation material are filtered at assembly time.
+      sourceMaterialAuthorization,
     });
 
     // PRI-1146 (round 2, P1-01): use the workspace-scoped sink, not a bare
@@ -692,15 +698,15 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       // A task WITH a persisted snapshot keeps its original strategic basis —
       // the runner reuses the snapshot and never reads the latest INTENT.md
       // (SPEC §6.6 snapshot immutability). Flag-off = zero file access.
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }) },
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }), sourceMaterialAuthorization },
       { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
     const distillerRunner = new DiagDistillerRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), sourceMaterialAuthorization },
       { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
     const routerRunner = new DiagRouterRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, trustedPrincipleSource: routerLedgerAdapter },
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, trustedPrincipleSource: routerLedgerAdapter, sourceMaterialAuthorization },
       { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
 
@@ -1096,7 +1102,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       // SPEC review round-3 P1: the FULL write gate (persisted disposition /
       // re-evaluation), not the confidence/kind-only partial check — a
       // corrupted or stale admission document can never be intaked here.
-      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId)) ?? checkAdmissionGate(candidate);
+      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization })) ?? checkAdmissionGate(candidate);
       if (admissionBlock) {
         intakeFailed = true;
         intakeResults.push({

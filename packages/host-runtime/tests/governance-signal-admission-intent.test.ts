@@ -24,6 +24,8 @@ import {
   ensureGovernanceDiagnosticianTask,
   type GovernanceCorrectionCandidate,
 } from '../src/governance-signal-admission.js';
+import { recordConversationIngestionConsent } from '../src/conversation-ingestion/consent.js';
+import { CODEX_INGESTION_DISCLOSURE_VERSION } from '../src/codex-disclosure.js';
 import { ingestGovernanceObservations } from '../src/governance-observation-store.js';
 import { runPendingDiagnosticianOnce } from '../src/diagnostician-auto-run.js';
 import { resetHostIntentDocCacheForTest } from '../src/intent-doc-reader.js';
@@ -97,6 +99,14 @@ function writeConfig(intentEnabled: boolean): void {
   (config as { internalAgents: { defaultRuntime: string } }).internalAgents.defaultRuntime = 'pd.default';
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
   fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+  // PRI-1283 R2: governance continuation requires granted consent-ledger
+  // state (see source-revocation-safety.test.ts for the revocation matrix).
+  recordConversationIngestionConsent(workspaceDir, 'codex', {
+    decision: 'granted',
+    decidedVia: 'pd_codex_setup',
+    decidedAt: new Date().toISOString(),
+    disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
+  });
   process.env.GOV_INTENT_ADMISSION_KEY = 'test-key';
 }
 

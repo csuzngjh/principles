@@ -8,6 +8,7 @@ import {
 } from '@principles/core/runtime';
 import type { CommitNextTaskResult, PDTaskStatus } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createConsentLedgerSourceMaterialAuthorization } from '@principles/host-runtime/source-material-authorization';
 
 interface EnqueueSuccessorsOptions {
   workspace?: string;
@@ -403,7 +404,7 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
     }
 
     const orchestrator = new InternalizationOrchestrator(
-      { stateManager },
+      { stateManager, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, dryRun: true },
     );
 

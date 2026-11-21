@@ -58,6 +58,7 @@ import type { RemediationResult } from './remediation-output.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';
 import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
+import { createConsentLedgerSourceMaterialAuthorization } from '@principles/host-runtime';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -266,6 +267,8 @@ function resolveCandidateRecommendation(
 
 export async function handleCandidateList(opts: CandidateListOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-1283 R2: latest-consent gate for admission re-verification.
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
@@ -345,6 +348,8 @@ interface CandidateInternalizeResult {
 
 export async function handleCandidateInternalize(opts: CandidateInternalizeOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-1283 R2: latest-consent gate for admission re-verification.
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
   // PRI-720: resolve the full-chain override once per invocation (seed-time
   // application; affects only chains this command seeds).
@@ -390,7 +395,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
     // (same verdict, zero writes — cli-4).
     let fullGate: Awaited<ReturnType<typeof enforceFullAdmissionForWrite>>;
     try {
-      fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId, { persistReevaluation: opts.dryRun !== true });
+      fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId, { persistReevaluation: opts.dryRun !== true, sourceMaterialAuthorization });
     } catch (err: unknown) {
       const result: CandidateInternalizeResult = {
         candidateId: opts.candidateId,
@@ -617,6 +622,8 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
 
 export async function handleCandidateShow(opts: CandidateShowOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-1283 R2: latest-consent gate for admission re-verification.
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
@@ -1347,6 +1354,8 @@ function printDreamerReport(report: DreamerSeedReport): void {
  */
 export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-1283 R2: latest-consent gate for admission re-verification.
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
@@ -1376,7 +1385,7 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
     // a full re-evaluation from the persisted materials runs and is saved.
     // SPEC CR-03 §7.2 (review S1): the persisted/full admission gate owns the
     // write permission; the partial record check below stays a fast pre-refusal.
-    const fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+    const fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId, { sourceMaterialAuthorization });
     if (fullGate !== null) {
       const result = {
         candidateId: opts.candidateId,
@@ -1566,6 +1575,8 @@ interface CandidateReviewOptions {
  */
 export async function handleCandidateReview(opts: CandidateReviewOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-1283 R2: latest-consent gate for admission re-verification.
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
@@ -1597,7 +1608,7 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
         // SPEC review S1: a CREATE decision is a governance write — it passes
         // the full admission gate (the reuse verdict remains exempt by
         // PRI-917 R5 F4: a reuse decision creates nothing).
-        const createFullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+        const createFullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId, { sourceMaterialAuthorization });
         const admissionBlock = createFullGate ?? checkAdmissionGate(candidate);
         if (admissionBlock) {
           const payload = {
@@ -1829,6 +1840,8 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
  */
 export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-1283 R2: latest-consent gate for admission re-verification.
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
 
   try {
     const dbPath = resolveStateDbPath(workspaceDir);
@@ -1894,6 +1907,8 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
  */
 export async function handleCandidateRepair(opts: CandidateRepairOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-1283 R2: latest-consent gate for admission re-verification.
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
@@ -1916,7 +1931,7 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
     // or a prior bypass; refuse and surface the reason.
     // SPEC review S1: repair re-intake passes the SAME full write gate —
     // a corrupted admission document can never be repaired into the Ledger.
-    const repairFullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+    const repairFullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId, { sourceMaterialAuthorization });
     const admissionBlock = repairFullGate ?? checkAdmissionGate(candidate);
     if (admissionBlock) {
       const result = {
@@ -2120,6 +2135,8 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
   }
 
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-1283 R2: latest-consent gate for admission re-verification.
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const isConfirm = opts.confirm ?? false;
   const stateManager = new RuntimeStateManager({ workspaceDir, readonly: !isConfirm });
   // PRI-720: resolve the full-chain override once per invocation.
@@ -2283,7 +2300,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       // PRI-442 Stage 4: admission gate check — refuse non-admitted pending
       // candidates to prevent backfill from bypassing the admission gate.
       // SPEC review S1: backfill writes pass the full admission gate too.
-      const backfillFullGate = await enforceFullAdmissionForWrite(stateManager, candidateId);
+      const backfillFullGate = await enforceFullAdmissionForWrite(stateManager, candidateId, { sourceMaterialAuthorization });
       const admissionBlock = backfillFullGate ?? checkAdmissionGate(candidate);
       if (admissionBlock) {
         output.intakeFailed++;
@@ -2493,6 +2510,8 @@ interface CandidateRouteOptions {
  */
 export async function handleCandidateRoute(opts: CandidateRouteOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-1283 R2: latest-consent gate for admission re-verification.
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {

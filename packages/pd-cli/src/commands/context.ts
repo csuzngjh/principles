@@ -14,6 +14,7 @@ import {
   SqliteSourceTraceLocator,
 } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createConsentLedgerSourceMaterialAuthorization, createGovernanceTrajectoryTurnReader } from '@principles/host-runtime';
 
 interface ContextBuildOptions {
   json?: boolean;
@@ -30,7 +31,14 @@ export async function handleContextBuild(taskId: string, opts: ContextBuildOptio
     const historyQuery = new SqliteHistoryQuery(connection);
     const trajectoryLocator = new SqliteTrajectoryLocator(connection);
     const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
-    const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
+    // PRI-1283 R2: latest-consent gate — context assembly refuses
+    // governance-sourced material whose host consent is not granted.
+    const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
+    const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {
+      sourceTraceLocator,
+      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization }),
+      sourceMaterialAuthorization,
+    });
 
     const payload = await assembler.assemble(taskId);
 

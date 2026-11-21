@@ -23,7 +23,7 @@
  */
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from '@principles/host-runtime/pd-config';
-import { listGovernanceObservations, listGovernanceTurnTexts } from '@principles/host-runtime';
+import { listGovernanceObservations, listGovernanceTurnTexts, readSourceMaterialAuthorization } from '@principles/host-runtime';
 import { isSentinelSessionId } from '@principles/core/runtime';
 import { submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
@@ -70,6 +70,13 @@ function verifyCodexTarget(
   const targetTurnId = requestedTurnId === undefined ? submissionTurnId : readHostId(requestedTurnId);
   if (targetTurnId === undefined) return { status: 'unverified', detail: 'codex_target_turn_invalid' };
 
+  // PRI-1283 R2: target-turn evidence is codex conversation material —
+  // check the LATEST consent BEFORE reading it. Revoked/not-granted consent
+  // means no evidence read (fail closed), not a bounded read.
+  const codexAuthorization = readSourceMaterialAuthorization({ workspaceDir, hostKind: 'codex' });
+  if (codexAuthorization.status === 'blocked') {
+    return { status: 'unverified', detail: `codex_consent_${codexAuthorization.reason}` };
+  }
   const result = listGovernanceObservations({
     workspaceDir, hostKind: 'codex', rolloutIdentity: sessionId, hostTurnId: targetTurnId, limit: 64,
   });
@@ -132,6 +139,13 @@ export function assembleSubmitCapability(
       typeof value === 'string' && value.trim().length > 0 && !isSentinelSessionId(value.trim()));
     if (candidates.length === 0) {
       return { status: 'unverified', detail: 'host_session_claim_empty' };
+    }
+    // PRI-1283 R2: the probe READS retained conversation text — the latest
+    // consent must be granted. Blocked consent leaves the submission legal
+    // but unbound (no conversation read happens at all).
+    const hostAuthorization = readSourceMaterialAuthorization({ workspaceDir, hostKind: host });
+    if (hostAuthorization.status === 'blocked') {
+      return { status: 'unverified', detail: `host_consent_${hostAuthorization.reason}` };
     }
     for (const candidate of candidates) {
       const userTurns = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: candidate, hostKind: host, limit: 1 });

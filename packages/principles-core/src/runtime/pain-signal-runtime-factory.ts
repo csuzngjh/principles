@@ -44,6 +44,7 @@ import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
 import type { RuntimeKind, PDRuntimeAdapter } from './runtime-protocol.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 import type { IntentDocReader } from './intent/intent-doc-reader-port.js';
+import type { SourceMaterialAuthorizationPort } from './source-material-authorization.js';
 import {
   resolveAgentRuntimeBinding,
   checkAgentRuntimeReadiness,
@@ -97,6 +98,14 @@ export interface PainSignalRuntimeFactoryOptions {
    * bridge. Absent = fail-closed for automatic_hook provenance.
    */
   isAutoPainSubmissionAuthorized?: () => boolean;
+  /**
+   * PRI-1283 R2: latest-consent gate for governance-sourced conversation
+   * material. Consulted per assembly / per model invocation — a consent
+   * revocation takes effect immediately, including on a cached bridge. ABSENT
+   * = fail-closed for governance-sourced material (deny-all): consuming
+   * consent-gated excerpts without an authorization check is the R2 gap.
+   */
+  sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
 }
 
 /** Funnel name for the Runtime v2 diagnosis path. */
@@ -721,7 +730,11 @@ async function constructBridge(
     stateManager.taskStore,
     historyQuery,
     stateManager.runStore,
-    { sourceTraceLocator, trajectoryTurnReader: opts.trajectoryTurnReader },
+    {
+      sourceTraceLocator,
+      trajectoryTurnReader: opts.trajectoryTurnReader,
+      sourceMaterialAuthorization: opts.sourceMaterialAuthorization,
+    },
   );
 
   // ADR-0029: one adapter, one construction site. validateRuntimeConfig already
@@ -793,11 +806,11 @@ async function constructBridge(
     heartbeatIntervalMs: executionTiming.heartbeatIntervalMs,
   };
   const rootCauseRunner = new DiagRootCauseRunner(
-    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
+    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader, sourceMaterialAuthorization: opts.sourceMaterialAuthorization },
     stageRunnerOptions,
   );
   const distillerRunner = new DiagDistillerRunner(
-    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), sourceMaterialAuthorization: opts.sourceMaterialAuthorization },
     stageRunnerOptions,
   );
   const routerRunner = new DiagRouterRunner(
@@ -811,6 +824,7 @@ async function constructBridge(
       trustedPrincipleSource: isRouterTrustedPrincipleSource(opts.ledgerAdapter)
         ? opts.ledgerAdapter
         : { readTrustedPrinciples: () => ({ status: 'unavailable' as const, reason: 'source_not_configured' as const }) },
+      sourceMaterialAuthorization: opts.sourceMaterialAuthorization,
     },
     // PRI-818 (R-08): effectiveConfig must reach Stage C like it does for
     // Stage A/B — without it, isDegradationEnabled() is always false and the
