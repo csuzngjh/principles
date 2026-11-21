@@ -51,7 +51,7 @@ export function assertPayloadSourceAuthorization(
   const hostKind = payload.diagnosisTarget?.hostKind;
   const window = payload.conversationWindow ?? [];
   if (typeof hostKind === 'string' && (GOVERNED_TARGET_HOSTS as readonly string[]).includes(hostKind) && window.length > 0) {
-    const decision = port.isHostSourceMaterialAuthorized(hostKind as SourceMaterialHostKind);
+    const decision = port.isHostSourceMaterialAuthorized(hostKind);
     if (!decision.authorized) {
       throw new PDRuntimeError(
         'input_invalid',

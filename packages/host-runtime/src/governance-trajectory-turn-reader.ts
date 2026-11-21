@@ -55,9 +55,9 @@ export interface GovernanceTrajectoryTurnReaderArgs {
 function readTurnRows(
   workspaceDir: string,
   kind: 'user_turn' | 'assistant_turn',
-  sessionId: string,
-  port: SourceMaterialAuthorizationPort,
+  query: { sessionId: string; port: SourceMaterialAuthorizationPort },
 ): readonly GovernanceTurnTextRow[] {
+  const { sessionId, port } = query;
   if (sessionId.trim().length === 0) return [];
   const authorizedHostKinds = GOVERNANCE_TURN_HOSTS.filter(
     (host) => port.isHostSourceMaterialAuthorized(host).authorized,
@@ -86,7 +86,7 @@ export function createGovernanceTrajectoryTurnReader(args: GovernanceTrajectoryT
   const port = args.sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization;
   return {
     listUserTurnsForSession(sessionId: string): TrajectoryUserTurn[] {
-      return readTurnRows(args.workspaceDir, 'user_turn', sessionId, port).map((row, index) => ({
+      return readTurnRows(args.workspaceDir, 'user_turn', { sessionId, port }).map((row, index) => ({
         id: row.id,
         turnIndex: row.sourceOrdinal >= 0 ? row.sourceOrdinal : index,
         rawExcerpt: row.visibleText,
@@ -96,7 +96,7 @@ export function createGovernanceTrajectoryTurnReader(args: GovernanceTrajectoryT
       }));
     },
     listAssistantTurns(sessionId: string): TrajectoryAssistantTurn[] {
-      return readTurnRows(args.workspaceDir, 'assistant_turn', sessionId, port).map((row) => ({
+      return readTurnRows(args.workspaceDir, 'assistant_turn', { sessionId, port }).map((row) => ({
         id: row.id,
         sessionId,
         runId: '',

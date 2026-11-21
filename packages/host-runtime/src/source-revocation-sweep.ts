@@ -191,7 +191,13 @@ interface TrajectorySweepResult {
   canonicalPainIds: string[];
 }
 
-function sweepTrajectoryDb(dbPath: string, hostKind: SweepHostKind, logicalKeyPrefix: string, apply: boolean, nowIso: string): TrajectorySweepResult | { error: string } {
+function sweepTrajectoryDb(args: {
+  dbPath: string;
+  hostKind: SweepHostKind;
+  apply: boolean;
+  nowIso: string;
+}): TrajectorySweepResult | { error: string } {
+  const { dbPath, hostKind, apply, nowIso } = args;
   const counts = emptyCounts();
   const failures: string[] = [];
   let db: DatabaseHandle;
@@ -330,14 +336,15 @@ interface StateSweepOutcome {
   failures: string[];
 }
 
-async function sweepStateDb(
-  workspaceDir: string,
-  hostKind: SweepHostKind,
-  logicalKeyPrefix: string,
-  apply: boolean,
-  nowIso: string,
-  decidedAt: string | null,
-): Promise<StateSweepOutcome> {
+async function sweepStateDb(args: {
+  workspaceDir: string;
+  hostKind: SweepHostKind;
+  logicalKeyPrefix: string;
+  apply: boolean;
+  nowIso: string;
+  decidedAt: string | null;
+}): Promise<StateSweepOutcome> {
+  const { workspaceDir, hostKind, logicalKeyPrefix, apply, nowIso, decidedAt } = args;
   const counts = emptyCounts();
   const failures: string[] = [];
   const stateDbPath = resolveStateDbPath(workspaceDir);
@@ -529,7 +536,7 @@ export async function runSourceRevocationSweep(options: RunSourceRevocationSweep
       ledgerUnreadable = true;
       continue;
     }
-    const record = read.record;
+    const { record } = read;
     if (record === null) continue;
     if (record.decision === 'granted' || record.decision === 'pending' || record.decision === 'failed' || record.decision === 'revoked') {
       if (record.decision !== 'granted') {
@@ -570,7 +577,7 @@ export async function runSourceRevocationSweep(options: RunSourceRevocationSweep
     const failures: string[] = [];
 
     if (fs.existsSync(trajectoryDbPath)) {
-      const trajResult = sweepTrajectoryDb(trajectoryDbPath, target.hostKind, logicalKeyPrefix, apply, ranAt);
+      const trajResult = sweepTrajectoryDb({ dbPath: trajectoryDbPath, hostKind: target.hostKind, apply, nowIso: ranAt });
       if ('error' in trajResult) {
         failures.push(trajResult.error);
       } else {
@@ -581,7 +588,7 @@ export async function runSourceRevocationSweep(options: RunSourceRevocationSweep
       }
     }
 
-    const stateResult = await sweepStateDb(workspaceDir, target.hostKind, logicalKeyPrefix, apply, ranAt, target.decidedAt);
+    const stateResult = await sweepStateDb({ workspaceDir, hostKind: target.hostKind, logicalKeyPrefix, apply, nowIso: ranAt, decidedAt: target.decidedAt });
     purged.tasks = stateResult.counts.tasks;
     purged.taskEvidenceEntries = stateResult.counts.taskEvidenceEntries;
     purged.taskCorrectionEvidence = stateResult.counts.taskCorrectionEvidence;

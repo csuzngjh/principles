@@ -51,13 +51,14 @@ export type SourceMaterialAuthorizationResult =
 
 /** Full-result read for health surfaces, tests and the sweep. */
 export function readSourceMaterialAuthorization(input: ReadSourceMaterialAuthorizationInput): SourceMaterialAuthorizationResult {
-  const read = readConversationIngestionConsent(input.workspaceDir, input.hostKind);
+  const { workspaceDir, hostKind } = input;
+  const read = readConversationIngestionConsent(workspaceDir, hostKind);
   if (!read.ok) {
     return { status: 'blocked', reason: 'consent_unreadable', detail: `${read.reason}; ${read.nextAction}` };
   }
-  const record = read.record;
+  const { record } = read;
   if (record === null) {
-    return { status: 'blocked', reason: 'consent_missing', detail: `no conversation-ingestion consent record for host '${input.hostKind}' in this workspace` };
+    return { status: 'blocked', reason: 'consent_missing', detail: `no conversation-ingestion consent record for host '${hostKind}' in this workspace` };
   }
   if (record.decision === 'granted') {
     return { status: 'authorized' };
