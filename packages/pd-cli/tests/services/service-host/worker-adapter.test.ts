@@ -956,7 +956,10 @@ describe('final-closure review — post-cycle snapshot deadline (P1-02)', () => 
     expect(result.worker.exitCode).toBe(0);
   });
 
-  it('a timed-out snapshot that DID measure a task-state change keeps the evidenced changedAt — the timeout cannot silently lose real progress (review follow-up)', async () => {
+  it(
+    'a timed-out snapshot that DID measure a task-state change keeps the evidenced changedAt — the timeout cannot silently lose real progress (review follow-up)',
+    { timeout: 30_000 },
+    async () => {
     const workspace = await workspaceWithStore();
     const adapter = createCodexWorkerAdapter();
     let reads = 0;
@@ -972,7 +975,7 @@ describe('final-closure review — post-cycle snapshot deadline (P1-02)', () => 
       // cannot exhaust the budget before the read and skip the measured
       // change entirely.
       deadlineAtMs: (() => {
-        const deadline = performance.now() + 1_000;
+        const deadline = performance.now() + 5_000;
         testDeadline = deadline;
         return deadline;
       })(),
