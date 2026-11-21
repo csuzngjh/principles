@@ -1,10 +1,11 @@
 # PD 痛苦信号自愈恢复技术设计
 
+- v0.7，改为宿主请求身份前置绑定、结构化提交回执兜底、身份/目标证据解耦，并补齐 Codex / OpenClaw / WorkBuddy-Pi 的真实 MCP 元数据调用链，2026-11-21 · 配套 [产品 SPEC](./SPEC-PD-FEEDBACK-RESILIENCE-001.md)
 - v0.6，新增 MCP 提交回执驱动的缺失身份恢复、最小化回执捕获、Recovery Reconcile 与非无限 Pending 契约，2026-11-21 · 配套 [产品 SPEC](./SPEC-PD-FEEDBACK-RESILIENCE-001.md)
 - v0.5，补齐 Evidence/sourceRef 生命周期契约（§2.2）与治理状态对齐（§4.1），2026-11-20 · 配套 [产品 SPEC](./SPEC-PD-FEEDBACK-RESILIENCE-001.md)
 - v0.4，入口、完整事件样本、相对评价、补证与无界面运行契约，2026-11-19
 - 后台触发与生命周期的权威目标设计见 [PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md) 及其 [技术设计](./SPEC-PD-SERVICE-HOST-001-TECHNICAL-DESIGN.md)。本文件 §4.1 只保留业务恢复链路所需的进程事实与验收约束。
-- 源码基线 `origin/main@2e91fdfa7916bf04943f16325da4beb0c95cd934`（2026-11-21），包含 [#2699](https://github.com/csuzngjh/principles/pull/2699)、[#2700](https://github.com/csuzngjh/principles/pull/2700)、[#2701](https://github.com/csuzngjh/principles/pull/2701) 及 [#2702](https://github.com/csuzngjh/principles/pull/2702)。路径解析服从 #2699。
+- 源码基线 `origin/main@44eb2260606776dc28939a45d5375c2fb29b4a0c`（2026-11-21），包含 [#2699](https://github.com/csuzngjh/principles/pull/2699)、[#2700](https://github.com/csuzngjh/principles/pull/2700)、[#2701](https://github.com/csuzngjh/principles/pull/2701) 及 [#2702](https://github.com/csuzngjh/principles/pull/2702)。路径解析服从 #2699。宿主 MCP 元数据调用链的安装态/源码态核对见[配套审计报告](../reports/PD_HOST_IDENTITY_CONTEXT_AUDIT_20261121.md)。
 - **规范性数据语义**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。本设计只定义如何复用现有入口、轨迹存储和任务管道，不声称相关完整事件数据集能力已在当前代码中实现。
 
 ## 1. 基线与设计决定
@@ -16,7 +17,7 @@
 | 已核对的入口 | 当前事实 | 实施约束 |
 | --- | --- | --- |
 | [Skill 源文件](../../packages/pd-skills/skills/pd-pain-signal/zh.md)、[CLI record](../../packages/pd-cli/src/commands/pain-record.ts) | Skill 的有锚点入口调用 MCP，要求本次 Owner 同意。Codex 旧显式 CLI 接受原话；通用 CLI 的 `handlePainRecord` 将 `painType` 设为 `user_frustration`，有绑定和无绑定两种来源，`--wait` 及工作区配置影响同步行为。 | 保留既有参数、原话类别、同步调用兼容。实现有锚点的 CLI 输入时复用 MCP 同一核心校验；Skill 调用一个可用入口，已被宿主消费的前缀不二次上报。正常异步提交先本地保存再回复。 |
-| [MCP 装配](../../packages/pd-mcp-server/src/submit-assembly.ts) → [submitPainCapability](../../packages/principles-core/src/runtime/pain-submit-capability.ts) | `buildMcpIngressReport` 使用 `owner_manual/mcp_agent_assisted`；工作区由服务绑定。模型参数不能证明授权。能力层校验锚点、按既有规则生成身份并读回任务。Codex 取证是对当轮元数据及该工作区轨迹的精确查询。 | Owner 手工、代报和代理自主来源必须分别记录；调用了 MCP 只说明运输方式。旧信号按原字段解释，历史授权标签不追改。 |
+| [MCP 装配](../../packages/pd-mcp-server/src/submit-assembly.ts) → [submitPainCapability](../../packages/principles-core/src/runtime/pain-submit-capability.ts) | `server.ts` 已把 `ctx.mcpReq._meta` 传给提交能力；Codex 原生提供 `threadId/sessionId`，turn id 可选。当前 `verifyCodexTarget` 仍把身份绑定与目标轮正文可用性耦合，正文缺失时会拒绝建立身份关联。 | 将宿主身份解析与目标证据定位拆开：可信 Session 可在写入前绑定；目标轮/正文仍由独立的 `SourceTraceLocator` 和 consent/retention 校验负责。模型参数不能证明宿主身份。 |
 | [Core 入口判定](../../packages/principles-core/src/runtime/pain-ingress.ts)、[宿主观察适配器](../../packages/openclaw-plugin/src/hooks/pain-ingress-adapter.ts) | `automatic_hook` 有归属且有证据时可 submit；无归属或证据仅 `observation_only`，不创建诊断任务。 | 优先让可信宿主侧承载获准的代理自主报告。仅当现有来源不能如实表达该路径时，扩展原来源联合与持久解析；校验当前工作区的自动执行授权、宿主身份和原事件。普通 MCP 参数不得设置 `approved` 或伪造观察身份。 |
 
 **统一到哪一层。** CLI、MCP 和宿主事件保持各自输入协议，适配后使用已有 `PainIngressReport`、`evaluatePainIngress`、`PainToPrincipleService.recordPain` 及任务读回；不另建第二种入口事件或 Pain 管道。完整上下文行为偏差事件是数据集/分析语义单位，引用现有 Pain 身份、宿主权威轨迹和行动证据，不替代 `PainIngressReport` 或诊断任务。向实现人员交付以下字段映射和对照样本。
@@ -37,35 +38,51 @@
 | v0.1 新设计 `proofRefs`、材料版本和专用装配接口。#2701 已可使用任务原有 `evidence`、`verifiedHostSession` 和 `evidenceClass`。 | 使用原有表示和诊断装配。只在任务上保留缺失时所需的可选线索和复查进度。没有新的证据数据源或消费者。 |
 | v0.1 的测试只证明「能写证据」或直接用计数调准入。#2701 后续补丁明确修过 `evidenceClass` 与顶层数组不同步会被读回拒绝。 | 验收走真实任务写入、持久一致性解析、诊断装配及候选准入，不能用伪造 `entryCount` 或直接调评分门代替。 |
 | 共享 `pickDiagnosticianCandidate` 先从库按 `limit` 取最旧的 pending / retry_wait。取出后跳过待补证项会产生队首阻塞。 | 在既有任务查询中先排除未就绪证据，再应用原排序、数量上限和轮转。执行端继续检查候选资格，避免 CLI 或并发更新绕开。 |
-| 旧版把自动重开、全缺 ID 推断、三宿主 MCP 等价身份和 Windows 新触发放在同一首版；首版又被缩窄成仅处理已知目标正文晚到，遗漏了「Pain 已创建但 Session 丢失」的原始故障。 | 首版必须同时交付 B1 可信提交回执身份恢复、A2 已知目标正文晚到补证及 B3 无界面业务闭环。历史终态任务重开明确排除；各宿主适配分开验收，Service Host 基础设施只归 PRI-1278。 |
+| 旧版把自动重开、全缺 ID 推断、三宿主 MCP 等价身份和 Windows 新触发放在同一首版；后续又把身份恢复缩窄为仅靠 PostToolUse 回执，忽略 Codex 已有请求 `_meta`，也没有核对 OpenClaw / Pi 的真实元数据传递能力。 | 首版必须同时交付 B1 宿主请求身份前置绑定与回执兜底、A2 已知目标正文晚到补证及 B3 无界面业务闭环。历史终态任务重开明确排除；各宿主适配分开验收，Service Host 基础设施只归 PRI-1278。 |
 
 **代码分工**：程序做定位、核验、补录与调度；PD Core 内置代理做诊断和候选建议。权限和候选准入由现有程序完成。缺可靠来源时分类为证据不足，用户无需另交一份材料才得到已登记回执。
 
-### 1.3 B1：可信提交回执驱动的身份恢复
+### 1.3 B1：宿主身份上下文前置绑定与回执兜底
 
 #### 现状核验（不得把现有能力夸大为已交付）
 
-- MCP `pd_submit_pain` 在处理时可从宿主请求元数据读取身份声明；`submitPainCapability` 只在 `verifyHostSession` 验证通过后才写入 `sessionIdHint` / `painIngress.verifiedHostSession`。声明缺失或未验证时，任务合法落库但保持 unbound。
-- Codex `PostToolUse` 的 `.*` matcher 已覆盖 `pd_submit_pain`；该事件在工具返回后由宿主 hook 触发，不依赖模型是否继续完成下一轮推理/跟进。`packages/codex-adapter/src/codec/input-decoder.ts` 将宿主 `session_id/turn_id/tool_use_id/tool_response` 解码为可信上下文 `sessionId/turnId/toolCallId/toolOutput`。`ingestCodexConversation` 可把 `toolName/params/result` 写入 `governance_observations`。但该路径受 `codex_conversation_ingestion` feature flag 和 consent ledger 双重门控，不能保证所有 MCP 提交都有回执观察。
-- 当前 Codex EventLog 的 `tool_call` 不包含结构化 `toolResponse` / `painId`（即使记录工具名、toolCallId、错误/退出码等），不能作为身份恢复凭据。
-- `listGovernanceObservations` 是通用有界列表（默认 500、最大 2000），没有按 `toolName + result.painId` 的专用精确查询契约。不得用通用列表截断扫描宣称能找回任意历史提交。
-- 因此，已有获授权 `governance_observations` 中的完整结构化回执可作为兼容回退来源；但它不是可靠的默认捕获机制。B1 必须增加宿主完成事件上的最小回执捕获，并证明其真实安装行为。
+- MCP `server.ts` 已把 `ctx.mcpReq._meta` 作为 `requestMeta` 传入 `submit-assembly.ts`；但当前只有 Codex 分支消费该元数据。WorkBuddy/OpenClaw 分支仍从 `submission.hostSession`（工具参数）读取声明，再查询轨迹；模型可见参数不是宿主身份来源，不能作为前置身份绑定依据。
+- 当前 Codex `verifyCodexTarget` 从 `_meta.threadId/sessionId` 和 `x-codex-turn-metadata.turn_id` 读取 Session/提交 Turn，但要求两者都存在，并默认把提交 Turn 当作目标 Turn；随后必须在 `governance_observations` 找到该目标轮可读的 user/assistant 正文。目标正文缺失时返回 `codex_target_evidence_unavailable`，因此**提交身份验证与目标证据可用性被错误耦合**。可信 Session 不应因目标正文晚到而无法绑定；`submissionTurnId` 也必须允许缺失。
+- Codex 源码的 `with_mcp_tool_call_ids_meta` 会注入 `threadId/sessionId`，并在有来源信息时附带 `windowId/itemId`；`x-codex-turn-metadata.turn_id` 是可选字段。该 helper 不注入 `toolCallId`；Codex PostToolUse 事件另有 `tool_use_id`。因此不能把所有 Codex 调用都假设为同时携带 Session、Turn 和 toolCallId。
+- OpenClaw 已安装版本 `2026.11.5` 的 MCP runtime `callTool(server, tool, args, options)` 已支持 `options._meta` 并转发到 `tools/call`；runtime 对象也暴露 `sessionId` 与 `sessionKey`。但当前 `materializeBundleMcpToolsForRun` 调用点只执行 `t.callTool(server, tool, args)`，没有传第四个参数。所需缺口是宿主运行时调用点把可信 `sessionId` 和可用的 tool-call identity 写入 `_meta`；`sessionKey` 不是 Session ID，未证明的 run/turn 值不得冒充 `submissionTurnId`。
+- WorkBuddy/Pi 当前 `McpRequestOptions` 只有 `signal/timeoutMs/onProgress`，没有 `_meta`；`requestInternal` 只在进度回调时构造包含 `progressToken` 的 `_meta`。Pi 的 MCP tool `execute` 收到 `_toolCallId`，但当前没有把活动 Session 上下文传给 `client.callTool`。需要把 Session 从宿主执行上下文传入，并让 MCP client 合并自定义 `_meta` 与 `progressToken`。
+- 当前通用 `verifyHostSession` 读取 `submission.hostSession`，再调用 `listGovernanceTurnTexts` 要求工作区轨迹中已有 user-turn 正文。该条件把“宿主提交身份”绑定到“授权正文已采集”；`listGovernanceTurnTexts` 查询的是 PD `governance_observations`，不能假设等价于 OpenClaw / WorkBuddy 自己的 `user_turns` 等宿主表。宿主元数据可信时，身份验证不得依赖目标正文或全量会话采集。
+- Codex `PostToolUse` 的 `.*` matcher 已覆盖 `pd_submit_pain`，事件可提供 `session_id/turn_id/tool_use_id/tool_response`，适合作为请求元数据缺失时的兜底。`ingestCodexConversation` 写入 `governance_observations` 仍受 `codex_conversation_ingestion` 与 consent 双门控；EventLog 的普通 `tool_call` 不包含结构化 `toolResponse/painId`，不能代替 PostToolUse 回执。
+- `listGovernanceObservations` 是通用有界列表（默认 500、最大 2000），不是按 `painId/taskId` 的精确查询契约。兼容回放必须增加有界精确查询；不得扫描通用列表、宿主私有历史数据库或未登记目录。
 
-#### 最小回执捕获契约
+#### 主路径：MCP 请求中的可信宿主上下文
 
-1. 在宿主 `after_tool_call` / PostToolUse 完成事件中，只处理工具名精确等于 `pd_submit_pain` 的事件。身份必须来自宿主适配器的可信事件上下文，不来自模型参数、用户文本或 MCP 输入中的 `hostSession` 声明。
-2. 严格解析 Codex PostToolUse 的 toolOutput（原始 `tool_response`）：当前 MCP envelope 是单个 text content block，JSON 位于 `content[0].text`，不使用 `structuredContent`。只接受完整解析出的 `pd.pain-submit-receipt.v1`，要求 `capability=pd_submit_pain`、`status=submitted`（或 `submit_unconfirmed` 经原任务精确读回后确认）、`painId` 与 `taskId` 非空且匹配原任务。拒绝多块/非 JSON/自由文本中的相似字符串、普通消息、摘要、错误回执和未确认写入。
-3. 同时绑定当前安装解析出的 Workspace、hostKind、宿主 Session、提交 Turn、toolUseId/toolCallId、receipt schema/capability/status、painId/taskId 与 observedAt。`taskId` 必须与 `painId` 的确定性映射一致，且原任务 `input_ref` 精确指向该 `painId`。
-4. 仅持久化恢复所需的最小化元数据；Session/Turn/toolUseId 等标识仍按敏感运行元数据保护；不存储 `reason`、`anchorRef`、prompt、完整工具输入/输出、transcript 正文或摘要。首选在原任务 `diagnostic_json` 上用 CAS 原子附加已验证的 `verifiedHostSession` / `sessionIdHint` 和 recovery receipt reference；不新建 Pain、Task、全局队列或第二证据库。
-5. 该最小捕获必须有明确的一次性 Workspace 级披露/授权；不得借 MCP 单次提交同意推导对完整会话采集的同意，也不得绕过 `codex_conversation_ingestion` 或现有 consent ledger。若现有 consent 明确覆盖该最小元数据，可复用；否则实现独立的 receipt-only 授权。它不要求每条 Pain 再次审批。
-6. 当 hook 捕获失败时，只有在已有正式 consent 的情况下才可通过已授权 transcript catch-up 回放结构化回执。不得读取 Codex/WorkBuddy/OpenClaw 私有历史数据库或扫描未登记的会话目录。两条路径都不可用时，状态必须是可解释的 `receipt_unavailable` / `blocked_by_consent`，不能猜测。
+1. `pd-mcp-server` 从 `ctx.mcpReq._meta` 读取请求级宿主上下文，并将各宿主原生字段规范化为内部 `HostSubmissionContext`：`sessionId` 必需，`submissionTurnId` 与 `toolCallId` 可选，来源标记为 `mcp_request_meta`。对非 Codex 宿主统一使用命名空间字段 `_meta["pd.host-context.v1"] = { sessionId, submissionTurnId?, toolCallId? }`；Codex 适配器读取其原生 `threadId/sessionId` 与可选 `x-codex-turn-metadata.turn_id`。`hostKind` 和 `workspaceDir` 始终来自 MCP Server 启动绑定，不接受调用方或模型自报。
+2. 仅当 MCP Server 是由对应宿主按当前 Workspace 配置启动的受信 stdio 子进程时，才将该连接的 `_meta` 视为宿主注入上下文。若未来支持 HTTP/远程传输，必须另有认证的宿主主体；裸 `_meta` 不能建立可信绑定。`submission.hostSession` 等模型可见工具参数不能作为身份来源；若其与 `_meta` 冲突，必须 fail closed 并记录冲突，不得任选其一。**这不是放宽 PRI-1260 对普通 `hostSession` 声明的验证要求**：只有同一绑定 stdio client 产生的 host-generated `_meta` 走此路径；模型/用户参数中的 claim 仍按既有轨迹验证或保持 unbound。
+3. 宿主字段映射必须逐个核验，不做跨宿主猜测：
+   - **Codex**：优先用 `threadId` 作为轨迹 Session 身份，缺失时才按已验证兼容规则使用 `sessionId`；`x-codex-turn-metadata.turn_id` 可提供提交 Turn，但它是可选字段。`windowId/itemId` 不是 Turn ID；Codex MCP metadata helper 不提供 toolCallId，不能伪造。
+   - **OpenClaw**：从当前 MCP runtime 的 `sessionId` 读取 Session，并从真实 tool execution context 取得 toolCallId。`sessionKey` 是路由/会话键，不等于 `sessionId`；当前调用点未证明存在稳定 submissionTurnId，不得用最近消息、run id 或 `sessionKey` 替代。
+   - **WorkBuddy/Pi**：从活动宿主 Session context 传递 `sessionId`，`_toolCallId` 可映射为 toolCallId。`generation_id` 只有在宿主契约证明其与提交 Turn 一一对应时才能作为 `submissionTurnId`；否则省略。
+4. 校验 Session 字段形状、长度、sentinel、当前 Workspace/host 启动绑定及最小元数据授权。**身份绑定不要求目标轮正文或完整 transcript 已存在**；可信 `sessionId` 通过后，即可在原 Pain/Task 初始写入时持久化 `sessionIdHint` / `painIngress.verifiedHostSession`。`submissionTurnId` 缺失不能否定 Session 绑定；若没有可信 Turn，目标轮继续保持未知/待核验。宿主轨迹中的 Session 存在性可作额外一致性检查，但不得以目标正文缺失否定宿主身份。
+5. 前置 `_meta` 与回执兜底使用同一个最小宿主身份元数据授权范围：仅允许保存 `sessionId/submissionTurnId/toolCallId`、Workspace/host 绑定引用及必要时间；该授权必须是一次性 Workspace 级明确披露/同意，与完整会话采集、自动 Pain 上报授权分离。`codex_conversation_ingestion` 关闭时不得读取 transcript，但不应阻止已获准的最小身份元数据绑定；若最小元数据授权未开启，则保留合法 Pain 为 unbound 并记录 `blocked_by_consent`。
+6. 请求 `_meta` 缺失时不猜测、不读取模型参数补位，先按现有合法入口保存原 Pain/Task 为 unbound，再进入下面的回执兜底路径。字段冲突、错误 host/workspace、sentinel 或非法结构不自动降级成可信身份；必须记录明确失败原因。
+
+#### 兜底路径：宿主工具完成事件中的结构化提交回执
+
+1. 仅当 MCP 请求缺少可用的宿主身份上下文时，才尝试宿主 `after_tool_call` / PostToolUse 完成事件。只处理工具名精确等于 `pd_submit_pain` 的事件；身份来自宿主适配器的可信事件上下文，不来自模型参数、用户文本或 MCP 输入中的 `hostSession` 声明。若事件与已收到的 `_meta` 冲突，视为歧义并拒绝自动绑定。
+2. 按各宿主真实事件 envelope 解析结构化返回。Codex 当前 MCP envelope 是单个 text content block，JSON 位于 `content[0].text`，不使用 `structuredContent`；只接受完整解析出的 `pd.pain-submit-receipt.v1`，要求 `capability=pd_submit_pain`、`status=submitted`（或 `submit_unconfirmed` 经原任务精确读回后确认）、`painId/taskId` 非空。其他宿主必须以真实安装事件样本定义自己的解码器，不能把 Codex envelope 外推。
+3. 唯一匹配必须同时满足当前 Workspace、hostKind、工具名、receipt schema/capability/status、精确 `painId/taskId`、原任务 `input_ref` 和确定性 `taskId` 映射；可用时还需匹配 toolUseId/toolCallId。相同物理调用的幂等重放折叠；不同调用 ID 的多条匹配视为 ambiguous。`submit_unconfirmed` 不能直接当成功，须先按精确 ID 读回。
+4. 仅持久化恢复所需最小元数据，不存储 `reason`、`anchorRef`、prompt、完整工具输入/输出、transcript 正文或摘要。通过原 Task `diagnostic_json` expected-value CAS 附加 `verifiedHostSession` / `sessionIdHint` 与 receipt reference；不新建 Pain、Task、全局队列或第二证据库。
+5. 回执捕获与持久化使用上面同一 Workspace 级最小元数据授权；不能借 MCP 单次提交同意推导完整会话采集同意，也不能绕过现有 consent ledger。已有获授权 `governance_observations` 中的结构化回执仅作为兼容回放来源，必须按 `hostKind + toolName + painId + taskId` 精确查询；不得使用通用 500/2000 行列表截断扫描。
+6. 不得读取 Codex/WorkBuddy/OpenClaw 私有历史数据库或扫描未登记会话目录。回执不存在、授权撤回、匹配歧义、写入未确认或 hook 失败时，保留原 Pain/Task，并持久化 `receipt_unavailable` / `blocked_by_consent` / `ambiguous_receipt` 等明确状态；不能猜测或伪报恢复成功。
 
 #### 身份和目标分层
 
-- `submissionSessionId/submissionTurnId`：证明哪一次 MCP 工具调用创建了这条 Pain，由唯一可信提交回执恢复。
-- `targetTurnId`：证明痛苦信号指向哪一轮行为。可来自 MCP 已明确给出的目标轮或其他同等可信线索，随后必须在相同 host/workspace/session 下独立核验。
-- 提交轮默认作为目标轮只适用于现有明确的当轮语义；不能用提交轮、最新轮、`turn_index`、最近消息、文本相似度或模型推断填补一个明确指向早前行为但目标未知的任务。
-- `SourceTraceLocator` 继续负责在 `sessionIdHint` 已验证后精确定位目标证据；缺少 `sessionIdHint` 时返回 `missing_session_hint` 是正确的 fail-closed 行为，不应改成模糊搜索。
+- `submissionSessionId`：由可信 MCP request `_meta` 前置绑定；请求元数据缺失时，才由宿主完成事件的唯一结构化提交回执兜底恢复。它证明提交发生在哪个宿主 Session，不证明目标正文已可读。
+- `submissionTurnId`：宿主确实提供稳定提交 Turn 时一并保存；它是可选字段，不得因缺失而否定可信 Session 绑定，也不得把 `windowId/itemId/sessionKey/generation_id/runId/turn_index` 未经证明地映射为 Turn。
+- `targetTurnId`：证明痛苦信号指向哪一轮行为。可来自明确的目标线索，随后必须在相同 host/workspace/session 下独立核验；若目标未知或正文晚到，保留 `waiting_for_target_evidence`，不撤销已验证的提交 Session。
+- 提交 Turn 只有在现有明确的当轮语义下才能作为目标 Turn；不能用提交轮、最新轮、最近消息、文本相似度或模型推断填补一个明确指向早前行为但目标未知的任务。
+- `SourceTraceLocator` 只负责在 `sessionIdHint` 已验证后精确定位目标证据；缺少 Session 时返回 `missing_session_hint` 仍是正确的 fail-closed 行为，但身份恢复由 MCP 前置上下文/回执兜底负责，不应把正文读取器改成身份猜测器。
 
 #### Recovery disposition
 
@@ -94,9 +111,9 @@
 
 本机只读快照核对（前轮采样值）：留存正文方面，Codex 用户/助手观测为 108/20，WorkBuddy 为 7/46。OpenClaw 的治理观测表空，传统轨迹表共有 1,268 条用户轮、4,591 条助手轮、22,997 条工具记录。旧信号任务为 `succeeded`，会话提示 null、证据 0；按两个已知轮次查 Codex 治理观测均未命中。此项数值只说明采样时哪些表有数据，不能推广到每条反馈。
 
-历史来源复核（2026-11-19）：既有 PRI-1260 记录给出了另一观察点。只读查询 Codex `thread_history_1.sqlite` 的 `thread_items` 后，确认该旧反馈有一条已完成的 `pd_submit_pain` 工具记录，位于已知提交轮；结构化结果的 `painId`、`capability` 和 `submitted` 回执相符。之前只查的 JSONL 不能证明同一关系。这个证据说明**可以定位该次提交**，不能证明用户所指早前轮的正文现在仍可访问，也不能证明已安装 PD 有受支持的读取契约。首版不接入宿主私有历史库。B1 若要支持回执恢复，先用受支持入口证明等价的结构化关联；只允许保存必要引用，不扫描私有全库。复查报告只记录类型、计数及核验结果。
+历史来源复核（2026-11-19）：既有 PRI-1260 记录给出了另一观察点。只读查询 Codex `thread_history_1.sqlite` 的 `thread_items` 后，确认该旧反馈有一条已完成的 `pd_submit_pain` 工具记录，位于已知提交轮；结构化结果的 `painId`、`capability` 和 `submitted` 回执相符。之前只查的 JSONL 不能证明同一关系。这个证据说明**可以定位该次提交**，不能证明用户所指早前轮的正文现在仍可访问，也不能证明已安装 PD 有受支持的读取契约。首版不接入宿主私有历史库。B1 改由受支持的 MCP request `_meta` 建立主路径，完成事件中的结构化回执只作缺失元数据时的兜底；仅保存必要引用，不扫描私有全库。复查报告只记录类型、计数及核验结果。
 
-**身份可用性**：Codex MCP SDK 的 `ctx.mcpReq._meta` 传入宿主 `threadId/sessionId` 与 `x-codex-turn-metadata.turn_id`；#2701 已接到精确读取。WorkBuddy hook 有 `generation_id`，转录的 `host_turn_id` 则由 `providerData.messageId` 或记录 ID 派生，二者与 MCP 提交的等价性未证实。OpenClaw 普通 MCP 同样未证明与某个用户轮等价。可确定的宿主能力按入口启用，不用默认映射补齐结果。
+**身份可用性（2026-11-21 安装态/源码态复核）**：Codex MCP 原生 `_meta` 提供 `threadId/sessionId`，`x-codex-turn-metadata.turn_id` 可选；当前 PD 已把 `_meta` 传到提交能力，但 `verifyCodexTarget` 仍要求 Turn ID 和目标正文，必须拆分。WorkBuddy/Pi 当前 MCP client 没有 `_meta` 请求选项；tool `execute` 虽有 `_toolCallId`，但活动 Session 尚未传入 `callTool`。OpenClaw 已安装 runtime 的 `callTool` 支持第四参数 `options._meta`，且有 `sessionId`，但 materializer 调用点没有传第四参数；`sessionKey` 不能当 Session ID。`generation_id`、`providerData.messageId`、`turn_index` 与 MCP 提交 Turn 的等价性仍未证实。各宿主按真实传递字段逐一启用，不用默认映射补齐结果。
 
 数据路径只取 #2699 验证好的宿主工作区，从对应数据库读；不根据项目 cwd、自由文本或 MCP 参数里的路径改变归属。就算其他宿主有相同内容、ID 或可读文件也不查。读取授权、摘录可持久化权限、复用和清退各按现行政策。正式入口的留存级别只说明记录可能能读，不能用来隐式扩大持久化范围。
 
@@ -148,32 +165,37 @@
 
 ```mermaid
 flowchart TD
-  A[宿主通过 MCP 提交 Pain] --> B[原 Pain 与 Task 持久化]
-  B --> C{提交 Session 已验证?}
-  C -->|是| E[目标轮精确核验]
-  C -->|否| D[宿主 PostToolUse 捕获最小回执]
-  D --> F[Recovery Reconcile 精确匹配]
-  F -->|唯一可信匹配| G[CAS 更新原 Task 身份]
-  F -->|无匹配/歧义/无授权| W[持久化 Waiting / Degraded disposition]
-  G --> E
-  E -->|目标正文尚未采集| H[授权 catch-up 与有限等待]
-  H --> E
-  E -->|目标证据已核验| I[CAS 补入原 Task evidence]
-  I --> J[既有 Diagnostician Worker]
-  J --> K[现有诊断与候选准入]
-  K --> L[既有 Owner / 治理流程]
-  W -->|新可信回执/证据到达| F
+  A[宿主通过 MCP 提交 Pain] --> B[读取 MCP tools/call _meta]
+  B --> C{可信 Session 上下文有效?}
+  C -->|是| D[前置绑定 Session 并写入原 Pain/Task]
+  C -->|缺失| E[合法写入原 Pain/Task 为 unbound]
+  C -->|冲突/非法/未授权| F0[合法写入原 Pain/Task 为 unbound 并记录原因]
+  E --> F[宿主 PostToolUse 捕获结构化回执]
+  F0 --> W[持久化 Waiting / Degraded disposition]
+  F --> G[Recovery Reconcile 精确匹配]
+  G -->|唯一可信匹配| H[CAS 绑定原 Task Session]
+  G -->|无匹配/歧义/无授权| W
+  D --> I[目标 Turn 与证据独立核验]
+  H --> I
+  I -->|目标正文尚未采集| J[授权 catch-up 与有限等待]
+  J --> I
+  I -->|目标证据已核验| K[CAS 补入原 Task evidence]
+  K --> L[既有 Diagnostician Worker]
+  L --> M[现有诊断与候选准入]
+  M --> N[既有 Owner / 治理流程]
+  W -->|新可信回执/证据到达| G
 ```
 
-1. **Durable Ingress**：`pd_submit_pain` 继续使用既有 `submitPainCapability` 和原任务持久化/读回。缺失或未验证 Session 时，允许合法 Pain 先保存为 unbound，并保留具体原因；不因可选轨迹读取失败而丢弃合法提交。原 `painId` 与确定性 `taskId` 是后续恢复的唯一业务锚点。`submit_unconfirmed` 仍表示结果未知，不能直接视为成功。
-2. **最小回执捕获**：Codex `after_tool_call` / PostToolUse 在工具返回后触发，独立于模型后续是否继续推理或执行；事件已向适配器提供宿主上下文 `sessionId/turnId/toolCallId/toolOutput`。在独立的 receipt-only 分支中，仅解析 `pd_submit_pain` 的结构化返回，严格核验 `schemaVersion/capability/status/painId/taskId` 与当前 Workspace 和原任务。只保留 Session、提交 Turn、toolUseId、回执标识及时间等最小化元数据，并按敏感运行元数据保护，不读取/保存 prompt、reason、anchor 原文或 transcript。该分支需一次性显式授权，不能绕过完整会话采集的 feature flag/consent。
-3. **身份恢复**：每个 Worker Cycle 在已有 catch-up / governance reconcile 后、诊断候选领取前，运行有界 `PainRecoveryReconcile`。对 `sessionIdHint` 缺失的原 Task，优先读已附着的 receipt-only 元数据；需要回放时，只从当前 Workspace 已授权且保留有效的结构化 `pd_submit_pain` observation 精确查询。查询键至少包括 `hostKind + toolName + receipt.painId + receipt.taskId`，并校验 toolUseId、schema、status、Workspace 和任务 `input_ref`。相同物理/逻辑调用的幂等重放折叠为一条；不同 toolUseId 的多条匹配视为 ambiguous。禁止用通用 500 行列表截断扫描、文本搜索、跨宿主/跨 Workspace 搜索或宿主私有历史库。
-4. **提交身份与目标证据分层**：唯一匹配后，恢复的是 `submissionSessionId/submissionTurnId`，通过 `updateTaskIfDiagnosticJsonUnchanged` 对原 Task 做 CAS，写入 `sessionIdHint`、`painIngress.verifiedHostSession` 与 receipt reference。之后才调用 `SourceTraceLocator`。目标轮继续依赖明确 `targetTurnId` 或等价可信线索；当轮默认语义沿用现有规则，但早前目标未知时不推断。`SourceTraceLocator` 缺 `sessionIdHint` 返回 `missing_session_hint` 仍是正确边界。
-5. **目标证据补齐**：身份验证后，复用 #2701 精确取证和现有宿主 catch-up。校验同一 host/workspace/session、确切 `rollout_identity` 与目标 `host_turn_id`，再按现有 consent、retention、消毒和摘录政策读取/持久化。目标正文晚到时进入 `waiting_for_target_evidence`；正文到达后只更新原 Task 的 `evidence` 与 `evidenceClass`，真实数组和计数必须一致。不得用提交轮、最近轮、root session 回退或模糊匹配替代目标。
-6. **条件写与任务保护**：身份与证据分别用原任务 JSON 的 expected-value CAS 更新；每次只补当前缺失字段，不覆盖已验证且冲突的身份、不覆盖活动租约、不改写已成功/终态任务。身份恢复不伪造 `evidenceClass=available`；只有真实合规 evidence entries 写入后才能更新 evidenceClass。CAS 冲突时重新读取并重新评估，不盲目重试。
-7. **继续与公平领取**：只有身份/目标材料达到既有诊断要求的任务才进入 `pickDiagnosticianCandidate`。等待项必须在 SQL 排序和 `LIMIT` 前排除，正常任务继续领取。已有合法 Owner 陈述或独立证据已足以支持诊断时，不因缺少可选轨迹强制等待；治理批准/拒绝仍走既有流程。
-8. **有界恢复 disposition**：在原 Task `diagnostic_json` 保存版本化 `recovery` 对象：`schemaVersion/state/reasonCode/attemptCount/lastCheckedAt/nextCheckAt/receiptRef/resolvedAt`。至少区分 `waiting_for_receipt`、`waiting_for_target_evidence`、`ready_for_diagnosis`、`blocked_by_consent`、`ambiguous_receipt`、`recovery_exhausted`、`unrecoverable`。不增加新的通用 TaskStatus；Read Model 将其投影为清楚的 Waiting/Degraded，不能只显示无原因 `pending`。按有界退避检查；达到上限后停止空转并保留原 Pain/Task。新可信回执或证据到达时可通过同一 CAS 重新评估。
-9. **失败隔离**：无回执、回执歧义、授权撤回、来源过期、目标未知、采集器故障、Worker 暂停必须使用不同 reasonCode。无法证明来源时 fail closed；不删除反馈、不创建第二条、不自动请求用户去 Console 补 ID，也不声称恢复成功。
+1. **Durable Ingress**：`pd_submit_pain` 继续使用既有 `submitPainCapability` 和原任务持久化/读回。提交前先解析 `requestMeta`；可信 Session 通过 host/workspace 绑定与最小元数据授权后，在原 Pain/Task 写入时一并持久化。元数据缺失时允许合法 Pain 先保存为 unbound 并保留原因；冲突/非法/未授权时 fail closed，不丢弃合法 Owner 报告，也不伪造身份。原 `painId` 与确定性 `taskId` 是后续恢复的唯一业务锚点。`submit_unconfirmed` 仍表示结果未知，不能直接视为成功。
+2. **前置身份绑定**：只读取 MCP `tools/call` 的 host-injected `_meta`；`hostKind` 与 Workspace 来自 MCP Server 启动绑定，Session 来自宿主原生上下文。`submissionTurnId/toolCallId` 按宿主能力可选；缺少 Turn 不阻止 Session 绑定。模型参数中的 `hostSession` 不可信，若与 `_meta` 冲突必须 fail closed。此步骤不查询或保存目标轮正文，不要求完整 transcript 已采集。
+3. **回执兜底捕获**：当请求 `_meta` 缺失时，宿主 `after_tool_call` / PostToolUse 在工具返回后捕获 `pd_submit_pain` 的结构化回执及可信 Session/调用上下文。按宿主真实 envelope 解析，严格核验 `schemaVersion/capability/status/painId/taskId`、Workspace、host 与原任务；只保存最小身份/回执元数据，不读取或保存 prompt、reason、anchor 原文或 transcript。此路径使用独立的一次性 Workspace 最小身份元数据授权，不依赖完整 conversation ingestion。
+4. **身份恢复**：每个 Worker Cycle 在已有 catch-up / governance reconcile 后、诊断候选领取前，运行有界 `PainRecoveryReconcile`。只处理 `sessionIdHint` 缺失且有合法恢复路径的原 Task；优先读附着的 receipt-only 元数据，需要兼容回放时按 `hostKind + toolName + receipt.painId + receipt.taskId` 精确查询当前 Workspace 已授权的结构化 observation。校验 schema/status、确定性 taskId、`input_ref` 与可用的 toolUseId；相同调用重放折叠，多条不同调用匹配视为 ambiguous。禁止通用 500/2000 行列表扫描、文本搜索、跨宿主/跨 Workspace 搜索或宿主私有历史库。
+5. **提交身份与目标证据分层**：前置绑定或回执恢复只写 `submissionSessionId` 与可用的 `submissionTurnId`，通过 `updateTaskIfDiagnosticJsonUnchanged` 对原 Task 做 CAS，更新 `sessionIdHint`、`painIngress.verifiedHostSession` 和来源引用。之后才调用 `SourceTraceLocator`。目标轮依赖明确 `targetTurnId` 或等价可信线索；提交 Turn 只有在明确的当轮语义下才可作目标轮，早前目标未知时不推断。`SourceTraceLocator` 缺 `sessionIdHint` 返回 `missing_session_hint` 仍是正确边界。
+6. **目标证据补齐**：Session 已绑定后，复用 #2701 精确取证和现有宿主 catch-up。校验同一 host/workspace/session、确切 `rollout_identity` 与目标 `host_turn_id`，再按现有 consent、retention、消毒和摘录政策读取/持久化。目标正文晚到时进入 `waiting_for_target_evidence`；正文到达后只更新原 Task 的 `evidence` 与 `evidenceClass`，真实数组和计数必须一致。不得用提交轮、最近轮、root session 回退或模糊匹配替代目标。
+7. **条件写与任务保护**：身份与证据分别用原任务 JSON 的 expected-value CAS 更新；每次只补当前缺失字段，不覆盖已验证且冲突的身份、不覆盖活动租约、不改写已成功/终态任务。身份恢复不伪造 `evidenceClass=available`；只有真实合规 evidence entries 写入后才能更新 evidenceClass。CAS 冲突时重新读取并重新评估，不盲目重试。
+8. **继续与公平领取**：只有身份/目标材料达到既有诊断要求的任务才进入 `pickDiagnosticianCandidate`。等待项必须在 SQL 排序和 `LIMIT` 前排除，正常任务继续领取。已有合法 Owner 陈述或独立证据已足以支持诊断时，不因缺少可选轨迹强制等待；治理批准/拒绝仍走既有流程。
+9. **有界恢复 disposition**：在原 Task `diagnostic_json` 保存版本化 `recovery` 对象：`schemaVersion/state/reasonCode/attemptCount/lastCheckedAt/nextCheckAt/receiptRef/resolvedAt`。至少区分 `waiting_for_receipt`、`waiting_for_target_evidence`、`ready_for_diagnosis`、`blocked_by_consent`、`ambiguous_receipt`、`recovery_exhausted`、`unrecoverable`。不增加新的通用 TaskStatus；Read Model 将其投影为清楚的 Waiting/Degraded，不能只显示无原因 `pending`。按有界退避检查；达到上限后停止空转并保留原 Pain/Task。新可信回执或证据到达时可通过同一 CAS 重新评估。
+10. **失败隔离**：无回执、回执歧义、授权撤回、来源过期、目标未知、采集器故障、Worker 暂停必须使用不同 reasonCode。无法证明来源时 fail closed；不删除反馈、不创建第二条、不自动请求用户去 Console 补 ID，也不声称恢复成功。
 
 候选查询必须在 SQL 排序/`LIMIT` 前应用 recovery disposition 过滤，影子检查使用同一语义。等待身份/目标证据的任务进入有界 recovery 查询，不进入模型领取队列；`recovery_exhausted` 不得每个周期持续轮询。候选执行端再次读任务状态、证据和租约，避免 CLI 或并发更新绕开。
 
@@ -183,14 +205,16 @@ flowchart TD
 
 | 位置 | 现有能力 | 首版最小改动 |
 | --- | --- | --- |
-| MCP `server.ts` / `submit-assembly.ts`、Core `submitPainCapability` | 读取 Codex 请求元数据、验证 `hostSessionClaim`、持久化原 Pain/Task，并返回版本化 `pd.pain-submit-receipt.v1`。 | 缺失元数据时继续合法登记并留下 unbound 原任务；回执只证明提交身份，不证明目标轮正文已到。`submit_unconfirmed` 必须精确读回后才能恢复。 |
-| `packages/codex-adapter/src/pd-hook.ts` / `packages/codex-adapter/src/codec/input-decoder.ts` `PostToolUse` | `hooks.json` 的 PostToolUse matcher 为 `.*`；事件上下文已有 `sessionId/turnId/toolCallId/toolOutput`。当前完整 observation 写入受 `codex_conversation_ingestion` 与 consent 双门控。 | 新增 receipt-only 最小捕获，只解析 `pd_submit_pain` 单 text-block JSON 回执，保存最小化身份元数据，并按敏感运行元数据保护并 CAS 更新原 Task；不得读写完整 prompt/transcript。 |
-| `governance-observation-store.ts`、`catchUpCodexIngestion` | 已授权的 `tool_call` observation 可保存 `toolName/params/result`，有 retention 与 checkpoint；catch-up 只处理已认证 rollout。 | 作为已授权的兼容回退来源；提供按 host/tool/painId/taskId 的有界精确查询，不能用默认 500/最大 2000 的通用列表做全库扫描。不得扫描私有历史数据库或新路径。 |
+| MCP `server.ts` / `submit-assembly.ts`、Core `submitPainCapability` | Server 已传递 `ctx.mcpReq._meta`；当前仅 Codex 分支消费，通用分支仍读工具参数 `hostSession` 并要求轨迹 user-turn。能力层持久化原 Pain/Task 并返回 `pd.pain-submit-receipt.v1`。 | 所有宿主统一规范化可信 request `_meta`；host/workspace 来自进程启动绑定。可信 Session 在初始写入前绑定，缺失时合法落库为 unbound 并走回执兜底；目标正文不作为身份验证前置条件。`submit_unconfirmed` 必须精确读回后才能恢复。 |
+| `packages/codex-adapter/src/pd-hook.ts` / `packages/codex-adapter/src/codec/input-decoder.ts` | Codex MCP `_meta` 原生提供 `threadId/sessionId`，`x-codex-turn-metadata.turn_id` 可选；PostToolUse matcher `.*` 事件提供 `session_id/turn_id/tool_use_id/tool_response`。完整 observation 仍受 `codex_conversation_ingestion` 与 consent 双门控。 | 将 Codex 原生 `_meta` 作为主路径，允许缺少 submissionTurnId 时绑定 Session；拆开目标正文校验。PostToolUse 只在 request metadata 缺失时作为 receipt fallback，解析单 text-block JSON 并最小化 CAS 更新原 Task；不读写 prompt/transcript。 |
+| OpenClaw 已安装 MCP runtime（2026.11.5） | `callTool(server, tool, args, options)` 已支持并转发 `options._meta`；runtime 暴露 `sessionId/sessionKey`，但 `materializeBundleMcpToolsForRun` 只传三参数。 | 在宿主运行时调用点把 `runtime.sessionId` 和当前 tool-call identity 写入 `_meta["pd.host-context.v1"]`；`sessionKey` 不可代替 Session ID，Turn ID 只在真实稳定字段存在时传递。无 metadata 时保留完成事件 receipt fallback。 |
+| WorkBuddy / Pi MCP client | `McpRequestOptions` 当前只有 `signal/timeoutMs/onProgress`；`requestInternal` 仅在进度通知时添加 `progressToken`；tool `execute` 有 `_toolCallId`，但没有 Session 上下文。 | Pi MCP 增加 `_meta` 请求选项并与 `progressToken` 合并；从活动 WorkBuddy Session context 传 `sessionId`，从 `_toolCallId` 传 toolCallId。`generation_id` 不经证明不得作为 submissionTurnId；保留完成事件 receipt fallback。 |
+| `governance-observation-store.ts`、`catchUpCodexIngestion` | 已授权的 `tool_call` observation 可保存 `toolName/params/result`，有 retention 与 checkpoint；普通 Codex EventLog 不含结构化 tool response。 | 仅作为已授权的兼容回放来源；提供按 host/tool/painId/taskId 的有界精确查询。身份主路径不依赖该表中已有正文；不得用默认 500/最大 2000 的通用列表扫描，也不得读取宿主私有历史库。 |
 | `RuntimeStateManager.updateTaskIfDiagnosticJsonUnchanged`、`SqliteTaskStore.listTasks` | 现有原任务读取、带 JSON/status/lease 前置条件的条件更新与任务筛选。 | 在原 Task `diagnostic_json` 存 recovery disposition；身份与证据分别 CAS，保留活动租约和终态保护；待恢复项在 SQL 排序及 `LIMIT` 前排除。无需新表/新 TaskStatus。 |
 | `workspace-worker.ts` / `pickDiagnosticianCandidate` | 既有 catch-up、governance reconcile、Recovery Sweep、候选公平选择。 | 在候选领取前增加有界 `PainRecoveryReconcile`；它先恢复身份，再补目标证据，不调用模型、不替代现有诊断和准入。 |
-| `SourceTraceLocator`、`SqliteContextAssembler`、`PainSignalBridge`、`evaluateAdmission`、Read Model | 精确目标轨迹读取、任务证据装配、诊断、候选准入和状态投影。 | `SourceTraceLocator` 只处理已验证 Session；缺 Session 的恢复由前置 receipt resolver 完成。Read Model 展示 Waiting/Degraded reason 与 nextCheckAt，不把无原因 pending 当作正常状态。 |
+| `SourceTraceLocator`、`SqliteContextAssembler`、`PainSignalBridge`、`evaluateAdmission`、Read Model | 精确目标轨迹读取、任务证据装配、诊断、候选准入和状态投影。 | `SourceTraceLocator` 只处理已绑定 Session 后的目标证据；身份由 MCP request `_meta` 前置绑定，缺失时由 receipt resolver 兜底。Read Model 区分 `waiting_for_receipt` 与 `waiting_for_target_evidence`，展示 Waiting/Degraded reason 与 nextCheckAt，不把无原因 pending 当作正常状态。 |
 
-`SourceTraceLocator` 缺 `sessionIdHint` 返回 `missing_session_hint` 是正确的 fail-closed 行为；它不负责猜测身份。B1 只恢复新建且仍可继续的 unbound Pain，不重开历史终态任务，不复用 `reopenDiagnosticianFamilyAtomic` 改变终态。B2 分别证明 WorkBuddy/OpenClaw 的宿主回执映射；B3 复用 Service Host 唤醒既有 Worker Cycle。
+`SourceTraceLocator` 缺 `sessionIdHint` 返回 `missing_session_hint` 是正确的 fail-closed 行为；它不负责猜测身份。B1 只处理新建且仍可继续的 Pain：可信 request `_meta` 在初始写入前绑定，缺失时由结构化回执恢复；不重开历史终态任务，不复用 `reopenDiagnosticianFamilyAtomic` 改变终态。B2 分别证明 WorkBuddy/Pi 与 OpenClaw 的 `_meta` 传递和完成事件兜底；B3 复用 Service Host 唤醒既有 Worker Cycle。
 
 ### 4.1 谁负责让管道继续运转
 
@@ -206,14 +230,14 @@ flowchart TD
 
 | 用例 | 首版通过条件 |
 | --- | --- |
-| T1 缺失 Session 的真实 MCP 提交 | 在真实 Codex 宿主中故意移除 MCP 请求携带的 Session 元数据；pd_submit_pain 仍成功创建原 Pain/Task。工具返回后立即终止/中断宿主代理的下一轮执行，验证宿主 PostToolUse 仍独立捕获精确结构化回执，恢复器只更新原 Task 的 Session/提交轮；不调用 Console、不人工填 ID、不重新提交。 |
-| T2 回执捕获与授权边界 | 分别测试 PostToolUse 正常、hook 写入失败、回执延迟、submit_unconfirmed、完整 conversation ingestion 关闭、receipt-only 授权撤回。仅授权的最小回执路径可自动恢复；授权关闭时不读 transcript、不绕过 consent，必须落明确 blocked_by_consent/receipt_unavailable。 |
-| T3 目标轮正文晚到 | Session 和目标轮已验证，但目标正文未采集；在同一安装构建完成 catch-up、原任务读回、诊断装配、候选准入。精确原轮、原 ID、evidenceClass 与真实 evidence 数一致；不得用提交轮代替早前目标。 |
-| T4 回执唯一性与隔离反例 | 普通消息、其他工具、同文异会话、异宿主同 ID、异 Workspace、不同 toolUseId 的多条回执、损坏 schema、失败状态、撤回/过期来源均不得关联；相同 toolUseId 的幂等重放只产生一次身份更新。 |
+| T1 前置身份绑定的真实 MCP 提交 | 在真实 Codex 宿主保留原生 `_meta.threadId/sessionId`，即使目标轮正文尚未进入 PD 授权轨迹，`pd_submit_pain` 也必须在初始写入时绑定 `sessionIdHint`；`submissionTurnId` 缺失不得否定 Session。验证身份绑定不读取目标正文、不依赖 PostToolUse，也不调用 Console/人工填 ID。 |
+| T2 元数据缺失时的回执兜底与授权边界 | 故意移除 MCP `_meta`，原 Pain/Task 先合法落库为 unbound；验证 PostToolUse 捕获精确结构化回执并恢复同一 Task。分别测试 hook 写入失败、回执延迟、submit_unconfirmed、完整 conversation ingestion 关闭但最小身份元数据授权开启、最小授权撤回。授权关闭时不读 transcript、不绕过 consent，必须落明确 blocked_by_consent/receipt_unavailable。 |
+| T3 身份已绑定但目标正文晚到 | 前置 `_meta` 已绑定提交 Session，目标 Turn 已由独立线索明确，但目标正文尚未采集；在同一安装构建完成 catch-up、原任务读回、诊断装配、候选准入。精确原轮、原 ID、evidenceClass 与真实 evidence 数一致；不得把 Session 绑定或提交 Turn 当作目标正文。 |
+| T4 身份上下文与回执唯一性/隔离反例 | 模型伪造 `hostSession` 参数、`_meta` 与参数冲突、错误 host/workspace、sentinel Session、异宿主同 ID、异 Workspace、普通消息/其他工具、不同 toolCallId 的多条回执、损坏 schema、失败状态、撤回/过期来源均不得关联；相同调用的幂等重放只产生一次身份更新。`sessionKey/generation_id/runId/turn_index` 不得未经证明映射为 Session/Turn。 |
 | T5 队列公平性 | 让缺身份/缺证等待项超过候选领取上限；等待项在 SQL 排序和 LIMIT 前排除，正常任务仍领取。recovery_exhausted 不再每周期空转。 |
 | T6 并发、重启与重复 | 两个 Worker 并发、进程在 receipt capture / CAS / evidence write 中途退出、Lease 过期、hook 重放及 catch-up 重放；原 Pain/Task ID 不变，无重复 Pain、重复诊断或覆盖活动/终态任务。 |
 | T7 无界面业务恢复 | 正式安装、用户登录后关闭 Web、Console、Companion，并在完成迁移后关闭 OpenClaw Gateway；提交一条故意缺 Session 且目标正文晚到的真实 Pain。Service Host 自动触发 Worker Cycle，完成身份恢复、证据补齐、诊断与准入；杀掉一次后台进程后自行接续。 |
-| T8 宿主适配矩阵 | Codex、WorkBuddy、OpenClaw 各自通过真实入口证明工具完成事件、结构化回执、Session/Turn 和 Workspace 的唯一映射。未通过的宿主不得宣称支持完整自动恢复；不得把 generation_id、providerData.messageId、turn_index 或 OpenClaw 最近轮直接等同。 |
+| T8 宿主适配矩阵 | Codex 验证原生 `_meta`；OpenClaw 验证运行时调用点传递 `sessionId/toolCallId` 到 `_meta["pd.host-context.v1"]`；WorkBuddy/Pi 验证活动 Session 与 `_toolCallId` 经 MCP client 传递。三者另分别移除 `_meta` 验证完成事件回执兜底。每个宿主只声明真实提供并验证的字段；不得把 `generation_id`、`providerData.messageId`、`sessionKey`、`turn_index` 或最近轮直接等同。 |
 | T9 完整事件归档 | 从任务开始到 Pain 触发的对话、工具调用/返回、产物和状态变化均能通过授权 sourceRef 追溯；后续纠正按真实时间关联；缺失、撤回或过期来源不会被摘要伪装成完整样本。 |
 | T10 相对期望评价 | 覆盖成功但偏离、失败但符合预期、同一行为因 Owner/任务上下文不同而方向相反；当时可获知期望、事后澄清、评价者推断分层保存，冲突和不确定性允许显式结论。 |
 | T11 时间视图隔离 | 历史诊断只读该诊断时点已有上下文；决策点评测只暴露宿主当时可获知的信息；后续纠正/诊断不得泄漏；原动作后的历史结果不得充当替代动作的反事实结果。 |
@@ -224,11 +248,11 @@ flowchart TD
 
 | 产品门槛 | 实际入口、动作与判据 |
 | --- | --- |
-| B1 缺失身份自动恢复（首版发布必过） | T1/T2 全部通过；提交身份来自宿主可信完成事件和唯一结构化回执；身份恢复与目标证据补齐分开证明；原 Pain/Task ID 不变。 |
+| B1 宿主身份前置绑定与回执兜底（首版发布必过） | T1/T2 全部通过；主路径从可信 MCP `_meta` 在写入前绑定 Session，兜底路径从唯一结构化回执恢复缺失身份；目标证据补齐单独证明；原 Pain/Task ID 不变。 |
 | B2 宿主适配矩阵 | 每个声明支持的宿主通过 T8；未通过的宿主必须显式降级或关闭对应 MCP 自动恢复能力，不能把 Codex 的证据外推到其他宿主。 |
 | B3 无界面生命周期（首版发布必过） | T7 通过，且 Service Host Phase 5 / AC-01～AC-13 的基础设施验收证据可引用；本工单只验真实 Pain 业务结果，不复制 PRI-1278 的 Scheduler/Worker/Lease/迁移验收。 |
 | R2 sourceRef 撤回安全（生产发布前置） | T13 通过并关闭 PRI-1283；未通过前不得宣称 sourceRef 目标证据自动恢复达到生产发布条件。 |
 | B4 来源与字段一致 | 同一偏差从有锚点 CLI、Skill、MCP 和获准的宿主自动来源进入；比较原任务读回与诊断实收的行为/锚点/来源/证据；另测代理伪称 Owner、无授权和重复事件。 |
 | B5 自动推进与治理停点 | 走真实任务写入→身份/证据恢复→模型实收→诊断落库→准入→适用 intake→原 Owner 节点。批准与拒绝各走独立样本；缺证、授权撤回、模型暂时不可用和明确暂停均有不同持久结果。 |
 
-实施顺序：PRI-1274（B1 缺失身份恢复）与 PRI-1273（A2 已知目标正文晚到）并行实施，二者是首版闭环的两个独立恢复阶段；PRI-1275/1276 复用 PRI-1274 的共享 receipt contract，分别完成 WorkBuddy/OpenClaw 适配，不再被 PRI-1273 的 Codex 晚到证据切片串行阻塞；PRI-1277 仅负责真实 Pain 的无界面业务集成与验收，必须等待 PRI-1278 Phase 5 生产交接、PRI-1273/1274 的恢复链通过及 PRI-1283 R2 安全门关闭；PRI-1278 是 Service Host 基础设施唯一负责人，PRI-1283 是 sourceRef 撤回安全唯一负责人。PRI-1272 汇总所有已声明支持的宿主、入口、安装版本和最后一个可证明的治理节点。历史终态任务重开不属于本首版，未核验的宿主/来源不得记为通过。
+实施顺序：PRI-1274（B1 宿主身份前置绑定与回执兜底）与 PRI-1273（A2 已知目标正文晚到）并行实施，二者分别解决提交身份与目标证据；PRI-1275/1276 复用 PRI-1274 的共享 `HostSubmissionContext` / receipt contract，分别补齐 WorkBuddy/Pi 与 OpenClaw 的 MCP `_meta` 传递及回执兜底，不再被 PRI-1273 的 Codex 晚到证据切片串行阻塞；PRI-1277 仅负责真实 Pain 的无界面业务集成与验收，必须等待 PRI-1278 Phase 5 生产交接、PRI-1273/1274 的恢复链通过及 PRI-1283 R2 安全门关闭；PRI-1278 是 Service Host 基础设施唯一负责人，PRI-1283 是 sourceRef 撤回安全唯一负责人。PRI-1272 汇总所有已声明支持的宿主、入口、安装版本和最后一个可证明的治理节点。历史终态任务重开不属于本首版，未核验的宿主/来源不得记为通过。
