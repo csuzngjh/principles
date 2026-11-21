@@ -338,18 +338,43 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   } else if (!consumerFlag.enabled) {
     // F9: the cycle ENDED here (paused) — settle the liveness record so the
     // in-flight `catch_up` stage and its deadline do not survive it.
+    // P2-01 (final-remediation review): EVERY earlier stage's failure must
+    // reach the result — not catch-up only. A reconcile failure under a
+    // consumer pause is a degraded cycle, never a clean paused + exit 0.
+    const prePauseDegradations: string[] = [];
+    if (catchUp.status === 'degraded') {
+      prePauseDegradations.push(`catch_up:${catchUp.reason ?? 'degraded'}`);
+    }
+    if (!reconcile.ok) {
+      prePauseDegradations.push(`reconcile:${reconcile.reason ?? 'failed'}`);
+    }
+    for (const d of reconcile.degradations) {
+      const tagged = `reconcile:${d}`;
+      if (!prePauseDegradations.includes(tagged)) prePauseDegradations.push(tagged);
+    }
+    if (prePauseDegradations.length > 0) {
+      const reason = `paused_stage_failures:${prePauseDegradations.join('|').slice(0, 160)}`;
+      finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'degraded', reason });
+      return {
+        ...base,
+        mode: 'degraded',
+        reason,
+        // Keep the REAL failing stage's recovery guidance ahead of the
+        // generic pause hint (P2-01 §C: catchUp.nextAction must not be
+        // overwritten by a generic paused suggestion).
+        nextAction: catchUp.status === 'degraded' && catchUp.nextAction !== undefined
+          ? catchUp.nextAction
+          : (reconcile.nextAction ?? 'Inspect the governance workspace trajectory store and transcript consent; the worker retries automatically on the next cycle.'),
+        degradations: prePauseDegradations,
+        report: { catchUp, reconcile, diagnostician: null, downstream: null },
+      };
+    }
     finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'paused' });
     return {
       ...base,
       mode: 'paused',
       reason: 'internalization_auto_consumer_disabled',
       nextAction: 'Automatic internalization execution is paused for this governance workspace; manual commands remain available: pd diagnose, pd runtime internalization run-once.',
-      // Catch-up ran BEFORE this early return. Keeping its degradation on the
-      // paused result means `pd workbuddy worker --once` can still report a
-      // broken transcript catch-up instead of exiting as a clean pause.
-      ...(catchUp.status === 'degraded'
-        ? { degradations: [`catch_up:${catchUp.reason ?? 'degraded'}`] }
-        : {}),
       report: { catchUp, reconcile, diagnostician: null, downstream: null },
     };
   } else {

@@ -335,3 +335,57 @@ describe('WorkBuddy worker cycle — cycle liveness (Phase 2, PRI-1280)', () => 
     expect(readWorkbuddyWorkerLiveness(path.join(os.tmpdir(), 'pd-workbuddy-no-such-ws'))).toBeNull();
   });
 });
+
+describe('P2-01 final-remediation — paused path aggregates EVERY earlier stage failure', () => {
+  function enableIngestion(governance: string): void {
+    const configPath = path.join(governance, '.pd', 'config.yaml');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { features: Record<string, { enabled: boolean } | undefined> };
+    config.features['workbuddy_conversation_ingestion'] = { category: 'quiet', enabled: true } as { enabled: boolean };
+    fs.writeFileSync(configPath, JSON.stringify(config));
+  }
+
+  it('paused + catch-up failure → degraded with catch_up: reason, catch-up nextAction kept', async () => {
+    const governance = makeWorkerWorkspace({ consumer: false });
+    enableIngestion(governance);
+    fs.writeFileSync(path.join(governance, '.state', 'conversation-ingestion-consent.json'), '{not-json', 'utf8');
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(result.mode).toBe('degraded');
+    expect(result.reason).toContain('paused_stage_failures');
+    expect(result.reason).toContain('catch_up:consent_unreadable');
+    expect(result.degradations).toBeDefined();
+    expect(result.degradations?.some((d) => d.startsWith('catch_up:'))).toBe(true);
+    // The real failing stage's recovery hint wins over the generic pause text.
+    expect(result.nextAction).toBeDefined();
+    expect(result.nextAction).not.toContain('internalization execution is paused');
+    const liveness = readWorkbuddyWorkerLiveness(governance);
+    expect(liveness?.lastCycleMode).toBe('degraded');
+  });
+
+  it('paused + reconcile failure → degraded with reconcile: reason', async () => {
+    const governance = makeWorkerWorkspace({ consumer: false });
+    fs.writeFileSync(path.join(governance, '.state', 'trajectory.db'), 'garbage-not-sqlite', 'utf8');
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(result.mode).toBe('degraded');
+    expect(result.reason).toContain('reconcile:');
+    expect(result.degradations?.some((d) => d.startsWith('reconcile:'))).toBe(true);
+  });
+
+  it('paused + BOTH stages failing → both degradation categories surface', async () => {
+    const governance = makeWorkerWorkspace({ consumer: false });
+    enableIngestion(governance);
+    fs.writeFileSync(path.join(governance, '.state', 'conversation-ingestion-consent.json'), '{not-json', 'utf8');
+    fs.writeFileSync(path.join(governance, '.state', 'trajectory.db'), 'garbage-not-sqlite', 'utf8');
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(result.mode).toBe('degraded');
+    expect(result.degradations?.some((d) => d.startsWith('catch_up:'))).toBe(true);
+    expect(result.degradations?.some((d) => d.startsWith('reconcile:'))).toBe(true);
+  });
+
+  it('paused + NO failures → clean paused, unchanged behavior', async () => {
+    const governance = makeWorkerWorkspace({ consumer: false });
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(result.mode).toBe('paused');
+    expect(result.reason).toBe('internalization_auto_consumer_disabled');
+    expect(result.degradations).toBeUndefined();
+  });
+});

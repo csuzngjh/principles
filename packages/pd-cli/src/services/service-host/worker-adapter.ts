@@ -129,6 +129,15 @@ export interface WorkerAdapterExecuteInput {
   readonly activeRelease: ActiveReleaseFacts;
   readonly invocationId: string;
   readonly timeoutMs: number;
+  /**
+   * Absolute MONOTONIC deadline (a `performance.now()` timestamp, ms) shared
+   * by every adapter bound to this workspace (P1-01 final-remediation
+   * review): the whole adapter path — entry resolution, config/env build,
+   * pre/post snapshots and the subprocess run — lives inside this one
+   * budget, not just the child's run time. When omitted the adapter derives
+   * one from `timeoutMs`. It is never persisted or used as wall clock.
+   */
+  readonly deadlineAtMs?: number;
   readonly signal?: AbortSignal;
   readonly identity: InstallIdentity;
   /** Environment the allowlist is applied to (default: process.env). */
@@ -241,8 +250,33 @@ const STDERR_TAIL_PERSIST = 400;
  * Closed reason codes produced by OUR worker survive verbatim; only
  * embedded path/whitespace noise is normalized.
  */
+// P2-04 (final-remediation review): path redaction must not stop at the
+// FIRST segment group — a Windows path containing spaces
+// (`C:\Users\Jane Doe\…`) used to leak its tail because the old pattern
+// required every segment to be whitespace-free. Middle segments may
+// contain spaces only when followed by another separator; the final
+// segment stays whitespace-bounded so an English sentence is not eaten.
+// eslint-disable-next-line no-control-regex -- control chars must not break path matching; they are stripped after redaction
+const WINDOWS_DRIVE_PATH = /[A-Za-z]:[\\/](?:[^\x00-\x1F\\/:*?"<>|]+[\\/])*[^\s\x00-\x1F\\/:*?"<>|]*/g;
+// eslint-disable-next-line no-control-regex -- same rationale as WINDOWS_DRIVE_PATH
+const WINDOWS_UNC_PATH = /\\\\[^\s\x00-\x1F\\/:*?"<>|]+[\\/](?:[^\x00-\x1F\\/:*?"<>|]+[\\/])*[^\s\x00-\x1F\\/:*?"<>|]*/g;
+// eslint-disable-next-line no-control-regex -- same rationale as WINDOWS_DRIVE_PATH
+const POSIX_ABS_PATH = /\/(?:[^\s"'`\\/:*?<>|\x00-\x1F]+\/)+[^\s"'`\\/:*?<>|\x00-\x1F]*/g;
+// Credential material must never reach a status file or plain log: only the
+// variable NAME survives (`FOO_API_KEY=<redacted>`), the value is dropped.
+const CREDENTIAL_ASSIGNMENT = /\b(?:[A-Za-z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[A-Za-z0-9_]*)\s*[=:]\s*["']?[^\s"'`,;]+/g;
+const BEARER_TOKEN = /\bBearer\s+[^\s"'`,;]+/g;
+const API_KEY_LIKE = /\b(?:sk|pk|ghp|gho|ghu|ghs|xox[baprs]|AIza|eyJ)[A-Za-z0-9_\-.]{7,}/g;
+
 export function sanitizeWorkerText(value: string, max: number = STDERR_TAIL_PERSIST): string {
-  const withoutPaths = value.replace(/(?:[A-Za-z]:)?(?:\\|\/)(?:[^\s"'`\\/:*?<>|]+(?:\\|\/))+[^\s"'`\\/:*?<>|]*/g, '<path>');
+  const withoutSecrets = value
+    .replace(BEARER_TOKEN, 'Bearer <redacted>')
+    .replace(CREDENTIAL_ASSIGNMENT, '<redacted>')
+    .replace(API_KEY_LIKE, '<redacted>');
+  const withoutPaths = withoutSecrets
+    .replace(WINDOWS_UNC_PATH, '<path>')
+    .replace(WINDOWS_DRIVE_PATH, '<path>')
+    .replace(POSIX_ABS_PATH, '<path>');
   const clean = withoutPaths.replace(/[^\x20-\x7E]+/g, ' ');
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
@@ -342,6 +376,11 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
       const now = input.probes?.now ?? (() => new Date());
       const startedDate = now();
       const workspaceDir = path.resolve(input.workspaceDir);
+      // P1-01: the workspace deadline is MONOTONIC and covers the entire
+      // adapter path, not only the subprocess window.
+      const deadlineAtMs = input.deadlineAtMs ?? (performance.now() + input.timeoutMs);
+      const remainingBudgetMs = (): number => deadlineAtMs - performance.now();
+      const budgetExhaustedNextAction = 'The per-workspace timeout budget was exhausted before this step finished (entry resolution/config/snapshot/post-cycle work counts against the same budget as the Worker run); raise --timeout-ms or select hosts in separate runs.';
       const adapterVersion: typeof WORKER_ADAPTER_CONTRACT_VERSION = WORKER_ADAPTER_CONTRACT_VERSION;
       const base = {
         hostKind: config.hostKind,
@@ -421,13 +460,20 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
       // ── Pre-cycle task snapshot (progress evidence, task §6) ──
       const before = readTaskProgressSnapshot(workspaceDir);
 
+      // ── Hard deadline check BEFORE spawn (P1-01 §C): config/env/snapshot
+      // work may have consumed the whole budget — a Worker must never start
+      // past it, and the refusal is a timeout, not a Worker failure. ──
+      if (remainingBudgetMs() <= 0) {
+        return finish('timeout', { reason: 'workspace_timeout_budget_exhausted', nextAction: budgetExhaustedNextAction, worker: { cliEntry: entry.entry, cliEntrySource: entry.source } });
+      }
+
       // ── The bounded real cycle: pd <host> worker --once --json --workspace <dir> ──
       const runProcess = input.probes?.spawnWorkerProcess ?? runWorkerProcess;
       const proc = await runProcess({
         cliEntry: entry.entry,
         args: [config.hostKind, 'worker', '--once', '--json', '--workspace', workspaceDir],
         env,
-        timeoutMs: input.timeoutMs,
+        timeoutMs: Math.max(1, Math.floor(remainingBudgetMs())),
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
       });
 
@@ -444,12 +490,16 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         environmentReport,
       };
 
-      // ── Post-cycle snapshot + diff ──
-      const after = readTaskProgressSnapshot(workspaceDir);
+      // ── Post-cycle snapshot is INSIDE the same budget (P1-01 §B): if the
+      // Worker consumed the deadline entirely, the snapshot is reported as
+      // evidence-unavailable rather than read past the deadline or faked. ──
+      const after = remainingBudgetMs() > 0
+        ? readTaskProgressSnapshot(workspaceDir)
+        : { ok: false as const, reason: 'workspace_timeout_budget_exhausted' };
       let taskProgress: TaskProgressEvidence | null = null;
       let evidenceReason: string | undefined;
-      if (!before.ok) evidenceReason = before.reason;
-      else if (!after.ok) evidenceReason = after.reason;
+      if (!before.ok) evidenceReason = sanitizeWorkerText(before.reason);
+      else if (!after.ok) evidenceReason = sanitizeWorkerText(after.reason);
       else taskProgress = diffTaskProgress(before.snapshot, after.snapshot);
 
       // ── Parse + guard the worker result (fail-closed, rc-1..rc-4) ──
@@ -471,7 +521,7 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         const resultWorkspace = readString(parsed, 'workspaceDir');
         const mode = readString(parsed, 'mode');
         if (resultWorkspace === null || !sameWorkspaceDir(resultWorkspace, workspaceDir)) {
-          parseProblem = `worker_result_rejected:workspace_mismatch${resultWorkspace === null ? '' : `(${resultWorkspace.slice(0, 120)})`}`;
+          parseProblem = `worker_result_rejected:workspace_mismatch${resultWorkspace === null ? '' : `(${sanitizeWorkerText(resultWorkspace, 120)})`}`;
           parsed = null;
         } else if (mode === null || !WORKER_RESULT_MODES.has(mode)) {
           parseProblem = `worker_result_rejected:unknown_mode${mode === null ? '' : `(${mode.slice(0, 40)})`}`;
@@ -504,7 +554,9 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
 
       // Process-level outcomes first (never fabricate a success over a kill).
       if (proc.spawnError !== undefined) {
-        return assemble({ outcome: 'unavailable', reason: proc.spawnError, nextAction: 'The Worker child could not be started; check the active release install and Node executable.', businessProgress: emptyProgress });
+        // P2-04: spawn errors are free-form OS text (paths, config
+        // fragments) — sanitize before the status file like stderr.
+        return assemble({ outcome: 'unavailable', reason: sanitizeWorkerText(proc.spawnError), nextAction: 'The Worker child could not be started; check the active release install and Node executable.', businessProgress: emptyProgress });
       }
       if (proc.timedOut) {
         return assemble({
@@ -562,6 +614,22 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         ...(evidenceReason !== undefined ? { evidenceReason } : {}),
       };
 
+      // P2-02 (final-remediation review): cycle OUTCOME and business
+      // PROGRESS are independent facts — a paused/degraded cycle can still
+      // have recorded real progress, and `lastProgressAt` must then carry
+      // the evidenced timestamp. Precedence: the trusted task-diff changedAt,
+      // then the worker's own persisted liveness completion time (a
+      // persisted fact, not the coordinator's clock) for corroborating-only
+      // evidence; no evidence → null, never a fabricated timestamp.
+      const progressAt = taskProgress?.taskStateChanged === true
+        ? taskProgress.changedAt
+        : (reportEvidence.diagnosticianSucceeded
+            || reportEvidence.downstreamRan
+            || reportEvidence.postProcessingResumed > 0
+            || reportEvidence.catchUpProcessed > 0)
+          ? (health.lastCycleCompletedAt ?? completedDate.toISOString())
+          : null;
+
       if (mode === 'paused') {
         // CodeRabbit review fix: a paused cycle may still carry non-blocking
         // degradations (WorkBuddy runs catch-up before the pause early-return).
@@ -575,11 +643,12 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
             outcome: 'degraded',
             reason: `paused_with_degradations:${degradations.join('|').slice(0, 160)}`,
             nextAction: workerNextAction ?? 'The cycle paused AND reported non-blocking degradations; investigate the degradation before treating the pause as clean.',
+            lastProgressAt: progressAt,
             businessProgress,
             workerMode: mode,
           });
         }
-        return assemble({ outcome: 'paused', reason: workerReason ?? 'paused', nextAction: workerNextAction, businessProgress, workerMode: mode });
+        return assemble({ outcome: 'paused', reason: workerReason ?? 'paused', nextAction: workerNextAction, lastProgressAt: progressAt, businessProgress, workerMode: mode });
       }
       if (mode === 'degraded') {
         // F7 review fix: a degraded CYCLE and persisted business progress are
@@ -591,7 +660,7 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
           outcome: 'degraded',
           reason: workerReason ?? 'degraded',
           nextAction: workerNextAction,
-          lastProgressAt: taskProgress?.taskStateChanged === true ? taskProgress.changedAt : null,
+          lastProgressAt: progressAt,
           businessProgress,
           workerMode: mode,
         });
@@ -622,7 +691,7 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
       if (taskProgress !== null && (taskProgress.taskStateChanged || cycleEvidence)) {
         return assemble({
           outcome: 'cycle_completed',
-          lastProgressAt: taskProgress.changedAt ?? completedDate.toISOString(),
+          lastProgressAt: progressAt ?? completedDate.toISOString(),
           businessProgress,
           workerMode: mode,
         });

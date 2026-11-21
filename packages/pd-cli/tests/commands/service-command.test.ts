@@ -347,3 +347,33 @@ describe('handler behavior through the real action', () => {
     }
   });
 });
+
+describe('P2-04 final-remediation — human output for records without a Worker execution', () => {
+  it('an exception record (budget exhausted / adapter threw) shows reason + nextAction, not a bare label', async () => {
+    const { printHumanShadow } = await import('../../src/commands/service-run-once.js');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const record = {
+      requestedDir: '/ws/dual', canonicalDir: '/ws/dual', hostKind: 'workbuddy',
+      admission: 'admitted', workspaceState: 'failed',
+      refusalReason: 'workspace_timeout_budget_exhausted',
+      refusalNextAction: 'raise --timeout-ms or select hosts in separate runs',
+      lastProgressAt: null, lastProgressSource: null,
+    };
+    const result = {
+      ok: true, outcome: 'completed', runId: 'r1',
+      identity: { pdHome: '/pd', homeDir: '/h', homeSource: 'env', mode: 'sandbox', environment: { experimentRootStripped: false, ignoredIdentityEnvVars: [], inheritedHostRootEnvVars: [] } },
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      manifest: { verdict: 'ok', hosts: [], workspacesCount: 1 },
+      discovery: { discoveredTotal: 1, counts: { authorized: 1 }, hostRoots: [], incomplete: false, workspaces: [] },
+      executions: [record],
+      statusWrite: { ok: true, path: '/pd/service/run-once-status.json' },
+      status: { nextAction: 'next' },
+    };
+    printHumanShadow(result as unknown as Parameters<typeof printHumanShadow>[0]);
+    const rendered = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(rendered).toContain('workspace_timeout_budget_exhausted');
+    expect(rendered).toContain('raise --timeout-ms');
+    expect(rendered).not.toContain('— adapter failure\n');
+    logSpy.mockRestore();
+  });
+});

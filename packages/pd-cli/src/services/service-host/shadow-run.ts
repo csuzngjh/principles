@@ -75,7 +75,7 @@ import type {
   WorkspaceDescriptor,
   resolveActiveReleaseCliEntry,
 } from './worker-adapter.js';
-import { WORKER_HOST_KINDS } from './worker-adapter.js';
+import { WORKER_HOST_KINDS, sanitizeWorkerText } from './worker-adapter.js';
 import type { WorkerProcessOptions, WorkerProcessResult } from './worker-process.js';
 import { createCodexWorkerAdapter } from './worker-adapter-codex.js';
 import { createWorkbuddyWorkerAdapter } from './worker-adapter-workbuddy.js';
@@ -242,7 +242,11 @@ function carriedProgress(result: AdapterCycleResult, previous: string | undefine
   if (result.businessProgress.taskStateChanged && result.lastProgressAt !== null) {
     return { lastProgressAt: result.lastProgressAt, lastProgressSource: 'task_state_change' };
   }
-  if (result.cycleOutcome === 'cycle_completed') {
+  // P2-02 (final-remediation review): a non-null lastProgressAt is real
+  // evidenced progress for ANY outcome — a paused/degraded cycle that
+  // persisted catch-up/downstream work keeps its timestamp too, not only a
+  // completed one.
+  if (result.cycleOutcome === 'cycle_completed' || result.lastProgressAt !== null) {
     return {
       lastProgressAt: result.lastProgressAt ?? previous ?? null,
       lastProgressSource: result.lastProgressAt !== null ? 'cycle_evidence' : previous !== undefined ? 'previous_run' : null,
@@ -493,10 +497,12 @@ async function completeShadowRun(identity: InstallIdentity, context: {
     dispatchedIdentities.add(requestedIdentity);
     const descriptor = buildDescriptor(entry);
     const hostKinds = options.hostFilter !== undefined ? [options.hostFilter] : [...WORKER_HOST_KINDS];
-    // CR review fix: `perWorkspaceTimeoutMs` is the budget for the WHOLE
-    // workspace — serial bound adapters share one deadline instead of each
-    // receiving a fresh full timeout.
-    const workspaceDeadline = Date.now() + timeoutMs;
+    // CR review fix + P1-01: `perWorkspaceTimeoutMs` is the budget for the
+    // WHOLE workspace — serial bound adapters share one deadline instead of
+    // each receiving a fresh full timeout, and the deadline is a MONOTONIC
+    // timestamp (performance.now) so wall-clock adjustments cannot stretch
+    // or collapse it.
+    const workspaceDeadline = performance.now() + timeoutMs;
     let ranAny = false;
     for (const hostKind of hostKinds) {
       // R2 review fix: same pre-dispatch check inside the host loop — an
@@ -508,7 +514,7 @@ async function completeShadowRun(identity: InstallIdentity, context: {
         continue; // Not binding evidence for THIS host — not an error; other hosts may still run.
       }
       ranAny = true;
-      const remainingMs = workspaceDeadline - Date.now();
+      const remainingMs = workspaceDeadline - performance.now();
       if (remainingMs <= 0) {
         // Budget exhausted by an earlier adapter on this workspace — record
         // the timeout truthfully instead of starting another Worker.
@@ -532,6 +538,9 @@ async function completeShadowRun(identity: InstallIdentity, context: {
           activeRelease,
           invocationId: randomUUID(),
           timeoutMs: remainingMs,
+          // P1-01: the absolute monotonic deadline rides along — the adapter
+          // checks it again before spawn and before the post-cycle snapshot.
+          deadlineAtMs: workspaceDeadline,
           ...(options.signal !== undefined ? { signal: options.signal } : {}),
           identity,
           inheritedEnv: context.env,
@@ -557,7 +566,8 @@ async function completeShadowRun(identity: InstallIdentity, context: {
           workspaceState: 'failed',
           lastProgressAt: previousProgress.at.get(requestedIdentity) ?? null,
           lastProgressSource: previousProgress.at.has(requestedIdentity) ? 'previous_run' : null,
-          refusalReason: `adapter_threw:${message.slice(0, 160)}`,
+          refusalReason: `adapter_threw:${sanitizeWorkerText(message, 160)}`,
+          refusalNextAction: 'The Worker Adapter threw before returning a structured result; inspect the adapter and workspace state, then re-run the shadow cycle.',
         });
         continue;
       }

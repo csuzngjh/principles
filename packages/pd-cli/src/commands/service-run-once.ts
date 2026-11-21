@@ -132,7 +132,7 @@ function printHumanRefusal(reason: string, nextAction: string): void {
 }
 
 /** Human rendering of one shadow execution (task §10: outcome + progress + health stay distinct). */
-function printHumanShadow(result: Extract<ShadowRunResult, { outcome: 'completed' }>): void {
+export function printHumanShadow(result: Extract<ShadowRunResult, { outcome: 'completed' }>): void {
   const { identity, activeRelease } = result;
   console.log(`pd service run-once (shadow) — install identity resolved`);
   console.log(`  pdHome:        ${identity.pdHome}`);
@@ -145,7 +145,11 @@ function printHumanShadow(result: Extract<ShadowRunResult, { outcome: 'completed
     }
     const { execution } = record;
     if (execution === undefined) {
-      console.log(`    [${record.workspaceState}] ${record.requestedDir} (${record.hostKind ?? '?'}) — adapter failure`);
+      // P2-04: records with no Worker execution (workspace_timeout_budget_
+      // exhausted, adapter_threw, worker_spawn_failed) still owe the human
+      // output their recorded reason and nextAction, not a bare label.
+      console.log(`    [${record.workspaceState}] ${record.requestedDir} (${record.hostKind ?? '?'}) — ${record.refusalReason ?? 'adapter failure'}`);
+      if (record.refusalNextAction !== undefined) console.log(`        next: ${record.refusalNextAction}`);
       continue;
     }
     const progress = record.lastProgressAt !== null ? record.lastProgressAt : 'none yet';

@@ -820,3 +820,172 @@ describe('CR review fixes — signal kill + paused degradations', () => {
     expect(result.reason).toBe('internalization_auto_consumer_disabled');
   });
 });
+
+describe('final-remediation review — monotonic workspace deadline (P1-01)', () => {
+  it('deadline already exhausted → spawnWorkerProcess is NEVER called and the outcome is a timeout, not a worker failure', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    let spawnCalls = 0;
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-budget',
+      timeoutMs: 60_000,
+      deadlineAtMs: performance.now() - 1,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => { spawnCalls += 1; return procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }) }); },
+      },
+    });
+    expect(spawnCalls).toBe(0);
+    expect(result.cycleOutcome).toBe('timeout');
+    expect(result.reason).toBe('workspace_timeout_budget_exhausted');
+    expect(result.lastProgressAt).toBeNull();
+  });
+
+  it('the deadline is MONOTONIC — a wall-clock probe reporting a far-future time does not expire the budget', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    let spawnCalls = 0;
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-mono',
+      timeoutMs: 5_000,
+      deadlineAtMs: performance.now() + 60_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        now: () => new Date(Date.now() + 10 * 365 * 24 * 3600 * 1000),
+        spawnWorkerProcess: async () => { spawnCalls += 1; return procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }) }); },
+      },
+    });
+    expect(spawnCalls).toBe(1);
+    expect(result.cycleOutcome).not.toBe('timeout');
+  });
+
+  it('a run that consumes the budget reports the post-cycle snapshot as evidence-unavailable inside the SAME budget', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-after-budget',
+      timeoutMs: 60_000,
+      deadlineAtMs: performance.now() + 60,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => {
+          await new Promise((r) => setTimeout(r, 120));
+          return procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }) });
+        },
+      },
+    });
+    expect(result.cycleOutcome).toBe('degraded');
+    expect(result.reason).toBe('progress_evidence_unavailable:workspace_timeout_budget_exhausted');
+  });
+});
+
+describe('final-remediation review — progress decoupled from outcome (P2-02)', () => {
+  it('a PAUSED cycle that still changed a task keeps the evidenced changedAt', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-paused-progress',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => {
+          const handle = await createRuntimeStateHandle({ workspaceDir: workspace, readonly: false, bootstrapIfMissing: true });
+          try {
+            await handle.stateManager.createTask({ taskId: 'paused-evidence', taskKind: 'diagnostician', status: 'pending', attemptCount: 0, maxAttempts: 3 });
+          } finally {
+            await handle.close().catch(() => undefined);
+          }
+          return procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'paused', reason: 'internalization_auto_consumer_disabled' }) });
+        },
+      },
+    });
+    expect(result.cycleOutcome).toBe('paused');
+    expect(result.businessProgress.taskStateChanged).toBe(true);
+    expect(result.lastProgressAt).not.toBeNull();
+  });
+
+  it('a paused cycle with NO evidence carries no timestamp — never a fabricated one', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-paused-empty',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'paused' }) }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('paused');
+    expect(result.businessProgress.taskStateChanged).toBe(false);
+    expect(result.lastProgressAt).toBeNull();
+  });
+
+  it('a DEGRADED cycle with corroborating report evidence records progress time (task §6 matrix)', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-degraded-progress',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({ workspaceDir: workspace, mode: 'degraded', report: { diagnostician: { status: 'succeeded' } } }),
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('degraded');
+    expect(result.lastProgressAt).not.toBeNull();
+  });
+});
+
+describe('final-remediation review — sanitizeWorkerText (P2-04)', () => {
+  it('redacts credential env values but keeps the variable name context gone, never the secret', async () => {
+    const { sanitizeWorkerText } = await import('../../../src/services/service-host/worker-adapter.js');
+    const out = sanitizeWorkerText('failed OPENAI_API_KEY=sk-s3cr3tvalue123 for https://x');
+    expect(out).not.toContain('sk-s3cr3tvalue123');
+    expect(out).not.toContain('OPENAI_API_KEY=sk');
+    const bearer = sanitizeWorkerText('Authorization: Bearer tok_abcdef123456');
+    expect(bearer).not.toContain('tok_abcdef123456');
+    const looseKey = sanitizeWorkerText('key material ghp_aBcDeFgH12345678 leaked');
+    expect(looseKey).not.toContain('ghp_aBcDeFgH12345678');
+  });
+
+  it('redacts Windows drive, spaced, UNC and POSIX paths without cutting mid-path', async () => {
+    const { sanitizeWorkerText } = await import('../../../src/services/service-host/worker-adapter.js');
+    const win = sanitizeWorkerText('ENOENT at C:\\Users\\Jane\\ws\\.pd\\state.db read');
+    expect(win).not.toContain('Jane');
+    expect(win).toContain('<path>');
+    const spaced = sanitizeWorkerText('ENOENT at C:\\Users\\Jane Doe\\ws\\.pd\\state.db read');
+    expect(spaced).not.toContain('Jane Doe');
+    const unc = sanitizeWorkerText('EIO at \\\\server\\share\\dir\\state.db');
+    expect(unc).not.toContain('server');
+    const posix = sanitizeWorkerText('ENOENT at /home/ubuntu/repos/ws/.pd/state.db');
+    expect(posix).not.toContain('ubuntu');
+  });
+
+  it('strips control characters and bounds length', async () => {
+    const { sanitizeWorkerText } = await import('../../../src/services/service-host/worker-adapter.js');
+    const ctrl = sanitizeWorkerText('a\x00b\x07c\x1Fd');
+    expect(ctrl).not.toMatch(/[\x00-\x1F]/);
+    const long = sanitizeWorkerText('x'.repeat(500), 100);
+    expect(long.length).toBeLessThanOrEqual(100);
+  });
+});
