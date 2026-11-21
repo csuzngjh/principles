@@ -1627,6 +1627,37 @@ describe("complete semantic swap verification via real CLI (P0-2)", () => {
     expect(report.positionExchange.invalidPairs).toBe(0);
   });
 
+  it("counter-image content from a different assignment is never paired", () => {
+    // Regression: a duplicate task reusing the same trajectories with
+    // inverted roles is NOT a position exchange of the same comparison —
+    // pairing requires the same assignmentKey.
+    const a = healthyPackage();
+    const aSwap = swapJudgePackage(a.blindPackage, a.secretBinding, "pkg-1:swap");
+    const crossTask = {
+      blindPackage: aSwap.blindPackage,
+      secretBinding: aSwap.secretBinding,
+      rawResponse: rawResponseOf({ displayVerdict: "B_BETTER" }),
+      record: healthyRecord(
+        aSwap,
+        "B_BETTER",
+        "j-2",
+        "cfg-candidate+case-1@v1+opp-2+rep-1+ref-1",
+      ),
+    };
+    const { report } = validateBundle(
+      "swap-cross-task",
+      bundle([
+        entryOf(a, "A_BETTER", "j-1"),
+        crossTask,
+        entryOf(a, "A_BETTER", "j-1", { swapOf: "pkg-1:swap" }),
+      ]),
+    );
+    // The declared claim on a different task's package is a binding defect,
+    // and the unpaired entries never enter the flip-rate denominator.
+    expect(codes(report)).toContain("SWAP_CONTENT_MISMATCH");
+    expect(report.positionExchange.evaluatedPairs).toBe(0);
+  });
+
   it("a chained explicit claim on an already-bound package is still reported", () => {
     // Regression: being claimed as a partner does not mute a package's own
     // explicit swapOf — A→B′ paired, then B′→C must still flag the double

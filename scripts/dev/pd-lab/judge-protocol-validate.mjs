@@ -588,10 +588,16 @@ function main() {
     // declaration is never skipped: it must reach the pairing checks so a
     // second claim on an already-bound package reports the conflict.
     if (pairedPackageIds.has(pkgId) && !declared) continue;
+    // A position exchange re-judges the SAME frozen comparison in inverted
+    // display order, so the partner must share this record's comparison
+    // identity (assignmentKey) — counter-image content alone is not enough:
+    // a different task reusing the same trajectories is not a position flip.
     const counterKey = (candidate) =>
       candidate &&
       candidate !== entry &&
       isPlainObject(candidate.blindPackage) &&
+      String(candidate.record?.assignmentKey) ===
+        String(entry.record?.assignmentKey) &&
       candidate.blindPackage.outputA === pkg.outputB &&
       candidate.blindPackage.outputB === pkg.outputA &&
       candidate.blindPackage.context === pkg.context;
@@ -624,7 +630,7 @@ function main() {
         packageId: pkgId,
         judgmentId,
         code: "SWAP_CONTENT_MISMATCH",
-        message: `declared swap partner ${declared} does not carry the exchanged outputs`,
+        message: `declared swap partner ${declared} is not the counter-image of the same comparison (assignmentKey and exchanged outputs must both match)`,
       });
       continue;
     }
