@@ -156,11 +156,19 @@ function packageProblem(blindPackage) {
   if (blindPackage.truncation !== undefined) {
     if (!Array.isArray(blindPackage.truncation))
       return "blindPackage.truncation must be an array when present";
+    const sidesSeen = new Set();
     for (const entry of blindPackage.truncation) {
       if (!isPlainObject(entry))
         return "each truncation entry must be an object";
       if (!TRUNCATION_SIDES.includes(entry.truncatedSide))
         return "truncation entry truncatedSide must be A, B or CONTEXT";
+      // CR5: one truncation fact per side — a duplicate side would be
+      // silently overwritten by the role-canonical digest and the tamper
+      // would stay digest-invisible. Rejected here (same rule as
+      // comparisonInputDigestOf) before any digest is computed.
+      if (sidesSeen.has(entry.truncatedSide))
+        return `duplicate truncation fact for side ${entry.truncatedSide}`;
+      sidesSeen.add(entry.truncatedSide);
       if (
         !Number.isInteger(entry.truncatedAt) ||
         entry.truncatedAt <= 0 ||
@@ -303,9 +311,12 @@ function main() {
       2,
     );
   }
-  const arbitrations = Array.isArray(bundle.arbitrations)
-    ? bundle.arbitrations
-    : [];
+  const arbitrations = bundle.arbitrations ?? [];
+  // CR1: a non-array arbitrations field is a malformed bundle, not "no
+  // arbitrations" — treating an object-valued record as an empty list would
+  // silently drop the operator's arbitration evidence and exit 0.
+  if (!Array.isArray(arbitrations))
+    fail("bundle.arbitrations must be an array when present", 2);
 
   // Optional preregistered judge-slot registry (T4 parity). When the bundle
   // carries one, every record's judgeSlotId must be in it; when it does
@@ -384,7 +395,7 @@ function main() {
       ? String(entry.blindPackage.packageId)
       : "<missing>";
     const judgmentId = isPlainObject(entry?.record)
-      ? String(entry.record.judgmentId ?? "<missing>")
+      ? diagnosticId(entry.record.judgmentId)
       : "<missing>";
     // Every problem raised for this entry also marks the record invalid —
     // record validity is the aggregation of ALL per-entry checks (P1-1).
@@ -643,7 +654,7 @@ function main() {
     if (!isPlainObject(entry?.blindPackage)) continue;
     const pkg = entry.blindPackage;
     const pkgId = String(pkg.packageId);
-    const judgmentId = String(entry.record?.judgmentId ?? "<missing>");
+    const judgmentId = diagnosticId(entry.record?.judgmentId);
     if (entry.swapOf !== undefined && !isNonEmptyString(entry.swapOf)) {
       report({
         packageId: pkgId,
@@ -673,10 +684,16 @@ function main() {
     // display order, so the partner must share this record's comparison
     // identity (assignmentKey) — counter-image content alone is not enough:
     // a different task reusing the same trajectories is not a position flip.
+    // CR3: the partner must also be a DIFFERENT package — a position
+    // exchange always produces a distinct swapped package; two judgments of
+    // the SAME package are re-judgments/retries, never an exchange pair
+    // (with identical A/B texts the content check alone would pair them and
+    // the downstream semantic checks would reject the whole bundle).
     const counterKey = (candidate) =>
       candidate &&
       candidate !== entry &&
       isPlainObject(candidate.blindPackage) &&
+      String(candidate.blindPackage.packageId) !== pkgId &&
       String(candidate.record?.assignmentKey) ===
         String(entry.record?.assignmentKey) &&
       candidate.blindPackage.outputA === pkg.outputB &&
@@ -848,7 +865,7 @@ function main() {
     if (arbProblem !== null) {
       report({
         packageId: "<arbitration>",
-        judgmentId: String(arbitration?.arbitrationId ?? "<missing>"),
+        judgmentId: diagnosticId(arbitration?.arbitrationId),
         code: "INVALID_ARBITRATION_RECORD",
         message: `arbitration ${arbitration?.arbitrationId ?? "<missing>"}: ${arbProblem}`,
       });
@@ -1078,7 +1095,7 @@ function main() {
     return {
       assignmentKey: key,
       judgmentIds: rows
-        .map((row) => String(row.entry.record.judgmentId ?? "<missing>"))
+        .map((row) => diagnosticId(row.entry.record.judgmentId))
         .sort(),
       // Diagnostics only — the T4 merge decides who actually voted.
       votingJudgments: voting.map((d) => d.judgmentId).sort(),
@@ -1109,7 +1126,7 @@ function main() {
     if (!matchedArbitrations.has(arbitration)) {
       report({
         packageId: "<arbitration>",
-        judgmentId: String(arbitration?.arbitrationId ?? "<missing>"),
+        judgmentId: diagnosticId(arbitration?.arbitrationId),
         code: "INVALID_ARBITRATION_RECORD",
         message: `arbitration ${arbitration?.arbitrationId ?? "<missing>"} references assignment ${arbitration?.assignmentKey ?? "<missing>"} which is neither declared in bundle.assignments nor carried by any judgment record in this bundle`,
       });
@@ -1157,6 +1174,16 @@ function main() {
   process.exitCode = valid ? 0 : 1;
 }
 
+// CR2: diagnostic labels for untrusted id fields. JSON-derived values can
+// never make String() throw, but an object-valued judgmentId would render
+// as "[object Object]" — labels stay honest and greppable instead, and
+// comparison keys stay string-typed.
+function diagnosticId(value) {
+  if (typeof value === "string") return value.length > 0 ? value : "<empty>";
+  if (value === null || value === undefined) return "<missing>";
+  return `<non-string:${Array.isArray(value) ? "array" : typeof value}>`;
+}
+
 function pairReport(entry, partnerEntry, swapProblemCodes, derivedByEntry) {
   const pkg = entry.blindPackage;
   const partnerPackage = partnerEntry.blindPackage;
@@ -1184,15 +1211,24 @@ function pairReport(entry, partnerEntry, swapProblemCodes, derivedByEntry) {
     rightDerived !== null &&
     rightDerived.valid;
   const pairValid = swapProblemCodes.length === 0 && recordsValid;
-  // consistent only when BOTH restored verdicts are determinate and equal —
-  // UNKNOWN/FAILED/missing results are disclosed as undetermined, never
-  // counted as consistent (P0-2); only valid pairs enter the denominator.
+  // CR4: a FAILED attempt may retain its parsed verdict text (audit
+  // evidence), but it never votes — a valid pair with a failed side is
+  // UNDETERMINED, never consistent.
+  const neitherFailed =
+    leftDerived !== null &&
+    rightDerived !== null &&
+    !leftDerived.failed &&
+    !rightDerived.failed;
+  // consistent only when BOTH restored verdicts are determinate, neither
+  // side failed, and the verdicts are equal — UNKNOWN/FAILED/missing
+  // results are disclosed as undetermined, never counted as consistent
+  // (P0-2/CR4); only valid pairs enter the denominator.
   let result = null;
   if (pairValid) {
     const determinate = (v) =>
       v === "CANDIDATE_BETTER" || v === "TIE" || v === "REFERENCE_BETTER";
     result =
-      determinate(left) && determinate(right)
+      determinate(left) && determinate(right) && neitherFailed
         ? left === right
           ? "consistent"
           : "flipped"

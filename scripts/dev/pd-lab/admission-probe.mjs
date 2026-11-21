@@ -333,6 +333,12 @@ function loadD6Decision(file, datasetSha256) {
       actual: datasetSha256,
     });
   }
+  if (
+    p.trajectoryDbSha256 !== undefined &&
+    (typeof p.trajectoryDbSha256 !== 'string' || !D6_DATASET_SHA_RE.test(p.trajectoryDbSha256))
+  ) {
+    structuralFailure('d6_decision_invalid', 'd6.parameters.trajectoryDbSha256 must be 64-char lowercase hex when present', { file });
+  }
   return {
     file,
     fileSha256,
@@ -344,6 +350,7 @@ function loadD6Decision(file, datasetSha256) {
       storageScope: p.storageScope,
       dataSource: p.dataSource,
       retentionDays: p.retentionDays,
+      ...(p.trajectoryDbSha256 !== undefined ? { trajectoryDbSha256: p.trajectoryDbSha256 } : {}),
     },
   };
 }
@@ -2473,6 +2480,20 @@ function main() {
 
     const trajectorySha256 = sha256FileOrFailure('trajectory_db', trajectoryDbPath);
     const blobManifestSha256 = sha256FileOrFailure('blob_manifest', blobManifestPath);
+    // DV8: a snapshot-pinned D6 decision must cover the trajectory.db this
+    // run is about to read — a mismatch is out-of-scope data access and
+    // fails closed before any report is written.
+    if (
+      d6Grant !== null &&
+      d6Grant.parameters.trajectoryDbSha256 !== undefined &&
+      d6Grant.parameters.trajectoryDbSha256 !== trajectorySha256
+    ) {
+      structuralFailure('d6_decision_invalid', 'the D6 decision pinned a different trajectory snapshot (trajectoryDbSha256 mismatch) — reading this snapshot would exceed the granted data scope', {
+        file: d6Grant.file,
+        authorized: d6Grant.parameters.trajectoryDbSha256,
+        actual: trajectorySha256,
+      });
+    }
 
     const perSample = [];
     const blobHashCache = new Map(); // ref -> safety-verified read outcome ({ok,sha256}|{ok:false,reason,detail})
@@ -2823,7 +2844,9 @@ function main() {
           // whose frozen datasetSha256 equals this dataset's digest (the
           // loader fails closed otherwise). The binding is echoed in full
           // so downstream T6 qualification can re-verify report <-> D6
-          // consistency mechanically.
+          // consistency mechanically. DV8: a snapshot-pinned decision must
+          // match the trajectory.db this run actually opened — checked
+          // here, at the single point where the snapshot bytes are known.
           status: 'RAN_WITH_D6',
           d6Decision: {
             file: d6Grant.file,
@@ -2841,8 +2864,17 @@ function main() {
             dataSource: d6Grant.parameters.dataSource,
             retentionDays: d6Grant.parameters.retentionDays,
             snapshotDir,
+            snapshotTrajectorySha256: trajectorySha256,
           },
           result: 'full-fidelity admission probe executed under the bound D6 authorization',
+          ...(d6Grant.parameters.trajectoryDbSha256 !== undefined
+            ? {
+                snapshotBinding: {
+                  authorizedTrajectoryDbSha256: d6Grant.parameters.trajectoryDbSha256,
+                  matches: true, // a mismatch failed closed before the report
+                },
+              }
+            : {}),
         }
       : {
           // Without Owner decision D6 (full-fidelity data authorization) this

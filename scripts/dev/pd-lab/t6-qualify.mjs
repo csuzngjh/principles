@@ -27,7 +27,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { qualifyT6 } from "./t6-qualification.mjs";
+import { qualifyT6, validateQualificationInput } from "./t6-qualification.mjs";
 
 const USAGE = [
   "usage: t6-qualify.mjs \\",
@@ -164,6 +164,16 @@ function main() {
   }
   if (!isPlainObject(input)) {
     fail("input must be a JSON object", 2);
+  }
+  // CR11: structural validation BEFORE any evidence path is resolved — an
+  // invalid input never touches a single evidence file, and its rejection
+  // message is the engine's own problem list.
+  const preflight = validateQualificationInput(input);
+  if (!preflight.ok) {
+    process.stderr.write(
+      `t6-qualify: structurally invalid qualification input:\n  - ${preflight.problems.join("\n  - ")}\n`,
+    );
+    process.exit(1);
   }
 
   // ── Evidence resolution (P0-1): every bound artifactRef is read, its

@@ -150,6 +150,12 @@ export const QUALIFICATION_REASON_CODES = Object.freeze([
 // approver's authenticity; that provenance limit is disclosed honestly.
 export const QUALIFICATION_DISCLOSURE_CODES = Object.freeze([
   "AUTHORITY_PROVENANCE_UNVERIFIED",
+  // CR10: a granted D2 that does not name the preregistration it froze
+  // cannot cryptographically bind this qualification to one registration
+  // file — a numerically identical registration with a flipped exploratory
+  // marker would pass the numeric checks. Disclosed so the Owner can
+  // require the digest binding in future decisions.
+  "PREREGISTRATION_IDENTITY_UNBOUND",
 ]);
 
 // 2^-n underflows below every practical alpha/2 long before this bound; the
@@ -413,6 +419,21 @@ function approvalParameters(document, scope) {
       return { valid: false, problem: "d2.parameters.repetitions must be an integer >= 1" };
     if (!isNonEmptyString(p.licenseConditions))
       return { valid: false, problem: "d2.parameters.licenseConditions must be a non-empty string" };
+    // Optional preregistration identity binding (CR10): an Owner decision
+    // may freeze WHICH preregistration file it authorizes (content digest);
+    // the engine then rejects a swapped registration with identical numbers
+    // but a different exploratory marker. Absent binding is disclosed, not
+    // assumed.
+    if (
+      p.preregistrationSha256 !== undefined &&
+      (typeof p.preregistrationSha256 !== "string" ||
+        !/^[0-9a-f]{64}$/.test(p.preregistrationSha256))
+    )
+      return {
+        valid: false,
+        problem:
+          "d2.parameters.preregistrationSha256 must be a 64-char lowercase hex digest when present",
+      };
     return {
       valid: true,
       parameters: {
@@ -423,6 +444,9 @@ function approvalParameters(document, scope) {
         callBudget: p.callBudget,
         repetitions: p.repetitions,
         licenseConditions: p.licenseConditions,
+        ...(p.preregistrationSha256 !== undefined
+          ? { preregistrationSha256: p.preregistrationSha256 }
+          : {}),
       },
     };
   }
@@ -460,6 +484,20 @@ function approvalParameters(document, scope) {
     return { valid: false, problem: "d6.parameters.dataSource must be a non-empty string" };
   if (!isPositiveInteger(p.retentionDays))
     return { valid: false, problem: "d6.parameters.retentionDays must be an integer >= 1" };
+  // Optional snapshot binding (DV8): a D6 decision may pin the exact
+  // trajectory.db bytes the authorized probe must read — without it the
+  // probe's own report still echoes the snapshot digests it actually read
+  // (admission report snapshot block), and the operator-side dataset
+  // binding is the enforced floor.
+  if (
+    p.trajectoryDbSha256 !== undefined &&
+    (typeof p.trajectoryDbSha256 !== "string" ||
+      !DATASET_SHA256_RE.test(p.trajectoryDbSha256))
+  )
+    return {
+      valid: false,
+      problem: "d6.parameters.trajectoryDbSha256 must be 64-char lowercase hex when present",
+    };
   return {
     valid: true,
     parameters: {
@@ -468,6 +506,9 @@ function approvalParameters(document, scope) {
       storageScope: p.storageScope,
       dataSource: p.dataSource,
       retentionDays: p.retentionDays,
+      ...(p.trajectoryDbSha256 !== undefined
+        ? { trajectoryDbSha256: p.trajectoryDbSha256 }
+        : {}),
     },
   };
 }
@@ -704,6 +745,14 @@ function deriveCalibrationFacts(document) {
     if (!invocationModel.valid)
       return { interpretable: false, invocationModelMissing: invocation.invocationId };
     if (invocation.status === "FAILED") {
+      // A FAILED call was still a REAL model invocation (D2 froze the model
+      // for the calls that are made, not only the ones that succeed) — its
+      // serving model must match the report-level judgeModel too (DV6).
+      if (!modelsEqual(invocationModel, judgeModel))
+        return {
+          interpretable: false,
+          invocationModelMismatch: invocation.invocationId,
+        };
       failed += 1;
       continue;
     }
@@ -721,8 +770,13 @@ function deriveCalibrationFacts(document) {
       return { interpretable: false, positionExchangeMissing: invocation.invocationId };
     succeeded += 1;
     if (invocation.judgeVerdict === invocation.referenceVerdict) agreed += 1;
-    positionExchanged += 1;
-    if (!invocation.positionExchangeConsistent) positionFlipped += 1;
+    // Position-flip denominator: only DETERMINATE judge verdicts count
+    // (judge-protocol semantics: UNKNOWN/failed outcomes are undetermined,
+    // never dilute the flip rate) — DV3.
+    if (invocation.judgeVerdict !== "UNKNOWN") {
+      positionExchanged += 1;
+      if (!invocation.positionExchangeConsistent) positionFlipped += 1;
+    }
   }
   // precisionTargetMet recomputed from the raw evidence — never the
   // report's own boolean (a zero-denominator calibration claims nothing).
@@ -765,6 +819,7 @@ function deriveOwnerReviewFacts(document) {
   )
     return fail;
   const seenSampleIds = new Set();
+  const seenReviewUnits = new Set();
   let agreeing = 0;
   const disagreements = { VERDICT_CONFLICT: 0, TIE_VS_WIN: 0, REASON_CONFLICT: 0 };
   let rechecked = 0;
@@ -783,6 +838,16 @@ function deriveOwnerReviewFacts(document) {
     if (seenSampleIds.has(sample.sampleId))
       return { interpretable: false, duplicateSample: sample.sampleId };
     seenSampleIds.add(sample.sampleId);
+    // D5 authorizes blind-review SAMPLE PAIRS — one review unit is one
+    // package in one display order (a legitimate position exchange reviews
+    // the counter-package in the other order, a DIFFERENT unit). Reviewing
+    // the same package in the same order twice under fresh sampleIds does
+    // not add independent evidence — it is invalid, never recounted
+    // (DV4/CR7).
+    const reviewUnit = `${sample.packageId}\u0000${sample.displayOrder}`;
+    if (seenReviewUnits.has(reviewUnit))
+      return { interpretable: false, duplicateReviewUnit: sample.packageId };
+    seenReviewUnits.add(reviewUnit);
     // The identity map is the secret-side binding the Owner's display
     // verdicts were formed against; the restored verdict must be exactly
     // what the protocol's own restoration produces — a mismatch means the
@@ -814,7 +879,11 @@ function deriveOwnerReviewFacts(document) {
     agreementRate: sampleCount > 0 ? agreeing / sampleCount : null,
     disagreementCounts: disagreements,
     recheckedCount: rechecked,
-    allRecheckStable: rechecked === sampleCount && sampleCount > 0,
+    recheckStableCount: recheckStable,
+    // D5 stability gate: EVERY sample must be STABLE on recheck — a mere
+    // recheck count ignores UNSTABLE outcomes (DV2/CR8); NOT_RECHECKED
+    // samples fail the gate too.
+    allRecheckStable: sampleCount > 0 && recheckStable === sampleCount,
   };
 }
 
@@ -854,8 +923,17 @@ function derivePreregistrationFacts(document) {
 // a D6-authorized run; it can never be claimed by a fixture run). P1-6: the
 // probe's positive state must ALSO cite the dataset digest the D6 decision
 // authorized — a RAN_WITH_D6 report over a different dataset than the one
-// D6 froze is not authorized data access.
-function deriveDataPathAuthorization(d6Approved, admissionDoc, d6Parameters) {
+// D6 froze is not authorized data access. DV5/CR9: the probe must moreover
+// have run under the SAME decision record this input binds — the probe's
+// echoed d6Decision.sha256 (the decision file's byte digest) must equal the
+// verified digest of the bound artifact, so a newer decision for the same
+// dataset can't silently back an older probe run.
+function deriveDataPathAuthorization(
+  d6Approved,
+  admissionDoc,
+  d6Parameters,
+  d6BindingSha256,
+) {
   if (!d6Approved) return false;
   if (
     !isPlainObject(admissionDoc) ||
@@ -868,14 +946,23 @@ function deriveDataPathAuthorization(d6Approved, admissionDoc, d6Parameters) {
   // rejected, and so is any other value the producer never agreed to emit.
   if (admissionDoc.realDataProbe.status !== "RAN_WITH_D6") return false;
   // The dataset the probe actually ran over must be the dataset the D6
-  // decision authorized (digest equality, both sides).
+  // decision authorized (digest equality on the probe's own echo AND the
+  // report's dataset block — CR9: read the probeScope echo, not a caller
+  // field).
   const probedDataset =
-    admissionDoc.realDataProbe.datasetSha256 ?? admissionDoc.dataset?.sha256 ?? null;
-  return (
-    d6Parameters !== null &&
-    d6Parameters.datasetSha256 === probedDataset &&
-    admissionDoc.dataset?.sha256 === d6Parameters.datasetSha256
-  );
+    admissionDoc.realDataProbe.probeScope?.datasetSha256 ??
+    admissionDoc.dataset?.sha256 ??
+    null;
+  if (
+    d6Parameters === null ||
+    d6Parameters.datasetSha256 !== probedDataset ||
+    admissionDoc.dataset?.sha256 !== d6Parameters.datasetSha256
+  )
+    return false;
+  // Decision-record identity: the probe's echoed decision digest must match
+  // the bound D6 artifact's verified digest.
+  const echoedDecisionSha = admissionDoc.realDataProbe.d6Decision?.sha256 ?? null;
+  return echoedDecisionSha !== null && echoedDecisionSha === d6BindingSha256;
 }
 
 // Data integrity is proven only by a verified admission report whose
@@ -1063,6 +1150,7 @@ export function qualifyT6(input, resolvedEvidence = null) {
             d6Approval.parameters !== null
             ? d6Approval.parameters
             : null,
+          boundApproval("d6") !== null ? boundApproval("d6").sha256 : null,
         )
       : null;
 
@@ -1123,6 +1211,24 @@ export function qualifyT6(input, resolvedEvidence = null) {
         `D2 authorized a call budget of ${d2Params.callBudget} but the calibration records ${calibrationFacts.auditCallCount} calls`,
       );
   }
+  // D2 <-> the preregistration identity (CR10): when the decision froze the
+  // registration file's digest, the bound artifact must be exactly that
+  // file; without the binding the limitation is disclosed.
+  if (d2Params !== null) {
+    const preregDigest = evidenceBindings.preregistration?.sha256 ?? null;
+    if (d2Params.preregistrationSha256 !== undefined) {
+      if (preregDigest !== d2Params.preregistrationSha256)
+        parameterMismatch(
+          `D2 froze preregistration ${d2Params.preregistrationSha256} but the bound registration is ${preregDigest ?? "absent"}`,
+        );
+    } else {
+      disclosures.push({
+        code: "PREREGISTRATION_IDENTITY_UNBOUND",
+        message:
+          "the granted D2 decision does not name the preregistration file it froze (preregistrationSha256 absent) — the numeric checks hold, but a swapped registration with a flipped exploratory marker cannot be cryptographically excluded; require the digest binding in future decisions",
+      });
+    }
+  }
   // D5 <-> the Owner blind review that actually ran (sample floor + thresholds).
   // The floor/threshold checks apply to a COMPLETED (PASSED) review claim —
   // a NOT_RUN review is an honest "not finished yet" (handled as an
@@ -1166,8 +1272,17 @@ export function qualifyT6(input, resolvedEvidence = null) {
       `D5 allowed a position-flip rate <= ${d5Params.maxPositionFlipRate} but the calibration records ${calibrationFacts.positionFlipRate}`,
     );
   // D6 <-> the dataset that was actually probed (three-way digest equality:
-  // decision <-> admission report <-> source-groups mapping).
-  if (d6Params !== null && admission !== null && sourceGroups !== null) {
+  // decision <-> admission report <-> source-groups mapping). DV7: the
+  // parameter checks only run on plain-object documents — a bound artifact
+  // whose bytes parse to a JSON null/scalar must degrade to artifact-invalid
+  // checks elsewhere, never throw.
+  if (
+    d6Params !== null &&
+    admission !== null &&
+    sourceGroups !== null &&
+    isPlainObject(admission.document) &&
+    isPlainObject(sourceGroups.document)
+  ) {
     if (
       isNonEmptyString(admission.document.dataset?.sha256) &&
       admission.document.dataset.sha256 !== d6Params.datasetSha256
@@ -1181,6 +1296,17 @@ export function qualifyT6(input, resolvedEvidence = null) {
     )
       parameterMismatch(
         `D6 authorized dataset ${d6Params.datasetSha256} but the source-groups mapping is bound to ${sourceGroups.document.datasetSha256}`,
+      );
+    // DV8: a snapshot-pinned decision must match the snapshot the report
+    // actually read (the admission report's trajectory-db digest).
+    if (
+      d6Params.trajectoryDbSha256 !== undefined &&
+      isNonEmptyString(admission.document.snapshot?.trajectoryDb?.sha256) &&
+      admission.document.snapshot.trajectoryDb.sha256 !==
+        d6Params.trajectoryDbSha256
+    )
+      parameterMismatch(
+        `D6 pinned trajectory snapshot ${d6Params.trajectoryDbSha256} but the probe read ${admission.document.snapshot.trajectoryDb.sha256}`,
       );
   }
   if (parameterFindings.length > 0) addBlocked("APPROVAL_PARAMETER_MISMATCH");
@@ -1282,7 +1408,11 @@ export function qualifyT6(input, resolvedEvidence = null) {
     calibration,
     calibrationFacts,
     (c) => c.status,
-    (c) => c.modelCallCount,
+    // CR6: the declared count is the ACTUAL call total (successes AND
+    // failures — the calls really happened); the recomputed audit total is
+    // its counterpart. Success sufficiency is proven separately by the
+    // recomputed precision (a zero-success denominator claims nothing).
+    (c) => (c.auditCallCount !== undefined ? c.auditCallCount : c.modelCallCount),
   );
   checkClaim(
     "ownerBlindReview",

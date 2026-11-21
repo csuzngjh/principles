@@ -1613,8 +1613,9 @@ describe("D6 positive data-path binding (P1-6, engine side)", () => {
     const input = grantedInput();
     const ev = resolvedFor(input) as Record<string, any>;
     // The report claims RAN_WITH_D6, the D6 decision authorized THIS
-    // dataset — but the probe actually ran over a different one.
-    ev.admissionReport.document.realDataProbe.datasetSha256 = "f".repeat(64);
+    // dataset — but the probe actually ran over a different one (the
+    // probeScope echo is the authoritative record of what was probed).
+    ev.admissionReport.document.realDataProbe.probeScope.datasetSha256 = "f".repeat(64);
     const result = qualifyT6(input, ev as never);
     expect(result.status).toBe("BLOCKED");
     expect(result.blockedReasons).toContain("DATA_PATH_AUTHORIZATION_INVALID");
@@ -1624,6 +1625,153 @@ describe("D6 positive data-path binding (P1-6, engine side)", () => {
     const result = run(grantedInput());
     expect(result.status).toBe("CONFIRMATORY_READY");
     expect(result.checks.dataPathAuthorizationValid).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Devin/CodeRabbit round-4 findings — evidence-binding regressions.
+// ---------------------------------------------------------------------------
+
+describe("review round-4 hardening (Devin/CodeRabbit)", () => {
+  it("DV2/CR8: an UNSTABLE recheck fails the D5 stability gate even when every sample was rechecked", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.ownerBlindReview.document.samples[3].recheckStability = "UNSTABLE";
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    expect(
+      result.evidenceCheck.approvalParameterBinding.findings.join(" "),
+    ).toContain("not all STABLE");
+  });
+
+  it("DV3: UNKNOWN judge verdicts stay OUT of the position-flip denominator (no dilution)", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    const invocations = ev.judgeCalibration.document.invocations;
+    // Half the calls are UNKNOWN (their reference verdicts are UNKNOWN too,
+    // so agreement stays perfect) and "flipped"; the determinate half is
+    // all consistent. Old behavior: flipRate 20/40 = 0.5 > 0.2 → mismatch.
+    // Fixed behavior: UNKNOWN never enters the denominator → 0/20 = 0.
+    for (let i = 0; i < invocations.length / 2; i += 1) {
+      invocations[i].judgeVerdict = "UNKNOWN";
+      invocations[i].referenceVerdict = "UNKNOWN";
+      invocations[i].positionExchangeConsistent = false;
+    }
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("CONFIRMATORY_READY");
+    expect(result.blockedReasons).not.toContain("APPROVAL_PARAMETER_MISMATCH");
+    // A genuinely flipped determinate half still exceeds the 0.2 cap.
+    const flipped = resolvedFor(input) as Record<string, any>;
+    const finv = flipped.judgeCalibration.document.invocations;
+    for (let i = 0; i < finv.length / 2; i += 1)
+      finv[i].positionExchangeConsistent = false;
+    const flippedResult = qualifyT6(input, flipped as never);
+    expect(flippedResult.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    expect(
+      flippedResult.evidenceCheck.approvalParameterBinding.findings.join(" "),
+    ).toContain("position-flip rate");
+  });
+
+  it("DV4/CR7: reviewing the SAME package in the SAME order twice does not add sample pairs", () => {
+    const input = grantedInput({ ownerBlindReview: { status: "PASSED", sampleCount: 40 } });
+    const ev = resolvedFor(input) as Record<string, any>;
+    const samples = ev.ownerBlindReview.document.samples;
+    // Re-review pkg-1 (same displayOrder) under a fresh sampleId.
+    const dupe = { ...samples[1], sampleId: "s-dup", packageId: samples[0].packageId };
+    samples.push(dupe);
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("DV5/CR9: a probe report citing a DIFFERENT D6 decision than the bound one is rejected", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.admissionReport.document.realDataProbe.d6Decision.sha256 = `sha256:${"a".repeat(63)}0`;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("DATA_PATH_AUTHORIZATION_INVALID");
+  });
+
+  it("DV6: a FAILED invocation served by a model the report never declared is invalid evidence", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.judgeCalibration.document.invocations[0].status = "FAILED";
+    ev.judgeCalibration.document.invocations[0].model = {
+      provider: "off-book-provider",
+      modelId: "off-book",
+      version: "0",
+    };
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("DV7: a bound artifact whose bytes are a bare JSON null degrades to BLOCKED, never a crash", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.admissionReport.document = null;
+    ev.sourceGroups.document = null;
+    let result;
+    expect(() => {
+      result = qualifyT6(input, ev as never);
+    }).not.toThrow();
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("CR6: the declared call count is the ACTUAL total — successes AND failures", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    const invocations = ev.judgeCalibration.document.invocations;
+    // 39 succeeded + 1 failed, input declares 40 total calls: the audit
+    // total matches (the old succeeded-only comparison rejected this).
+    invocations[0].status = "FAILED";
+    const result = qualifyT6(input, ev as never);
+    expect(result.evidenceCheck.artifacts.judgeCalibration.verdict).toBe(
+      "match",
+    );
+    expect(result.status).toBe("CONFIRMATORY_READY");
+    // Declaring 39 against 40 actual calls (same evidence) is a mismatch.
+    const under = JSON.parse(JSON.stringify(input));
+    under.judgeModelCalibration.modelCallCount = 39;
+    const underResult = qualifyT6(under, ev as never);
+    expect(underResult.blockedReasons).toContain("EVIDENCE_CLAIM_MISMATCH");
+  });
+
+  it("DV8: a D6 decision pinning a trajectory snapshot rejects a report read from another snapshot", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.approvals.d6.document.parameters.trajectoryDbSha256 = "9".repeat(64);
+    ev.admissionReport.document.snapshot = {
+      consistencyStatus: "CONSISTENT_WITHIN_WINDOW",
+      trajectoryDb: { sha256: "8".repeat(64) },
+    };
+    const result = qualifyT6(input, ev as never);
+    expect(result.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    expect(
+      result.evidenceCheck.approvalParameterBinding.findings.join(" "),
+    ).toContain("pinned trajectory snapshot");
+  });
+
+  it("CR10: a D2 decision that freezes the preregistration digest rejects a swapped registration", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.approvals.d2.document.parameters.preregistrationSha256 = "7".repeat(64);
+    const result = qualifyT6(input, ev as never);
+    expect(result.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    expect(
+      result.evidenceCheck.approvalParameterBinding.findings.join(" "),
+    ).toContain("froze preregistration");
+    // Without the digest binding the limitation is DISCLOSED, not blocking.
+    const unbound = resolvedFor(input) as Record<string, any>;
+    delete unbound.approvals.d2.document.parameters.preregistrationSha256;
+    const unboundResult = qualifyT6(input, unbound as never);
+    expect(unboundResult.status).toBe("CONFIRMATORY_READY");
+    expect(
+      unboundResult.disclosures.map((d: { code: string }) => d.code),
+    ).toContain("PREREGISTRATION_IDENTITY_UNBOUND");
   });
 });
 
@@ -1758,14 +1906,33 @@ describe("t6-qualify CLI", () => {
   // fixture path — the CLI recomputes it from the bytes).
   function writeEvidence(dir: string, input: Record<string, any>) {
     const resolved = resolvedFor(input) as Record<string, any>;
+    // Fixture refs are always plain filenames inside the temp dir — the
+    // basename guard keeps the write provably contained (the CLI's own
+    // path-safety rules live in t6-qualify.mjs and are tested separately).
     const bind = (binding: { artifactRef: string; sha256: string }, doc: unknown) => {
-      const filePath = path.join(dir, binding.artifactRef);
+      if (path.basename(binding.artifactRef) !== binding.artifactRef)
+        throw new Error(`fixture artifactRef must be a plain filename: ${binding.artifactRef}`);
+      const filePath = path.join(dir, path.basename(binding.artifactRef));
       fs.writeFileSync(filePath, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
       const actual = `sha256:${createHash("sha256")
         .update(fs.readFileSync(filePath))
         .digest("hex")}`;
       binding.sha256 = actual;
     };
+    // Approvals first: the admission report's RAN_WITH_D6 echo must cite the
+    // REAL d6 decision-file digest (DV5/CR9 decision-identity binding), so
+    // the d6 artifact is written before the admission report that cites it.
+    for (const key of ["d2", "d5", "d6"]) {
+      if (input.evidence?.approvals?.[key])
+        bind(input.evidence.approvals[key], resolved.approvals[key].document);
+    }
+    if (
+      input.evidence?.approvals?.d6 &&
+      resolved.admissionReport.document.realDataProbe?.status === "RAN_WITH_D6"
+    ) {
+      resolved.admissionReport.document.realDataProbe.d6Decision.sha256 =
+        input.evidence.approvals.d6.sha256;
+    }
     for (const key of [
       "sourceGroups",
       "admissionReport",
@@ -1774,10 +1941,6 @@ describe("t6-qualify CLI", () => {
       "ownerBlindReview",
     ]) {
       if (input.evidence?.[key]) bind(input.evidence[key], resolved[key].document);
-    }
-    for (const key of ["d2", "d5", "d6"]) {
-      if (input.evidence?.approvals?.[key])
-        bind(input.evidence.approvals[key], resolved.approvals[key].document);
     }
     return input;
   }
@@ -1919,13 +2082,29 @@ describe("t6-qualify CLI", () => {
 describe("t6-qualify CLI input-structure gates (P2-3, P2-4)", () => {
   function writeEvidenceFiles(dir: string, input: Record<string, any>) {
     const resolved = resolvedFor(input) as Record<string, any>;
+    // Same containment guard as the CLI suite's writeEvidence (fixture refs
+    // are plain filenames; the CLI's own path rules are under test, not
+    // bypassed here).
     const bind = (binding: { artifactRef: string; sha256: string }, doc: unknown) => {
-      const filePath = path.join(dir, binding.artifactRef);
+      if (path.basename(binding.artifactRef) !== binding.artifactRef)
+        throw new Error(`fixture artifactRef must be a plain filename: ${binding.artifactRef}`);
+      const filePath = path.join(dir, path.basename(binding.artifactRef));
       fs.writeFileSync(filePath, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
       binding.sha256 = `sha256:${createHash("sha256")
         .update(fs.readFileSync(filePath))
         .digest("hex")}`;
     };
+    for (const key of ["d2", "d5", "d6"]) {
+      if (input.evidence?.approvals?.[key])
+        bind(input.evidence.approvals[key], resolved.approvals[key].document);
+    }
+    if (
+      input.evidence?.approvals?.d6 &&
+      resolved.admissionReport.document.realDataProbe?.status === "RAN_WITH_D6"
+    ) {
+      resolved.admissionReport.document.realDataProbe.d6Decision.sha256 =
+        input.evidence.approvals.d6.sha256;
+    }
     for (const key of [
       "sourceGroups",
       "admissionReport",
@@ -1934,10 +2113,6 @@ describe("t6-qualify CLI input-structure gates (P2-3, P2-4)", () => {
       "ownerBlindReview",
     ]) {
       if (input.evidence?.[key]) bind(input.evidence[key], resolved[key].document);
-    }
-    for (const key of ["d2", "d5", "d6"]) {
-      if (input.evidence?.approvals?.[key])
-        bind(input.evidence.approvals[key], resolved.approvals[key].document);
     }
     return input;
   }

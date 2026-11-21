@@ -2905,3 +2905,125 @@ describe("swapJudgePackage final blind-leak gate (P2-3)", () => {
     expect(checkPackageForLeaks(pkg)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CodeRabbit round-4: bundle-shape, swap-inference and truncation-integrity
+// regressions.
+// ---------------------------------------------------------------------------
+
+describe("review round-4 hardening (CodeRabbit)", () => {
+  const entryFor = (built: any, record: any, raw?: string) => ({
+    blindPackage: built.blindPackage,
+    secretBinding: built.secretBinding,
+    record,
+    ...(raw !== undefined ? { rawResponse: raw } : {}),
+  });
+
+  it("CR1: a non-array bundle.arbitrations exits 2 and leaves no out directory", () => {
+    const built = healthyPackage();
+    const j1 = healthyRecord(built, "A_BETTER", "j-1");
+    const dir = path.join(tempRoot, "bad-arbitrations-type");
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "bundle.json");
+    fs.writeFileSync(
+      file,
+      `${JSON.stringify({
+        schema: "pd-lab-judge-protocol-bundle.v1",
+        entries: [entryFor(built, j1, rawResponseOf({ displayVerdict: "A_BETTER" }))],
+        arbitrations: { arbitrationId: "arb-1" },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const out = path.join(dir, "out");
+    const run = runValidateCli(["--bundle", file, "--out", out]);
+    expect(run.status).toBe(2);
+    expect(fs.existsSync(out)).toBe(false);
+  });
+
+  it("CR3: two judgments of the SAME package with identical A/B texts are never inferred as a swap", () => {
+    // Identical outputs make the package its own content mirror; the old
+    // inference paired the package with itself and the semantic checks
+    // rejected the whole bundle. Now the same-package candidate is excluded.
+    const built = healthyPackage({
+      outputCandidate: "symmetric trajectory text",
+      outputReference: "symmetric trajectory text",
+    });
+    const j1 = healthyRecord(built, "A_BETTER", "j-1", undefined, {
+      judgeSlotId: "slot-a",
+    });
+    const j2 = healthyRecord(built, "A_BETTER", "j-2", undefined, {
+      judgeSlotId: "slot-b",
+    });
+    const { run, report } = validateBundle("same-package-rejudge", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        entryFor(built, j1, rawResponseOf({ displayVerdict: "A_BETTER" })),
+        entryFor(built, j2, rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ],
+    });
+    expect(run.status).toBe(0);
+    expect(report.problems).toHaveLength(0);
+    expect(report.positionExchange.pairs).toHaveLength(0);
+    // The two seats still merge normally.
+    expect(report.perAssignment[0].outcome).toBe("CANDIDATE_BETTER");
+  });
+
+  it("CR4: a swap pair whose one side is a FAILED attempt is undetermined, never consistent", () => {
+    const base = healthyPackage();
+    const swapped = swapJudgePackage(
+      base.blindPackage,
+      base.secretBinding,
+      "pkg-swap-b",
+    );
+    const j1 = healthyRecord(base, "A_BETTER", "j-1", undefined, {
+      judgeSlotId: "slot-a",
+    });
+    // The swapped side FAILED but kept its verdict text — the pair must not
+    // count as consistent just because both restored verdicts agree.
+    const j2 = healthyRecord(swapped, "A_BETTER", "j-2", undefined, {
+      judgeSlotId: "slot-b",
+      attemptStatus: "FAILED",
+    });
+    const { report } = validateBundle("failed-swap-side", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        entryFor(base, j1, rawResponseOf({ displayVerdict: "A_BETTER" })),
+        entryFor(swapped, j2, rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ],
+    });
+    const pair = report.positionExchange.pairs[0];
+    expect(pair.valid).toBe(true);
+    expect(pair.result).toBe("undetermined");
+    expect(report.positionExchange.undetermined).toBe(1);
+    expect(report.positionExchange.consistent).toBe(0);
+  });
+
+  it("CR5: duplicate truncation facts for the same side are rejected structurally and by the digest", () => {
+    const built = healthyPackage({ maxOutputChars: 10 });
+    // Build the record from the HEALTHY package first (its digest is
+    // honest), then tamper only the package the entry carries — the
+    // duplicate-side structural gate must fire before any digest work.
+    const record = healthyRecord(built, "UNKNOWN", "j-1");
+    const pkg = { ...built.blindPackage };
+    pkg.truncation = [...built.blindPackage.truncation, { ...built.blindPackage.truncation[0] }];
+    const { run, report } = validateBundle("dup-truncation-side", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        {
+          blindPackage: pkg,
+          secretBinding: built.secretBinding,
+          record,
+          rawResponse: rawResponseOf({ displayVerdict: "UNKNOWN", unknownReason: "insufficient comparable evidence" }),
+        },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(
+      report.problems.map((p: { message: string }) => p.message).join(" "),
+    ).toContain("duplicate truncation fact");
+    // The digest helper enforces the same rule defensively.
+    expect(() =>
+      comparisonInputDigestOf(pkg, { A: "candidate", B: "reference" }),
+    ).toThrow(/duplicate truncation fact/);
+  });
+});

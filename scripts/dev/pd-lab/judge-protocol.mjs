@@ -643,6 +643,14 @@ export function comparisonInputDigestOf(blindPackage, identityMap) {
         entry.truncatedSide === "CONTEXT"
           ? "context"
           : roleOfSide(entry.truncatedSide);
+      // CR5: two truncation facts for the SAME side are a malformed
+      // package — silently overwriting one with the other would keep the
+      // digest stable while the truncation record changed (a tamper the
+      // digest could never detect).
+      if (Object.hasOwn(truncationByRole, key))
+        throw new Error(
+          `comparisonInputDigestOf: duplicate truncation fact for side ${entry.truncatedSide} — the package is malformed and must be rejected by validation before digesting`,
+        );
       truncationByRole[key] = {
         truncatedAt: entry.truncatedAt,
         originalChars: entry.originalChars,

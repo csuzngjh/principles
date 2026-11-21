@@ -3353,4 +3353,41 @@ describe('D6 positive data-probe path (P1-6)', () => {
     expect(run.status).toBe(1);
     expect(stderrReason(run)?.reason ?? stderrReason(run)).toBe('d6_decision_invalid');
   });
+
+  it('DV8: a snapshot-pinned D6 decision rejects a probe over a DIFFERENT trajectory.db', () => {
+    const world = buildHealthyWorld('d6-snapshot-pin');
+    const datasetSha = sha256File(world.datasetPath);
+    // Pin a digest that is provably not this snapshot's trajectory.db.
+    const file = writeJson(
+      world.root,
+      'd6-pinned.json',
+      d6DecisionOf(datasetSha, { trajectoryDbSha256: 'e'.repeat(64) }),
+    );
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(1);
+    const failure = stderrReason(run);
+    expect(failure?.reason ?? failure).toBe('d6_decision_invalid');
+    expect(failure.details.authorized).toBe('e'.repeat(64));
+    expect(typeof failure.details.actual).toBe('string');
+  });
+
+  it('DV8: a snapshot-pinned D6 decision matching the actual trajectory.db reports the binding', () => {
+    const world = buildHealthyWorld('d6-snapshot-ok');
+    const datasetSha = sha256File(world.datasetPath);
+    const trajectorySha = sha256File(path.join(world.snapshotDir, 'trajectory.db'));
+    const file = writeJson(
+      world.root,
+      'd6-pinned-ok.json',
+      d6DecisionOf(datasetSha, { trajectoryDbSha256: trajectorySha }),
+    );
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(0);
+    const report = readOut(world.outDir).report;
+    expect(report.realDataProbe.status).toBe('RAN_WITH_D6');
+    expect(report.realDataProbe.probeScope.snapshotTrajectorySha256).toBe(trajectorySha);
+    expect(report.realDataProbe.snapshotBinding).toEqual({
+      authorizedTrajectoryDbSha256: trajectorySha,
+      matches: true,
+    });
+  });
 });
