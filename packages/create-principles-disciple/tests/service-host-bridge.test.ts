@@ -85,6 +85,23 @@ function fakeInstalledCli(home: string): string {
   return pdHome;
 }
 
+/** Create the platform's scheduler-registration artifact (the cheap probe's signal). */
+function fakeRegistrationArtifact(home: string): void {
+  if (process.platform === 'win32') {
+    const dir = path.join(home, '.pd', 'service');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'scheduler-registration-win.xml'), '<Task/>', 'utf8');
+  } else if (process.platform === 'darwin') {
+    const dir = path.join(home, 'Library', 'LaunchAgents');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'com.principles-disciple.service-host.abc1234567.plist'), '<plist/>', 'utf8');
+  } else {
+    const dir = path.join(home, '.config', 'systemd', 'user');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'pd-service-host-abc1234567.timer'), '[Timer]\n', 'utf8');
+  }
+}
+
 describe('runServiceHostCli — trusted invocation shape', () => {
   it('invokes the installed entry with --json and the authoritative --pd-home, cleaned env, no credentials', async () => {
     const home = tempHome();
@@ -104,7 +121,9 @@ describe('runServiceHostCli — trusted invocation shape', () => {
       expect(calls[0]?.args[0]).toBe(path.join(pdHome, 'runtime', 'pd-cli', 'dist', 'index.js'));
       expect(calls[0]?.args.join(' ')).toContain('service install');
       expect(calls[0]?.args.join(' ')).toContain('--json');
-      expect(calls[0]?.args.join(' ')).toContain(`--pd-home ${pdHome}`);
+      // --pd-home carries the HOME ROOT (the CLI derives <home>/.pd itself).
+      expect(calls[0]?.args.join(' ')).toContain(`--pd-home ${home}`);
+      expect(calls[0]?.args.join(' ')).not.toContain(`--pd-home ${pdHome}`);
       expect(calls[0]?.env.PD_EXPERIMENT_ROOT).toBeUndefined();
       expect(calls[0]?.env.PD_WORKSPACE_DIR).toBeUndefined();
       // No credential-shaped argument ever crosses the boundary.
@@ -149,9 +168,25 @@ describe('runServiceHostCli — trusted invocation shape', () => {
 });
 
 describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)', () => {
-  it('without consent: refreshes ONLY when a registration already exists; never creates one', async () => {
+  it('without consent and NO registration artifact: ZERO CLI calls (no boot cost on fresh machines)', async () => {
     const home = tempHome();
     const pdHome = fakeInstalledCli(home);
+    const calls: RecordedCall[] = [];
+    const spawnFn = fakeSpawn({
+      status: { code: 0, stdout: '{"schemaVersion":"pd.service-status.v1","scheduler":{"registered":false}}' },
+    }, calls);
+    await reconcileServiceHostScheduler({
+      pdHome, registerServiceHost: false, enableServiceHost: false,
+      warn: () => { throw new Error('no warnings expected'); },
+      probes: { spawnFn },
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('without consent (artifact present): refreshes ONLY when the CLI reports a registration; never creates one', async () => {
+    const home = tempHome();
+    const pdHome = fakeInstalledCli(home);
+    fakeRegistrationArtifact(home);
     const calls: RecordedCall[] = [];
     const spawnFn = fakeSpawn({
       status: { code: 0, stdout: '{"schemaVersion":"pd.service-status.v1","scheduler":{"registered":false,"enabled":false}}' },
@@ -172,6 +207,7 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
   it('without consent but registered: re-runs install (idempotent refresh), preserving enabled state', async () => {
     const home = tempHome();
     const pdHome = fakeInstalledCli(home);
+    fakeRegistrationArtifact(home);
     const calls: RecordedCall[] = [];
     const spawnFn = fakeSpawn({
       status: { code: 0, stdout: '{"schemaVersion":"pd.service-status.v1","scheduler":{"registered":true,"enabled":true}}' },
@@ -225,9 +261,10 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
     expect(warnings[0]).toContain('AccessDenied');
   });
 
-  it('an unreadable scheduler state is a warning, never a thrown error', async () => {
+  it('an unreadable scheduler state (artifact present) is a warning, never a thrown error', async () => {
     const home = tempHome();
     const pdHome = fakeInstalledCli(home);
+    fakeRegistrationArtifact(home);
     const spawnFn = fakeSpawn({
       status: { code: 1, stdout: '{"schemaVersion":"pd.service-status.v1","ok":false,"reason":"identity_refused"}' },
     }, []);

@@ -189,6 +189,35 @@ export async function runServiceHostCli(pdHome: string, args: readonly string[],
   };
 }
 
+/**
+ * Cheap platform file probe: could a PD scheduler registration exist at all?
+ * Used to SKIP the CLI status probe entirely on machines where nothing was
+ * ever registered — a full CLI boot per install() otherwise accumulates into
+ * minutes across install-heavy flows (CI observed at the 15m job timeout).
+ * Name prefixes only (no install-key duplication — the key stays owned by
+ * pd-cli's schedulerIdentityFor).
+ */
+export function maybeSchedulerRegistrationExists(homeDir: string): boolean {
+  try {
+    if (process.platform === 'win32') {
+      return fs.existsSync(path.join(homeDir, '.pd', 'service', 'scheduler-registration-win.xml'));
+    }
+    if (process.platform === 'darwin') {
+      const agents = path.join(homeDir, 'Library', 'LaunchAgents');
+      return fs.readdirSync(agents).some((name) => name.startsWith('com.principles-disciple.service-host.') && name.endsWith('.plist'));
+    }
+    if (process.platform === 'linux') {
+      const units = path.join(homeDir, '.config', 'systemd', 'user');
+      return fs.readdirSync(units).some((name) => name.startsWith('pd-service-host-') && name.endsWith('.timer'));
+    }
+    return false;
+  } catch {
+    // An unreadable directory proves nothing either way — keep the honest
+    // (slower) path: ask the CLI.
+    return true;
+  }
+}
+
 export interface SchedulerReconcileInput {
   readonly pdHome: string;
   /** Explicit operator consent (--register-service-host / --enable-service-host). */
@@ -229,7 +258,13 @@ export async function reconcileServiceHostScheduler(input: SchedulerReconcileInp
     }
     return;
   }
-  // Upgrade path: refresh only when a registration already exists.
+  // Upgrade path: refresh only when a registration plausibly exists. The
+  // file probe avoids a full CLI boot per install on machines where nothing
+  // was ever registered (CI/fresh installs); an unreadable dir falls back to
+  // asking the CLI.
+  if (!maybeSchedulerRegistrationExists(path.dirname(input.pdHome))) {
+    return;
+  }
   const status = await runServiceHostCli(input.pdHome, ['service', 'status'], input.probes ?? {});
   if (!status.ok) {
     input.warn(`Service Host scheduler state could not be verified after install (${status.detail}) — nothing was changed. ${status.nextAction ?? ''}`.trim());
