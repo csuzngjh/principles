@@ -42,7 +42,7 @@
 
 ## 6. 合成协议校验（已执行，无需 D2/D5）
 
-测试入口：`npm run test:scripts`（`scripts/__tests__/pd-lab-judge-protocol.test.ts`，65 用例，全部通过；真实 CLI 子进程驱动 `npm run lab:judge-validate`）。
+测试入口：`npm run test:scripts`（`scripts/__tests__/pd-lab-judge-protocol.test.ts`，66 用例，全部通过；真实 CLI 子进程驱动 `npm run lab:judge-validate`）。
 
 | 校验面 | 结果 |
 | --- | --- |
