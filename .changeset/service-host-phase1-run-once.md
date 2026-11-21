@@ -11,8 +11,10 @@ PD_EXPERIMENT_ROOT stripping, recorded), two-source workspace discovery over
 the canonical install manifest and validated per-host claims
 (`collectHostWorkspaceClaims` / `findForeignWorkspaceOwner` reused), realpath
 identity dedupe, read-only `backgroundExecutions` owner projection, the
-install-level single-instance run lock (wx-create + body-verified stale
-takeover + ownership-checked release, immediate `already_running` semantics),
+install-level single-instance run lock (SQLite `BEGIN IMMEDIATE` arbitration
+over `<pdHome>/service/service-run-gate.db` — acquire, PID-verified takeover and
+ownership-checked release all decided inside one transaction; zero-wait
+immediate `already_running`; fully fail-closed on gate/busy errors),
 and the versioned operational status file under
 `<pdHome>/service/run-once-status.json`. Phase 1 starts no Worker and changes
 no consumer ownership; a run without `--dry-run` refuses

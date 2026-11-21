@@ -21,6 +21,7 @@ import {
   parseInstallManifest,
   type BindingReadDiagnostic,
   type HostClaimOptions,
+  type HostClaimReaders,
   type InstallManifest,
 } from '@principles/install-layout';
 import {
@@ -34,6 +35,7 @@ import {
   releaseServiceRunLock,
   serviceRunLockPath,
   type HolderLiveness,
+  type ReleaseServiceRunLockResult,
   type ServiceRunLockHandle,
 } from './locking/service-run-lock.js';
 import {
@@ -71,6 +73,19 @@ export interface RunOnceOptions {
      * root must never be folded into "no workspaces found" (P2-1).
      */
     readonly listDir?: (dir: string) => 'readable' | 'missing' | 'not_directory' | 'unreadable';
+    /**
+     * Lock release (default: `releaseServiceRunLock`). The release outcome
+     * is part of the run's result: a genuinely failed release is NEVER
+     * reported as an unremarkable `completed` (§三).
+     */
+    readonly releaseLock?: (handle: ServiceRunLockHandle) => ReleaseServiceRunLockResult;
+    /**
+     * Claim readers for `collectHostWorkspaceClaims` (default: the real
+     * filesystem readers). Injected in tests so errno-specific binding
+     * evidence — including unreadable Codex plugins/data directories —
+     * reproduces deterministically on every platform (§五).
+     */
+    readonly claimReaders?: HostClaimReaders;
   };
 }
 
@@ -328,6 +343,7 @@ function completeRun(
     env: Readonly<Record<string, string | undefined>>;
     holdsLock: (handle: ServiceRunLockHandle) => boolean;
     listDir: (dir: string) => 'readable' | 'missing' | 'not_directory' | 'unreadable';
+    claimReaders?: HostClaimReaders;
   },
 ): RunOnceResult {
   const hostRoots = hostRootReports(identity, context.env, context.listDir);
@@ -441,6 +457,7 @@ function completeRun(
     workbuddyConfigDir: identity.hostRoots.workbuddyConfigDir,
     platform: process.platform,
     readDiagnostics,
+    ...(context.claimReaders !== undefined ? { readers: context.claimReaders } : {}),
   };
   const claims = collectHostWorkspaceClaims(claimOptions);
 
@@ -531,8 +548,12 @@ export function runServiceRunOnce(options: RunOnceOptions = {}): RunOnceResult {
     };
   }
   const handle: ServiceRunLockHandle = lock.handle;
+  const releaseLock = options.probes?.releaseLock ?? releaseServiceRunLock;
+  let result: RunOnceResult;
+  let runError: unknown;
+  let runThrew = false;
   try {
-    return completeRun(identity, {
+    result = completeRun(identity, {
       runId,
       startedAt,
       staleTakenOver: lock.staleTakenOver,
@@ -540,9 +561,47 @@ export function runServiceRunOnce(options: RunOnceOptions = {}): RunOnceResult {
       env,
       holdsLock: options.probes?.holdsLock ?? holdsServiceRunLock,
       listDir: options.probes?.listDir ?? defaultListDir,
+      ...(options.probes?.claimReaders !== undefined ? { claimReaders: options.probes.claimReaders } : {}),
     });
-  } finally {
-    releaseServiceRunLock(handle);
+  } catch (error) {
+    runThrew = true;
+    runError = error;
+    result = { ok: false, outcome: 'refused', runId, reason: 'internal_error', nextAction: '' };
   }
+  const release = releaseLock(handle);
+  const releaseFailed = release === 'failed_busy' || release === 'failed_unwritable';
+  if (runThrew) {
+    // §三.8: the PRIMARY error stays the thrown one; a release failure is
+    // recorded on the diagnostics channel, never swapped in as the error.
+    if (releaseFailed) {
+      console.error(`pd service run-once: lock release also failed (${release}) after the run error`);
+    }
+    throw runError;
+  }
+  if (releaseFailed) {
+    // §三.7: a genuinely failed release is never reported as an unremarkable
+    // `completed` — the release failure surfaces (exit code 1 through the
+    // refused path) while the persisted status keeps its truthful record.
+    if (result.outcome === 'completed') {
+      return {
+        ok: false,
+        outcome: 'refused',
+        runId,
+        reason: `service_run_lock_release_failed:${release === 'failed_busy' ? 'busy' : 'unwritable'}`,
+        nextAction:
+          'The dry-run finished but its run lock could not be released through the arbitration gate. ' +
+          'The leftover lock carries a dead-holder PID once this process exits, so the next run recovers ' +
+          'on PID evidence — inspect the service directory and the gate database before re-running.',
+        statusWrite: result.statusWrite,
+      };
+    }
+    // The run already ended refused: keep the primary reason, record the
+    // secondary release failure in nextAction (§三.8).
+    return {
+      ...result,
+      nextAction: `${result.nextAction} (Additionally, the run lock release failed: ${release}.)`,
+    };
+  }
+  return result;
 }
 

@@ -426,3 +426,171 @@ describe('real multi-process lock contention', () => {
     expect((await spawnAttempt(home)).code).toBe(0);
   }, 20000);
 });
+
+describe('round-5 lifecycle scenarios (T9–T14)', () => {
+  // A child that parks after a successful acquire until told to release.
+  function forkHoldAndRelease(home: string, flagDir: string, mode = ''): Promise<AttemptVerdict> {
+    return new Promise((resolve, reject) => {
+      const child = fork(CHILD_SCRIPT, [home, '0', 'lock-held', flagDir, mode], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+      let stdout = '';
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8');
+      });
+      child.on('error', reject);
+      child.on('exit', (code) => resolve({ code: code ?? -1, stdout }));
+    });
+  }
+
+  it('T9: an injected transaction-end failure after lock creation leaves NO orphan — the next contender recovers immediately', async () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    // First contender: creates the lock file, then the gate end is injected
+    // to fail — compensation must remove OUR file, and the verdict is an
+    // honest 'unwritable', never a masqueraded success.
+    const failed = await new Promise<AttemptVerdict>((resolve, reject) => {
+      const child = fork(CHILD_SCRIPT, [home, '0', '', '', 'acquire-end-fail'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+      let stdout = '';
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8');
+      });
+      child.on('error', reject);
+      child.on('exit', (code) => resolve({ code: code ?? -1, stdout }));
+    });
+    expect(failed.code).toBe(EXIT_UNWRITABLE);
+    expect(JSON.parse(failed.stdout)).toEqual({ kind: 'unwritable' });
+    expect(existsSync(lockPath)).toBe(false); // compensated, no orphan
+    // Next contender needs no stale window: the path is clean.
+    const recovered = await spawnAttempt(home);
+    expect(recovered.code).toBe(0);
+    expect(JSON.parse(recovered.stdout).stale).toBe(false);
+  }, 20000);
+
+  it('T9b: end-failure compensation never deletes a foreign lock a different process created', async () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    const flagDir = tempHome();
+    // A real foreign holder parks mid-hold; the end-fail contender must not
+    // displace its lock even though the injection runs after evaluation.
+    const holder = forkHoldAndRelease(home, flagDir);
+    await waitFlag(path.join(flagDir, 'at-lock-held'));
+    const foreignBody = readFileSync(lockPath, 'utf8');
+    const failed = await new Promise<AttemptVerdict>((resolve, reject) => {
+      const child = fork(CHILD_SCRIPT, [home, '0', '', '', 'acquire-end-fail'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+      let stdout = '';
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8');
+      });
+      child.on('error', reject);
+      child.on('exit', (code) => resolve({ code: code ?? -1, stdout }));
+    });
+    expect(failed.code).toBe(EXIT_UNWRITABLE);
+    expect(readFileSync(lockPath, 'utf8')).toBe(foreignBody);
+    writeFileSync(path.join(flagDir, 'go-lock-held'), '1');
+    expect((await holder).code).toBe(0);
+  }, 20000);
+
+  it('T10: a release racing a busy gate reports a real failure (exit 10) and never unlinks outside arbitration', async () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    const flagDir = tempHome();
+    const holder = forkHoldAndRelease(home, flagDir);
+    await waitFlag(path.join(flagDir, 'at-lock-held'));
+    const holderBody = readFileSync(lockPath, 'utf8');
+    // Occupy the gate ourselves — the child's release must wait its bounded
+    // retry, fail honestly, and never bypass arbitration to unlink.
+    const Database = (await import('better-sqlite3')).default;
+    const gate = new Database(gateDbPath(home));
+    gate.pragma('busy_timeout = 0');
+    gate.exec('BEGIN IMMEDIATE');
+    try {
+      writeFileSync(path.join(flagDir, 'go-lock-held'), '1');
+      const result = await holder;
+      expect(result.code).toBe(10); // release failed — observable, not silent
+      // The lock file survives byte-identical.
+      expect(readFileSync(lockPath, 'utf8')).toBe(holderBody);
+      // While the gate is still busy, no contender can acquire either.
+      expect((await spawnAttempt(home)).code).toBe(EXIT_HELD);
+    } finally {
+      gate.exec('ROLLBACK');
+      gate.close();
+    }
+    // The leftover lock carries a dead-holder PID (the child exited) —
+    // recovery happens on PID evidence without waiting out the window.
+    const recovered = await spawnAttempt(home);
+    expect(recovered.code).toBe(0);
+    expect(JSON.parse(recovered.stdout).stale).toBe(true);
+  }, 30000);
+
+  it('T10b: an injected release transaction-end failure is reported as a failure (exit 10), never a silent clean exit', async () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    const flagDir = tempHome();
+    const holder = forkHoldAndRelease(home, flagDir, 'release-end-fail');
+    await waitFlag(path.join(flagDir, 'at-lock-held'));
+    const holderBody = readFileSync(lockPath, 'utf8');
+    writeFileSync(path.join(flagDir, 'go-lock-held'), '1');
+    const result = await holder;
+    expect(result.code).toBe(10);
+    // Whatever the transaction did before failing, the file is either gone
+    // (our own verified delete) or still OUR body — never displaced by
+    // something else.
+    if (existsSync(lockPath)) expect(readFileSync(lockPath, 'utf8')).toBe(holderBody);
+    expect((await spawnAttempt(home)).code).toBe(0);
+  }, 20000);
+
+  it('T11: acquire is zero-wait — a contender during a live hold AND during a busy release gets held, never a second run', async () => {
+    const home = tempHome();
+    const flagDir = tempHome();
+    // Scenario A: A holds the lock (gate free between txn) — B is refused
+    // immediately by the lock-file evaluation, then A finishes.
+    const a = forkHoldAndRelease(home, flagDir);
+    await waitFlag(path.join(flagDir, 'at-lock-held'));
+    const started = Date.now();
+    const b = await spawnAttempt(home);
+    expect(b.code).toBe(EXIT_HELD);
+    expect(Date.now() - started).toBeLessThan(5000); // refused immediately — never queued into a second dry-run
+    writeFileSync(path.join(flagDir, 'go-lock-held'), '1');
+    expect((await a).code).toBe(0);
+    // Scenario B + C: a live arbiter (any transaction — e.g. a release in
+    // progress) makes simultaneous contenders fail held, never two winners.
+    const Database = (await import('better-sqlite3')).default;
+    const gate = new Database(gateDbPath(home));
+    gate.pragma('busy_timeout = 0');
+    gate.exec('BEGIN IMMEDIATE');
+    try {
+      const [c, d] = await Promise.all([spawnAttempt(home), spawnAttempt(home)]);
+      expect(c.code).toBe(EXIT_HELD);
+      expect(d.code).toBe(EXIT_HELD);
+    } finally {
+      gate.exec('ROLLBACK');
+      gate.close();
+    }
+    // Exactly one winner afterwards — single-instance semantics preserved.
+    expect((await spawnAttempt(home)).code).toBe(0);
+  }, 30000);
+
+  it('T14: mixed-version boundary — a live legacy .mtx blocks a new contender across processes', async () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    const flagDir = tempHome();
+    // An "old-version" holder: a real process whose pid we record in .mtx.
+    const holder = fork(CHILD_SCRIPT, [tempHome(), '0', 'lock-held', flagDir], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    await waitFlag(path.join(flagDir, 'at-lock-held'));
+    expect(holder.pid).toBeGreaterThan(0);
+    writeFileSync(`${lockPath}.mtx`, `${holder.pid} mtxtoken 2026-01-01T00:00:00.000Z`, 'utf8');
+    // The old protocol's mutex owner is provably alive: the new contender
+    // must refuse — never run a second coordinator beside it.
+    expect((await spawnAttempt(home)).code).toBe(EXIT_HELD);
+    expect(existsSync(lockPath)).toBe(false); // no lock created
+    // The live .mtx itself is left in place.
+    expect(readFileSync(`${lockPath}.mtx`, 'utf8')).toContain(`${holder.pid} mtxtoken`);
+    writeFileSync(path.join(flagDir, 'go-lock-held'), '1');
+    await new Promise<void>((resolve) => holder.on('exit', () => resolve()));
+    // With the legacy owner dead, stale-age + dead-pid lets the sweep
+    // remove it on a later acquire — recovery completes cleanly.
+    backdate(`${lockPath}.mtx`);
+    expect((await spawnAttempt(home)).code).toBe(0);
+    expect(existsSync(`${lockPath}.mtx`)).toBe(false);
+  }, 30000);
+});

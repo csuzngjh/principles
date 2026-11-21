@@ -26,20 +26,25 @@
  * Every acquisition, takeover and release decision is serialized through a
  * dedicated arbitration gate: the stable, short-lived SQLite database
  * `<pdHome>/service/service-run-gate.db`, guarded by `BEGIN IMMEDIATE`.
- * While one process holds the transaction, every other contender's BEGIN
- * blocks for at most {@link GATE_BUSY_TIMEOUT_MS} and then fails with
- * SQLITE_BUSY — mapped to `held` (fail-closed). A gate that cannot be
- * opened or transacted at all maps to `unwritable` (fail-closed).
+ * While one process holds the transaction, a contender's `BEGIN IMMEDIATE`
+ * fails with SQLITE_BUSY — ACQUIRE waits zero milliseconds (SPEC §8.2
+ * immediate `already_running`, never a queue), RELEASE retries briefly and
+ * bounded. A gate that cannot be opened or transacted at all maps to
+ * `unwritable` (fail-closed).
  *
  * The state machine inside the transaction is:
  *
  *   evaluateLock ─ 'absent'            → 'wx' create → acquired
  *                ├ 'fresh'             → held
+ *                ├ 'dead'              → re-evaluate → unlink → 'wx' create
+ *                │                       → acquired(staleTakenOver)
  *                ├ 'stale-alive'       → held   (live or inconclusive owner)
  *                ├ 'stale-unreadable'  → corrupt (identity unverifiable)
- *                ├ 'stale-anonymous'   → corrupt (no holder identity)
- *                └ 'stale-dead'        → re-evaluate → unlink → 'wx' create
- *                                        → acquired(staleTakenOver)
+ *                └ 'stale-anonymous'   → corrupt (no holder identity)
+ *
+ * 'dead' means the recorded holder PID is PROVABLY dead — age does not
+ * matter: a verifiably-exited holder is recovered immediately rather than
+ * waiting out the stale window (§P0.8).
  *
  * Why this closes the file-mutex races:
  *
@@ -92,11 +97,16 @@ import Database from 'better-sqlite3';
 export const SERVICE_RUN_LOCK_STALE_MS = 30 * 60 * 1000;
 
 /**
- * How long a contender's `BEGIN IMMEDIATE` waits for the arbitration gate
- * before SQLite reports SQLITE_BUSY. Bounded because SPEC §8.2 requires an
- * immediate `already_running` verdict, never an unbounded queue.
+ * Busy policy is split per role (SPEC §8.2 immediate `already_running`):
+ * ACQUIRE waits ZERO milliseconds — a second coordinator must never queue
+ * behind a finishing run and then execute a second dry-run. RELEASE gets
+ * its own bounded wait ({@link RELEASE_BUSY_TIMEOUT_MS} ×
+ * {@link RELEASE_MAX_ATTEMPTS}) because a release racing a concurrent
+ * arbiter should still complete when the gate frees momentarily.
  */
-const GATE_BUSY_TIMEOUT_MS = 1500;
+const ACQUIRE_BUSY_TIMEOUT_MS = 0;
+const RELEASE_BUSY_TIMEOUT_MS = 1500;
+const RELEASE_MAX_ATTEMPTS = 2;
 
 /** The one lock file per install: `<pdHome>/service/service-run.lock`. */
 export function serviceRunLockPath(pdHome: string): string {
@@ -160,6 +170,12 @@ export interface ServiceRunLockProbes {
    * passes nothing.
    */
   readonly takeoverSync?: (phase: ServiceRunLockTakeoverPhase) => void;
+  /**
+   * Deterministic test seam: force the gate transaction's END to fail after
+   * the acquire body ran — exercises the orphan-lock compensation path
+   * (§P0). Production never sets it.
+   */
+  readonly gateEndFailure?: boolean;
 }
 
 /** A bounded, control-char-free echo of a lock body for diagnostics (rc-8). */
@@ -259,14 +275,54 @@ function tryCreate(lockPath: string, body: string): 'created' | 'busy' | { error
 }
 
 /**
- * Best-effort sweep of legacy sidecar orphans older than the stale window:
- * `.mtx` (pre-arbitration file mutex), `.take-*` and `.rel-*` (the retired
- * rename-aside protocol). The current protocol creates NONE of these, so
- * sweeping them can never remove arbitration state — and the arbitration
- * gate database (`service-run-gate.db` plus its `-journal`/`-wal`/`-shm`
- * sidecars) does not match these patterns and is never touched.
+ * Legacy-protocol guard: the retired `.mtx` file mutex was held by a LIVE
+ * process for its whole critical section — a live `.mtx` therefore means an
+ * old-version coordinator may be mid-takeover right now, and proceeding
+ * would ignore arbitration the old protocol still honors (mixed-version
+ * double-run). Fail closed as 'occupied' when the recorded PID is alive OR
+ * unverifiable; only a demonstrably-dead owner lets us proceed. An
+ * unreadable `.mtx` is occupied-by-default: file age or absence of a
+ * parseable body never proves the old protocol's mutex is free.
  */
-function sweepOrphanSidecars(lockPath: string, staleMs: number): void {
+function legacyMutexOccupied(lockPath: string, processAlive: (pid: number) => HolderLiveness): boolean {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(`${lockPath}.mtx`, 'utf8');
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? String(Reflect.get(error, 'code'))
+        : '';
+    // ENOENT/ENOTDIR: no legacy mutex exists — proceed.
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+    return true; // exists but unreadable → unverifiable → fail closed
+  }
+  const pid = holderPidOf(raw);
+  if (pid === undefined) return true; // corrupt ownership → cannot verify → fail closed
+  try {
+    return processAlive(pid) !== 'dead';
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * PID-verified sweep of legacy sidecar orphans (§六): `.mtx` (pre-
+ * arbitration file mutex), `.take-*` and `.rel-*` (the retired rename-aside
+ * protocol). The current protocol creates NONE of these — but they may
+ * still be held by an ACTIVE old-version process, so file age alone never
+ * justifies deletion: a sidecar is removed only when it is BOTH past the
+ * stale window AND its recorded holder PID is demonstrably dead. Alive,
+ * unknown, unparseable or unreadable ownership keeps the file (fail-closed;
+ * manual recovery remains the path for those). The arbitration gate
+ * database (`service-run-gate.db` plus `-journal`/`-wal`/`-shm`) never
+ * matches these patterns and is never touched.
+ */
+function sweepOrphanSidecars(
+  lockPath: string,
+  staleMs: number,
+  processAlive: (pid: number) => HolderLiveness,
+): void {
   const dir = path.dirname(lockPath);
   const base = path.basename(lockPath);
   let entries: string[];
@@ -280,6 +336,23 @@ function sweepOrphanSidecars(lockPath: string, staleMs: number): void {
     const sidecar = path.join(dir, entry);
     try {
       if (fs.statSync(sidecar).mtimeMs >= Date.now() - staleMs) continue;
+      // Ownership check before any deletion: a dead recorded owner makes
+      // the orphan provably unheld; anything else is kept, never assumed.
+      let sidecarBody: string;
+      try {
+        sidecarBody = fs.readFileSync(sidecar, 'utf8');
+      } catch {
+        continue;
+      }
+      const pid = holderPidOf(sidecarBody);
+      if (pid === undefined) continue;
+      let liveness: HolderLiveness;
+      try {
+        liveness = processAlive(pid);
+      } catch {
+        liveness = 'unknown';
+      }
+      if (liveness !== 'dead') continue;
       fs.rmSync(sidecar, { force: true });
     } catch {
       // best effort; a failed sweep never blocks locking
@@ -290,12 +363,13 @@ function sweepOrphanSidecars(lockPath: string, staleMs: number): void {
 /**
  * What the lock file currently is (single stat+read, no state change):
  *  - `absent`             — nothing at the path (contender may just create);
- *  - `fresh`              — inside the stale window, whatever its body is;
+ *  - `fresh`              — inside the stale window with a live/unverifiable holder;
+ *  - `dead`               — recorded holder PID is demonstrably dead, ANY age
+ *                           (recovery on PID evidence, not the 30-min window);
  *  - `stale-unreadable`   — beyond the window but unreadable (corrupt);
  *  - `stale-anonymous`    — beyond the window, body carries no holder pid;
- *  - `stale-dead`         — beyond the window AND recorded holder provably dead;
  *  - `stale-alive`        — beyond the window but holder live/inconclusive.
- * Only `stale-dead` may proceed to a takeover.
+ * Only `dead` may proceed to a takeover.
  */
 type LockEvaluation =
   | { kind: 'absent' }
@@ -303,7 +377,7 @@ type LockEvaluation =
   | { kind: 'stale-unreadable' }
   | { kind: 'stale-anonymous'; body: string }
   | { kind: 'stale-alive' }
-  | { kind: 'stale-dead'; body: string };
+  | { kind: 'dead'; body: string };
 
 function evaluateLock(
   lockPath: string,
@@ -316,18 +390,21 @@ function evaluateLock(
   } catch {
     return { kind: 'absent' };
   }
-  if (stats.mtimeMs >= Date.now() - staleMs) return { kind: 'fresh' };
+  const stale = stats.mtimeMs < Date.now() - staleMs;
   const body = readLockBody(lockPath);
-  if (body === undefined) return { kind: 'stale-unreadable' };
+  if (body === undefined) return stale ? { kind: 'stale-unreadable' } : { kind: 'fresh' };
   const holderPid = holderPidOf(body);
-  if (holderPid === undefined) return { kind: 'stale-anonymous', body };
+  if (holderPid === undefined) return stale ? { kind: 'stale-anonymous', body } : { kind: 'fresh' };
   let liveness: HolderLiveness;
   try {
     liveness = processAlive(holderPid);
   } catch {
     liveness = 'unknown';
   }
-  return liveness === 'dead' ? { kind: 'stale-dead', body } : { kind: 'stale-alive' };
+  // A PROVABLY-dead recorded holder is recoverable immediately — the stale
+  // window bounds only UNVERIFIABLE ownership, not verified death (§P0.8).
+  if (liveness === 'dead') return { kind: 'dead', body };
+  return stale ? { kind: 'stale-alive' } : { kind: 'fresh' };
 }
 
 /** SQLITE_BUSY (and its extended variants) means a live contender holds the gate. */
@@ -349,20 +426,53 @@ type GateOutcome<T> =
   | { ok: false; kind: 'busy' | 'unwritable'; detail: string };
 
 /**
+ * Options for one arbitrated section.
+ *
+ * The gate database exists ONLY to be the arbiter — it stores no state that
+ * must persist, so a transaction ends with `ROLLBACK`, never `COMMIT`.
+ * That removes the entire "commit failed but the filesystem write already
+ * happened" failure class (§P0): nothing is ever half-persisted.
+ */
+interface GateArbitrationOptions {
+  /** SQLITE_BUSY wait — zero for acquire (immediate refusal), bounded for release. */
+  readonly busyTimeoutMs: number;
+  /**
+   * The lock body THIS section may have written. When the transaction end
+   * still fails, compensation deletes the file — but only while it still
+   * carries THIS exact body (compare-and-delete; a foreign body is never
+   * touched). Safe even after the gate slipped away: our file and another
+   * contender's 'wx'-created file cannot coexist at the same path.
+   */
+  readonly createdBody?: string;
+  /** Test seam: force the transaction end to fail after `body` ran. */
+  readonly injectEndFailure?: boolean;
+  /** Hook invoked once inside the transaction (deterministic tests). */
+  readonly insideTxn?: () => void;
+}
+
+/**
  * Run `body` while holding the cross-process arbitration gate: open the
  * gate database, `BEGIN IMMEDIATE`, run the body's serialized decisions,
- * `COMMIT`. Any failure is fail-closed:
+ * end the transaction. Any failure is fail-closed:
  *  - SQLITE_BUSY anywhere               → 'busy' (a live arbiter exists);
  *  - gate unopenable / transaction error → 'unwritable' (unknown state —
  *    never decide outside arbitration).
  * A process dying mid-transaction releases the gate through the OS (POSIX
  * fcntl / Windows LockFileEx), so recovery needs no file heuristics at all.
+ *
+ * If ending the transaction fails AFTER the body created our lock file,
+ * compensation removes that file while it still carries our body — a
+ * same-path-exclusive compare-and-delete, never a blind unlink (§P0.6).
  */
-function withGateArbitration<T>(lockPath: string, body: () => T): GateOutcome<T> {
+function withGateArbitration<T>(
+  lockPath: string,
+  opts: GateArbitrationOptions,
+  body: () => T,
+): GateOutcome<T> {
   let db: InstanceType<typeof Database> | undefined;
   try {
     db = new Database(serviceRunGatePath(lockPath));
-    db.pragma(`busy_timeout = ${GATE_BUSY_TIMEOUT_MS}`);
+    db.pragma(`busy_timeout = ${opts.busyTimeoutMs}`);
   } catch (error) {
     return { ok: false, kind: 'unwritable', detail: `arbitration gate unavailable: ${errorDetail(error)}` };
   }
@@ -382,13 +492,28 @@ function withGateArbitration<T>(lockPath: string, body: () => T): GateOutcome<T>
   }
   try {
     const value = body();
-    db.exec('COMMIT');
+    opts.insideTxn?.();
+    if (opts.injectEndFailure === true) {
+      const injected = new Error('injected gate transaction-end failure');
+      Reflect.set(injected, 'code', 'SQLITE_IOERR');
+      throw injected;
+    }
+    // No persistent gate data: ROLLBACK ends the transaction — a failed
+    // COMMIT can never orphan the filesystem writes made inside `body`.
+    db.exec('ROLLBACK');
     return { ok: true, value };
   } catch (error) {
     try {
       db.exec('ROLLBACK');
     } catch {
       // rollback best-effort; process death releases the gate anyway
+    }
+    if (opts.createdBody !== undefined) {
+      try {
+        if (readLockBody(lockPath) === opts.createdBody) fs.unlinkSync(lockPath);
+      } catch {
+        // Leave it — a dead-holder body recovers on PID evidence anyway.
+      }
     }
     return {
       ok: false,
@@ -436,12 +561,23 @@ export function acquireServiceRunLock(
     return { ok: false, kind: 'unwritable', detail: message };
   }
 
-  const gated = withGateArbitration(lockPath, (): AcquireServiceRunLockResult => {
+  const gated = withGateArbitration(
+    lockPath,
+    {
+      busyTimeoutMs: ACQUIRE_BUSY_TIMEOUT_MS,
+      createdBody: body,
+      injectEndFailure: options?.probes?.gateEndFailure === true,
+    },
+    (): AcquireServiceRunLockResult => {
+    // Mixed-version protection (§六): an old-protocol coordinator may be
+    // mid-takeover holding `.mtx`. A live/unverifiable legacy mutex means
+    // fail-closed held — never run a second instance beside it.
+    if (legacyMutexOccupied(lockPath, processAlive)) return heldVerdict(lockPath);
     const evaluate = (): LockEvaluation => evaluateLock(lockPath, staleMs, processAlive);
     const createOwned = (staleTakenOver: boolean): AcquireServiceRunLockResult => {
       const created = tryCreate(lockPath, body);
       if (created === 'created') {
-        sweepOrphanSidecars(lockPath, staleMs);
+        sweepOrphanSidecars(lockPath, staleMs, processAlive);
         return { ok: true, handle: { lockPath, token, body }, staleTakenOver };
       }
       if (typeof created === 'object') return { ok: false, kind: 'unwritable', detail: created.error };
@@ -462,7 +598,7 @@ export function acquireServiceRunLock(
           // The stale body names no verifiable holder — cannot prove the
           // old holder died, so takeover is refused fail-closed (P1-4).
           return { ok: false, kind: 'corrupt', detail: `lock body carries no verifiable holder identity: ${bodyEcho(evaluation.body)}` };
-        case 'stale-dead':
+        case 'dead':
           return 'takeover';
       }
     };
@@ -476,9 +612,9 @@ export function acquireServiceRunLock(
     // interleave a fresh create between our check and our unlink.
     takeoverSync?.('mutex-acquired');
     const inner = evaluate();
-    if (inner.kind !== 'stale-dead') {
+    if (inner.kind !== 'dead') {
       // Non-cooperating writers aside, the only reachable states here are
-      // 'stale-dead' or 'absent' (a cooperating process cannot change the
+      // 'dead' or 'absent' (a cooperating process cannot change the
       // file under our transaction). Map defensively anyway.
       if (inner.kind === 'absent') return createOwned(true);
       const mapped = mapEvaluation(inner);
@@ -502,7 +638,8 @@ export function acquireServiceRunLock(
     }
     takeoverSync?.('lock-removed');
     return createOwned(true);
-  });
+    },
+  );
 
   if (!gated.ok) {
     return gated.kind === 'busy'
@@ -513,22 +650,69 @@ export function acquireServiceRunLock(
 }
 
 /**
+ * Structured release outcome (§三): a release can never be silent.
+ *  - `released`           — our lock was verified and unlinked under the gate;
+ *  - `not_owned`          — the lock is gone or already another holder's;
+ *                           never an error, and never deletes a foreign body;
+ *  - `failed_busy`        — the arbiter stayed busy through the bounded retry;
+ *  - `failed_unwritable`  — the gate/transaction itself failed.
+ */
+export type ReleaseServiceRunLockResult = 'released' | 'not_owned' | 'failed_busy' | 'failed_unwritable';
+
+export interface ReleaseServiceRunLockOptions {
+  /** Deterministic test seam: force the release transaction's end to fail. */
+  readonly injectEndFailure?: boolean;
+  /** Hook invoked once inside the release transaction (deterministic tests). */
+  readonly insideTxn?: () => void;
+}
+
+/**
  * Ownership-checked release under the SAME arbitration gate: verify the
  * lock body is OURS and unlink it inside one transaction — a true
  * compare-and-delete, so the file a foreign holder just created can never
- * be removed by our late release (P1-4). A gate failure leaves the lock in
- * place rather than deleting outside arbitration; the leftover is safe —
- * it carries a dead-PID body and a future stale-dead takeover recovers it.
+ * be removed by our late release (P1-4). The release gets its own bounded
+ * retry (`RELEASE_BUSY_TIMEOUT_MS` × `RELEASE_MAX_ATTEMPTS`) independent of
+ * acquire's zero-wait policy, but NEVER bypasses the gate to unlink: a gate
+ * failure leaves the lock in place and reports it — the leftover carries
+ * our own PID, which the next contender recovers on death evidence.
  */
-export function releaseServiceRunLock(handle: ServiceRunLockHandle): void {
-  withGateArbitration(handle.lockPath, () => {
-    if (readLockBody(handle.lockPath) !== handle.body) {
-      return; // not ours — never displace another holder's lock
-    }
-    try {
-      fs.unlinkSync(handle.lockPath);
-    } catch {
-      // Already gone — the run ended; nothing left to release.
-    }
-  });
+export function releaseServiceRunLock(
+  handle: ServiceRunLockHandle,
+  options?: ReleaseServiceRunLockOptions,
+): ReleaseServiceRunLockResult {
+  for (let attempt = 0; attempt < RELEASE_MAX_ATTEMPTS; attempt += 1) {
+    let verdict: ReleaseServiceRunLockResult = 'released';
+    const gated = withGateArbitration(
+      handle.lockPath,
+      {
+        busyTimeoutMs: RELEASE_BUSY_TIMEOUT_MS,
+        injectEndFailure: options?.injectEndFailure === true,
+        ...(options?.insideTxn !== undefined ? { insideTxn: options.insideTxn } : {}),
+      },
+      () => {
+        const current = readLockBody(handle.lockPath);
+        if (current !== handle.body) {
+          verdict = 'not_owned'; // gone or foreign — never displace it
+          return;
+        }
+        try {
+          fs.unlinkSync(handle.lockPath);
+        } catch (error) {
+          const code =
+            typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+              ? String(Reflect.get(error, 'code'))
+              : '';
+          if (code === 'ENOENT') {
+            verdict = 'not_owned'; // already gone — nothing left to release
+            return;
+          }
+          throw error; // real unlink failure → transaction fails → unwritable
+        }
+      },
+    );
+    if (gated.ok) return verdict;
+    if (gated.kind === 'unwritable') return 'failed_unwritable';
+    // 'busy': bounded retry — the concurrent arbiter usually frees shortly.
+  }
+  return 'failed_busy';
 }

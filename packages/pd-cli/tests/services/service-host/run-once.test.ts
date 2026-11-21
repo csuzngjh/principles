@@ -625,3 +625,81 @@ describe('P2 binding-evidence diagnostics (SPEC §9.1.8)', () => {
     expect(result.status.discovery.incomplete).toBe(false);
   });
 });
+
+describe('round-5: release result + directory diagnostics', () => {
+  it('a genuinely failed release is never reported as an unremarkable completed (§三.7)', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    const result = runServiceRunOnce({
+      env: {},
+      trustedHomeDir: home,
+      probes: { releaseLock: () => 'failed_busy' },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok || result.outcome !== 'refused') throw new Error(`expected refused, got ${JSON.stringify(result).slice(0, 300)}`);
+    expect(result.reason).toBe('service_run_lock_release_failed:busy');
+    // The persisted status still carries the truthful completed record.
+    expect(result.statusWrite?.ok).toBe(true);
+  });
+
+  it('a release failure layered on a refused run keeps the primary reason and records the secondary (§三.8)', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    // Force an early refusal: unreadable manifest → refused mid-run, then
+    // release also fails — the primary refusal reason survives.
+    rmSync(path.join(home, '.pd', 'install.json'), { force: true });
+    const result = runServiceRunOnce({
+      env: {},
+      trustedHomeDir: home,
+      probes: { releaseLock: () => 'failed_unwritable' },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok || result.outcome !== 'refused') throw new Error('expected refused');
+    expect(result.reason).toContain('install_manifest');
+    expect(result.nextAction).toContain('lock release failed');
+  });
+
+  it('an unreadable codex plugins/data directory marks discovery incomplete — diagnostics reach run-once (§五)', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    const codexHome = path.join(home, '.codex');
+    const dataRoot = path.join(codexHome, 'plugins', 'data');
+    const result = runServiceRunOnce({
+      env: {},
+      trustedHomeDir: home,
+      probes: {
+        claimReaders: {
+          readJson: () => undefined,
+          readJsonStatus: () => ({ kind: 'absent' }),
+          listDir: () => undefined,
+          listDirStatus: (dir: string) =>
+            dir === dataRoot ? { kind: 'unreadable', detail: 'EACCES' } : { kind: 'absent' },
+          realpath: () => undefined,
+        },
+      },
+    });
+    expectCompleted(result);
+    expect(result.status.discovery.incomplete).toBe(true);
+    expect(result.status.nextAction).toContain('INCOMPLETE');
+  });
+
+  it('a missing codex plugins/data directory is honest absence — no diagnostic, stays complete', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    const result = runServiceRunOnce({
+      env: {},
+      trustedHomeDir: home,
+      probes: {
+        claimReaders: {
+          readJson: () => undefined,
+          readJsonStatus: () => ({ kind: 'absent' }),
+          listDir: () => undefined,
+          listDirStatus: () => ({ kind: 'absent' }),
+          realpath: () => undefined,
+        },
+      },
+    });
+    expectCompleted(result);
+    expect(result.status.discovery.incomplete).toBe(false);
+  });
+});

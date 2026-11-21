@@ -228,6 +228,19 @@ export interface BindingReadDiagnostic {
   readonly detail: string;
 }
 
+/**
+ * Structured directory-read outcome (SPEC-PD-SERVICE-HOST-001 §9.1.8, same
+ * contract as {@link JsonFileReadStatus}): `absent` (ENOENT/ENOTDIR) is a
+ * normal "directory does not exist" fact, while `unreadable` (EACCES/EPERM/
+ * EIO or any other I/O failure) is DEGRADED evidence — a plugin-data
+ * directory that exists but cannot be listed must never be silently
+ * treated as an empty one hiding real host claims.
+ */
+export type DirReadStatus =
+  | { readonly kind: 'ok'; readonly entries: readonly string[] }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unreadable'; readonly detail: string };
+
 /** Injectable filesystem surface so the collector stays deterministic in tests. */
 export interface HostClaimReaders {
   readJson(file: string): Record<string, unknown> | undefined;
@@ -239,6 +252,13 @@ export interface HostClaimReaders {
    */
   readJsonStatus?(file: string): JsonFileReadStatus;
   listDir(dir: string): string[] | undefined;
+  /**
+   * Structured directory listing. When provided it takes precedence over
+   * `listDir` and lets an unreadable plugins/data directory surface as a
+   * diagnostic instead of an empty one. Readers injected by older tests
+   * may omit it — they keep the `listDir`-only contract.
+   */
+  listDirStatus?(dir: string): DirReadStatus;
   /** Canonical (realpath) identity, or undefined when unresolvable. */
   realpath(target: string): string | undefined;
 }
@@ -313,6 +333,26 @@ function defaultHostClaimReaders(): HostClaimReaders {
         return undefined;
       }
     },
+    listDirStatus(dir: string): DirReadStatus {
+      try {
+        const entries: unknown = fs.readdirSync(dir);
+        // A reader that cannot produce an entry array (mocked/non-standard
+        // fs) is degraded evidence, never a crash.
+        if (!Array.isArray(entries)) {
+          return { kind: 'unreadable', detail: 'readdir returned a non-array listing' };
+        }
+        return { kind: 'ok', entries };
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+            ? String(Reflect.get(error, 'code'))
+            : '';
+        // ENOENT/ENOTDIR are honest "not present" facts; anything else is
+        // degraded evidence (EACCES, EPERM, EIO, I/O errors …).
+        if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'absent' };
+        return { kind: 'unreadable', detail: code || (error instanceof Error ? error.message : String(error)) };
+      }
+    },
     realpath(target: string): string | undefined {
       try {
         return fs.realpathSync.native(target);
@@ -347,6 +387,31 @@ function readJsonChecked(
     }
   }
   return undefined;
+}
+
+/**
+ * List a directory while honoring SPEC §9.1.8: an existing-but-unreadable
+ * directory is recorded as a diagnostic (degraded evidence), never
+ * silently treated as empty. `absent` yields no entries and no diagnostic.
+ */
+function readDirChecked(
+  readers: HostClaimReaders,
+  dir: string,
+  diagnostics: BindingReadDiagnostic[] | undefined,
+): string[] {
+  if (readers.listDirStatus === undefined) {
+    // Legacy injected readers keep the listDir-only contract: `undefined`
+    // cannot be diagnosed further.
+    return readers.listDir(dir) ?? [];
+  }
+  const status = readers.listDirStatus(dir);
+  if (status.kind === 'ok') return Array.isArray(status.entries) ? [...status.entries] : [];
+  if (status.kind === 'unreadable') {
+    if (diagnostics !== undefined && !diagnostics.some((d) => d.file === dir)) {
+      diagnostics.push({ file: dir, status: 'unreadable', detail: status.detail });
+    }
+  }
+  return [];
 }
 
 function readWorkspaceFromDeclaration(
@@ -511,7 +576,9 @@ export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly 
     }
   }
   const dataRoot = path.join(codexHome, 'plugins', 'data');
-  const entries = readers.listDir(dataRoot) ?? [];
+  // §9.1.8: an unreadable plugins/data directory is degraded evidence —
+  // record it as a diagnostic, never fold it into "no codex claims".
+  const entries = readDirChecked(readers, dataRoot, options.readDiagnostics);
   for (const entry of entries) {
     if (typeof entry !== 'string' || !entry.startsWith(CODEX_PLUGIN_DATA_PREFIX)) continue;
     const binding = path.join(dataRoot, entry, 'mcp-binding.json');

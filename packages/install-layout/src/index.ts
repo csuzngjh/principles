@@ -840,5 +840,6 @@ export {
   type HostClaimOptions,
   type JsonFileReadStatus,
   type BindingReadDiagnostic,
+  type DirReadStatus,
   type ForeignWorkspaceOwnerVerdict,
 } from './mcp-binding-contract.js';

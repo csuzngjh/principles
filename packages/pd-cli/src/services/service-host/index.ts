@@ -30,6 +30,7 @@ export {
   releaseServiceRunLock,
   serviceRunLockPath,
   type AcquireServiceRunLockResult,
+  type ReleaseServiceRunLockResult,
   type ServiceRunLockHandle,
 } from './locking/service-run-lock.js';
 export {
