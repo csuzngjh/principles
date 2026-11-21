@@ -468,7 +468,13 @@ describe('round-5 lock lifecycle (P0/P1)', () => {
     expect(held.ok).toBe(true);
     if (!held.ok) return;
     expect(releaseServiceRunLock(held.handle)).toBe('released');
-    expect(existsSync(lockPath)).toBe(false);
+    let postReleaseBody: string | undefined;
+    try {
+      postReleaseBody = readFileSync(lockPath, 'utf8');
+    } catch {
+      postReleaseBody = undefined;
+    }
+    expect(postReleaseBody).toBeUndefined();
     // not_owned: foreign body in place — never deleted.
     const foreignBody = '424244 foreigntoken 2026-01-01T00:00:00.000Z';
     writeFileSync(lockPath, foreignBody, 'utf8');
