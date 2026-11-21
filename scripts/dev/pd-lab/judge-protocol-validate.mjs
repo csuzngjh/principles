@@ -716,7 +716,7 @@ function main() {
       continue;
     }
     const partnerId = String(resolved.blindPackage.packageId);
-    const key = [pkgId, partnerId].sort().join(" ");
+    const key = [pkgId, partnerId].sort().join("\u0000");
     if (seenSwap.has(key)) continue;
     seenSwap.add(key);
     if (pairedPackageIds.has(pkgId) || pairedPackageIds.has(partnerId)) {
@@ -933,7 +933,14 @@ function main() {
     };
   };
   const mergeComponentsByKey = new Map();
-  for (const key of [...assignmentMap.keys()].sort()) {
+  // P1-5: the merge plan is the UNION of the keys the bundle DECLARED and
+  // the keys the records actually carry. A declared assignment with no
+  // judge records is not silently dropped — it enters the merge and the
+  // T4 mergeJudgments itself emits its FinalComparison as
+  // {verdict: UNKNOWN, reasonCode: MISSING_JUDGMENTS} (a declared plan is
+  // never trimmed to the records that happen to exist; records are never
+  // fabricated for a declared plan either).
+  for (const key of [...new Set([...assignmentMap.keys(), ...declaredAssignments.keys()])].sort()) {
     const components = assignmentComponentsFor(key);
     if (components === null) {
       report({
@@ -984,11 +991,14 @@ function main() {
   // the seats are the slots that actually entered this comparison (a FAILED
   // attempt's seat counts; an invalid record never sits). An unrelated
   // comparison can never inflate or starve this one's requiredJudgments.
+  // P1-5: a declared key with NO records merges too — mergeJudgments then
+  // emits {verdict: UNKNOWN, reasonCode: MISSING_JUDGMENTS} for it, so the
+  // declared plan and the final comparison set stay in 1:1 correspondence.
   const finalComparisons = [];
   for (const key of [...mergeComponentsByKey.keys()].sort()) {
     const groupRecords = [];
     const groupBlind = {};
-    for (const { entry, derived } of assignmentMap.get(key)) {
+    for (const { entry, derived } of assignmentMap.get(key) ?? []) {
       if (derived === null || !derived.valid) continue;
       groupRecords.push(entry.record);
       if (isPlainObject(entry.secretBinding?.identityMap))
@@ -1049,8 +1059,11 @@ function main() {
     finalComparisons.map((fc) => [fc.assignmentKey, fc]),
   );
   const matchedArbitrations = new Set();
-  const perAssignment = [...assignmentMap.keys()].sort().map((key) => {
-    const rows = assignmentMap.get(key);
+  // P1-5: the per-assignment diagnostics cover the same union as the merge
+  // plan — a declared-but-unjudged assignment shows up here too, carrying
+  // its MISSING_JUDGMENTS outcome instead of being silently absent.
+  const perAssignment = [...new Set([...assignmentMap.keys(), ...declaredAssignments.keys()])].sort().map((key) => {
+    const rows = assignmentMap.get(key) ?? [];
     const voting = rows
       .map((row) => row.derived)
       .filter((d) => d && d.valid && !d.failed && d.restoredVerdict !== null);
@@ -1088,13 +1101,17 @@ function main() {
   });
   // A structurally valid arbitration that binds no assignment in this
   // bundle is not evidence (malformed ones were already rejected above).
+  // The binding set is the declared ∪ recorded plan (P1-5) — an arbitration
+  // may legitimately bind a declared assignment that has no judgment
+  // records yet (the merge keeps that unit UNKNOWN / MISSING_JUDGMENTS and
+  // never adopts the arbitration).
   for (const arbitration of validArbitrations) {
     if (!matchedArbitrations.has(arbitration)) {
       report({
         packageId: "<arbitration>",
         judgmentId: String(arbitration?.arbitrationId ?? "<missing>"),
         code: "INVALID_ARBITRATION_RECORD",
-        message: `arbitration ${arbitration?.arbitrationId ?? "<missing>"} references assignment ${arbitration?.assignmentKey ?? "<missing>"} which has no judgment records in this bundle`,
+        message: `arbitration ${arbitration?.arbitrationId ?? "<missing>"} references assignment ${arbitration?.assignmentKey ?? "<missing>"} which is neither declared in bundle.assignments nor carried by any judgment record in this bundle`,
       });
     }
   }
@@ -1109,6 +1126,13 @@ function main() {
       validEntries: perRecord.filter((r) => r.valid).length,
       failedAttemptsPreserved: failedAttemptsPreserved.sort(),
       problemCount: problems.length,
+      // P1-5 acceptance surface: the declared plan (∪ recorded keys) and
+      // the final comparison set must stay in 1:1 correspondence — an
+      // unjudged declared assignment counts here as a MISSING_JUDGMENTS
+      // comparison, never as a dropped plan entry.
+      declaredAssignments: declaredAssignments.size,
+      mergedAssignmentKeys: mergeComponentsByKey.size,
+      finalComparisons: finalComparisons.length,
     },
     problems,
     disclosures,

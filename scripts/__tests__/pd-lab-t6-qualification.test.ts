@@ -38,6 +38,11 @@ import {
 import { sourceGroupsDigestOf } from "../dev/pd-lab/admission-probe.mjs";
 import { twoSidedThreshold } from "../dev/pd-lab/alignment-report.mjs";
 import {
+  JUDGE_PROTOCOL_REF,
+  judgeProtocolDigest,
+  restoreDisplayVerdict,
+} from "../dev/pd-lab/judge-protocol.mjs";
+import {
   runQualifyCli,
   REPO_ROOT,
 } from "./fixtures/pd-lab-t6-qualification-helpers.mjs";
@@ -84,7 +89,7 @@ function evidenceBindings() {
   };
 }
 
-const APPROVAL_DOC = (approved: boolean, scope: string) => ({
+const APPROVAL_BASE = (approved: boolean, scope: string) => ({
   kind: "owner-decision",
   approved,
   decidedBy: "O1",
@@ -94,6 +99,22 @@ const APPROVAL_DOC = (approved: boolean, scope: string) => ({
 
 const DATASET_SHA = "b".repeat(64);
 const PRECISION_TARGET = 0.9;
+// The synthetic judge model every calibration invocation claims to have run
+// (P1-2/P1-3: the D2 decision freezes the same model).
+const JUDGE_MODEL = {
+  provider: "synthetic-provider",
+  modelId: "judge-synth-1",
+  version: "1.0.0",
+};
+// D5 synthetic thresholds — the fixture review always satisfies them; the
+// negative tests below mutate them to prove the bindings fail closed.
+const D5_PARAMS = {
+  samplePairs: 20,
+  agreementRateThreshold: 0.8,
+  maxPositionFlipRate: 0.2,
+  reviewScope: "t7a-owner-blind-review",
+  recheckRequired: true,
+};
 
 /** Synthetic resolved evidence docs matching a granted input's claims. */
 function resolvedFor(input: Record<string, any>, opts: { exploratory?: boolean } = {}) {
@@ -120,6 +141,45 @@ function resolvedFor(input: Record<string, any>, opts: { exploratory?: boolean }
       BEHAVIOR_BRANCH: "READY",
     },
   }));
+  // Calibration invocations carry the full per-call evidence (P1-2): the
+  // model that served the call, the judge verdict, the reference verdict,
+  // and the position-exchange outcome. When the input claims the precision
+  // target was NOT met, the first quarter of calls disagree so the
+  // RECOMPUTED agreement rate lands below the 0.9 target — the fixture's
+  // numbers must be internally consistent with its own claims.
+  const callCount = input.judgeModelCalibration.modelCallCount;
+  const precisionMet = input.analysisPolicy.precisionTargetMet === true;
+  const invocations = Array.from({ length: callCount }, (_, i) => {
+    const disagree = !precisionMet && i < Math.ceil(callCount / 4);
+    return {
+      invocationId: `inv-${i + 1}`,
+      status: "SUCCEEDED",
+      model: { ...JUDGE_MODEL },
+      judgeVerdict: disagree ? "B_BETTER" : "A_BETTER",
+      referenceVerdict: "A_BETTER",
+      positionExchangeConsistent: true,
+    };
+  });
+  // Blind-review samples carry the actual review record (P1-2): position,
+  // identity map, the Owner's verdict, the judge's verdict, the restored
+  // candidate-frame verdict (recomputed with the protocol's own
+  // restoration), the recheck stability and the disagreement type.
+  const reviewCount = input.ownerBlindReview.sampleCount;
+  const samples = Array.from({ length: reviewCount }, (_, i) => {
+    const identityMap = { A: "candidate", B: "reference" };
+    const judgeVerdict = "A_BETTER";
+    return {
+      sampleId: `s-${i + 1}`,
+      packageId: `pkg-${i + 1}`,
+      displayOrder: "AB",
+      identityMap,
+      ownerVerdict: judgeVerdict,
+      judgeVerdict,
+      judgeRestoredVerdict: restoreDisplayVerdict(judgeVerdict, identityMap),
+      recheckStability: "STABLE",
+      disagreementType: null,
+    };
+  });
   return {
     sourceGroups: {
       artifactRef: "source-groups.json",
@@ -141,7 +201,18 @@ function resolvedFor(input: Record<string, any>, opts: { exploratory?: boolean }
         dataset: { sha256: DATASET_SHA },
         snapshot: { consistencyStatus: "CONSISTENT_WITHIN_WINDOW" },
         invalidPlan: [],
-        realDataProbe: { status: "RAN_WITH_D6" },
+        realDataProbe: {
+          status: "RAN_WITH_D6",
+          d6Decision: {
+            file: "d6.json",
+            sha256: FAKE_SHA,
+            decidedBy: "O1",
+            decidedAt: "2026-11-21T00:00:00Z",
+            datasetSha256: DATASET_SHA,
+          },
+          probeScope: { datasetSha256: DATASET_SHA },
+          result: "synthetic fixture probe under a bound D6 decision",
+        },
         sourceGroups: {
           digest: groupsDigest,
           groupCount: Object.keys(cases).length,
@@ -170,12 +241,12 @@ function resolvedFor(input: Record<string, any>, opts: { exploratory?: boolean }
       document: {
         schema: "pd-lab-judge-calibration.v1",
         status: input.judgeModelCalibration.status,
-        invocations: Array.from(
-          { length: input.judgeModelCalibration.modelCallCount },
-          (_, i) => ({ invocationId: `inv-${i + 1}`, status: "SUCCEEDED" }),
-        ),
+        judgeProtocolRef: JUDGE_PROTOCOL_REF,
+        judgeProtocolDigest: judgeProtocolDigest(),
+        judgeModel: { ...JUDGE_MODEL },
+        invocations,
         precisionTarget: PRECISION_TARGET,
-        precisionTargetMet: input.analysisPolicy.precisionTargetMet,
+        precisionTargetMet: precisionMet,
       },
     },
     ownerBlindReview: {
@@ -184,10 +255,7 @@ function resolvedFor(input: Record<string, any>, opts: { exploratory?: boolean }
       document: {
         schema: "pd-lab-owner-blind-review.v1",
         status: input.ownerBlindReview.status,
-        samples: Array.from(
-          { length: input.ownerBlindReview.sampleCount },
-          (_, i) => ({ sampleId: `s-${i + 1}` }),
-        ),
+        samples,
       },
     },
     approvals: {
@@ -195,19 +263,41 @@ function resolvedFor(input: Record<string, any>, opts: { exploratory?: boolean }
         artifactRef: "d2.json",
         sha256: FAKE_SHA,
         document: {
-          ...APPROVAL_DOC(input.authorization.d2Approved, "d2"),
+          ...APPROVAL_BASE(input.authorization.d2Approved, "d2"),
           exploratory: opts.exploratory === true,
+          parameters: {
+            model: { ...JUDGE_MODEL },
+            alpha: input.analysisPolicy.alpha,
+            minimumIndependentSourceGroups:
+              input.analysisPolicy.minimumIndependentSourceGroups,
+            precisionTarget: PRECISION_TARGET,
+            callBudget: 10000,
+            repetitions: 1,
+            licenseConditions: "synthetic-test-license",
+          },
         },
       },
       d5: {
         artifactRef: "d5.json",
         sha256: FAKE_SHA,
-        document: APPROVAL_DOC(input.authorization.d5Approved, "d5"),
+        document: {
+          ...APPROVAL_BASE(input.authorization.d5Approved, "d5"),
+          parameters: { ...D5_PARAMS },
+        },
       },
       d6: {
         artifactRef: "d6.json",
         sha256: FAKE_SHA,
-        document: APPROVAL_DOC(input.authorization.d6Approved === true, "d6"),
+        document: {
+          ...APPROVAL_BASE(input.authorization.d6Approved === true, "d6"),
+          parameters: {
+            datasetSha256: DATASET_SHA,
+            sampleRange: "frozen-16",
+            storageScope: "artifacts/pd-lab",
+            dataSource: "t1-snapshot",
+            retentionDays: 365,
+          },
+        },
       },
     },
   };
@@ -554,7 +644,6 @@ describe("qualifyT6 states", () => {
         minimumIndependentSourceGroups: 5,
         precisionTargetMet: true,
       },
-      ownerBlindReview: { status: "NOT_RUN", sampleCount: 0 },
     });
     // Neither authorization alone suffices — the input boolean is never
     // trusted, and a plain D2 approval does not cover exploratory.
@@ -582,6 +671,66 @@ describe("qualifyT6 states", () => {
     expect(
       qualifyT6(base, d2Only).t6Permissions.exploratoryT6Allowed,
     ).toBe(false);
+  });
+
+  it("P1-1: an exploratory preregistration can NEVER reach CONFIRMATORY_READY, even with every statistical condition met", () => {
+    // Every gate granted, n = 14 >= every minimum, precision met, review
+    // PASSED — the ONLY exploratory fact is the preregistration marker.
+    const result = run(grantedInput());
+    expect(result.status).toBe("CONFIRMATORY_READY");
+    const exploratory = qualifyT6(
+      grantedInput(),
+      resolvedFor(grantedInput(), { exploratory: true }) as never,
+    );
+    // The marker alone caps the verdict at EXPLORATORY_ONLY...
+    expect(exploratory.status).toBe("EXPLORATORY_ONLY");
+    expect(exploratory.unmetCriteria).toEqual([
+      "PREREGISTRATION_EXPLORATORY_CAP",
+    ]);
+    // ...and forbids both the confirmatory grant and PROMOTE.
+    expect(exploratory.t6Permissions.confirmatoryT6Allowed).toBe(false);
+    expect(exploratory.t6Permissions.promotePossible).toBe(false);
+    // The full exploratory authorization set still grants exploratory T6.
+    expect(exploratory.t6Permissions.exploratoryT6Allowed).toBe(true);
+    // A confirmatory preregistration with the same evidence stays
+    // CONFIRMATORY_READY — the cap discriminates on the registration type.
+    expect(run(grantedInput()).status).toBe("CONFIRMATORY_READY");
+  });
+
+  it("P1-1: exploratory T6 requires the Owner blind review to have PASSED with the D5 sample floor", () => {
+    const base = grantedInput({
+      readyIndependentSourceGroups: 5,
+      analysisPolicy: {
+        alpha: 0.05,
+        minimumIndependentSourceGroups: 5,
+        precisionTargetMet: true,
+      },
+    });
+    // Owner blind review NOT_RUN → exploratory T6 denied even with the full
+    // D2 exploratory + prereg marker authorization pair.
+    const notRun = qualifyT6(
+      { ...base, ownerBlindReview: { status: "NOT_RUN", sampleCount: 0 } },
+      resolvedFor(
+        { ...base, ownerBlindReview: { status: "NOT_RUN", sampleCount: 0 } },
+        { exploratory: true },
+      ) as never,
+    );
+    expect(notRun.status).toBe("EXPLORATORY_ONLY");
+    expect(notRun.unmetCriteria).toContain("OWNER_BLIND_REVIEW_NOT_PASSED");
+    expect(notRun.t6Permissions.exploratoryT6Allowed).toBe(false);
+    // PASSED but below the D5-approved sample floor (20) → fail-closed
+    // BLOCKED (an authorization mismatch, not an unmet criterion).
+    const thin = { ...base, ownerBlindReview: { status: "PASSED", sampleCount: 10 } };
+    const thinResult = qualifyT6(
+      thin,
+      resolvedFor(thin, { exploratory: true }) as never,
+    );
+    expect(thinResult.status).toBe("BLOCKED");
+    expect(
+      thinResult.evidenceCheck.approvalParameterBinding.findings.join(" "),
+    ).toContain("sample pairs");
+    expect(thinResult.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    expect(thinResult.t6Permissions.exploratoryT6Allowed).toBe(false);
   });
 
   it("today's honest state (no D2/D5/D6) is mechanically BLOCKED", () => {
@@ -723,6 +872,13 @@ describe("qualifyT6 states", () => {
           },
         }),
         "resolved",
+      ],
+      // PREREGISTRATION_EXPLORATORY_CAP: every statistical condition met,
+      // only the exploratory registration marker caps the verdict.
+      [
+        grantedInput(),
+        (input: ReturnType<typeof grantedInput>) =>
+          resolvedFor(input, { exploratory: true }),
       ],
     ];
     const emitted = new Set<string>();
@@ -1017,6 +1173,578 @@ describe("evidence semantics hardening", () => {
     expect(
       tampered.evidenceCheck.artifacts.readySourceGroups.contentDigestMismatch,
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-2: calibration and blind-review facts must be re-derivable from the
+// raw evidence — a report's own headline boolean proves nothing.
+// ---------------------------------------------------------------------------
+
+describe("calibration evidence re-derivation (P1-2)", () => {
+  const flags = (result: any) =>
+    result.evidenceCheck.artifacts.readySourceGroups ?? {};
+
+  it("a calibration report missing its judge protocol digest is invalid evidence", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    delete ev.judgeCalibration.document.judgeProtocolDigest;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("a calibration report bound to a DIFFERENT protocol digest is invalid evidence", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.judgeCalibration.document.judgeProtocolDigest = `sha256:${"e".repeat(64)}`;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("a calibration report whose SUCCEEDED invocations ran a different model than the report claims is invalid", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    // The report says judgeModel X; one invocation actually ran model Y.
+    ev.judgeCalibration.document.invocations[3].model = {
+      provider: "other-provider",
+      modelId: "other-model",
+      version: "9.9.9",
+    };
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("a declared PASSED precision target contradicted by the raw metrics is rejected", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    // Declared met + input claims met, but 3/4 of the raw calls disagree —
+    // the RECOMPUTED agreement rate (0.25) is below the 0.9 target.
+    const invocations = ev.judgeCalibration.document.invocations;
+    for (let i = 0; i < Math.ceil(invocations.length * 0.75); i += 1)
+      invocations[i].judgeVerdict = "B_BETTER";
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_CLAIM_MISMATCH");
+    expect(result.evidenceCheck.artifacts.precisionTarget.recomputed).toBe(
+      false,
+    );
+    expect(result.evidenceCheck.artifacts.precisionTarget.reportClaimed).toBe(
+      true,
+    );
+  });
+
+  it("a SUCCEEDED invocation without its position-exchange outcome is invalid evidence", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    delete ev.judgeCalibration.document.invocations[7]
+      .positionExchangeConsistent;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("duplicate invocation ids inside the calibration report are invalid evidence", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.judgeCalibration.document.invocations[1].invocationId =
+      ev.judgeCalibration.document.invocations[0].invocationId;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+});
+
+describe("owner blind-review evidence re-derivation (P1-2)", () => {
+  it("a sample carrying only a sampleId (no actual judgments) is invalid evidence", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.ownerBlindReview.document.samples[0] = { sampleId: "s-1" };
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("duplicate blind-review sample ids are invalid evidence (never double-counted)", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.ownerBlindReview.document.samples[1].sampleId =
+      ev.ownerBlindReview.document.samples[0].sampleId;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("a recorded identity map that does not explain the recorded verdict is invalid", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    // The judge verdict says A won; the recorded restored verdict names the
+    // reference — the blinding does not explain the record.
+    ev.ownerBlindReview.document.samples[0].judgeRestoredVerdict =
+      "REFERENCE_BETTER";
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+
+  it("an agreeing sample that carries a disagreement type is structurally invalid", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.ownerBlindReview.document.samples[0].disagreementType =
+      "VERDICT_CONFLICT";
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-3: D2/D5/D6 approvals must bind the experiment parameters they froze;
+// any mismatch with the actual evidence is an authorization violation.
+// ---------------------------------------------------------------------------
+
+describe("approval parameter binding (P1-3)", () => {
+  it("D2 approved model A but the calibration ran model B → BLOCKED with the finding", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.approvals.d2.document.parameters.model = {
+      provider: "approved-provider",
+      modelId: "approved-model",
+      version: "1.2.3",
+    };
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    expect(
+      result.evidenceCheck.approvalParameterBinding.findings.join(" "),
+    ).toContain("authorized model approved-provider/approved-model/1.2.3");
+  });
+
+  it("D2 froze alpha 0.05 but the preregistration froze 0.01 → BLOCKED", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.approvals.d2.document.parameters.alpha = 0.01;
+    const result = qualifyT6(input, ev as never);
+    expect(result.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    expect(
+      result.evidenceCheck.approvalParameterBinding.findings.join(" "),
+    ).toContain("alpha=0.01");
+  });
+
+  it("D5 approved 40 sample pairs but only 20 were reviewed → BLOCKED", () => {
+    const input = grantedInput({
+      ownerBlindReview: { status: "PASSED", sampleCount: 20 },
+    });
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.approvals.d5.document.parameters.samplePairs = 40;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    expect(
+      result.evidenceCheck.approvalParameterBinding.findings.join(" "),
+    ).toContain("40 blind-review sample pairs but only 20");
+  });
+
+  it("D6 authorized dataset A but the admission report probed dataset B → BLOCKED", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.approvals.d6.document.parameters.datasetSha256 = "c".repeat(64);
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    // The data-path gate also fails closed on the same inconsistency.
+    expect(result.blockedReasons).toContain("DATA_PATH_AUTHORIZATION_INVALID");
+  });
+
+  it("a granted approval record missing its parameter block is non-interpretable", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    delete ev.approvals.d2.document.parameters;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+    // Per-key fragments of parameters fail the same way.
+    const partial = resolvedFor(input) as Record<string, any>;
+    delete partial.approvals.d6.document.parameters.retentionDays;
+    expect(qualifyT6(input, partial as never).blockedReasons).toContain(
+      "EVIDENCE_ARTIFACT_INVALID",
+    );
+    const noModel = resolvedFor(input) as Record<string, any>;
+    delete noModel.approvals.d2.document.parameters.model;
+    expect(qualifyT6(input, noModel as never).blockedReasons).toContain(
+      "EVIDENCE_ARTIFACT_INVALID",
+    );
+  });
+
+  it("D2 call budget exceeded by the actual calibration calls → BLOCKED", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.approvals.d2.document.parameters.callBudget = 10;
+    const result = qualifyT6(input, ev as never);
+    expect(result.blockedReasons).toContain("APPROVAL_PARAMETER_MISMATCH");
+    expect(
+      result.evidenceCheck.approvalParameterBinding.findings.join(" "),
+    ).toContain("budget of 10");
+  });
+
+  it("an unauthorized experiment cannot grant itself permission by editing input booleans (P1-1)", () => {
+    // The honest state claims every authorization but binds no records:
+    // every affirmative boolean fails for lack of bound evidence.
+    const forged = {
+      ...notRunInput(),
+      authorization: {
+        dataPathAuthorizationValid: true,
+        dataIntegrityValid: true,
+        d2Approved: true,
+        d5Approved: true,
+        d6Approved: true,
+      },
+      judgeModelCalibration: { status: "PASSED", modelCallCount: 40 },
+      ownerBlindReview: { status: "PASSED", sampleCount: 40 },
+      analysisPolicy: {
+        alpha: 0.05,
+        minimumIndependentSourceGroups: 14,
+        precisionTargetMet: true,
+      },
+      readyIndependentSourceGroups: 14,
+    };
+    const result = qualifyT6(forged);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.t6Permissions.exploratoryT6Allowed).toBe(false);
+    expect(result.t6Permissions.confirmatoryT6Allowed).toBe(false);
+    expect(result.t6Permissions.promotePossible).toBe(false);
+    expect(result.blockedReasons).toContain("EVIDENCE_MISSING_FOR_CLAIM");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-4: source-group record integrity — duplicates, session anchors and
+// count consistency can never inflate the READY group count.
+// ---------------------------------------------------------------------------
+
+describe("source-group record integrity (P1-4)", () => {
+  const flags = (result: any) =>
+    result.evidenceCheck.artifacts.readySourceGroups ?? {};
+
+  it("a duplicate caseId (INCOMPLETE then READY) is invalid — the later record cannot bury the earlier probe", () => {
+    const input = grantedInput({ readyIndependentSourceGroups: 2 });
+    const ev = resolvedFor(input) as Record<string, any>;
+    const perSample = ev.admissionReport.document.perSample;
+    perSample.push({
+      ...perSample[0],
+      completeness: "INCOMPLETE",
+      pathReadiness: {
+        PIPELINE_REPLAY: "BLOCKED",
+        EXPECTATION_LABELING: "READY",
+        BEHAVIOR_BRANCH: "READY",
+      },
+    });
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+    expect(flags(result).duplicateCase).toBe(perSample[0].caseId);
+  });
+
+  it("a duplicate caseId (READY then INCOMPLETE) is equally invalid — no overwrite in either direction", () => {
+    const input = grantedInput({ readyIndependentSourceGroups: 2 });
+    const ev = resolvedFor(input) as Record<string, any>;
+    const perSample = ev.admissionReport.document.perSample;
+    const incompleteClone = {
+      ...perSample[0],
+      completeness: "INCOMPLETE",
+      pathReadiness: {
+        PIPELINE_REPLAY: "BLOCKED",
+        EXPECTATION_LABELING: "READY",
+        BEHAVIOR_BRANCH: "READY",
+      },
+    };
+    perSample.unshift(incompleteClone);
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(flags(result).duplicateCase).toBe(perSample[1].caseId);
+  });
+
+  it("a session-less case in a SHARED group is invalid (no provable common origin)", () => {
+    const input = grantedInput({
+      readyIndependentSourceGroups: 2,
+      analysisPolicy: {
+        alpha: 0.05,
+        minimumIndependentSourceGroups: 2,
+        precisionTargetMet: true,
+      },
+    });
+    const ev = resolvedFor(input) as Record<string, any>;
+    // Both cases lose their session anchor but stay in separate groups...
+    const perSample = ev.admissionReport.document.perSample;
+    perSample[0].sessionId = "";
+    perSample[1].sessionId = "";
+    // ...single-case groups are the producer's mechanical rule for
+    // session-less cases, so the evidence stays VALID: both singleton
+    // groups derive READY (the status may still be EXPLORATORY_ONLY for
+    // statistical reasons — that is not an evidence defect).
+    const separate = qualifyT6(input, ev as never);
+    expect(separate.blockedReasons).toEqual([]);
+    expect(separate.evidenceCheck.artifacts.readySourceGroups.derived).toBe(2);
+    // ...but merging them into ONE group claims an independence violation:
+    // no session anchor can prove the shared origin.
+    const merged = resolvedFor(input) as Record<string, any>;
+    merged.sourceGroups.document.groups = {
+      "case-1": "group-a",
+      "case-2": "group-a",
+    };
+    merged.sourceGroups.document.rationales = {
+      "group-a": "synthetic: shared group",
+    };
+    merged.sourceGroups.document.digest = sourceGroupsDigestOf(
+      merged.sourceGroups.document.groups,
+      merged.sourceGroups.document.rationales,
+    );
+    merged.admissionReport.document.sourceGroups.digest =
+      merged.sourceGroups.document.digest;
+    merged.admissionReport.document.perSample[0].sessionId = "";
+    merged.admissionReport.document.perSample[1].sessionId = "";
+    const result = qualifyT6(input, merged as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+    expect(flags(result).sessionAnchorMissingSharedGroup).toBeTruthy();
+  });
+
+  it("a missing sessionId field is not silently skipped — the same shared-group rule applies", () => {
+    const input = grantedInput({
+      readyIndependentSourceGroups: 2,
+      analysisPolicy: {
+        alpha: 0.05,
+        minimumIndependentSourceGroups: 2,
+        precisionTargetMet: true,
+      },
+    });
+    const ev = resolvedFor(input) as Record<string, any>;
+    delete ev.admissionReport.document.perSample[0].sessionId;
+    ev.admissionReport.document.perSample[1].sessionId = "";
+    // Both anchor-less cases in separate singleton groups stay valid
+    // evidence — no session check was silently skipped, the singleton rule
+    // applied and both groups still derive READY.
+    const result = qualifyT6(input, ev as never);
+    expect(result.blockedReasons).toEqual([]);
+    expect(result.evidenceCheck.artifacts.readySourceGroups.derived).toBe(2);
+  });
+
+  it("dataset.sampleCount disagreeing with the per-sample records is invalid", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.admissionReport.document.dataset.sampleCount = 99;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(flags(result).countMismatch).toBe("dataset.sampleCount");
+  });
+
+  it("counts.caseCount disagreeing with the per-sample records is invalid", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.admissionReport.document.counts = { caseCount: 3 };
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(flags(result).countMismatch).toBe("counts.caseCount");
+  });
+
+  it("extra mapping keys beyond the probed cases are invalid (count mismatch)", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    const groups = { ...ev.sourceGroups.document.groups };
+    groups["case-ghost"] = "group-ghost";
+    ev.sourceGroups.document.groups = groups;
+    ev.sourceGroups.document.rationales["group-ghost"] = "synthetic: ghost";
+    ev.sourceGroups.document.digest = sourceGroupsDigestOf(
+      groups,
+      ev.sourceGroups.document.rationales,
+    );
+    ev.admissionReport.document.sourceGroups.digest =
+      ev.sourceGroups.document.digest;
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    // The bidirectional check names the unknown case first.
+    expect(flags(result).unknownCase).toBe("case-ghost");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2-1: nMinAlpha null must fail closed — never silently coerced by
+// JavaScript's relational comparison rules.
+// ---------------------------------------------------------------------------
+
+describe("nMinAlpha null boundary (P2-1)", () => {
+  it("an exhausted n_min search is BLOCKED and nMeetsNMinAlpha is explicitly false (not >= null → true)", { timeout: 180_000 }, () => {
+    const input = grantedInput({
+      readyIndependentSourceGroups: 5,
+      analysisPolicy: {
+        alpha: 1e-310,
+        minimumIndependentSourceGroups: 5,
+        precisionTargetMet: true,
+      },
+    });
+    const result = run(input);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("N_MIN_ALPHA_SEARCH_EXHAUSTED");
+    expect(result.thresholds.nMinAlpha).toBeNull();
+    // The bug this pins: 5 >= null coerces null to 0 and evaluates TRUE.
+    expect(result.checks.nMeetsNMinAlpha).toBe(false);
+    expect(result.unmetCriteria).not.toContain("BELOW_N_MIN_ALPHA");
+  });
+
+  it("n_min(alpha) boundary values remain exact at practical alphas", () => {
+    expect(nMinForAlpha(0.05)).toBe(6);
+    expect(nMinForAlpha(0.1)).toBe(5);
+    expect(nMinForAlpha(0.01)).toBe(8);
+    expect(nMinForAlpha(0.2)).toBe(4);
+    expect(() => nMinForAlpha(0)).toThrow();
+    expect(() => nMinForAlpha(1)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-6 (engine side): the positive RAN_WITH_D6 state is only accepted when
+// the probe's dataset matches the D6-authorized dataset.
+// ---------------------------------------------------------------------------
+
+describe("D6 positive data-path binding (P1-6, engine side)", () => {
+  it("a forged RAN_WITH_D6 over a dataset the D6 decision never authorized is rejected", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    // The report claims RAN_WITH_D6, the D6 decision authorized THIS
+    // dataset — but the probe actually ran over a different one.
+    ev.admissionReport.document.realDataProbe.datasetSha256 = "f".repeat(64);
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("DATA_PATH_AUTHORIZATION_INVALID");
+  });
+
+  it("an honest RAN_WITH_D6 report whose d6Decision echo matches everything passes the data-path gate", () => {
+    const result = run(grantedInput());
+    expect(result.status).toBe("CONFIRMATORY_READY");
+    expect(result.checks.dataPathAuthorizationValid).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2-2: artifactRef is a relative path inside the input file's directory.
+// Traversal, absolute paths and symlink escapes are verification failures.
+// ---------------------------------------------------------------------------
+
+describe("t6-qualify artifactRef path security (P2-2)", () => {
+  const setupDirs = (name: string) => {
+    const dir = fs.mkdtempSync(path.join(tempRoot, `p22-${name}-`));
+    const outside = fs.mkdtempSync(path.join(tempRoot, `p22-outside-${name}-`));
+    return { dir, outside };
+  };
+  const writeInputWithD2Ref = (dir: string, artifactRef: string) => {
+    const input = {
+      ...notRunInput(),
+      evidence: {
+        approvals: { d2: { artifactRef, sha256: FAKE_SHA } },
+      },
+    };
+    const file = path.join(dir, "qualification-input.json");
+    fs.writeFileSync(file, JSON.stringify(input, null, 2), "utf8");
+    const out = path.join(dir, "out");
+    return { file, out };
+  };
+  const problemOf = (out: string) => {
+    const verification = JSON.parse(
+      fs.readFileSync(path.join(out, "evidence-verification.json"), "utf8"),
+    );
+    return verification.artifacts["approvals.d2"].problem ?? null;
+  };
+
+  it("a parent-traversal artifactRef (../) is rejected before any read", () => {
+    const { dir, outside } = setupDirs("traversal");
+    fs.writeFileSync(path.join(outside, "d2.json"), "{}", "utf8");
+    // The exact relative escape regardless of tmp naming (forward slashes
+    // keep the ref in the "relative with .." class on both platforms).
+    const rel = path.relative(dir, path.join(outside, "d2.json"));
+    const input = {
+      ...notRunInput(),
+      evidence: { approvals: { d2: { artifactRef: rel, sha256: FAKE_SHA } } },
+    };
+    const file = path.join(dir, "qualification-input.json");
+    fs.writeFileSync(file, JSON.stringify(input, null, 2), "utf8");
+    const out = path.join(dir, "out");
+    const run = runQualifyCli(["--input", file, "--out", out]);
+    expect(run.status).toBe(1);
+    expect(problemOf(out)).toContain("parent traversal");
+  });
+
+  it("absolute artifactRefs are rejected (POSIX root and Windows drive forms)", () => {
+    const { dir } = setupDirs("absolute");
+    for (const ref of ["/etc/passwd", "C:\\Windows\\system32\\config.json"]) {
+      const suffix = ref.replace(/[^a-z]+/gi, "-");
+      const out = path.join(dir, `out-${suffix}`);
+      const input = {
+        ...notRunInput(),
+        evidence: { approvals: { d2: { artifactRef: ref, sha256: FAKE_SHA } } },
+      };
+      const file = path.join(dir, `input-${suffix}.json`);
+      fs.writeFileSync(file, JSON.stringify(input, null, 2), "utf8");
+      const run = runQualifyCli(["--input", file, "--out", out]);
+      expect(run.status, ref).toBe(1);
+      expect(problemOf(out), ref).toMatch(/absolute|drive-qualified/);
+    }
+  });
+
+  it("a symlink inside the evidence directory that escapes it is rejected", (ctx) => {
+    const { dir, outside } = setupDirs("symlink");
+    const target = path.join(outside, "d2.json");
+    fs.writeFileSync(target, "{}", "utf8");
+    const link = path.join(dir, "d2-link.json");
+    try {
+      fs.symlinkSync(target, link, "file");
+    } catch {
+      // Windows without symlink privilege — the containment gate cannot be
+      // exercised here; the traversal/absolute gates above still cover the
+      // escaping-path classes this environment can create.
+      ctx.skip();
+      return;
+    }
+    const { file, out } = writeInputWithD2Ref(dir, "d2-link.json");
+    const run = runQualifyCli(["--input", file, "--out", out]);
+    expect(run.status).toBe(1);
+    expect(problemOf(out)).toContain("escapes the evidence root");
+  });
+
+  it("a legitimately nested relative path inside the evidence root resolves normally", () => {
+    const { dir } = setupDirs("nested");
+    fs.mkdirSync(path.join(dir, "nested", "dir"), { recursive: true });
+    const doc = {
+      kind: "owner-decision",
+      approved: false,
+      decidedBy: "O1",
+      decidedAt: "2026-11-22T00:00:00Z",
+      scope: "d2",
+    };
+    const docPath = path.join(dir, "nested", "dir", "d2.json");
+    fs.writeFileSync(docPath, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
+    const sha = `sha256:${createHash("sha256").update(fs.readFileSync(docPath)).digest("hex")}`;
+    const input = {
+      ...notRunInput(),
+      evidence: {
+        approvals: { d2: { artifactRef: "nested/dir/d2.json", sha256: sha } },
+      },
+    };
+    const file = path.join(dir, "qualification-input.json");
+    fs.writeFileSync(file, JSON.stringify(input, null, 2), "utf8");
+    const out = path.join(dir, "out");
+    const run = runQualifyCli(["--input", file, "--out", out]);
+    expect(run.status).toBe(0); // BLOCKED verdict is a valid computed outcome
+    const verification = JSON.parse(
+      fs.readFileSync(path.join(out, "evidence-verification.json"), "utf8"),
+    );
+    expect(verification.artifacts["approvals.d2"].verified).toBe(true);
+    const qualification = JSON.parse(
+      fs.readFileSync(path.join(out, "qualification.json"), "utf8"),
+    );
+    expect(qualification.status).toBe("BLOCKED");
+    expect(qualification.blockedReasons).toContain("D2_NOT_APPROVED");
   });
 });
 

@@ -10,10 +10,13 @@
 //   EXPLORATORY_ONLY   authorizations and live calibration passed, but n is
 //                      below n_min(alpha) or the preregistered minimum
 //                      independent source groups, the precision target is
-//                      unmet, or the Owner blind review has not passed.
-//                      Exploratory T6 needs an explicit D2 exploratory
-//                      approval and can never produce a PROMOTE.
-//   CONFIRMATORY_READY everything above passed AND
+//                      unmet, the Owner blind review has not passed, OR the
+//                      preregistration itself is marked exploratory (that
+//                      marker is a permanent cap — no later evidence ever
+//                      upgrades it). Exploratory T6 needs an explicit D2
+//                      exploratory approval and can never produce a PROMOTE.
+//   CONFIRMATORY_READY everything above passed AND the preregistration is
+//                      NOT exploratory AND
 //                      n >= max(n_min(alpha), minimumIndependentSourceGroups)
 //                      and the preregistered precision target is met.
 //
@@ -60,7 +63,13 @@
 
 import { twoSidedThreshold } from "./alignment-report.mjs";
 import { sourceGroupsDigestOf } from "./admission-probe.mjs";
-import { JUDGE_PROTOCOL_REF, judgeProtocolDigest } from "./judge-protocol.mjs";
+import {
+  JUDGE_PROTOCOL_REF,
+  judgeProtocolDigest,
+  restoreDisplayVerdict,
+  DISPLAY_ORDERS,
+  PROTOCOL_VERDICTS,
+} from "./judge-protocol.mjs";
 
 export const QUALIFICATION_STATUSES = Object.freeze([
   "BLOCKED",
@@ -128,6 +137,12 @@ export const QUALIFICATION_REASON_CODES = Object.freeze([
   "BELOW_PREREGISTERED_MIN_SOURCE_GROUPS",
   "PRECISION_TARGET_NOT_MET",
   "OWNER_BLIND_REVIEW_NOT_PASSED",
+  // An exploratory-marked preregistration can never satisfy the
+  // confirmatory criteria — no amount of later evidence upgrades it (P1-1).
+  "PREREGISTRATION_EXPLORATORY_CAP",
+  // Approval-parameter binding (P1-3): a granted D2/D5/D6 decision whose
+  // parameters contradict the frozen experiment evidence.
+  "APPROVAL_PARAMETER_MISMATCH",
 ]);
 
 // Non-blocking disclosure codes — an approval record verified byte-exact
@@ -335,6 +350,128 @@ export function validateQualificationInput(input) {
 
 // ─── Evidence derivations (pure: documents -> facts) ────────────────────────
 
+// A judge/generator model block as frozen by the judge protocol
+// ({provider, modelId, version} — all non-empty strings; same shape as the
+// protocol record's judgeModel).
+function modelBlockOf(document, label) {
+  if (
+    !isPlainObject(document) ||
+    !isNonEmptyString(document.provider) ||
+    !isNonEmptyString(document.modelId) ||
+    !isNonEmptyString(document.version)
+  )
+    return { valid: false, label };
+  return {
+    valid: true,
+    label,
+    provider: document.provider,
+    modelId: document.modelId,
+    version: document.version,
+  };
+}
+
+function modelsEqual(a, b) {
+  return (
+    a.provider === b.provider && a.modelId === b.modelId && a.version === b.version
+  );
+}
+
+function isUnitIntervalRate(value) {
+  return (
+    typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
+  );
+}
+
+const DATASET_SHA256_RE = /^[0-9a-f]{64}$/;
+
+// P1-3: an affirmative D2/D5/D6 decision must carry the experiment
+// parameters it froze (HANDOFF decision table — no thresholds are invented
+// here). Missing or malformed parameters make the record non-interpretable
+// for a granted decision; a rejection (approved: false) needs none.
+function approvalParameters(document, scope) {
+  if (document.approved !== true) return { valid: true, parameters: null };
+  const p = document.parameters;
+  if (!isPlainObject(p)) return { valid: false, problem: "parameters object missing on a granted decision" };
+  if (scope === "d2") {
+    const model = modelBlockOf(p.model, "d2.parameters.model");
+    if (!model.valid)
+      return { valid: false, problem: "d2.parameters.model needs {provider, modelId, version}" };
+    if (
+      typeof p.alpha !== "number" ||
+      !Number.isFinite(p.alpha) ||
+      p.alpha <= 0 ||
+      p.alpha >= 1
+    )
+      return { valid: false, problem: "d2.parameters.alpha must be a finite number in (0,1)" };
+    if (!isPositiveInteger(p.minimumIndependentSourceGroups))
+      return { valid: false, problem: "d2.parameters.minimumIndependentSourceGroups must be an integer >= 1" };
+    if (!isUnitIntervalRate(p.precisionTarget) || p.precisionTarget <= 0)
+      return { valid: false, problem: "d2.parameters.precisionTarget must be a rate in (0,1]" };
+    if (!isPositiveInteger(p.callBudget))
+      return { valid: false, problem: "d2.parameters.callBudget must be an integer >= 1" };
+    if (!isPositiveInteger(p.repetitions))
+      return { valid: false, problem: "d2.parameters.repetitions must be an integer >= 1" };
+    if (!isNonEmptyString(p.licenseConditions))
+      return { valid: false, problem: "d2.parameters.licenseConditions must be a non-empty string" };
+    return {
+      valid: true,
+      parameters: {
+        model,
+        alpha: p.alpha,
+        minimumIndependentSourceGroups: p.minimumIndependentSourceGroups,
+        precisionTarget: p.precisionTarget,
+        callBudget: p.callBudget,
+        repetitions: p.repetitions,
+        licenseConditions: p.licenseConditions,
+      },
+    };
+  }
+  if (scope === "d5") {
+    if (!isPositiveInteger(p.samplePairs))
+      return { valid: false, problem: "d5.parameters.samplePairs must be an integer >= 1" };
+    if (!isUnitIntervalRate(p.agreementRateThreshold) || p.agreementRateThreshold <= 0)
+      return { valid: false, problem: "d5.parameters.agreementRateThreshold must be a rate in (0,1]" };
+    if (!isUnitIntervalRate(p.maxPositionFlipRate) || p.maxPositionFlipRate >= 1)
+      return { valid: false, problem: "d5.parameters.maxPositionFlipRate must be a rate in [0,1)" };
+    if (!isNonEmptyString(p.reviewScope))
+      return { valid: false, problem: "d5.parameters.reviewScope must be a non-empty string" };
+    return {
+      valid: true,
+      parameters: {
+        samplePairs: p.samplePairs,
+        agreementRateThreshold: p.agreementRateThreshold,
+        maxPositionFlipRate: p.maxPositionFlipRate,
+        reviewScope: p.reviewScope,
+        recheckRequired: p.recheckRequired === true,
+      },
+    };
+  }
+  // scope === "d6"
+  if (
+    typeof p.datasetSha256 !== "string" ||
+    !DATASET_SHA256_RE.test(p.datasetSha256)
+  )
+    return { valid: false, problem: "d6.parameters.datasetSha256 must be a 64-char lowercase hex digest" };
+  if (!isNonEmptyString(p.sampleRange))
+    return { valid: false, problem: "d6.parameters.sampleRange must be a non-empty string" };
+  if (!isNonEmptyString(p.storageScope))
+    return { valid: false, problem: "d6.parameters.storageScope must be a non-empty string" };
+  if (!isNonEmptyString(p.dataSource))
+    return { valid: false, problem: "d6.parameters.dataSource must be a non-empty string" };
+  if (!isPositiveInteger(p.retentionDays))
+    return { valid: false, problem: "d6.parameters.retentionDays must be an integer >= 1" };
+  return {
+    valid: true,
+    parameters: {
+      datasetSha256: p.datasetSha256,
+      sampleRange: p.sampleRange,
+      storageScope: p.storageScope,
+      dataSource: p.dataSource,
+      retentionDays: p.retentionDays,
+    },
+  };
+}
+
 // A structured approval record — never a bare boolean (P0-1 §3.2.6). The
 // shape follows the established owner-decision.json precedent.
 function approvalFromRecord(document, expectedScope) {
@@ -350,12 +487,17 @@ function approvalFromRecord(document, expectedScope) {
     document.scope !== expectedScope
   )
     return { interpretable: false, approved: false };
+  // P1-3: a granted decision must bind the experiment parameters it froze.
+  const parameters = approvalParameters(document, expectedScope);
+  if (!parameters.valid)
+    return { interpretable: false, approved: false, parameterProblem: parameters.problem };
   return {
     interpretable: true,
     approved: document.approved,
     // An exploratory T6 run needs an explicit exploratory grant on the D2
     // decision record — a plain approval never covers it.
     exploratory: document.exploratory === true,
+    parameters: parameters.parameters,
   };
 }
 
@@ -408,11 +550,32 @@ function deriveReadySourceGroups(sourceGroupsDoc, admissionDoc) {
     sourceGroupsDoc.digest !== admissionDoc.sourceGroups.digest
   )
     return { interpretable: false, groupingBindingMismatch: true };
+  // P1-4: a duplicate caseId is invalid evidence, full stop — the later
+  // record must never overwrite the earlier one (a READY re-record could
+  // bury an INCOMPLETE probe result and inflate the READY count).
   const perSample = new Map();
+  const seenCaseIds = new Set();
   for (const entry of admissionDoc.perSample) {
-    if (isPlainObject(entry) && isNonEmptyString(entry.caseId))
-      perSample.set(entry.caseId, entry);
+    if (!isPlainObject(entry) || !isNonEmptyString(entry.caseId))
+      return { interpretable: false, malformedPerSampleEntry: true };
+    if (seenCaseIds.has(entry.caseId))
+      return { interpretable: false, duplicateCase: entry.caseId };
+    seenCaseIds.add(entry.caseId);
+    perSample.set(entry.caseId, entry);
   }
+  // Count consistency (P1-4): the per-sample records and the report's own
+  // counts must agree — any divergence means the report was edited or
+  // truncated after the probe ran.
+  if (
+    admissionDoc.counts?.caseCount !== undefined &&
+    admissionDoc.counts.caseCount !== perSample.size
+  )
+    return { interpretable: false, countMismatch: "counts.caseCount" };
+  if (
+    admissionDoc.dataset?.sampleCount !== undefined &&
+    admissionDoc.dataset.sampleCount !== perSample.size
+  )
+    return { interpretable: false, countMismatch: "dataset.sampleCount" };
   // Case-mapping completeness is bidirectional: every case the admission
   // report probed must be mapped, and the mapping may not name cases the
   // report never saw.
@@ -428,12 +591,27 @@ function deriveReadySourceGroups(sourceGroupsDoc, admissionDoc) {
     if (!groupCases.has(groupId)) groupCases.set(groupId, []);
     groupCases.get(groupId).push(caseId);
   }
+  // Mapping cardinality (P1-4): after the bidirectional completeness check,
+  // the mapping must cover exactly the probed cases — no extra keys either.
+  if (Object.keys(sourceGroupsDoc.groups).length !== perSample.size)
+    return { interpretable: false, countMismatch: "sourceGroups.groups" };
   // One session is one source group: the producer keys groups by sessionId
   // (merges aside), so cases sharing a sessionId spanning multiple groupIds
   // means the session was split to inflate the independent-group count.
+  // A case WITHOUT a session anchor has no provable common origin with any
+  // other case: the producer's mechanical rule gives it a single-case
+  // group, so a shared group containing a session-less case can never be
+  // counted as independent evidence (P1-4: no silent skip — the schema
+  // allows an empty sessionId, and the substitute identity rule is the
+  // caseId singleton itself).
   const sessionGroups = new Map();
   for (const entry of perSample.values()) {
-    if (!isNonEmptyString(entry.sessionId)) continue;
+    if (!isNonEmptyString(entry.sessionId)) {
+      const singletonGroupId = sourceGroupsDoc.groups[entry.caseId];
+      if (groupCases.get(singletonGroupId)?.length > 1)
+        return { interpretable: false, sessionAnchorMissingSharedGroup: entry.caseId };
+      continue;
+    }
     const groupId = sourceGroupsDoc.groups[entry.caseId];
     if (
       sessionGroups.has(entry.sessionId) &&
@@ -464,65 +642,179 @@ function deriveReadySourceGroups(sourceGroupsDoc, admissionDoc) {
   };
 }
 
-// Live calibration report: status + the ACTUAL invocation count (failed
-// invocations stay in the audit count — they happened).
+// Live calibration report (P1-2): the status is only the headline — the
+// engine re-derives every governed fact from the raw invocation records:
+//   - the report must be bound to the CURRENT judge protocol
+//     (judgeProtocolRef + judgeProtocolDigest — a calibration run against a
+//     different protocol version says nothing about this one);
+//   - every invocation carries the model that actually served it, and a
+//     SUCCEEDED invocation must have run the report-level judgeModel (a
+//     report claiming model A on evidence produced by model B is invalid);
+//   - precisionTargetMet is RECOMPUTED from the raw per-invocation verdicts
+//     against their reference verdicts — the report's own boolean is a
+//     claim the engine compares against, never a fact it adopts;
+//   - position-exchange evidence must exist for every SUCCEEDED call (the
+//     flip rate is a D5 calibration metric derived from it).
 function deriveCalibrationFacts(document) {
+  const fail = { interpretable: false };
   if (
     !isPlainObject(document) ||
     document.schema !== "pd-lab-judge-calibration.v1" ||
     !CALIBRATION_STATUSES.includes(document.status) ||
     !Array.isArray(document.invocations)
   )
-    return { interpretable: false };
-  // Calibration evidence = unique SUCCEEDED invocations. Failed calls stay
-  // in auditCallCount — they happened and are auditable, but they are not
-  // calibration success evidence: PASSED requires real successful calls.
-  const succeededIds = new Set();
-  let invocationCount = 0;
+    return fail;
+  if (
+    document.judgeProtocolRef !== JUDGE_PROTOCOL_REF ||
+    typeof document.judgeProtocolDigest !== "string" ||
+    document.judgeProtocolDigest !== judgeProtocolDigest()
+  )
+    return { interpretable: false, protocolBindingMismatch: true };
+  const judgeModel = modelBlockOf(document.judgeModel, "judgeCalibration.judgeModel");
+  if (!judgeModel.valid) return { interpretable: false, judgeModelMissing: true };
+  if (
+    typeof document.precisionTarget !== "number" ||
+    !Number.isFinite(document.precisionTarget) ||
+    document.precisionTarget <= 0 ||
+    document.precisionTarget > 1
+  )
+    return { interpretable: false, precisionTargetMissing: true };
+  if (typeof document.precisionTargetMet !== "boolean")
+    return { interpretable: false, precisionTargetMetMissing: true };
+  // Raw invocation records: unique ids, an explicit status, the serving
+  // model, both verdicts (judge vs reference, display-frame four-value)
+  // and a position-exchange outcome per SUCCEEDED call.
+  const seenInvocationIds = new Set();
+  let succeeded = 0;
+  let failed = 0;
+  let agreed = 0;
+  let positionExchanged = 0;
+  let positionFlipped = 0;
   for (const invocation of document.invocations) {
     if (
-      isPlainObject(invocation) &&
-      isNonEmptyString(invocation.invocationId) &&
-      invocation.status === "SUCCEEDED"
+      !isPlainObject(invocation) ||
+      !isNonEmptyString(invocation.invocationId) ||
+      (invocation.status !== "SUCCEEDED" && invocation.status !== "FAILED")
     )
-      succeededIds.add(invocation.invocationId);
-    invocationCount += 1;
+      return { interpretable: false, malformedInvocation: true };
+    if (seenInvocationIds.has(invocation.invocationId))
+      return { interpretable: false, duplicateInvocation: invocation.invocationId };
+    seenInvocationIds.add(invocation.invocationId);
+    const invocationModel = modelBlockOf(invocation.model, "invocation.model");
+    if (!invocationModel.valid)
+      return { interpretable: false, invocationModelMissing: invocation.invocationId };
+    if (invocation.status === "FAILED") {
+      failed += 1;
+      continue;
+    }
+    // A SUCCEEDED call must have been served by the report-level judgeModel
+    // — the calibration claim is about THAT model.
+    if (!modelsEqual(invocationModel, judgeModel))
+      return {
+        interpretable: false,
+        invocationModelMismatch: invocation.invocationId,
+      };
+    if (!PROTOCOL_VERDICTS.includes(invocation.judgeVerdict) ||
+        !PROTOCOL_VERDICTS.includes(invocation.referenceVerdict))
+      return { interpretable: false, invocationVerdictMissing: invocation.invocationId };
+    if (typeof invocation.positionExchangeConsistent !== "boolean")
+      return { interpretable: false, positionExchangeMissing: invocation.invocationId };
+    succeeded += 1;
+    if (invocation.judgeVerdict === invocation.referenceVerdict) agreed += 1;
+    positionExchanged += 1;
+    if (!invocation.positionExchangeConsistent) positionFlipped += 1;
   }
+  // precisionTargetMet recomputed from the raw evidence — never the
+  // report's own boolean (a zero-denominator calibration claims nothing).
+  const derivedPrecisionTargetMet =
+    succeeded > 0 ? agreed / succeeded >= document.precisionTarget : false;
   return {
     interpretable: true,
     status: document.status,
-    modelCallCount: succeededIds.size,
-    auditCallCount: invocationCount,
-    precisionTarget:
-      typeof document.precisionTarget === "number" &&
-      Number.isFinite(document.precisionTarget)
-        ? document.precisionTarget
-        : null,
-    precisionTargetMet:
-      typeof document.precisionTargetMet === "boolean"
-        ? document.precisionTargetMet
-        : null,
+    modelCallCount: succeeded,
+    auditCallCount: succeeded + failed,
+    failedCallCount: failed,
+    judgeModel,
+    precisionTarget: document.precisionTarget,
+    declaredPrecisionTargetMet: document.precisionTargetMet,
+    // The recomputed fact — the engine's authority.
+    precisionTargetMet: derivedPrecisionTargetMet,
+    agreementRate: succeeded > 0 ? agreed / succeeded : null,
+    positionFlipRate: positionExchanged > 0 ? positionFlipped / positionExchanged : null,
   };
 }
 
-// Owner blind-review report: status + deduped valid sample count.
+// Owner blind-review report (P1-2): a sampleId alone proves nothing. Every
+// sample must carry the actual blind-review record — the Owner's verdict,
+// the judge's display-frame verdict, the A/B position and identity map the
+// Owner saw, the restored candidate-frame verdict (which the engine
+// re-derives with the protocol's own restoreDisplayVerdict to prove the
+// blinding was honest), a disagreement classification and the recheck
+// stability. The agreement rate and per-type disagreement counts are
+// RECOMPUTED from those records.
+const REVIEW_DISAGREEMENT_TYPES = ["VERDICT_CONFLICT", "TIE_VS_WIN", "REASON_CONFLICT"];
+const RECHECK_STABILITIES = ["STABLE", "UNSTABLE", "NOT_RECHECKED"];
+
 function deriveOwnerReviewFacts(document) {
+  const fail = { interpretable: false };
   if (
     !isPlainObject(document) ||
     document.schema !== "pd-lab-owner-blind-review.v1" ||
     !CALIBRATION_STATUSES.includes(document.status) ||
     !Array.isArray(document.samples)
   )
-    return { interpretable: false };
-  const sampleIds = new Set();
+    return fail;
+  const seenSampleIds = new Set();
+  let agreeing = 0;
+  const disagreements = { VERDICT_CONFLICT: 0, TIE_VS_WIN: 0, REASON_CONFLICT: 0 };
+  let rechecked = 0;
+  let recheckStable = 0;
   for (const sample of document.samples) {
-    if (isPlainObject(sample) && isNonEmptyString(sample.sampleId))
-      sampleIds.add(sample.sampleId);
+    if (
+      !isPlainObject(sample) ||
+      !isNonEmptyString(sample.sampleId) ||
+      !isNonEmptyString(sample.packageId) ||
+      !DISPLAY_ORDERS.includes(sample.displayOrder) ||
+      !PROTOCOL_VERDICTS.includes(sample.ownerVerdict) ||
+      !PROTOCOL_VERDICTS.includes(sample.judgeVerdict)
+    )
+      return { interpretable: false, malformedSample: true };
+    // Duplicate sampleIds would double-count one review (P1-2 negative).
+    if (seenSampleIds.has(sample.sampleId))
+      return { interpretable: false, duplicateSample: sample.sampleId };
+    seenSampleIds.add(sample.sampleId);
+    // The identity map is the secret-side binding the Owner's display
+    // verdicts were formed against; the restored verdict must be exactly
+    // what the protocol's own restoration produces — a mismatch means the
+    // recorded blinding does not explain the recorded verdict.
+    const restored = restoreDisplayVerdict(sample.judgeVerdict, sample.identityMap);
+    if (restored === null || restored !== sample.judgeRestoredVerdict)
+      return { interpretable: false, identityBindingInvalid: sample.sampleId };
+    if (!RECHECK_STABILITIES.includes(sample.recheckStability))
+      return { interpretable: false, recheckStabilityMissing: sample.sampleId };
+    if (sample.ownerVerdict === sample.judgeVerdict) {
+      agreeing += 1;
+      if (sample.disagreementType !== null && sample.disagreementType !== undefined)
+        return { interpretable: false, disagreementTypeInvalid: sample.sampleId };
+    } else {
+      if (!REVIEW_DISAGREEMENT_TYPES.includes(sample.disagreementType))
+        return { interpretable: false, disagreementTypeInvalid: sample.sampleId };
+      disagreements[sample.disagreementType] += 1;
+    }
+    if (sample.recheckStability !== "NOT_RECHECKED") {
+      rechecked += 1;
+      if (sample.recheckStability === "STABLE") recheckStable += 1;
+    }
   }
+  const sampleCount = seenSampleIds.size;
   return {
     interpretable: true,
     status: document.status,
-    sampleCount: sampleIds.size,
+    sampleCount,
+    agreementRate: sampleCount > 0 ? agreeing / sampleCount : null,
+    disagreementCounts: disagreements,
+    recheckedCount: rechecked,
+    allRecheckStable: rechecked === sampleCount && sampleCount > 0,
   };
 }
 
@@ -559,8 +851,11 @@ function derivePreregistrationFacts(document) {
 
 // Data-path authorization derives from the D6 approval AND an admission
 // report that actually ran over real data (realDataProbe is flipped only by
-// a D6-authorized run; it can never be claimed by a fixture run).
-function deriveDataPathAuthorization(d6Approved, admissionDoc) {
+// a D6-authorized run; it can never be claimed by a fixture run). P1-6: the
+// probe's positive state must ALSO cite the dataset digest the D6 decision
+// authorized — a RAN_WITH_D6 report over a different dataset than the one
+// D6 froze is not authorized data access.
+function deriveDataPathAuthorization(d6Approved, admissionDoc, d6Parameters) {
   if (!d6Approved) return false;
   if (
     !isPlainObject(admissionDoc) ||
@@ -571,7 +866,16 @@ function deriveDataPathAuthorization(d6Approved, admissionDoc) {
     return false;
   // Fail-closed on the agreed positive state only — NOT_RUN_WITHOUT_D6 is
   // rejected, and so is any other value the producer never agreed to emit.
-  return admissionDoc.realDataProbe.status === "RAN_WITH_D6";
+  if (admissionDoc.realDataProbe.status !== "RAN_WITH_D6") return false;
+  // The dataset the probe actually ran over must be the dataset the D6
+  // decision authorized (digest equality, both sides).
+  const probedDataset =
+    admissionDoc.realDataProbe.datasetSha256 ?? admissionDoc.dataset?.sha256 ?? null;
+  return (
+    d6Parameters !== null &&
+    d6Parameters.datasetSha256 === probedDataset &&
+    admissionDoc.dataset?.sha256 === d6Parameters.datasetSha256
+  );
 }
 
 // Data integrity is proven only by a verified admission report whose
@@ -714,6 +1018,11 @@ export function qualifyT6(input, resolvedEvidence = null) {
         declared: declaredValue === true,
         bound: true,
         verdict: "artifact_invalid",
+        // rc-9: a granted decision whose parameters cannot be interpreted
+        // names the exact structural problem, never fails silently.
+        ...(approval.parameterProblem
+          ? { parameterProblem: approval.parameterProblem }
+          : {}),
       };
       return false;
     }
@@ -748,8 +1057,148 @@ export function qualifyT6(input, resolvedEvidence = null) {
       ? deriveDataPathAuthorization(
           d6ApprovedEffective,
           admission ? admission.document : null,
+          d6Approval !== null &&
+            d6Approval.interpretable &&
+            d6Approval.approved &&
+            d6Approval.parameters !== null
+            ? d6Approval.parameters
+            : null,
         )
       : null;
+
+  // ── P1-3: approval parameters vs the frozen experiment evidence ────────
+  // Every cross-check runs only when BOTH sides are available and
+  // interpretable (a missing side is already blocked as missing evidence);
+  // a check that runs and fails is APPROVAL_PARAMETER_MISMATCH — the
+  // authorization never covered the experiment that was actually run.
+  const parameterFindings = [];
+  const parameterMismatch = (message) => {
+    parameterFindings.push(message);
+  };
+  const d2Params =
+    d2Approval !== null && d2Approval.interpretable && d2Approval.approved
+      ? d2Approval.parameters
+      : null;
+  const d5Params =
+    d5Approval !== null && d5Approval.interpretable && d5Approval.approved
+      ? d5Approval.parameters
+      : null;
+  const d6Params =
+    d6Approval !== null && d6Approval.interpretable && d6Approval.approved
+      ? d6Approval.parameters
+      : null;
+  // D2 <-> frozen preregistration (alpha / minimum groups / precision target)
+  if (d2Params !== null && preregFacts !== null && preregFacts.interpretable) {
+    if (d2Params.alpha !== preregFacts.alpha)
+      parameterMismatch(
+        `D2 froze alpha=${d2Params.alpha} but the preregistration froze ${preregFacts.alpha}`,
+      );
+    if (
+      d2Params.minimumIndependentSourceGroups !==
+      preregFacts.minimumIndependentSourceGroups
+    )
+      parameterMismatch(
+        `D2 froze minimumIndependentSourceGroups=${d2Params.minimumIndependentSourceGroups} but the preregistration froze ${preregFacts.minimumIndependentSourceGroups}`,
+      );
+    if (
+      preregFacts.precisionTarget !== null &&
+      d2Params.precisionTarget !== preregFacts.precisionTarget
+    )
+      parameterMismatch(
+        `D2 froze precisionTarget=${d2Params.precisionTarget} but the preregistration froze ${preregFacts.precisionTarget}`,
+      );
+  }
+  // D2 <-> the calibration that actually ran (model + precision target + budget)
+  if (d2Params !== null && calibrationFacts !== null && calibrationFacts.interpretable) {
+    if (!modelsEqual(d2Params.model, calibrationFacts.judgeModel))
+      parameterMismatch(
+        `D2 authorized model ${d2Params.model.provider}/${d2Params.model.modelId}/${d2Params.model.version} but the calibration ran ${calibrationFacts.judgeModel.provider}/${calibrationFacts.judgeModel.modelId}/${calibrationFacts.judgeModel.version}`,
+      );
+    if (d2Params.precisionTarget !== calibrationFacts.precisionTarget)
+      parameterMismatch(
+        `D2 froze precisionTarget=${d2Params.precisionTarget} but the calibration targeted ${calibrationFacts.precisionTarget}`,
+      );
+    if (calibrationFacts.auditCallCount > d2Params.callBudget)
+      parameterMismatch(
+        `D2 authorized a call budget of ${d2Params.callBudget} but the calibration records ${calibrationFacts.auditCallCount} calls`,
+      );
+  }
+  // D5 <-> the Owner blind review that actually ran (sample floor + thresholds).
+  // The floor/threshold checks apply to a COMPLETED (PASSED) review claim —
+  // a NOT_RUN review is an honest "not finished yet" (handled as an
+  // unmet criterion), never an authorization mismatch; a PASSED claim with
+  // too few samples or a sub-threshold agreement rate IS one.
+  if (d5Params !== null && reviewFacts !== null && reviewFacts.interpretable) {
+    if (
+      reviewFacts.status === "PASSED" &&
+      reviewFacts.sampleCount < d5Params.samplePairs
+    )
+      parameterMismatch(
+        `D5 approved ${d5Params.samplePairs} blind-review sample pairs but only ${reviewFacts.sampleCount} were actually reviewed`,
+      );
+    if (
+      reviewFacts.status === "PASSED" &&
+      reviewFacts.agreementRate !== null &&
+      reviewFacts.agreementRate < d5Params.agreementRateThreshold
+    )
+      parameterMismatch(
+        `D5 required an agreement rate >= ${d5Params.agreementRateThreshold} but the review records ${reviewFacts.agreementRate}`,
+      );
+    if (
+      d5Params.recheckRequired &&
+      reviewFacts.status === "PASSED" &&
+      !reviewFacts.allRecheckStable
+    )
+      parameterMismatch(
+        "D5 required recheck stability but the blind-review samples are not all STABLE on recheck",
+      );
+  }
+  // D5 <-> the judge calibration's position-flip metric (the D5 gate on the
+  // judge side of the calibration).
+  if (
+    d5Params !== null &&
+    calibrationFacts !== null &&
+    calibrationFacts.interpretable &&
+    calibrationFacts.positionFlipRate !== null &&
+    calibrationFacts.positionFlipRate > d5Params.maxPositionFlipRate
+  )
+    parameterMismatch(
+      `D5 allowed a position-flip rate <= ${d5Params.maxPositionFlipRate} but the calibration records ${calibrationFacts.positionFlipRate}`,
+    );
+  // D6 <-> the dataset that was actually probed (three-way digest equality:
+  // decision <-> admission report <-> source-groups mapping).
+  if (d6Params !== null && admission !== null && sourceGroups !== null) {
+    if (
+      isNonEmptyString(admission.document.dataset?.sha256) &&
+      admission.document.dataset.sha256 !== d6Params.datasetSha256
+    )
+      parameterMismatch(
+        `D6 authorized dataset ${d6Params.datasetSha256} but the admission report probed ${admission.document.dataset.sha256}`,
+      );
+    if (
+      isNonEmptyString(sourceGroups.document.datasetSha256) &&
+      sourceGroups.document.datasetSha256 !== d6Params.datasetSha256
+    )
+      parameterMismatch(
+        `D6 authorized dataset ${d6Params.datasetSha256} but the source-groups mapping is bound to ${sourceGroups.document.datasetSha256}`,
+      );
+  }
+  if (parameterFindings.length > 0) addBlocked("APPROVAL_PARAMETER_MISMATCH");
+  evidenceCheck.approvalParameterBinding = {
+    checked: [
+      "d2.alpha <-> preregistration",
+      "d2.minimumIndependentSourceGroups <-> preregistration",
+      "d2.precisionTarget <-> preregistration <-> calibration",
+      "d2.model <-> calibration judgeModel",
+      "d2.callBudget <-> calibration audit call count",
+      "d5.samplePairs <-> blind-review sample count (floor)",
+      "d5.agreementRateThreshold <-> recomputed review agreement rate",
+      "d5.maxPositionFlipRate <-> recomputed calibration flip rate",
+      "d5.recheckRequired <-> recomputed recheck stability",
+      "d6.datasetSha256 <-> admission report <-> source-groups mapping",
+    ],
+    findings: parameterFindings,
+  };
 
   // ── Status/count internal consistency (state table, P0-1) ────────────────
   const calStatus =
@@ -844,17 +1293,23 @@ export function qualifyT6(input, resolvedEvidence = null) {
     (r) => r.sampleCount,
   );
 
-  // ── Precision target: derived from the bound calibration report ─────────
+  // ── Precision target: RECOMPUTED from the calibration's raw evidence ────
   let precisionEffective = policy.precisionTargetMet;
   if (evidenceBindings.judgeCalibration !== undefined && calibrationDoc !== null) {
     if (!calibrationFacts.interpretable) {
       // EVIDENCE_ARTIFACT_INVALID already added by checkClaim.
       precisionEffective = false;
-    } else if (calibrationFacts.precisionTargetMet === null) {
-      addBlocked("EVIDENCE_ARTIFACT_INVALID");
-      precisionEffective = false;
     } else {
-      if (calibrationFacts.precisionTargetMet !== policy.precisionTargetMet)
+      // Three-way agreement (P1-2): the input claim, the report's own
+      // boolean, and the boolean RECOMPUTED from the raw per-invocation
+      // verdicts must all be the same value — the recomputed one wins as
+      // the effective fact.
+      if (calibrationFacts.declaredPrecisionTargetMet !== policy.precisionTargetMet)
+        addBlocked("EVIDENCE_CLAIM_MISMATCH");
+      if (
+        calibrationFacts.precisionTargetMet !==
+        calibrationFacts.declaredPrecisionTargetMet
+      )
         addBlocked("EVIDENCE_CLAIM_MISMATCH");
       // A met-precision claim must be anchored to the FROZEN preregistered
       // target — a bare boolean proves nothing about which target was met.
@@ -880,7 +1335,11 @@ export function qualifyT6(input, resolvedEvidence = null) {
   }
   evidenceCheck.artifacts.precisionTarget = {
     declared: policy.precisionTargetMet,
-    derived:
+    reportClaimed:
+      calibrationFacts && calibrationFacts.interpretable
+        ? calibrationFacts.declaredPrecisionTargetMet
+        : null,
+    recomputed:
       calibrationFacts && calibrationFacts.interpretable
         ? calibrationFacts.precisionTargetMet
         : null,
@@ -921,9 +1380,13 @@ export function qualifyT6(input, resolvedEvidence = null) {
         groupingBindingMismatch: groupFacts.groupingBindingMismatch === true,
         contentDigestMismatch: groupFacts.contentDigestMismatch === true,
         digestRecomputeFailed: groupFacts.digestRecomputeFailed === true,
+        malformedPerSampleEntry: groupFacts.malformedPerSampleEntry === true,
+        duplicateCase: groupFacts.duplicateCase ?? null,
+        countMismatch: groupFacts.countMismatch ?? null,
         unmappedCase: groupFacts.unmappedCase ?? null,
         unknownCase: groupFacts.unknownCase ?? null,
         sessionSplit: groupFacts.sessionSplit ?? null,
+        sessionAnchorMissingSharedGroup: groupFacts.sessionAnchorMissingSharedGroup ?? null,
       };
     } else {
       if (groupFacts.count !== declaredN) addBlocked("EVIDENCE_CLAIM_MISMATCH");
@@ -1025,9 +1488,10 @@ export function qualifyT6(input, resolvedEvidence = null) {
   // ── Gate evaluation ──────────────────────────────────────────────────────
   const nMinAlpha = nMinForAlpha(alpha);
   // Fail-closed: an exhausted search is a BLOCKED verdict, never a null that
-  // Math.max would silently coerce to 0 (P2-2).
+  // Math.max or >= would silently coerce to 0 (P2-1) — every comparison
+  // against nMinAlpha below is guarded by an explicit null check.
   if (nMinAlpha === null) addBlocked("N_MIN_ALPHA_SEARCH_EXHAUSTED");
-  const requiredGroups = Math.max(nMinAlpha ?? 0, minimumGroups);
+  const requiredGroups = nMinAlpha !== null ? Math.max(nMinAlpha, minimumGroups) : minimumGroups;
   const kAtN = twoSidedThreshold(nEffective, alpha);
 
   // Task stop conditions first: recorded activity without the authorization
@@ -1047,14 +1511,23 @@ export function qualifyT6(input, resolvedEvidence = null) {
   if (calStatus === "NOT_RUN") addBlocked("MODEL_CALIBRATION_NOT_RUN");
   if (calStatus === "FAILED") addBlocked("MODEL_CALIBRATION_FAILED");
 
+  const preregExploratory =
+    preregFacts !== null && preregFacts.interpretable === true && preregFacts.exploratory === true;
+
   const unmetCriteria = [];
   if (blockedReasons.length === 0) {
-    if (nEffective < nMinAlpha) unmetCriteria.push("BELOW_N_MIN_ALPHA");
+    if (nMinAlpha !== null && nEffective < nMinAlpha)
+      unmetCriteria.push("BELOW_N_MIN_ALPHA");
     if (nEffective < minimumGroups)
       unmetCriteria.push("BELOW_PREREGISTERED_MIN_SOURCE_GROUPS");
     if (!precisionEffective) unmetCriteria.push("PRECISION_TARGET_NOT_MET");
     if (revStatus !== "PASSED")
       unmetCriteria.push("OWNER_BLIND_REVIEW_NOT_PASSED");
+    // P1-1: an exploratory-marked preregistration can NEVER satisfy the
+    // confirmatory criteria — no sample size, precision or later evidence
+    // upgrades an exploratory registration to CONFIRMATORY_READY. Only a
+    // fresh confirmatory preregistration (a new experiment) can.
+    if (preregExploratory) unmetCriteria.push("PREREGISTRATION_EXPLORATORY_CAP");
   }
 
   const status =
@@ -1096,33 +1569,47 @@ export function qualifyT6(input, resolvedEvidence = null) {
       d6Approved: d6ApprovedEffective,
       modelCalibrationPassed: calStatus === "PASSED",
       ownerBlindReviewPassed: revStatus === "PASSED",
-      nMeetsNMinAlpha: nEffective >= nMinAlpha,
+      // P2-1: explicit null guard — a null nMinAlpha must never be silently
+      // coerced to 0 by JavaScript's relational comparison rules.
+      nMeetsNMinAlpha: nMinAlpha !== null && nEffective >= nMinAlpha,
       nMeetsPreregisteredMinimum: nEffective >= minimumGroups,
       precisionTargetMet: precisionEffective,
+      preregistrationExploratory: preregExploratory,
     },
     t6Permissions: {
       confirmatoryT6Allowed: status === "CONFIRMATORY_READY",
-      // SPEC 11 / HANDOFF T7a: exploratory T6 only with an explicit D2
-      // exploratory approval AND a preregistration marked exploratory (the
-      // preregistration marker is enforced at T6 preflight; this flag is the
-      // D2 side of that pair).
-      // Double authorization (P1-3): exploratory T6 needs BOTH the frozen
-      // preregistration marked exploratory AND a bound D2 owner-decision
-      // record that explicitly grants exploratory — an input boolean never
-      // suffices on its own.
-      exploratoryT6Allowed:
-        status === "EXPLORATORY_ONLY" &&
-        preregFacts !== null &&
-        preregFacts.interpretable === true &&
-        preregFacts.exploratory === true &&
-        d2Approval !== null &&
-        d2Approval.interpretable === true &&
-        d2Approval.approved === true &&
-        d2Approval.exploratory === true,
+      // SPEC 11 / HANDOFF T7a item 4 (P1-1): exploratory T6 execution is
+      // granted ONLY when ALL of the following hold simultaneously —
+      //   * the verdict is EXPLORATORY_ONLY (every authorization, integrity
+      //     and calibration gate passed; the shortfall is statistical);
+      //   * D2 is a bound, interpretable, APPROVED owner-decision;
+      //   * that D2 record EXPLICITLY grants exploratory;
+      //   * the FROZEN preregistration is marked exploratory;
+      //   * D5 is approved (checked again here — never assumed from the
+      //     status alone);
+      //   * the Owner blind review actually ran, PASSED, and its recomputed
+      //     sample count meets the D5-approved floor.
+      // No single input boolean can satisfy this on its own.
+      exploratoryT6Allowed: !(
+        status !== "EXPLORATORY_ONLY" ||
+        d2Approval === null ||
+        !d2Approval.interpretable ||
+        !d2Approval.approved ||
+        !d2Approval.exploratory ||
+        !preregExploratory ||
+        !d5Effective ||
+        revStatus !== "PASSED" ||
+        reviewFacts === null ||
+        !reviewFacts.interpretable ||
+        d5Params === null ||
+        reviewFacts.sampleCount < d5Params.samplePairs
+      ),
       // Exploratory results can NEVER produce PROMOTE; only a
-      // CONFIRMATORY_READY qualification may ever carry a promote
-      // recommendation, and even there governance decides (SPEC section 10).
-      promotePossible: status === "CONFIRMATORY_READY",
+      // CONFIRMATORY_READY qualification over a NON-exploratory
+      // preregistration may ever carry a promote recommendation (P1-1:
+      // bound by BOTH the status and the registration type), and even
+      // there governance decides (SPEC section 10).
+      promotePossible: status === "CONFIRMATORY_READY" && !preregExploratory,
     },
   };
 }

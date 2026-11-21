@@ -73,6 +73,20 @@ function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// P2-2: artifactRef is a RELATIVE path under the input file's directory —
+// the evidence root. Anything that could resolve outside it is rejected
+// BEFORE any filesystem read: absolute paths (POSIX or Windows, including
+// drive-relative and UNC forms), any ".." segment, and (after resolution)
+// symlinked locations whose real path escapes the root.
+function artifactRefPathProblem(artifactRef) {
+  if (path.isAbsolute(artifactRef)) return "absolute paths are not allowed";
+  if (/^[a-zA-Z]:/.test(artifactRef))
+    return "drive-qualified paths are not allowed";
+  const segments = artifactRef.split(/[\\/]+/);
+  if (segments.includes("..")) return "parent traversal (..) is not allowed";
+  return null;
+}
+
 // Resolve one bound evidence artifact: read bytes, recompute the digest from
 // those bytes, compare to the declared sha256, parse the JSON document. A
 // mismatch or unreadable artifact is a verification failure, never a skip.
@@ -89,10 +103,37 @@ function resolveArtifact(binding, baseDir) {
     return { resolved, document: null };
   }
   const artifactRef = binding.artifactRef;
+  // Path-safety gate (P2-2) — before the file is ever opened.
+  const pathProblem = artifactRefPathProblem(artifactRef);
+  if (pathProblem !== null) {
+    resolved.problem = `artifactRef rejected: ${pathProblem}`;
+    return { resolved, document: null };
+  }
   const filePath = path.resolve(baseDir, artifactRef);
+  // Symlink containment: resolve the REAL location of both the candidate
+  // file and the evidence root; the artifact must live inside the root
+  // after every link is followed.
+  let realPath;
+  try {
+    realPath = fs.realpathSync(filePath);
+  } catch (error) {
+    resolved.problem = `artifact unreadable: ${error.message}`;
+    return { resolved, document: null };
+  }
+  let realBase;
+  try {
+    realBase = fs.realpathSync(baseDir);
+  } catch {
+    realBase = baseDir;
+  }
+  const relative = path.relative(realBase, realPath);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+    resolved.problem = `artifactRef rejected: resolved real path ${realPath} escapes the evidence root ${realBase}`;
+    return { resolved, document: null };
+  }
   let bytes;
   try {
-    bytes = fs.readFileSync(filePath);
+    bytes = fs.readFileSync(realPath);
   } catch (error) {
     resolved.problem = `artifact unreadable: ${error.message}`;
     return { resolved, document: null };

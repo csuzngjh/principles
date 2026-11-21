@@ -136,7 +136,12 @@ const USAGE = `usage: admission-probe.mjs \\
   [--authorizations <file>]           per-case authorization records \\
   [--cross-session-review <file>]     auditable cross-session merge bases \\
   [--verify-source-groups <file>]     validate an existing source-groups.json \\
-                                      instead of generating one (exit 3 on INVALID_PLAN)`;
+                                      instead of generating one (exit 3 on INVALID_PLAN) \\
+  [--d6-decision <file>]              Owner decision D6 granting full-fidelity \\
+                                      data access for THIS dataset; when valid, \\
+                                      the report's realDataProbe carries \\
+                                      RAN_WITH_D6 + the decision binding, \\
+                                      otherwise it stays NOT_RUN_WITHOUT_D6`;
 
 /** Structured failure — never a bare stack (rc-3 / rc-9). */
 function structuralFailure(reason, message, details = {}) {
@@ -226,7 +231,7 @@ function parseArgs(argv) {
       usageFailure(`unexpected argument: ${arg}`);
     }
     const key = arg.slice(2);
-    const known = ['dataset', 'snapshot', 'out', 'expectations', 'authorizations', 'cross-session-review', 'verify-source-groups', 'study-purpose'];
+    const known = ['dataset', 'snapshot', 'out', 'expectations', 'authorizations', 'cross-session-review', 'verify-source-groups', 'study-purpose', 'd6-decision'];
     if (!known.includes(key)) {
       usageFailure(`unknown option: ${arg}`);
     }
@@ -277,6 +282,70 @@ function sha256FileOrFailure(label, file) {
       cause: String(error?.message ?? error),
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// P1-6: the POSITIVE real-data probe path. RAN_WITH_D6 can only be reached
+// through a bound D6 owner-decision that (a) has the established
+// owner-decision shape with scope 'd6', (b) is approved, and (c) froze a
+// datasetSha256 equal to the digest of the dataset THIS run is probing.
+// Every other outcome — no decision file, wrong scope, rejected decision,
+// missing/malformed parameters, digest mismatch — fails closed: the run
+// either aborts (a supplied-but-invalid decision is an operator error) or
+// stays NOT_RUN_WITHOUT_D6 (no decision supplied). The report never lets
+// the caller type RAN_WITH_D6 in: the status is derived here from the
+// verified decision alone.
+// ---------------------------------------------------------------------------
+const D6_DATASET_SHA_RE = /^[0-9a-f]{64}$/;
+
+function loadD6Decision(file, datasetSha256) {
+  const decision = readJsonFile('d6-decision', file);
+  const fileSha256 = sha256FileOrFailure('d6-decision', file);
+  if (!isPlainObject(decision) || decision.kind !== 'owner-decision') {
+    structuralFailure('d6_decision_invalid', 'the D6 decision file must be a {kind: "owner-decision"} record', { file });
+  }
+  if (decision.scope !== 'd6') {
+    structuralFailure('d6_decision_invalid', `the decision record's scope is ${String(decision.scope)} — only a scope "d6" decision can authorize the real-data probe`, { file, scope: decision.scope ?? null });
+  }
+  if (decision.approved !== true) {
+    structuralFailure('d6_decision_invalid', 'the bound D6 decision is not an approval — the real-data probe is not authorized', { file, approved: decision.approved ?? null });
+  }
+  if (!nonEmptyString(decision.decidedBy) || !nonEmptyString(decision.decidedAt)) {
+    structuralFailure('d6_decision_invalid', 'the D6 decision must carry decidedBy and decidedAt', { file });
+  }
+  const p = isPlainObject(decision.parameters) ? decision.parameters : null;
+  if (
+    p === null ||
+    typeof p.datasetSha256 !== 'string' ||
+    !D6_DATASET_SHA_RE.test(p.datasetSha256) ||
+    !nonEmptyString(p.sampleRange) ||
+    !nonEmptyString(p.storageScope) ||
+    !nonEmptyString(p.dataSource) ||
+    !Number.isInteger(p.retentionDays) ||
+    p.retentionDays <= 0
+  ) {
+    structuralFailure('d6_decision_invalid', 'the approved D6 decision lacks its frozen parameters (datasetSha256/sampleRange/storageScope/dataSource/retentionDays)', { file });
+  }
+  if (p.datasetSha256 !== datasetSha256) {
+    structuralFailure('d6_decision_invalid', 'the D6 decision authorized a different dataset (datasetSha256 mismatch) — running this probe under it would exceed the granted data scope', {
+      file,
+      authorized: p.datasetSha256,
+      actual: datasetSha256,
+    });
+  }
+  return {
+    file,
+    fileSha256,
+    decidedBy: decision.decidedBy,
+    decidedAt: decision.decidedAt,
+    parameters: {
+      datasetSha256: p.datasetSha256,
+      sampleRange: p.sampleRange,
+      storageScope: p.storageScope,
+      dataSource: p.dataSource,
+      retentionDays: p.retentionDays,
+    },
+  };
 }
 
 /** Dataset shape validation (fail-loud on structure, rc-1/rc-3/rc-4). */
@@ -2372,6 +2441,12 @@ function main() {
   }
 
   const dataset = loadDataset(options.dataset);
+  // P1-6: load and verify the optional D6 decision BEFORE anything else —
+  // an invalid supplied decision aborts the run (fail-closed), a missing
+  // one leaves the probe in its NOT_RUN_WITHOUT_D6 fixture-exercise mode.
+  const d6Grant = options['d6-decision']
+    ? loadD6Decision(options['d6-decision'], dataset.sha256)
+    : null;
   const redaction = detectRedaction(dataset);
   const expectations = options.expectations ? loadExpectations(options.expectations, dataset) : null;
   const authorizations = options.authorizations ? loadAuthorizations(options.authorizations, dataset) : null;
@@ -2742,12 +2817,39 @@ function main() {
     counts,
     sourceGroups: sourceGroupsSummary,
     invalidPlan: invalidPlanReasons,
-    realDataProbe: {
-      // Without Owner decision D6 (full-fidelity data authorization) this
-      // tool is only exercised on synthetic fixtures; a run over real
-      // snapshots flips this flag with the D6 reference.
-      status: 'NOT_RUN_WITHOUT_D6',
-    },
+    realDataProbe: d6Grant !== null
+      ? {
+          // P1-6 positive path: reached ONLY through a verified D6 decision
+          // whose frozen datasetSha256 equals this dataset's digest (the
+          // loader fails closed otherwise). The binding is echoed in full
+          // so downstream T6 qualification can re-verify report <-> D6
+          // consistency mechanically.
+          status: 'RAN_WITH_D6',
+          d6Decision: {
+            file: d6Grant.file,
+            sha256: d6Grant.fileSha256,
+            decidedBy: d6Grant.decidedBy,
+            decidedAt: d6Grant.decidedAt,
+            datasetSha256: d6Grant.parameters.datasetSha256,
+          },
+          probeScope: {
+            dataset: options.dataset,
+            datasetSha256: dataset.sha256,
+            sampleCount: dataset.samples.length,
+            sampleRange: d6Grant.parameters.sampleRange,
+            storageScope: d6Grant.parameters.storageScope,
+            dataSource: d6Grant.parameters.dataSource,
+            retentionDays: d6Grant.parameters.retentionDays,
+            snapshotDir,
+          },
+          result: 'full-fidelity admission probe executed under the bound D6 authorization',
+        }
+      : {
+          // Without Owner decision D6 (full-fidelity data authorization) this
+          // tool is only exercised on synthetic fixtures; a run over real
+          // snapshots flips this flag with the D6 reference.
+          status: 'NOT_RUN_WITHOUT_D6',
+        },
     perSample,
   };
 

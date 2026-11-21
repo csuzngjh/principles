@@ -2640,3 +2640,268 @@ describe("review round 3 hardening", () => {
     expect(retry.status).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P1-5: the declared assignment plan is complete in the merge — a declared
+// assignment with no judgment records is a MISSING_JUDGMENTS FinalComparison,
+// never a silently dropped plan row.
+// ---------------------------------------------------------------------------
+
+describe("declared assignments always reach the final comparison set (P1-5)", () => {
+  const entryFor = (built: any, record: any, raw?: string) => ({
+    blindPackage: built.blindPackage,
+    secretBinding: built.secretBinding,
+    record,
+    ...(raw !== undefined ? { rawResponse: raw } : {}),
+  });
+  const declared = (caseId: string, version = "v1", rep = "rep-1") => ({
+    candidateConfigId: "cfg-candidate",
+    caseId,
+    caseVersion: version,
+    opportunityId: "opp-1",
+    repetitionId: rep,
+    referenceId: "ref-1",
+  });
+  const assignmentKeyOf = (caseId: string, version = "v1", rep = "rep-1") =>
+    `cfg-candidate+${caseId}@${version}+opp-1+${rep}+ref-1`;
+
+  it("one declared assignment with ZERO entries still produces its FinalComparison (UNKNOWN / MISSING_JUDGMENTS)", () => {
+    const { run, report } = validateBundle("declared-unjudged", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [],
+      assignments: [declared("case-1")],
+    });
+    expect(run.status).toBe(0);
+    expect(report.perAssignment).toHaveLength(1);
+    expect(report.perAssignment[0].assignmentKey).toBe(
+      assignmentKeyOf("case-1"),
+    );
+    expect(report.perAssignment[0].outcome).toBe("UNKNOWN");
+    expect(report.perAssignment[0].reasonCode).toBe("MISSING_JUDGMENTS");
+    expect(report.totals.declaredAssignments).toBe(1);
+    expect(report.totals.finalComparisons).toBe(1);
+  });
+
+  it("ten declared assignments, nine judged — the tenth is MISSING_JUDGMENTS, not dropped", () => {
+    const entries: any[] = [];
+    const assignments = [];
+    for (let i = 1; i <= 10; i += 1) {
+      const caseId = `case-${i}`;
+      assignments.push(declared(caseId));
+      if (i === 10) continue; // the tenth declared assignment gets no records
+      const built = healthyPackage({ packageId: `pkg-${i}` });
+      const record = healthyRecord(
+        built,
+        "A_BETTER",
+        `j-${i}`,
+        assignmentKeyOf(caseId),
+      );
+      entries.push(
+        entryFor(built, record, rawResponseOf({ displayVerdict: "A_BETTER" })),
+      );
+    }
+    const { run, report } = validateBundle("nine-of-ten", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries,
+      assignments,
+    });
+    expect(run.status).toBe(0);
+    // The declared plan count equals the final comparison count — 1:1.
+    expect(report.totals.declaredAssignments).toBe(10);
+    expect(report.totals.finalComparisons).toBe(10);
+    expect(report.perAssignment).toHaveLength(10);
+    const byKey = new Map(
+      report.perAssignment.map((a: { assignmentKey: string }) => [
+        a.assignmentKey,
+        a,
+      ]),
+    );
+    // Every declared key is present.
+    for (let i = 1; i <= 10; i += 1)
+      expect(byKey.has(assignmentKeyOf(`case-${i}`)), `case-${i}`).toBe(true);
+    // The nine judged assignments merged to a determinate verdict; the
+    // unjudged tenth is UNKNOWN with MISSING_JUDGMENTS and no fabricated
+    // judgmentIds.
+    for (let i = 1; i <= 9; i += 1) {
+      expect(byKey.get(assignmentKeyOf(`case-${i}`)).outcome).toBe(
+        "CANDIDATE_BETTER",
+      );
+    }
+    const tenth = byKey.get(assignmentKeyOf("case-10"));
+    expect(tenth.outcome).toBe("UNKNOWN");
+    expect(tenth.reasonCode).toBe("MISSING_JUDGMENTS");
+    expect(tenth.judgmentIds).toEqual([]);
+  });
+
+  it("multiple declared assignments, ALL unjudged — every one reports MISSING_JUDGMENTS", () => {
+    const { report } = validateBundle("all-unjudged", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [],
+      assignments: [declared("case-a"), declared("case-b"), declared("case-c")],
+    });
+    expect(report.perAssignment).toHaveLength(3);
+    for (const assignment of report.perAssignment) {
+      expect(assignment.outcome).toBe("UNKNOWN");
+      expect(assignment.reasonCode).toBe("MISSING_JUDGMENTS");
+    }
+    expect(report.totals.finalComparisons).toBe(3);
+  });
+
+  it("a declared assignment whose only record is a FAILED attempt follows the T4 rule (no fabricated vote)", () => {
+    const built = healthyPackage();
+    const failedRecord = healthyRecord(built, "A_BETTER", "j-f", assignmentKeyOf("case-f"), {
+      attemptStatus: "FAILED",
+    });
+    const { report } = validateBundle("declared-failed-only", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        entryFor(built, failedRecord, rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ],
+      assignments: [declared("case-f")],
+    });
+    const assignment = report.perAssignment[0];
+    expect(assignment.outcome).toBe("UNKNOWN");
+    // The FAILED attempt preserved in the audit never becomes a vote.
+    expect(assignment.judgmentIds).toEqual(["j-f"]);
+    expect(assignment.votingJudgments).toEqual([]);
+    expect(report.totals.failedAttemptsPreserved).toContain("j-f");
+  });
+
+  it("an unjudged declared assignment never affects another assignment's merge", () => {
+    const built = healthyPackage();
+    const record = healthyRecord(built, "A_BETTER", "j-1", assignmentKeyOf("case-1"));
+    const { report } = validateBundle("isolated-missing", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        entryFor(built, record, rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ],
+      assignments: [declared("case-1"), declared("case-2")],
+    });
+    const byKey = new Map(
+      report.perAssignment.map((a: { assignmentKey: string }) => [
+        a.assignmentKey,
+        a,
+      ]),
+    );
+    expect(byKey.get(assignmentKeyOf("case-1")).outcome).toBe(
+      "CANDIDATE_BETTER",
+    );
+    expect(byKey.get(assignmentKeyOf("case-1")).reasonCode).toBe(
+      "CONSISTENT_JUDGMENTS",
+    );
+    expect(byKey.get(assignmentKeyOf("case-2")).outcome).toBe("UNKNOWN");
+    expect(byKey.get(assignmentKeyOf("case-2")).reasonCode).toBe(
+      "MISSING_JUDGMENTS",
+    );
+  });
+
+  it("partially judged (one seat of a two-seat plan) keeps the T4 partial semantics", () => {
+    const built = healthyPackage();
+    const j1 = healthyRecord(built, "A_BETTER", "j-1", assignmentKeyOf("case-p"), {
+      judgeSlotId: "slot-a",
+    });
+    const { report } = validateBundle("partial-seats", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        entryFor(built, j1, rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ],
+      assignments: [declared("case-p")],
+      // One slot delivered; the plan preregistered two seats. (A bundle-level
+      // slot registry would be needed for the G4 gate; without one the seat
+      // count is what actually entered.)
+    });
+    const assignment = report.perAssignment[0];
+    expect(assignment.outcome).toBe("CANDIDATE_BETTER");
+    expect(assignment.judgmentIds).toEqual(["j-1"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2-3: the position-exchanged package is itself a blind package — it must
+// pass the same leak scan, including the new packageId.
+// ---------------------------------------------------------------------------
+
+describe("swapJudgePackage final blind-leak gate (P2-3)", () => {
+  const builtOf = (extra: Record<string, unknown> = {}) =>
+    buildJudgePackage({
+      packageId: "pkg-orig-1",
+      context: "Owner expects bounded scope.",
+      outputCandidate:
+        "trajectory one: bounded plan, cites turn 3 evidence, flags one unknown",
+      outputReference:
+        "trajectory two: broader sweep, no citations, silent on risk",
+      identityMap: { A: "candidate", B: "reference" },
+      displayOrder: "AB",
+      ...extra,
+    });
+
+  it("a newPackageId that IS an arm word is refused (candidate / reference)", () => {
+    const built = builtOf();
+    for (const badId of ["candidate", "reference"]) {
+      const swapped = swapJudgePackage(
+        built.blindPackage,
+        built.secretBinding,
+        badId,
+      );
+      expect(swapped.ok, badId).toBe(false);
+      expect(swapped.code).toBe("SWAP_BLIND_PACKAGE_LEAK");
+      expect(swapped.violations.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("a packageId CONTAINING an arm word is refused (identity leak by substring)", () => {
+    const built = builtOf();
+    const swapped = swapJudgePackage(
+      built.blindPackage,
+      built.secretBinding,
+      "pkg-candidate-swap-2",
+    );
+    expect(swapped.ok).toBe(false);
+    expect(swapped.code).toBe("SWAP_BLIND_PACKAGE_LEAK");
+    const swappedRef = swapJudgePackage(
+      built.blindPackage,
+      built.secretBinding,
+      "x-reference-x",
+    );
+    expect(swappedRef.ok).toBe(false);
+    // buildJudgePackage refuses the same ids up front, so no leaking
+    // package can ever be swapped into existence.
+    for (const badId of ["pkg-candidate-9", "reference-pkg", "baseline-2"]) {
+      expect(builtOf({ packageId: badId }).ok).toBe(false);
+      expect(builtOf({ packageId: badId }).code).toBe("BLIND_PACKAGE_LEAK");
+    }
+  });
+
+  it("a normal packageId swaps cleanly and the exchange stays semantically exact", () => {
+    const built = builtOf({
+      maxOutputChars: 20, // force a truncation fact to verify side exchange
+    });
+    const swapped = swapJudgePackage(
+      built.blindPackage,
+      built.secretBinding,
+      "pkg-swap-1",
+    );
+    expect(swapped.ok).toBe(true);
+    const pkg = swapped.blindPackage;
+    const orig = built.blindPackage;
+    // Outputs exchanged.
+    expect(pkg.outputA).toBe(orig.outputB);
+    expect(pkg.outputB).toBe(orig.outputA);
+    // Context, rubric and protocol ref unchanged.
+    expect(pkg.context).toBe(orig.context);
+    expect(pkg.rubricVersion).toBe(orig.rubricVersion);
+    expect(pkg.judgeProtocolRef).toBe(orig.judgeProtocolRef);
+    // Truncation sides moved with the content.
+    const origSides = orig.truncation.map((t: { truncatedSide: string }) => t.truncatedSide).sort();
+    const swapSides = pkg.truncation.map((t: { truncatedSide: string }) => t.truncatedSide).sort();
+    expect(swapSides).toEqual(origSides);
+    // Identity map inverted; display order flipped.
+    expect(swapped.secretBinding.identityMap).toEqual({
+      A: "reference",
+      B: "candidate",
+    });
+    expect(swapped.secretBinding.displayOrder).toBe("BA");
+    // The exchanged package passes the same leak scan the original passed.
+    expect(checkPackageForLeaks(pkg)).toEqual([]);
+  });
+});

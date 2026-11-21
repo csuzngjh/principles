@@ -368,6 +368,21 @@ const ARM_WORD_VALUES = new Set([
  */
 export function checkPackageForLeaks(blindPackage) {
   const violations = findBlindViolations(blindPackage);
+  // packageId is operator-controlled packaging, never judged material: it
+  // may not even CONTAIN an arm word as a substring ("swap-candidate-2"
+  // unblinds the package as surely as the bare word does). Judged content
+  // (context/outputs) is exempt from the substring rule — it is data.
+  if (
+    isPlainObject(blindPackage) &&
+    typeof blindPackage.packageId === "string" &&
+    /candidate|reference|baseline/i.test(blindPackage.packageId)
+  ) {
+    violations.push({
+      path: "$.packageId",
+      token: blindPackage.packageId,
+      reason: "packageId contains an arm-identity word",
+    });
+  }
   const walk = (value, basePath) => {
     if (Array.isArray(value)) {
       value.forEach((item, index) => walk(item, `${basePath}[${index}]`));
@@ -558,18 +573,35 @@ export function swapJudgePackage(blindPackage, secretBinding, newPackageId) {
   const truncation = Array.isArray(blindPackage.truncation)
     ? swapSides(blindPackage.truncation)
     : undefined;
+  const swappedPackage = {
+    packageId: newPackageId,
+    judgeProtocolRef: blindPackage.judgeProtocolRef,
+    rubricVersion: blindPackage.rubricVersion,
+    comparisonQuestion: blindPackage.comparisonQuestion,
+    context: blindPackage.context,
+    outputA: blindPackage.outputB,
+    outputB: blindPackage.outputA,
+    ...(truncation && truncation.length > 0 ? { truncation } : {}),
+  };
+  // P2-3 final blind-leak gate: the exchanged package is a BLIND PACKAGE
+  // like any other, so it must pass the same leak scan the original had to
+  // pass — including the new packageId itself. A packageId that names an
+  // arm ("candidate", "reference", …) or carries other identity-leaking
+  // values would unblind the position exchange from the outside; such a
+  // swap is refused with ok:false, never returned as a valid package.
+  const violations = checkPackageForLeaks(swappedPackage);
+  if (violations.length > 0) {
+    return {
+      ok: false,
+      code: "SWAP_BLIND_PACKAGE_LEAK",
+      message:
+        "the swapped blind judge package failed the blind-leak scan (its packageId or exchanged content leaks arm identity)",
+      violations,
+    };
+  }
   return {
     ok: true,
-    blindPackage: {
-      packageId: newPackageId,
-      judgeProtocolRef: blindPackage.judgeProtocolRef,
-      rubricVersion: blindPackage.rubricVersion,
-      comparisonQuestion: blindPackage.comparisonQuestion,
-      context: blindPackage.context,
-      outputA: blindPackage.outputB,
-      outputB: blindPackage.outputA,
-      ...(truncation && truncation.length > 0 ? { truncation } : {}),
-    },
+    blindPackage: swappedPackage,
     secretBinding: {
       packageId: newPackageId,
       displayOrder: secretBinding.displayOrder === "AB" ? "BA" : "AB",
