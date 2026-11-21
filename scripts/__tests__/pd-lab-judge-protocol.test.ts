@@ -2467,3 +2467,124 @@ describe("structurally gated arbitrations (review finding 5)", () => {
     expect(report.perAssignment[0].outcome).toBe("UNKNOWN");
   });
 });
+
+describe("review round 3 hardening", () => {
+  const entryFor = (built: any, record: any, raw?: string) => ({
+    blindPackage: built.blindPackage,
+    secretBinding: built.secretBinding,
+    record,
+    ...(raw !== undefined ? { rawResponse: raw } : {}),
+  });
+
+  it("a fabricated truncation fact cannot launder an empty context", () => {
+    const built = healthyPackage();
+    const pkg = {
+      ...built.blindPackage,
+      context: "",
+      truncation: [
+        { truncatedSide: "CONTEXT", truncatedAt: 1, originalChars: 2 },
+      ],
+    };
+    const record = healthyRecord(built, "UNKNOWN", "j-fab") as any;
+    record.comparisonInputDigest = comparisonInputDigestOf(
+      pkg,
+      built.secretBinding.identityMap,
+    );
+    const { run, report } = validateBundle("fab-truncation", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        {
+          blindPackage: pkg,
+          secretBinding: built.secretBinding,
+          record,
+          rawResponse: rawResponseOf({ displayVerdict: "UNKNOWN" }),
+        },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(report.problems.map((p: { code: string }) => p.code)).toContain(
+      "PACKAGE_INVALID",
+    );
+  });
+
+  it("two comparisons sharing an arbitrationId fail the bundle (DUPLICATE_ARBITRATION)", () => {
+    const built = healthyPackage();
+    const keyA = "cfg-a+case-1@v1+opp-1+rep-1+ref-1";
+    const keyB = "cfg-b+case-2@v1+opp-2+rep-2+ref-2";
+    const digest = (built_: any) =>
+      comparisonInputDigestOf(built_.blindPackage, built_.secretBinding.identityMap);
+    const arb = (key: string) => ({
+      arbitrationId: "arb-1",
+      assignmentKey: key,
+      boundJudgmentIds: ["j-a", "j-b"],
+      boundComparisonInputDigests: [digest(built)],
+      verdict: "TIE",
+    });
+    const rec = (id: string, key: string, verdict: string) =>
+      healthyRecord(built, verdict, id, key, { judgeSlotId: `slot-${id}` });
+    const { run, report } = validateBundle("dup-arb", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        entryFor(built, rec("j-a", keyA, "A_BETTER"), rawResponseOf({ displayVerdict: "A_BETTER" })),
+        entryFor(built, rec("j-b", keyB, "B_BETTER"), rawResponseOf({ displayVerdict: "B_BETTER" })),
+      ],
+      arbitrations: [arb(keyA), arb(keyB)],
+    });
+    expect(run.status).toBe(1);
+    expect(report.problems.map((p: { code: string }) => p.code)).toContain(
+      "DUPLICATE_ARBITRATION",
+    );
+  });
+
+  it("one caseId at two versions across comparisons fails the bundle (CASE_VERSION_CONFLICT)", () => {
+    const built = healthyPackage();
+    const keyA = "cfg+case-1@v1+opp-1+rep-1+ref-1";
+    const keyB = "cfg+case-1@v2+opp-1+rep-1+ref-1";
+    const rec = (id: string, key: string) =>
+      healthyRecord(built, "A_BETTER", id, key, { judgeSlotId: `slot-${id}` });
+    const { run, report } = validateBundle("version-conflict", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        entryFor(built, rec("j-1", keyA), rawResponseOf({ displayVerdict: "A_BETTER" })),
+        entryFor(built, rec("j-2", keyB), rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(report.problems.map((p: { code: string }) => p.code)).toContain(
+      "CASE_VERSION_CONFLICT",
+    );
+  });
+
+  it("a non-array bundle.assignments exits 2 and leaves no out directory", () => {
+    const built = healthyPackage();
+    const j1 = healthyRecord(built, "A_BETTER", "j-1");
+    const dir = path.join(tempRoot, "bad-assignments");
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "bundle.json");
+    fs.writeFileSync(
+      file,
+      `${JSON.stringify({
+        schema: "pd-lab-judge-protocol-bundle.v1",
+        entries: [entryFor(built, j1, rawResponseOf({ displayVerdict: "A_BETTER" }))],
+        assignments: {},
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const out = path.join(dir, "out");
+    const run = runValidateCli(["--bundle", file, "--out", out]);
+    expect(run.status).toBe(2);
+    expect(fs.existsSync(out)).toBe(false);
+    // The corrected input can retry with the same --out.
+    fs.writeFileSync(
+      file,
+      `${JSON.stringify({
+        schema: "pd-lab-judge-protocol-bundle.v1",
+        entries: [entryFor(built, j1, rawResponseOf({ displayVerdict: "A_BETTER" }))],
+        assignments: [],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const retry = runValidateCli(["--bundle", file, "--out", out]);
+    expect(retry.status).toBe(0);
+  });
+});

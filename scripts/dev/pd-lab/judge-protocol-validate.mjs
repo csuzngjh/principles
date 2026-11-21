@@ -140,8 +140,15 @@ function packageProblem(blindPackage) {
           (t) =>
             isPlainObject(t) &&
             t.truncatedSide === "CONTEXT" &&
+            // The builder's own invariant: it only truncates when the
+            // budget is a positive integer below the original length, and
+            // the kept prefix is exactly truncatedAt chars — anything else
+            // is a fabricated truncation fact, not a lossy package.
+            Number.isInteger(t.truncatedAt) &&
+            t.truncatedAt > 0 &&
+            t.truncatedAt === blindPackage.context.length &&
             Number.isInteger(t.originalChars) &&
-            t.originalChars > 0,
+            t.originalChars > t.truncatedAt,
         );
       if (!truncationOk) return `blindPackage.${field} must be non-empty`;
     }
@@ -334,6 +341,10 @@ function main() {
         "the bundle carries no preregistered judge-slot registry; slot preregistration is unverified, not verified",
     });
   }
+  // Top-level shape checks all precede the --out reservation: an exit-2
+  // failure must leave no directory behind (cli-5-failure-no-mutation).
+  if (bundle.assignments !== undefined && !Array.isArray(bundle.assignments))
+    fail("bundle.assignments must be an array when present", 2);
 
   // Write-once --out (plain mkdir as the concurrency gate, admission-probe
   // precedent): a validation report directory is never silently replaced.
@@ -800,8 +811,6 @@ function main() {
   ];
   const declaredAssignments = new Map();
   if (bundle.assignments !== undefined) {
-    if (!Array.isArray(bundle.assignments))
-      fail("bundle.assignments must be an array when present", 2);
     for (const a of bundle.assignments) {
       if (
         !isPlainObject(a) ||
@@ -845,6 +854,29 @@ function main() {
       });
     } else {
       validArbitrations.push(arbitration);
+    }
+  }
+  // Bundle-level arbitrationId uniqueness: per-comparison merges each see
+  // only their own arbitration, so the duplicate check T4 runs inside one
+  // merge must be reproduced across the bundle. A duplicated id invalidates
+  // every arbitration carrying it — none of them is independent evidence.
+  const arbitrationIdsSeen = new Map();
+  for (const arbitration of validArbitrations)
+    arbitrationIdsSeen.set(
+      arbitration.arbitrationId,
+      (arbitrationIdsSeen.get(arbitration.arbitrationId) ?? 0) + 1,
+    );
+  for (const [arbitrationId, count] of arbitrationIdsSeen) {
+    if (count > 1) {
+      report({
+        packageId: "<arbitration>",
+        judgmentId: arbitrationId,
+        code: "DUPLICATE_ARBITRATION",
+        message: `arbitrationId ${arbitrationId} appears on ${count} arbitration records in the bundle`,
+      });
+      for (let i = validArbitrations.length - 1; i >= 0; i -= 1)
+        if (validArbitrations[i].arbitrationId === arbitrationId)
+          validArbitrations.splice(i, 1);
     }
   }
 
@@ -922,6 +954,23 @@ function main() {
       expectationRef: "t7a-expectation",
       ...components,
     });
+  }
+  // Bundle-level case-version consistency (T4's per-plan check, reproduced
+  // because the per-comparison merges each see one assignment): one caseId
+  // with two different versions across the bundle is a conflict.
+  const caseVersions = new Map();
+  for (const [key, components] of mergeComponentsByKey) {
+    const previous = caseVersions.get(components.caseId);
+    if (previous === undefined) {
+      caseVersions.set(components.caseId, components.caseVersion);
+    } else if (previous !== components.caseVersion) {
+      report({
+        packageId: "<merge>",
+        judgmentId: "<merge>",
+        code: "CASE_VERSION_CONFLICT",
+        message: `case ${components.caseId} declared with versions ${previous} and ${components.caseVersion} (key ${key})`,
+      });
+    }
   }
 
   // Per-comparison merge: every assignmentKey merges under ITS OWN seat
