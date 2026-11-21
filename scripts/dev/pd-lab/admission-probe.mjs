@@ -21,8 +21,13 @@
 //
 // Hard boundaries (HANDOFF T7a):
 //  * first version covers the OpenClaw trajectory store ONLY (TECH §5.2);
-//    samples whose host_kind is a non-empty non-openclaw value get
-//    NOT_EVALUATED paths, not guessed verdicts;
+//    a SESSION-BOUND sample whose host_kind is not openclaw (unknown/empty/
+//    null or an explicit other host) gets PIPELINE_REPLAY BLOCKED with the
+//    structured INGRESS_HOST_UNRESOLVABLE problem — fail-closed exactly like
+//    the production ingress (ab-lib decideHostArg: omitting --host would
+//    silently attribute openclaw), never a guessed verdict and never a silent
+//    host conversion. Session-LESS samples with an explicit non-openclaw
+//    host stay NOT_EVALUATED (no ingress host attribution is involved);
 //  * SOURCE_GAP vs SOURCE_RETENTION_EXPIRED follow the CONTRACT §2.4 rule:
 //    retention-expired requires POSITIVE retention evidence (session
 //    started_at strictly earlier than the session's earliest surviving turn,
@@ -84,9 +89,14 @@ const BLOB_MANIFEST_SCHEMA = 'pd-lab-blob-manifest.v1';
 const PATHS = ['PIPELINE_REPLAY', 'EXPECTATION_LABELING', 'BEHAVIOR_BRANCH'];
 
 // Problem codes whose presence makes a sample INCOMPLETE and blocks the paths
-// listed in CONTRACT §2.4. TOOL_RESULT_PREVIEW_ONLY does NOT block
-// PIPELINE_REPLAY (the production entry reads the same preview) but must be
-// recorded; ENVIRONMENT_UNAVAILABLE only blocks BEHAVIOR_BRANCH.
+// listed in CONTRACT §2.4. TOOL_RESULT_PREVIEW_ONLY and TOOL_RESULT_MISSING do
+// NOT block PIPELINE_REPLAY (the production entry reads the same evidence) but
+// must be recorded; ENVIRONMENT_UNAVAILABLE only blocks BEHAVIOR_BRANCH;
+// INGRESS_HOST_UNRESOLVABLE only blocks PIPELINE_REPLAY (r8 P1-01: the labeling
+// paths do not go through the CLI ingress and are judged on their own
+// evidence); EXPECTATION_VISIBILITY_UNPROVEN only blocks EXPECTATION_LABELING
+// (r8 P1-03: an EXPLICIT_AT_TIME claim without visibleAt is unproven, not
+// future information).
 const BASE_BLOCKING_CODES = new Set([
   'PAIN_ANCHOR_MISSING',
   'SOURCE_GAP',
@@ -96,10 +106,15 @@ const BASE_BLOCKING_CODES = new Set([
   'AUTHORIZATION_UNVERIFIED',
   'REFERENCE_UNAVAILABLE',
 ]);
+// INGRESS_HOST_UNRESOLVABLE is deliberately NOT in BASE_BLOCKING_CODES: it
+// blocks PIPELINE_REPLAY only (added in classifySample), because the labeling
+// and behavior paths never go through the CLI ingress and must be judged on
+// their own evidence (r8 P1-01).
 const COMPLETENESS_BLOCKING_CODES = new Set([
   ...BASE_BLOCKING_CODES,
   'EXPECTATION_UNRESOLVED',
   'FUTURE_INFORMATION',
+  'EXPECTATION_VISIBILITY_UNPROVEN',
 ]);
 const EXPECTATION_BLOCKING_CODES = new Set([...COMPLETENESS_BLOCKING_CODES]);
 // CONTRACT §2.4 / §3 authorization statuses tracked separately for the
@@ -1308,18 +1323,24 @@ function analyzeSession(sample, facts, startExplanation, prefixCompleteness, pre
   // preview cannot be the 500-unit truncation form in any encoding. The body
   // itself is still never fetched or emitted.
   const previewOnlyRows = toolCalls
-    .filter((call) => {
-      if (typeof call.preview_window !== 'string' || typeof call.preview_cp_len !== 'number') {
-        return false;
-      }
-      if (call.preview_cp_len > 501) {
-        return false; // more than 501 code points ⇒ more than 500 UTF-16 units
-      }
-      return call.preview_window.length === 500 && call.preview_window.endsWith('...');
-    })
+    .filter((call) => isTruncatedPreviewRow(call))
     .map((call) => call.id);
 
   return { problems, blobRefs, previewOnlyRows, session, userTurns, assistantTurns, toolCalls };
+}
+
+/** True when the row's preview IS the producer's 500-UTF-16-unit truncation
+ *  form (497 units + '...'); see analyzeSession for the full encoding
+ *  rationale (r2 review R695). Shared by the preview detection and the
+ *  tool-return evidence check so the two can never diverge. */
+function isTruncatedPreviewRow(call) {
+  if (typeof call.preview_window !== 'string' || typeof call.preview_cp_len !== 'number') {
+    return false;
+  }
+  if (call.preview_cp_len > 501) {
+    return false; // more than 501 code points ⇒ more than 500 UTF-16 units
+  }
+  return call.preview_window.length === 500 && call.preview_window.endsWith('...');
 }
 
 /** Numeric ISO comparison — string ordering breaks on timezone offsets. */
@@ -1355,6 +1376,27 @@ function analyzeExpectations(sample, expectations) {
       ),
     );
   }
+  // P1-03 (r8): EXPLICIT_AT_TIME claims the expectation was already visible
+  // at the historical trigger — but the basis declaration itself is a CLAIM,
+  // not comparable evidence. Without visibleAt (the CONTRACT-recognized
+  // visibility anchor; no equivalent source-location evidence exists in this
+  // record form) contemporaneous visibility cannot be verified, so the
+  // labeling path fails closed. RESEARCH_INFERENCE records are never
+  // auto-upgraded or held to this rule — they declare themselves as research
+  // level, not as historical claims. An UNPARSABLE visibleAt never reaches
+  // this point: loadExpectations rejects it structurally (exit 1) — the
+  // record never gets evaluated at all, which is the stronger fail-closed.
+  if (record.basis === 'EXPLICIT_AT_TIME' && typeof record.visibleAt !== 'string') {
+    problems.push(
+      makeProblem(
+        'EXPECTATION_VISIBILITY_UNPROVEN',
+        `expectations:${sample.caseId}.visibleAt`,
+        [`expectations:${sample.caseId}`, `painEvent:${sample.caseId}.created_at`],
+        'Expectation basis is EXPLICIT_AT_TIME but the record carries no visibleAt, so historical visibility at the pain trigger cannot be verified — the basis label is a claim, not evidence (CONTRACT §2.3 "当时可知位置"). A record that cannot prove when it became visible must not be admitted as a contemporaneous expectation.',
+        'Supply visibleAt (an instant at or before the pain trigger) or an equivalent CONTRACT-recognized source-location evidence; until then the sample is kept but expectation labeling stays blocked.',
+      ),
+    );
+  }
   // FUTURE_INFORMATION: expectation evidence not yet visible at the decision
   // point (SPEC §5.3 — later clarifications must not judge the historical
   // decision; they may still support learning research). A LATER_CLARIFICATION
@@ -1387,6 +1429,54 @@ function analyzeExpectations(sample, expectations) {
     }
   }
   return { problems, record, dependsOnToolOutput: record.dependsOnToolOutput === true, basis: typeof record.basis === 'string' ? record.basis : null };
+}
+
+// ---------------------------------------------------------------------------
+// Tool-return evidence (r8 P1-02): an expectation that declares
+// dependsOnToolOutput must have a REAL, verifiable tool return to read. The
+// tool_calls row carries only result_preview — the producer writes the FULL
+// output there when it fits the 500-unit budget, the 497+'...' truncation
+// form when it does not, and NULL when the call produced no result
+// (after-tool-call-helpers.ts). So a non-empty preview that is NOT the
+// truncation form IS a complete return; the truncation form is a partial
+// return (TOOL_RESULT_PREVIEW_ONLY, emitted by analyzeSession); everything
+// else (NULL/empty previews, or no rows at all) is NO verifiable return. A
+// tool CALL is never treated as a tool OUTPUT, and params_json is the call
+// side, never the return side. This snapshot form has no CONTRACT-recognized
+// Blob recovery path for tool results (tool_calls has no blob_ref column;
+// turn blobs cover user/assistant turns only) — if one is ever recognized it
+// must be honored here before a return is claimed missing.
+// ---------------------------------------------------------------------------
+function toolReturnEvidenceProblems(sample, toolCalls, previewOnlyRows, dependsOnToolOutput) {
+  if (dependsOnToolOutput !== true) {
+    return [];
+  }
+  const hasCompleteReturn = toolCalls.some(
+    (call) => typeof call.preview_window === 'string'
+      && call.preview_window.length > 0
+      && !isTruncatedPreviewRow(call),
+  );
+  if (hasCompleteReturn) {
+    return [];
+  }
+  if (previewOnlyRows.length > 0) {
+    // Partial returns exist and are already recorded as
+    // TOOL_RESULT_PREVIEW_ONLY (which blocks labeling whenever
+    // dependsOnToolOutput) — the more precise code wins, never both.
+    return [];
+  }
+  const noCalls = toolCalls.length === 0;
+  return [
+    makeProblem(
+      'TOOL_RESULT_MISSING',
+      `tool_calls:${sample.sessionId}`,
+      [`dataset:${sample.caseId}`, `expectations:${sample.caseId}.dependsOnToolOutput`, `session:${sample.sessionId}`],
+      noCalls
+        ? 'The expectation record declares dependsOnToolOutput, but the session carries no tool_calls rows at all — there is no tool output for the labeling to read.'
+        : `The expectation record declares dependsOnToolOutput, but none of the ${toolCalls.length} tool call(s) in this session carries a verifiable return (result_preview is NULL/empty on every row). A tool call is not a tool output, and params_json is the call side, never the return side.`,
+      'Recover the actual tool return from the host-native session file under an authorized scope (CONTRACT §2.4), or re-mark the expectation as not tool-dependent.',
+    ),
+  ];
 }
 
 /**
@@ -1632,10 +1722,43 @@ function analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir, blobHash
 // Path readiness (CONTRACT §2.4 table) and completeness (SPEC §5.2)
 // ---------------------------------------------------------------------------
 
+/**
+ * r8 P2: the prefix reason must MATCH the proven state. PROVEN_INCOMPLETE
+ * discloses the positive vanished-row evidence it actually found (sources +
+ * counts from the immortal-table dangling references); UNKNOWN states the two
+ * things that make it unknown — no first-writer identity anchor AND no
+ * positive deletion evidence; PROVEN_COMPLETE stays structurally unreachable
+ * (FIRST_WRITER_IDENTITY_PROVENANCE_AVAILABLE = false) and gets no reason.
+ */
+function prefixCompletenessReasonFor(state, missingReferences) {
+  if (state === 'PROVEN_INCOMPLETE') {
+    const total = missingReferences.reduce((sum, m) => sum + m.count, 0);
+    const sources = missingReferences.map((m) => `${m.reference}×${m.count}`).join(', ');
+    return `positive vanished-row evidence found: ${total} dangling reference(s) from immortal tables (${sources}) point at trajectory rows that no longer exist`;
+  }
+  if (state === 'UNKNOWN') {
+    return 'no first-writer identity anchor is persisted in the current schema (created_at is a timestamp, not a row identity; bare recordSession creations are legal) and no positive vanished-row evidence was found';
+  }
+  return null; // PROVEN_COMPLETE — unreachable until producer-side identity anchors exist
+}
+
 function classifySample(sample, problems, analysis, datasetRedacted, prefixCompleteness) {
   const codes = new Set(problems.map((p) => p.code));
   const hostKind = sample.hostKind;
-  const unsupportedHost = hostKind.length > 0 && hostKind !== 'openclaw';
+  // Same normalization as the production ingress decision (ab-lib
+  // decideHostArg): trim + lowercase before comparing — the raw value stays
+  // untouched in the report (unknown attribution is preserved, never
+  // fabricated as openclaw).
+  const hostKindNormalized = hostKind.trim().toLowerCase();
+  // P1-01 (r8): a SESSION-BOUND sample whose host cannot be expressed as
+  // openclaw (unknown/empty/null or an explicit other host) is judged per
+  // path — PIPELINE_REPLAY is BLOCKED by the structured
+  // INGRESS_HOST_UNRESOLVABLE problem exactly like the production ingress
+  // (decideHostArg returns failClosed before any CLI invocation), while the
+  // labeling/behavior paths are judged on their own evidence. Only a
+  // session-LESS sample with an explicit non-openclaw host remains
+  // NOT_EVALUATED (TECH §5.2 scope — no ingress host attribution involved).
+  const unsupportedHost = sample.sessionId.length === 0 && hostKindNormalized.length > 0 && hostKindNormalized !== 'openclaw';
 
   // Completeness (r7: DECOUPLED from path readiness) is the sample-level
   // evidence verdict: the historical prefix dimension contributes directly —
@@ -1644,7 +1767,8 @@ function classifySample(sample, problems, analysis, datasetRedacted, prefixCompl
   // provenance exists — while path readiness is judged per path on that
   // path's ACTUAL input evidence. A path can be READY while the sample is
   // INCOMPLETE; neither verdict is derived from the other.
-  const expectationEvidenceGapped = analysis.dependsOnToolOutput === true && codes.has('TOOL_RESULT_PREVIEW_ONLY');
+  const expectationEvidenceGapped = analysis.dependsOnToolOutput === true
+    && (codes.has('TOOL_RESULT_PREVIEW_ONLY') || codes.has('TOOL_RESULT_MISSING'));
   const completeness = (prefixCompleteness !== 'PROVEN_COMPLETE'
     || [...COMPLETENESS_BLOCKING_CODES].some((code) => codes.has(code))
     || expectationEvidenceGapped)
@@ -1656,8 +1780,8 @@ function classifySample(sample, problems, analysis, datasetRedacted, prefixCompl
   const executable = {};
   if (datasetRedacted || unsupportedHost) {
     // NOT_EVALUATED is never READY (CONTRACT §2.4). Redacted public copies
-    // cannot support full-fidelity qualification (SPEC §6.3); non-OpenClaw
-    // hosts are outside this probe's first version (TECH §5.2).
+    // cannot support full-fidelity qualification (SPEC §6.3); session-less
+    // non-OpenClaw hosts are outside this probe's first version (TECH §5.2).
     const reason = datasetRedacted
       ? 'dataset_is_redacted_public_copy_structural_audit_only'
       : `unsupported_host_kind:${hostKind}`;
@@ -1674,21 +1798,29 @@ function classifySample(sample, problems, analysis, datasetRedacted, prefixCompl
   // PIPELINE_REPLAY: the snapshot must contain everything the production
   // entry would read — the UNBOUNDED session turn lists
   // (listUserTurnsForSession / listAssistantTurns) plus any correction-
-  // evidence blobs they reference. SOURCE_GAP here means an OBSERVED input
-  // gap (role gap, hole, order break, empty window, post-trigger start) —
-  // the historical prefix UNKNOWN does NOT emit it (r7). TOOL_RESULT_PREVIEW
-  // _ONLY does NOT block (the production entry reads the same preview).
-  const pipelineBlocking = [...BASE_BLOCKING_CODES];
+  // evidence blobs they reference — AND the ingress must be expressible on
+  // the real CLI: a session-bound sample with an unresolvable host gets
+  // INGRESS_HOST_UNRESOLVABLE here (fail-closed, same semantics as
+  // buildIngressArgs/decideHostArg). SOURCE_GAP still means an OBSERVED
+  // input gap (role gap, hole, order break, empty window, post-trigger
+  // start) — the historical prefix UNKNOWN does NOT emit it (r7).
+  // TOOL_RESULT_PREVIEW_ONLY / TOOL_RESULT_MISSING do NOT block replay (the
+  // production entry reads the same evidence the probe sees).
+  const pipelineBlocking = [...BASE_BLOCKING_CODES, 'INGRESS_HOST_UNRESOLVABLE'];
   pathReadiness.PIPELINE_REPLAY = blockersFor(pipelineBlocking).length > 0 ? 'BLOCKED' : 'READY';
   pathBlockers.PIPELINE_REPLAY = blockersFor(pipelineBlocking);
 
   // EXPECTATION_LABELING: expectation-related turns and tool outputs must be
-  // fully readable; a preview-only tool result blocks when the expectation
-  // evidence depends on tool output (CONTRACT §2.4). Judged independently of
-  // PIPELINE_REPLAY's verdict.
+  // fully readable; a preview-only or absent tool return blocks when the
+  // expectation evidence depends on tool output (CONTRACT §2.4). Judged
+  // independently of PIPELINE_REPLAY's verdict — an ingress-host block never
+  // reaches this list.
   const expectationBlocking = [...EXPECTATION_BLOCKING_CODES];
   if (analysis.dependsOnToolOutput && codes.has('TOOL_RESULT_PREVIEW_ONLY')) {
     expectationBlocking.push('TOOL_RESULT_PREVIEW_ONLY');
+  }
+  if (analysis.dependsOnToolOutput && codes.has('TOOL_RESULT_MISSING')) {
+    expectationBlocking.push('TOOL_RESULT_MISSING');
   }
   pathReadiness.EXPECTATION_LABELING = blockersFor(expectationBlocking).length > 0 ? 'BLOCKED' : 'READY';
   pathBlockers.EXPECTATION_LABELING = blockersFor(expectationBlocking);
@@ -1959,16 +2091,22 @@ const REMEDIATION_POLICY = {
   REFERENCE_UNAVAILABLE: { missingEvidenceType: 'referenced_record', remediable: true, requiresOwnerDecision: false },
   FUTURE_INFORMATION: { missingEvidenceType: 'contemporaneous_expectation', remediable: true, requiresOwnerDecision: true },
   ENVIRONMENT_UNAVAILABLE: { missingEvidenceType: 'environment_snapshot', remediable: false, requiresOwnerDecision: false },
+  INGRESS_HOST_UNRESOLVABLE: { missingEvidenceType: 'session_host_binding', remediable: true, requiresOwnerDecision: true },
+  TOOL_RESULT_MISSING: { missingEvidenceType: 'tool_return_output', remediable: true, requiresOwnerDecision: false },
+  EXPECTATION_VISIBILITY_UNPROVEN: { missingEvidenceType: 'expectation_visibility_evidence', remediable: true, requiresOwnerDecision: true },
 };
 
 function affectedPathsFor(code, dependsOnToolOutput) {
-  if (code === 'TOOL_RESULT_PREVIEW_ONLY') {
+  if (code === 'TOOL_RESULT_PREVIEW_ONLY' || code === 'TOOL_RESULT_MISSING') {
     return dependsOnToolOutput ? ['EXPECTATION_LABELING'] : [];
   }
   if (code === 'ENVIRONMENT_UNAVAILABLE') {
     return ['BEHAVIOR_BRANCH'];
   }
-  if (code === 'EXPECTATION_UNRESOLVED' || code === 'FUTURE_INFORMATION') {
+  if (code === 'INGRESS_HOST_UNRESOLVABLE') {
+    return ['PIPELINE_REPLAY'];
+  }
+  if (code === 'EXPECTATION_UNRESOLVED' || code === 'FUTURE_INFORMATION' || code === 'EXPECTATION_VISIBILITY_UNPROVEN') {
     return ['EXPECTATION_LABELING'];
   }
   return ['PIPELINE_REPLAY', 'EXPECTATION_LABELING', 'BEHAVIOR_BRANCH'];
@@ -2393,6 +2531,27 @@ function main() {
       );
     }
 
+    // P1-01 (r8): a session-bound sample whose host cannot be resolved to
+    // openclaw (unknown/empty/null or an explicit other host — same trim+
+    // lowercase normalization as the production decision) gets the structured
+    // ingress blocker. This mirrors decideHostArg/buildIngressArgs exactly:
+    // the A/B runner refuses such a sample BEFORE any CLI invocation
+    // (ingress_host_unresolvable — omitting --host would silently attribute
+    // openclaw). The raw host attribution is preserved in the report, never
+    // converted; only PIPELINE_REPLAY consumes this code.
+    const hostKindNormalized = sample.hostKind.trim().toLowerCase();
+    if (sample.sessionId.length > 0 && hostKindNormalized !== 'openclaw') {
+      problems.push(
+        makeProblem(
+          'INGRESS_HOST_UNRESOLVABLE',
+          `dataset:${sample.caseId}.painEvent.host_kind`,
+          [`dataset:${sample.caseId}`, `session:${sample.sessionId}`, `painEvent:${sample.caseId}.host_kind`],
+          `The pain event is bound to session ${sample.sessionId} but its host cannot be resolved to openclaw (host_kind=${JSON.stringify(sample.hostKind)}). The A/B ingress fails closed before any CLI invocation (ingress_host_unresolvable): omitting --host would silently attribute openclaw, and guessing another host would fabricate attribution — so pipeline replay is not executable for this sample.`,
+          'Re-derive the true host attribution from the source system under an authorized scope, or keep the sample for the labeling/analysis paths that do not go through the CLI ingress.',
+        ),
+      );
+    }
+
     // BEHAVIOR_BRANCH environment evidence: the T1 snapshot form (two DBs +
     // blobs) carries no repository/environment snapshot, so historical cases
     // are always environment-unavailable (CONTRACT §2.4 known case).
@@ -2410,6 +2569,12 @@ function main() {
 
     const expectationAnalysis = analyzeExpectations(sample, expectations);
     problems.push(...expectationAnalysis.problems);
+    problems.push(...toolReturnEvidenceProblems(
+      sample,
+      sessionAnalysis.toolCalls,
+      sessionAnalysis.previewOnlyRows,
+      expectationAnalysis.dependsOnToolOutput,
+    ));
 
     const authorizationAnalysis = analyzeAuthorization(sample, authorizations, studyPurpose, evaluatedAtMs);
     problems.push(...authorizationAnalysis.problems);
@@ -2432,9 +2597,7 @@ function main() {
       authorizationStatus: authorizationAnalysis.status,
       sessionStartExplanation: facts !== null ? startExplanation : 'NOT_APPLICABLE',
       prefixCompleteness: facts !== null ? prefixCompleteness : 'UNKNOWN',
-      prefixCompletenessReason: facts !== null && prefixCompleteness !== 'PROVEN_COMPLETE'
-        ? 'no first-writer identity anchor is persisted in the current schema (created_at is a timestamp, not a row identity; bare recordSession creations are legal) and no positive vanished-row evidence was found'
-        : null,
+      prefixCompletenessReason: facts !== null ? prefixCompletenessReasonFor(prefixCompleteness, prefixMissingReferences) : null,
       prefixMissingReferenceCount: facts !== null ? prefixMissingReferences.reduce((sum, m) => sum + m.count, 0) : 0,
       expectationBasis: expectationAnalysis.basis,
       expectationDependsOnToolOutput: expectationAnalysis.dependsOnToolOutput,

@@ -417,10 +417,13 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     expect(codesOf(out, 'S01')).toContain('EXPECTATION_UNRESOLVED'); // structural findings still surface
   });
 
-  it('unsupported host kind → all paths NOT_EVALUATED (first version covers OpenClaw only)', () => {
+  it('session-LESS sample with an explicit non-openclaw host → all paths NOT_EVALUATED (first version covers OpenClaw only; no ingress host attribution involved)', () => {
+    // r8 P1-01 narrowed NOT_EVALUATED to the session-less shape: a session-
+    // BOUND non-openclaw host is now judged per path (see the r8 host matrix
+    // suite) with PIPELINE_REPLAY blocked by INGRESS_HOST_UNRESOLVABLE.
     const world = buildWorld('host', {
       sessions: [{ sessionId: 'sess-h', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
-      samples: [{ caseId: 'S01', sessionId: 'sess-h', hostKind: 'codex' }],
+      samples: [{ caseId: 'S01', sessionId: '', hostKind: 'codex' }],
     });
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
     expect(run.status).toBe(0);
@@ -780,10 +783,13 @@ describe('path classification and counts', () => {
     const out = readOut(world.outDir);
     const counts = out.report.counts as { paths: Record<string, Record<string, number>> };
     // r7: prefix UNKNOWN does not block path readiness — S01's actual inputs
-    // are complete (READY), S02 has an observed no-rows gap (BLOCKED), S03 is
-    // not evaluated — the counts stay per-path independent.
-    expect(counts.paths.PIPELINE_REPLAY).toEqual({ total: 3, READY: 1, BLOCKED: 1, NOT_EVALUATED: 1 });
-    expect(counts.paths.BEHAVIOR_BRANCH).toEqual({ total: 3, READY: 0, BLOCKED: 2, NOT_EVALUATED: 1 });
+    // are complete (READY), S02 has an observed no-rows gap (BLOCKED); r8
+    // P1-01: session-bound codex S03 is no longer NOT_EVALUATED — its
+    // PIPELINE_REPLAY is BLOCKED by the structured INGRESS_HOST_UNRESOLVABLE
+    // (fail-closed like the production ingress), so the NOT_EVALUATED bucket
+    // is now reserved for redacted/session-less-scope samples.
+    expect(counts.paths.PIPELINE_REPLAY).toEqual({ total: 3, READY: 1, BLOCKED: 2, NOT_EVALUATED: 0 });
+    expect(counts.paths.BEHAVIOR_BRANCH).toEqual({ total: 3, READY: 0, BLOCKED: 3, NOT_EVALUATED: 0 });
     expect(counts.problemCodes).toBeDefined();
   });
 });
@@ -1699,8 +1705,16 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0); // no dataset_invalid_structure
     const out = readOut(world.outDir);
-    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    // r8 P1-01: the session-bound sample with an unknown host ALSO gets the
+    // structured ingress blocker — PIPELINE_REPLAY is BLOCKED (the A/B runner
+    // would refuse it with ingress_host_unresolvable before any CLI call),
+    // while the healthy expectation evidence keeps EXPECTATION_LABELING READY
+    // on its own merits.
+    expect(codesOf(out, 'S01')).toEqual(['INGRESS_HOST_UNRESOLVABLE', 'ENVIRONMENT_UNAVAILABLE']);
     expect(out.report.perSample[0].hostKind).toBe(''); // unknown attribution preserved, never fabricated as openclaw
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(out.report.perSample[0].pathBlockers.PIPELINE_REPLAY).toEqual(['INGRESS_HOST_UNRESOLVABLE']);
+    expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('READY');
   });
 
   it('R455: manifest ok=false → the whole probe fails closed (snapshot_consistency_unverified)', () => {
@@ -2721,6 +2735,336 @@ describe('r6 P2: legacy snapshots missing optional evidence sources (real CLI su
 });
 
 // ---------------------------------------------------------------------------
+// r8 Final Closure — four targeted real-CLI matrices:
+//   P1-01 session-bound host matrix (ingress fail-closed, ab-lib parity),
+//   P1-02 tool-return evidence matrix (call ≠ output),
+//   P1-03 EXPLICIT_AT_TIME visibility matrix,
+//   P2   prefixCompletenessReason ↔ state/count consistency.
+// ---------------------------------------------------------------------------
+
+describe('r8 P1-01: session-bound host matrix — ingress fail-closed', () => {
+  // One healthy session + one healthy expectation record (resolved,
+  // historical visibleAt, NOT tool-dependent) + a full grant: the ONLY
+  // variable across the matrix is host_kind.
+  function hostWorld(label: string, hostKind: string) {
+    const world = buildWorld(label, {
+      sessions: [{ sessionId: 'sess-hostm', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-hostm', hostKind }],
+    });
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', { S01: fullGrant('S01') });
+    return { world, expFile, authFile };
+  }
+
+  it('host_kind=openclaw → the healthy path is unchanged (PIPELINE_REPLAY READY)', () => {
+    const { world, expFile, authFile } = hostWorld('r8-host-openclaw', 'openclaw');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const sample = readOut(world.outDir).report.perSample[0];
+    expect(codesOf(readOut(world.outDir), 'S01')).not.toContain('INGRESS_HOST_UNRESOLVABLE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('READY');
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual([]);
+  });
+
+  it('host_kind=null → PIPELINE_REPLAY BLOCKED with the structured ingress blocker; labeling stays READY on its own evidence', () => {
+    const { world, expFile, authFile } = hostWorld('r8-host-null', 'openclaw');
+    const dataset = JSON.parse(fs.readFileSync(world.datasetPath, 'utf8'));
+    dataset.samples[0].painEvent.host_kind = null; // the real-dataset S01/S08 shape
+    fs.writeFileSync(world.datasetPath, JSON.stringify(dataset, null, 2), 'utf8');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(sample.hostKind).toBe(''); // unknown attribution preserved — never converted to openclaw
+    expect(codesOf(out, 'S01')).toContain('INGRESS_HOST_UNRESOLVABLE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual(['INGRESS_HOST_UNRESOLVABLE']);
+    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(false);
+    // The labeling path never goes through the CLI ingress — its verdict is
+    // derived from its own (complete) evidence, NOT unconditionally blocked.
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('READY');
+    expect(sample.pathBlockers.EXPECTATION_LABELING).toEqual([]);
+    expect(sample.pathReadiness.BEHAVIOR_BRANCH).toBe('BLOCKED'); // ENVIRONMENT_UNAVAILABLE, its own reason
+  });
+
+  it('host_kind="" (empty string) → PIPELINE_REPLAY BLOCKED', () => {
+    const { world, expFile, authFile } = hostWorld('r8-host-empty', '');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    expect(codesOf(out, 'S01')).toContain('INGRESS_HOST_UNRESOLVABLE');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(out.report.perSample[0].pathBlockers.PIPELINE_REPLAY).toEqual(['INGRESS_HOST_UNRESOLVABLE']);
+    expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('READY');
+  });
+
+  it('host_kind=codex (explicit non-openclaw) → PIPELINE_REPLAY BLOCKED, not NOT_EVALUATED', () => {
+    const { world, expFile, authFile } = hostWorld('r8-host-codex', 'codex');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('INGRESS_HOST_UNRESOLVABLE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual(['INGRESS_HOST_UNRESOLVABLE']);
+    expect(sample.notEvaluatedReason).toBeNull(); // judged, not skipped
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('READY');
+  });
+
+  it('negative controls cause no experiment-execution side effects: every source file stays byte-identical', () => {
+    const { world, expFile, authFile } = hostWorld('r8-host-noeffects', 'codex');
+    const before = fingerprintTree(world.root);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const after = fingerprintTree(world.root);
+    // The only delta anywhere under the world root is the probe's own out dir
+    // (fingerprintTree keys are root-relative with forward slashes).
+    const outPrefix = 'probe-out/';
+    const added = [...after.keys()].filter((p) => !before.has(p));
+    expect(added.length).toBeGreaterThan(0);
+    expect(added.every((p) => p.startsWith(outPrefix))).toBe(true);
+    for (const [p, info] of before) {
+      expect(after.get(p)).toEqual(info); // hash + mtime unchanged
+    }
+  });
+});
+
+describe('r8 P1-02: tool-return evidence matrix — a call is not an output', () => {
+  function toolWorld(label: string, toolCalls: Array<{ paramsJson?: string; resultPreview?: string | null }>) {
+    const world = buildWorld(label, {
+      sessions: [{ sessionId: 'sess-tool', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }], toolCalls }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-tool' }],
+    });
+    const expFile = writeJson(world.root, 'exp.json', {
+      S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: true },
+    });
+    const authFile = writeJson(world.root, 'auth.json', { S01: fullGrant('S01') });
+    return { world, expFile, authFile };
+  }
+
+  it('no tool calls at all → TOOL_RESULT_MISSING blocks labeling; replay keeps its independent verdict', () => {
+    const { world, expFile, authFile } = toolWorld('r8-tool-nocalls', []);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('TOOL_RESULT_MISSING');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
+    expect(sample.pathBlockers.EXPECTATION_LABELING).toEqual(['TOOL_RESULT_MISSING']);
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY'); // replay does not depend on that expectation's tool output
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual([]);
+  });
+
+  it('call with legal params but NO return (result_preview NULL) → TOOL_RESULT_MISSING blocks labeling; replay READY', () => {
+    const { world, expFile, authFile } = toolWorld('r8-tool-noreturn', [{ paramsJson: '{}', resultPreview: null }]);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('TOOL_RESULT_MISSING');
+    expect(codesOf(out, 'S01')).not.toContain('TOOL_RESULT_PREVIEW_ONLY');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+  });
+
+  it('only the 500-unit truncated preview → TOOL_RESULT_PREVIEW_ONLY keeps blocking (never misreported as MISSING)', () => {
+    const truncated = `${'z'.repeat(497)}...`;
+    const { world, expFile, authFile } = toolWorld('r8-tool-preview', [{ paramsJson: '{}', resultPreview: truncated }]);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('TOOL_RESULT_PREVIEW_ONLY');
+    expect(codesOf(out, 'S01')).not.toContain('TOOL_RESULT_MISSING');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
+    expect(sample.pathBlockers.EXPECTATION_LABELING).toEqual(['TOOL_RESULT_PREVIEW_ONLY']);
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+  });
+
+  it('a complete readable return (short non-truncated preview IS the full output) → normal evaluation, labeling READY', () => {
+    const { world, expFile, authFile } = toolWorld('r8-tool-complete', [{ paramsJson: '{}', resultPreview: 'ok' }]);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).not.toContain('TOOL_RESULT_MISSING');
+    expect(codesOf(out, 'S01')).not.toContain('TOOL_RESULT_PREVIEW_ONLY');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('READY');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+  });
+
+  it('an expectation NOT depending on tool output is never blocked by any of the above shapes', () => {
+    const world = buildWorld('r8-tool-independent', {
+      sessions: [{ sessionId: 'sess-tool2', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }], toolCalls: [{ paramsJson: '{}', resultPreview: null }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-tool2' }],
+    });
+    const expFile = writeJson(world.root, 'exp.json', {
+      S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: false },
+    });
+    const authFile = writeJson(world.root, 'auth.json', { S01: fullGrant('S01') });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    expect(codesOf(out, 'S01')).not.toContain('TOOL_RESULT_MISSING'); // not a global gap — expectation-scoped only
+    expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('READY');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('READY');
+  });
+});
+
+describe('r8 P1-03: EXPLICIT_AT_TIME visibility matrix', () => {
+  function visWorld(label: string) {
+    const world = buildWorld(label, {
+      sessions: [{ sessionId: 'sess-vis', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-vis' }],
+    });
+    const authFile = writeJson(world.root, 'auth.json', { S01: fullGrant('S01') });
+    return { world, authFile };
+  }
+
+  it('EXPLICIT_AT_TIME without visibleAt → EXPECTATION_VISIBILITY_UNPROVEN blocks labeling; replay unaffected', () => {
+    const { world, authFile } = visWorld('r8-vis-missing');
+    const expFile = writeJson(world.root, 'exp.json', {
+      S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true }, // no visibleAt
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('EXPECTATION_VISIBILITY_UNPROVEN');
+    expect(codesOf(out, 'S01')).not.toContain('FUTURE_INFORMATION'); // unproven ≠ proven-future — the codes stay precise
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
+    expect(sample.pathBlockers.EXPECTATION_LABELING).toEqual(['EXPECTATION_VISIBILITY_UNPROVEN']);
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY'); // visibility only matters to labeling
+  });
+
+  it('EXPLICIT_AT_TIME with a FUTURE visibleAt → FUTURE_INFORMATION blocks labeling', () => {
+    const { world, authFile } = visWorld('r8-vis-future');
+    const expFile = writeJson(world.root, 'exp.json', {
+      S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: '2026-12-01T00:00:00.000Z' },
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('FUTURE_INFORMATION');
+    expect(codesOf(out, 'S01')).not.toContain('EXPECTATION_VISIBILITY_UNPROVEN');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+  });
+
+  it('EXPLICIT_AT_TIME with an unparsable visibleAt → the whole run fails closed at load (the record is never evaluated)', () => {
+    const { world, authFile } = visWorld('r8-vis-invalid');
+    const expFile = writeJson(world.root, 'exp.json', {
+      S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: 'not-a-timestamp' },
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(1); // structural rejection — stronger than a per-sample verdict
+    expect(stderrReason(run).reason).toBe('expectations_invalid_structure');
+    expect(fs.existsSync(path.join(world.outDir, 'admission-report.json'))).toBe(false);
+  });
+
+  it('EXPLICIT_AT_TIME with a valid historical visibleAt → normal evaluation, labeling READY', () => {
+    const { world, authFile } = visWorld('r8-vis-valid');
+    const expFile = writeJson(world.root, 'exp.json', {
+      S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0 }, // at/before the trigger
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).not.toContain('EXPECTATION_VISIBILITY_UNPROVEN');
+    expect(codesOf(out, 'S01')).not.toContain('FUTURE_INFORMATION');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('READY');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+  });
+
+  it('RESEARCH_INFERENCE is never auto-upgraded or held to the visibility rule', () => {
+    const { world, authFile } = visWorld('r8-vis-inference');
+    const expFile = writeJson(world.root, 'exp.json', {
+      S01: { expectationId: 'e', basis: 'RESEARCH_INFERENCE', resolved: true }, // no visibleAt by design
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    expect(codesOf(out, 'S01')).not.toContain('EXPECTATION_VISIBILITY_UNPROVEN');
+    expect(codesOf(out, 'S01')).not.toContain('FUTURE_INFORMATION');
+    expect(out.report.perSample[0].expectationBasis).toBe('RESEARCH_INFERENCE');
+    expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('READY');
+  });
+});
+
+describe('r8 P2: prefixCompletenessReason matches the proven state and the reference counts', () => {
+  it('PROVEN_INCOMPLETE → the reason discloses the positive dangling-reference evidence (sources × counts), never "no evidence found"', () => {
+    // Minimal N1 shape: an immortal signal_confirmation pointing at an early
+    // assistant turn that the REAL production sweeper then removes.
+    const world = buildWorld('r8-reason-proven', {
+      sessions: [
+        {
+          sessionId: 'sess-reason',
+          startedAt: '2026-09-01T10:00:00.000Z',
+          userTurns: [
+            { turnIndex: 2, createdAt: '2026-09-01T10:01:00.000Z' },
+            { turnIndex: 3, createdAt: '2026-09-01T10:06:00.000Z' },
+          ],
+          assistantTurns: [
+            { createdAt: '2026-09-01T10:01:30.000Z' },
+            { createdAt: '2026-09-01T10:06:30.000Z' },
+          ],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-reason', createdAt: '2026-09-01T10:08:00.000Z' }],
+      extraPainRows: [{ id: 900, sessionId: 'sess-reason', createdAt: '2026-09-01T10:00:00.000Z' }],
+    });
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    const db = new Database(dbPath);
+    const earlyUser = db.prepare("SELECT id FROM user_turns WHERE session_id = 'sess-reason' AND created_at = '2026-09-01T10:01:00.000Z'").get();
+    const earlyAssistant = db.prepare("SELECT id FROM assistant_turns WHERE session_id = 'sess-reason' AND created_at = '2026-09-01T10:01:30.000Z'").get();
+    db.close();
+    plantSignalConfirmation(dbPath, {
+      id: 'sc-reason',
+      sessionId: 'sess-reason',
+      userTurnRowid: earlyUser.id,
+      referencesAssistantTurnId: earlyAssistant.id,
+      createdAt: '2026-09-01T10:02:00.000Z',
+    });
+    const ageDb = new Database(dbPath);
+    ageDb.prepare('UPDATE user_turns SET created_at = ? WHERE id = ?').run('2026-05-01T10:01:00.000Z', earlyUser.id);
+    ageDb.prepare('UPDATE assistant_turns SET created_at = ? WHERE id = ?').run('2026-05-01T10:01:30.000Z', earlyAssistant.id);
+    ageDb.pragma('journal_mode = DELETE');
+    ageDb.close();
+    const sweep = runRealRetentionSweep(dbPath, '2026-09-01T00:00:00.000Z');
+    expect(sweep.outcome).toBe('completed');
+    expect(countSessionRows(dbPath, 'assistant_turns', 'sess-reason')).toBe(1);
+
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const sample = readOut(world.outDir).report.perSample[0];
+    expect(sample.prefixCompleteness).toBe('PROVEN_INCOMPLETE');
+    expect(sample.prefixCompletenessReason).toContain('positive vanished-row evidence found');
+    expect(sample.prefixCompletenessReason).toContain('signal_confirmations.references_assistant_turn_id×1');
+    expect(sample.prefixCompletenessReason).not.toContain('no positive vanished-row evidence was found'); // the P2 bug text
+    // State, reason and count must agree.
+    expect(sample.prefixMissingReferenceCount).toBeGreaterThanOrEqual(1);
+    expect(sample.prefixCompletenessReason).toContain(`${sample.prefixMissingReferenceCount} dangling reference(s)`);
+  });
+
+  it('UNKNOWN → the reason names the missing identity anchor AND the absence of positive evidence; count is 0', () => {
+    const world = buildHealthyWorld('r8-reason-unknown');
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const sample = readOut(world.outDir).report.perSample[0];
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(sample.prefixCompletenessReason).toContain('no first-writer identity anchor');
+    expect(sample.prefixCompletenessReason).toContain('no positive vanished-row evidence was found');
+    expect(sample.prefixCompletenessReason).not.toContain('positive vanished-row evidence found:');
+    expect(sample.prefixMissingReferenceCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Closed-set round-trip (ERR-146): every CONTRACT code is actually emitted by
 // some case in this suite, and the probe never emits codes outside the list.
 // ---------------------------------------------------------------------------
@@ -2760,6 +3104,23 @@ describe('problem-code closed set (CONTRACT §2.4 / ERR-146 round-trip)', () => 
           assistantTurns: [{ createdAt: T0 }],
           toolCalls: [{ paramsJson: 'oops{', resultPreview: 'ok' }],
         },
+        {
+          // r8 P1-01: healthy session, but the sample below binds to it with
+          // an EMPTY host_kind → the session-bound ingress is unresolvable
+          sessionId: 'sess-nohost',
+          startedAt: T0,
+          userTurns: [{ turnIndex: 0 }],
+          assistantTurns: [{ createdAt: T0 }],
+        },
+        {
+          // r8 P1-02: a tool call with legal params but NO result — the
+          // producer writes result_preview = NULL when there is no result
+          sessionId: 'sess-noreturn',
+          startedAt: T0,
+          userTurns: [{ turnIndex: 0 }],
+          assistantTurns: [{ createdAt: T0 }],
+          toolCalls: [{ paramsJson: '{}', resultPreview: null }],
+        },
       ],
       samples: [
         { caseId: 'C01', sessionId: 'sess-ok' }, // preview-only + expectation + authorization + env
@@ -2767,6 +3128,8 @@ describe('problem-code closed set (CONTRACT §2.4 / ERR-146 round-trip)', () => 
         { caseId: 'C03', sessionId: 'sess-expired', createdAt: PAIN_AT }, // RETENTION_EXPIRED (N1) + blob issues
         { caseId: 'C04', sessionId: 'sess-toolbreak', evidenceRefs: ['session:sess-nope'] }, // REFERENCE_UNAVAILABLE ×2
         { caseId: 'C05', sessionId: '' }, // PAIN_ANCHOR_MISSING
+        { caseId: 'C06', sessionId: 'sess-nohost', hostKind: '' }, // r8 P1-01: INGRESS_HOST_UNRESOLVABLE
+        { caseId: 'C07', sessionId: 'sess-noreturn' }, // r8 P1-02: TOOL_RESULT_MISSING (call without return)
       ],
       corruptManifestEntry: (entry: { ref: string; sha256: string }) => {
         if (entry.ref === blobB) {
@@ -2800,6 +3163,11 @@ describe('problem-code closed set (CONTRACT §2.4 / ERR-146 round-trip)', () => 
     const expFile = writeJson(world.root, 'exp.json', {
       C01: { basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: true },
       C03: { basis: 'LATER_CLARIFICATION', resolved: true, visibleAt: '2026-12-01T00:00:00.000Z' }, // FUTURE_INFORMATION
+      // r8 P1-03: EXPLICIT_AT_TIME without visibleAt — the claim is not
+      // evidence → EXPECTATION_VISIBILITY_UNPROVEN
+      C06: { basis: 'EXPLICIT_AT_TIME', resolved: true },
+      // r8 P1-02: depends on tool output, but the only call has no return
+      C07: { basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: true },
     });
     const authFile = writeJson(world.root, 'auth.json', {
       C01: { status: 'granted', scope: 'full_fidelity' },
@@ -2829,5 +3197,9 @@ describe('problem-code closed set (CONTRACT §2.4 / ERR-146 round-trip)', () => 
     expect(codesOf(out, 'C03')).toContain('SOURCE_RETENTION_EXPIRED'); // N1: dangling immortal reference
     expect(codesOf(out, 'C03')).toContain('DIGEST_MISMATCH');
     expect(codesOf(out, 'C05')).toContain('PAIN_ANCHOR_MISSING');
+    // r8 additions.
+    expect(codesOf(out, 'C06')).toContain('INGRESS_HOST_UNRESOLVABLE'); // session-bound empty host
+    expect(codesOf(out, 'C06')).toContain('EXPECTATION_VISIBILITY_UNPROVEN'); // EXPLICIT_AT_TIME without visibleAt
+    expect(codesOf(out, 'C07')).toContain('TOOL_RESULT_MISSING'); // call present, return absent
   });
 });

@@ -55,7 +55,9 @@ const REPO_ROOT = path.resolve(TEST_DIR, '..', '..', '..');
 export const SCRIPT = path.join(REPO_ROOT, 'scripts', 'dev', 'pd-lab', 'admission-probe.mjs');
 export const SCRIPT_SOURCE = fs.readFileSync(SCRIPT, 'utf8');
 
-/** CONTRACT §2.4 first-batch problem codes — the closed set the probe may emit. */
+/** CONTRACT §2.4 first-batch problem codes — the closed set the probe may emit.
+ *  r8 adds INGRESS_HOST_UNRESOLVABLE, TOOL_RESULT_MISSING and
+ *  EXPECTATION_VISIBILITY_UNPROVEN (CONTRACT §2.4 r8 amendment). */
 export const CONTRACT_PROBLEM_CODES = [
   'SOURCE_GAP',
   'SOURCE_RETENTION_EXPIRED',
@@ -68,6 +70,9 @@ export const CONTRACT_PROBLEM_CODES = [
   'DIGEST_MISMATCH',
   'FUTURE_INFORMATION',
   'ENVIRONMENT_UNAVAILABLE',
+  'INGRESS_HOST_UNRESOLVABLE',
+  'TOOL_RESULT_MISSING',
+  'EXPECTATION_VISIBILITY_UNPROVEN',
 ];
 
 export const T0 = '2026-09-01T10:00:00.000Z'; // session start / early turns
@@ -324,8 +329,11 @@ export function buildWorld(label, options) {
     let callIndex = 0;
     for (const call of session.toolCalls ?? []) {
       callIndex += 1;
-      const preview = call.resultPreview ?? 'ok';
-      if (preview.length > 20) {
+      // resultPreview: null is a REAL producer state (no result → NULL preview,
+      // after-tool-call-helpers.ts) and must be plantable — only an UNSET
+      // field defaults to the healthy short 'ok' preview.
+      const preview = call.resultPreview === undefined ? 'ok' : call.resultPreview;
+      if (preview !== null && preview.length > 20) {
         bodyMarkers.push(preview);
       }
       db.prepare(
