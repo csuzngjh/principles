@@ -184,12 +184,36 @@ function bodyEcho(body: string): string {
   return clean.length > 60 ? `${clean.slice(0, 59)}…` : clean;
 }
 
-function readLockBody(lockPath: string): string | undefined {
+/**
+ * Structured lock-file read outcome (P0 round 6): a missing file and an
+ * existing-but-unreadable file are different facts and the release path
+ * MUST distinguish them — EACCES/EPERM/EIO/EISDIR are degraded evidence,
+ * never `not_owned`.
+ */
+export type LockBodyRead =
+  | { readonly kind: 'readable'; readonly body: string }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unreadable'; readonly detail: string };
+
+export function readLockBodyStatus(lockPath: string): LockBodyRead {
   try {
-    return fs.readFileSync(lockPath, 'utf8');
-  } catch {
-    return undefined;
+    return { kind: 'readable', body: fs.readFileSync(lockPath, 'utf8') };
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? String(Reflect.get(error, 'code'))
+        : '';
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'absent' };
+    return {
+      kind: 'unreadable',
+      detail: code || (error instanceof Error ? error.message : String(error)),
+    };
   }
+}
+
+function readLockBody(lockPath: string): string | undefined {
+  const read = readLockBodyStatus(lockPath);
+  return read.kind === 'readable' ? read.body : undefined;
 }
 
 /** Bounded echo of the current holder body for the `held` verdict. */
@@ -203,12 +227,6 @@ function lockBody(token: string): string {
 }
 
 /**
- * Parse the holder PID out of a lock body (`<pid> <token> <createdAtISO>`).
- * Returns undefined when the body carries no verifiable holder identity —
- * a body we cannot attribute is treated as corrupt (fail-closed), never as
- * takeover evidence.
- */
-/**
  * Parse the recorded creation timestamp out of a lock/sidecar body
  * (`<pid> <token> <createdAtISO>`); undefined when unverifiable.
  */
@@ -220,6 +238,12 @@ function holderCreatedAtOf(body: string): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+/**
+ * Parse the holder PID out of a lock body (`<pid> <token> <createdAtISO>`).
+ * Returns undefined when the body carries no verifiable holder identity —
+ * a body we cannot attribute is treated as corrupt (fail-closed), never as
+ * takeover evidence.
+ */
 function holderPidOf(body: string): number | undefined {
   const firstSpace = body.indexOf(' ');
   const pidText = firstSpace === -1 ? body : body.slice(0, firstSpace);
@@ -369,7 +393,37 @@ function sweepOrphanSidecars(
         liveness = 'unknown';
       }
       if (liveness !== 'dead') continue;
-      fs.rmSync(sidecar, { force: true });
+      // Verify-then-delete bound to the verified inode (CodeQL
+      // js/file-system-race): rename is atomic — it moves the exact file
+      // whose body we just verified aside, so a writer recreating the
+      // original name afterwards creates a NEW file we never touch. The
+      // quarantined body is re-read and must match byte-for-byte before
+      // deletion; any mismatch restores it.
+      const quarantined = `${sidecar}.pd-quarantine-${randomUUID()}`;
+      try {
+        fs.renameSync(sidecar, quarantined);
+      } catch {
+        continue; // vanished or immovable — keep it, never assume
+      }
+      let verifiedBody: string | undefined;
+      try {
+        verifiedBody = fs.readFileSync(quarantined, 'utf8');
+      } catch {
+        verifiedBody = undefined;
+      }
+      if (verifiedBody !== sidecarBody) {
+        try {
+          fs.renameSync(quarantined, sidecar);
+        } catch {
+          // leave it quarantined; manual recovery keeps the bytes
+        }
+        continue;
+      }
+      try {
+        fs.rmSync(quarantined, { force: true });
+      } catch {
+        // best effort; a failed sweep never blocks locking
+      }
     } catch {
       // best effort; a failed sweep never blocks locking
     }
@@ -407,8 +461,10 @@ function evaluateLock(
     return { kind: 'absent' };
   }
   const stale = stats.mtimeMs < Date.now() - staleMs;
-  const body = readLockBody(lockPath);
-  if (body === undefined) return stale ? { kind: 'stale-unreadable' } : { kind: 'fresh' };
+  const read = readLockBodyStatus(lockPath);
+  if (read.kind === 'absent') return { kind: 'absent' }; // vanished under us
+  if (read.kind === 'unreadable') return stale ? { kind: 'stale-unreadable' } : { kind: 'fresh' };
+  const { body } = read;
   const holderPid = holderPidOf(body);
   if (holderPid === undefined) return stale ? { kind: 'stale-anonymous', body } : { kind: 'fresh' };
   let liveness: HolderLiveness;
@@ -680,6 +736,13 @@ export interface ReleaseServiceRunLockOptions {
   readonly injectEndFailure?: boolean;
   /** Hook invoked once inside the release transaction (deterministic tests). */
   readonly insideTxn?: () => void;
+  /**
+   * Deterministic test seam: replace the lock-file read inside the
+   * release transaction (default: the real classified read). Lets tests
+   * reproduce EACCES/EPERM/EIO on every platform without depending on OS
+   * permission behavior — production never sets it.
+   */
+  readonly readBody?: (lockPath: string) => LockBodyRead;
 }
 
 /**
@@ -706,8 +769,16 @@ export function releaseServiceRunLock(
         ...(options?.insideTxn !== undefined ? { insideTxn: options.insideTxn } : {}),
       },
       () => {
-        const current = readLockBody(handle.lockPath);
-        if (current !== handle.body) {
+        const read = (options?.readBody ?? readLockBodyStatus)(handle.lockPath);
+        if (read.kind === 'unreadable') {
+          // EACCES/EPERM/EIO/EISDIR and every other real read failure is a
+          // genuine release failure — NEVER `not_owned`, NEVER an unlink
+          // outside verification, and the lock file is left exactly as it
+          // is for human recovery or a later evidence-based takeover.
+          verdict = 'failed_unwritable';
+          return;
+        }
+        if (read.kind === 'absent' || read.body !== handle.body) {
           verdict = 'not_owned'; // gone or foreign — never displace it
           return;
         }

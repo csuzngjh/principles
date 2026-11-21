@@ -703,3 +703,20 @@ describe('round-5: release result + directory diagnostics', () => {
     expect(result.status.discovery.incomplete).toBe(false);
   });
 });
+
+describe('round-6: error + release-failure propagation', () => {
+  it('a thrown run error stays primary; a failed release is only a secondary diagnostic (§三.9)', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    expect(() =>
+      runServiceRunOnce({
+        env: {},
+        trustedHomeDir: home,
+        probes: {
+          holdsLock: () => { throw new Error('synthetic mid-run failure'); },
+          releaseLock: () => 'failed_unwritable',
+        },
+      }),
+    ).toThrow('synthetic mid-run failure');
+  });
+});

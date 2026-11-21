@@ -14,7 +14,10 @@ identity dedupe, read-only `backgroundExecutions` owner projection, the
 install-level single-instance run lock (SQLite `BEGIN IMMEDIATE` arbitration
 over `<pdHome>/service/service-run-gate.db` — acquire, PID-verified takeover and
 ownership-checked release all decided inside one transaction; zero-wait
-immediate `already_running`; fully fail-closed on gate/busy errors),
+immediate `already_running`; fully fail-closed on gate/busy errors; release
+reports a structured outcome — released / not_owned / failed_busy /
+failed_unwritable — where unreadable lock files (EACCES/EPERM/EIO) are real
+failures, never misread as released or not_owned),
 and the versioned operational status file under
 `<pdHome>/service/run-once-status.json`. Phase 1 starts no Worker and changes
 no consumer ownership; a run without `--dry-run` refuses

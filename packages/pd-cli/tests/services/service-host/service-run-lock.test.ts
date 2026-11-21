@@ -14,6 +14,7 @@ import {
   SERVICE_RUN_LOCK_STALE_MS,
   acquireServiceRunLock,
   holdsServiceRunLock,
+  readLockBodyStatus,
   releaseServiceRunLock,
   serviceRunLockPath,
 } from '../../../src/services/service-host/locking/service-run-lock.js';
@@ -577,5 +578,65 @@ describe('round-5 lock lifecycle (P0/P1)', () => {
     expect(existsSync(junk)).toBe(true);
     expect(existsSync(gateShm)).toBe(true);
     if (result.ok) releaseServiceRunLock(result.handle);
+  });
+});
+
+describe('round-6 release read classification (P0)', () => {
+  for (const code of ['EACCES', 'EPERM', 'EIO', 'EISDIR']) {
+    it(`a lock-file read failing ${code} releases as failed_unwritable — never not_owned, and the file stays`, () => {
+      const home = tempHome();
+      const held = acquireServiceRunLock(home);
+      expect(held.ok).toBe(true);
+      if (!held.ok) return;
+      const lockPath = serviceRunLockPath(home);
+      const result = releaseServiceRunLock(held.handle, {
+        readBody: () => ({ kind: 'unreadable', detail: `${code}: synthetic read failure` }),
+      });
+      expect(result).toBe('failed_unwritable');
+      // No unlink, no gate bypass: the lock file is byte-identical.
+      expect(readFileSync(lockPath, 'utf8')).toBe(held.handle.body);
+      // A healthy follow-up release still works.
+      expect(releaseServiceRunLock(held.handle)).toBe('released');
+      expect(existsSync(lockPath)).toBe(false);
+    });
+  }
+
+  it('a genuinely absent lock file (ENOENT) releases as not_owned', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    // The service dir exists (so the arbitration gate opens) but the lock
+    // file itself is absent.
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    expect(
+      releaseServiceRunLock({ lockPath, token: 'mine', body: `${process.pid} mine 2026-01-01T00:00:00.000Z` }),
+    ).toBe('not_owned');
+  });
+
+  it('a readable foreign body releases as not_owned and is left byte-identical', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    const foreignBody = '424244 foreigntoken 2026-01-01T00:00:00.000Z';
+    writeFileSync(lockPath, foreignBody, 'utf8');
+    expect(
+      releaseServiceRunLock({ lockPath, token: 'mine', body: `${process.pid} mine 2026-01-01T00:00:00.000Z` }),
+    ).toBe('not_owned');
+    expect(readFileSync(lockPath, 'utf8')).toBe(foreignBody);
+  });
+
+  it('the classifier itself maps ENOENT and ENOTDIR to absent, EACCES-shaped errors to unreadable', () => {
+    const home = tempHome();
+    // ENOENT: path missing entirely.
+    expect(readLockBodyStatus(path.join(home, 'no-such.lock')).kind).toBe('absent');
+    // ENOTDIR: a regular file where the parent directory belongs.
+    const blocker = path.join(home, 'service');
+    writeFileSync(blocker, 'not a directory', 'utf8');
+    expect(readLockBodyStatus(path.join(blocker, 'service-run.lock')).kind).toBe('absent');
+    // EISDIR: the lock path is a directory — a real, non-absence read failure.
+    const dirLock = path.join(home, 'a-dir.lock');
+    mkdirSync(dirLock, { recursive: true });
+    const unreadable = readLockBodyStatus(dirLock);
+    expect(unreadable.kind).toBe('unreadable');
+    if (unreadable.kind === 'unreadable') expect(unreadable.detail).toContain('EISDIR');
   });
 });
