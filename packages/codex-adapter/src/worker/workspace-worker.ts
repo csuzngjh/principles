@@ -143,6 +143,19 @@ const LIVENESS_STAGE_DEADLINE_MS = {
   downstream_cycle: 10 * 60_000,
 };
 
+/**
+ * WHO drove this cycle (PRI-1264 attribution, Phase 2 extension). The
+ * Service Host sets `PD_INVOCATION_SOURCE=service_host` on its Worker
+ * children (shadow mode); without the third value the stall attribution
+ * would misreport service-driven cycles as manual (TD §5.2).
+ */
+export function codexWorkerCycleDriver(): 'companion' | 'service_host' | 'manual' {
+  const source = process.env.PD_INVOCATION_SOURCE;
+  if (source === 'companion') return 'companion';
+  if (source === 'service_host') return 'service_host';
+  return 'manual';
+}
+
 export function readCodexWorkerLiveness(workspaceDir: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(path.join(path.resolve(workspaceDir), '.state', LIVENESS_FILE), 'utf8'));
@@ -256,7 +269,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
       // must not leave the PRE-pause cycle's deadline behind.
       stageDeadline: null,
       lastCycleStartedAt: cycleStartedAt.toISOString(),
-      lastCycleDriver: process.env.PD_INVOCATION_SOURCE === 'companion' ? 'companion' : 'manual',
+      lastCycleDriver: codexWorkerCycleDriver(),
     });
     // PRI-1063 (review fix): single-line flow mapping — see catch-up.ts.
     return { ...base, mode: 'paused', reason: 'host.codex_disabled', nextAction: 'Enable Codex PD behavior in the Workspace .pd/config.yaml — in the existing "features:" block set host.codex: {enabled: true} (one flat key, not nested).' };
@@ -272,7 +285,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     // the marker so the Owner can tell a companion-driven (resident, should
     // keep cycling) worker from a manual one-shot — "registered" alone said
     // nothing about whether a driver is actually alive.
-    lastCycleDriver: process.env.PD_INVOCATION_SOURCE === 'companion' ? 'companion' : 'manual',
+    lastCycleDriver: codexWorkerCycleDriver(),
   });
 
   const consumerFlag = loadFeatureFlagFromConfig(workspaceDir, 'internalization_auto_consumer', { info: (m) => logger.info(m), warn: (m) => logger.warn(m) });
@@ -568,7 +581,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     lastCycleMode: degradedReason !== undefined ? 'degraded' : 'ready',
     // PRI-1264: driver of the last COMPLETED cycle — the stall verdict reads
     // this so a no_recent_cycle report names WHO stopped driving.
-    lastCycleDriver: process.env.PD_INVOCATION_SOURCE === 'companion' ? 'companion' : 'manual',
+    lastCycleDriver: codexWorkerCycleDriver(),
     ...(degradedReason !== undefined ? { lastDegradedReason: degradedReason } : {}),
   });
   return {

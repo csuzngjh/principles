@@ -37,6 +37,18 @@ function tempHome(): string {
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   vi.restoreAllMocks();
+  process.exitCode = 0;
+  // buildPdProgram() returns the module-level singleton: commander KEEPS
+  // parsed option values between parseAsync calls on one instance, so a
+  // test that parsed --shadow/--host would leak into every later parse.
+  // Reset each option back to its declared default (public API) so the
+  // tests stay order-independent.
+  const runOnce = findServiceRunOnce();
+  for (const opt of runOnce.options) {
+    if (opt.long !== undefined) {
+      runOnce.setOptionValue(opt.long.replace(/^--/, '').replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase()), opt.defaultValue);
+    }
+  }
 });
 
 function findServiceRunOnce(): Command {
@@ -57,10 +69,20 @@ describe('registration (cli-7: the shipped program object)', () => {
     const json = runOnce.options.find((o: Option) => o.long === '--json');
     expect(json).toBeDefined();
   });
+
+  it('Phase 2 options are registered: --shadow (default off), repeatable --workspace, --host, --timeout-ms', () => {
+    const runOnce = findServiceRunOnce();
+    const shadow = runOnce.options.find((o: Option) => o.long === '--shadow');
+    expect(shadow, '--shadow must be registered').toBeDefined();
+    expect(shadow?.defaultValue).toBe(false);
+    expect(runOnce.options.find((o: Option) => o.long === '--workspace')).toBeDefined();
+    expect(runOnce.options.find((o: Option) => o.long === '--host')).toBeDefined();
+    expect(runOnce.options.find((o: Option) => o.long === '--timeout-ms')).toBeDefined();
+  });
 });
 
 describe('handler behavior through the real action', () => {
-  it('without --dry-run the coordinator refuses with dry_run_required_phase1 (exit 1, one JSON doc)', async () => {
+  it('without a mode flag the coordinator refuses with mode_required_phase2 (exit 1, one JSON doc)', async () => {
     const runOnce = findServiceRunOnce();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await runOnce.parseAsync(['--json'], { from: 'user' });
@@ -69,11 +91,106 @@ describe('handler behavior through the real action', () => {
     expect(jsonLines).toHaveLength(1);
     const parsed = JSON.parse(jsonLines[0]?.[0] as string) as { outcome: string; reason: string; nextAction: string };
     expect(parsed.outcome).toBe('refused');
-    expect(parsed.reason).toBe('dry_run_required_phase1');
+    expect(parsed.reason).toBe('mode_required_phase2');
     expect(parsed.nextAction).toContain('--dry-run');
+    expect(parsed.nextAction).toContain('--shadow');
     expect(process.exitCode).toBe(1);
     logSpy.mockRestore();
     process.exitCode = 0;
+  });
+
+  it('--dry-run and --shadow together are refused (cli-4 mutual exclusion)', async () => {
+    const runOnce = findServiceRunOnce();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runOnce.parseAsync(['--dry-run', '--shadow', '--workspace', 'X', '--json'], { from: 'user' });
+    const jsonLines = logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'));
+    expect(jsonLines).toHaveLength(1);
+    const parsed = JSON.parse(jsonLines[0]?.[0] as string) as { outcome: string; reason: string };
+    expect(parsed.outcome).toBe('refused');
+    expect(parsed.reason).toBe('dry_run_shadow_mutually_exclusive');
+    expect(process.exitCode).toBe(1);
+    logSpy.mockRestore();
+    process.exitCode = 0;
+  });
+
+  it('an invalid --host value is refused (fail-closed)', async () => {
+    const runOnce = findServiceRunOnce();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runOnce.parseAsync(['--shadow', '--workspace', 'X', '--host', 'openclaw', '--json'], { from: 'user' });
+    const jsonLines = logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'));
+    const parsed = JSON.parse(jsonLines[0]?.[0] as string) as { outcome: string; reason: string };
+    expect(parsed.outcome).toBe('refused');
+    expect(parsed.reason).toContain('invalid_host_kind:openclaw');
+    expect(process.exitCode).toBe(1);
+    logSpy.mockRestore();
+    process.exitCode = 0;
+  });
+
+  it('--shadow without --workspace is refused by the coordinator (explicit selection required)', async () => {
+    pinnedHomedir = tempHome();
+    try {
+      const runOnce = findServiceRunOnce();
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await runOnce.parseAsync(['--shadow', '--json'], { from: 'user' });
+      const jsonLines = logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'));
+      expect(jsonLines).toHaveLength(1);
+      const parsed = JSON.parse(jsonLines[0]?.[0] as string) as { outcome: string; reason: string };
+      expect(parsed.outcome).toBe('refused');
+      expect(parsed.reason).toBe('shadow_requires_explicit_workspace');
+      expect(process.exitCode).toBe(1);
+      logSpy.mockRestore();
+    } finally {
+      pinnedHomedir = undefined;
+      process.exitCode = 0;
+    }
+  });
+
+  it('repeatable --workspace selections reach the coordinator through the real parser (cli-7)', async () => {
+    const home = tempHome();
+    mkdirSync(path.join(home, '.pd'), { recursive: true });
+    writeFileSync(
+      path.join(home, '.pd', 'install.json'),
+      JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['codex'] }),
+      'utf8',
+    );
+    writeFileSync(
+      path.join(home, '.pd', 'active.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        generation: 1,
+        releaseId: 'test-release',
+        releaseMetadataDigest: 'b'.repeat(64),
+        previousReleaseId: null,
+        transactionId: 'txn-cli-test',
+        productVersion: '1.0.0',
+      }),
+      'utf8',
+    );
+    pinnedHomedir = home;
+    try {
+      const runOnce = findServiceRunOnce();
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await runOnce.parseAsync(
+        ['--shadow', '--json', '--workspace', path.join(home, 'ws-a'), '-w', path.join(home, 'ws-b')],
+        { from: 'user' },
+      );
+      const jsonLines = logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'));
+      expect(jsonLines).toHaveLength(1);
+      const parsed = JSON.parse(jsonLines[0]?.[0] as string) as {
+        outcome: string;
+        executions?: { admission: string; refusalReason?: string }[];
+      };
+      // Both selections reached the coordinator and were refused admission
+      // (neither is in authorized discovery) — the collector accumulated.
+      expect(parsed.outcome).toBe('completed');
+      expect(parsed.executions).toHaveLength(2);
+      expect(parsed.executions?.every((e) => e.admission === 'refused' && e.refusalReason === 'workspace_not_in_authorized_discovery')).toBe(true);
+      expect(process.exitCode).toBe(1); // all-refused is a non-zero outcome
+      logSpy.mockRestore();
+    } finally {
+      pinnedHomedir = undefined;
+      process.exitCode = 0;
+    }
   });
 
   it('a completed dry-run prints exactly one JSON document with workspace verdicts', async () => {

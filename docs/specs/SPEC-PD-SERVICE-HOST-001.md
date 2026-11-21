@@ -271,7 +271,7 @@ installed_* ── pd service uninstall ───────► uninstalled
 
 ### 8.4 Workspace 级后台生命周期所有权状态机
 
-每个 Workspace 在任一时刻只能有一个自动后台生命周期所有者。所有权以**持久化、可验证的 owner marker** 为唯一权威：进程是否存活、启动顺序、固定延迟都不是所有权证明。迁移目标对应 §11 Phase 2 / Phase 4 / Phase 5。
+每个 Workspace 在任一时刻只能有一个自动后台生命周期所有者。所有权以**持久化、可验证的 owner marker** 为唯一权威：进程是否存活、启动顺序、固定延迟都不是所有权证明。原子交接只发生在 §11 Phase 4 / Phase 5；**Phase 2 只做 shadow 驱动（marker 保持 `legacy`，旧所有者仍是唯一自动生命周期所有者，不停止 Companion Worker supervision / OpenClaw AutoConsumer）**（Gate 0 决策，Owner 2026-11-21，PRI-1280）。
 
 ~~~text
 LEGACY_OWNED
@@ -391,6 +391,14 @@ ADR-0020 §11.6 dated amendment（2026-11-19）已记录 Owner 对本 SPEC 窄�
 - **风险**：父进程环境污染（`PD_EXPERIMENT_ROOT`/`PD_WORKSPACE_DIR` 等）重定向生产 Workspace；WorkBuddy 无 liveness 导致健康判断失真。
 - **验收条件**：技术设计 §2.3 契约字段齐全；子进程环境按白名单构造；任务真实推进且状态可观测。
 - **退出条件**：在 shadow 模式下对真实 Workspace 完成 ≥1 个真实周期且可回滚；旧所有者仍唯一。
+
+#### Phase 2 准入边界（硬约束，Gate 0 决策 Owner 2026-11-21）
+
+**Phase 2 可以做**：显式、手动、有界的 shadow Cycle（默认关闭，必须显式选择 shadow 模式并显式指定已授权 Workspace）；通过统一 Worker Adapter 合同调用现有 `pd <host> worker --once`；按白名单构造 Worker 子进程环境；为 WorkBuddy 补齐周期级 liveness；记录真实 `lastProgressAt`；扩展 operational status。
+
+**Phase 2 不可以做**：注册 OS Scheduler（Phase 3）；修改 owner marker / 进入 §8.4 交接状态机（Phase 4/5）；停止 Companion Worker supervision；停止 OpenClaw AutoConsumer；Production Cutover；接入 OpenClaw Adapter（Phase 4）。
+
+**Phase 2 shadow 语义**：shadow 调用真实 Worker Cycle，可能推进现有业务任务——它不是零副作用 dry-run；`--dry-run` 保持 Phase 1 只读行为，两者语义严格区分。与旧消费者并发时的正确性由既有 Durable Lease / fencing 收敛（同任务不重复领取）；若无法证明并发安全，不得对该真实 Workspace 执行 shadow。
 
 ### Phase 3 — 用户级 OS Scheduler 注册
 

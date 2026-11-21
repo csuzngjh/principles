@@ -1234,13 +1234,19 @@ describe('worker cycle — PRI-1264 driver liveness + degraded catch-up recovery
     expect(task).toMatchObject({ status: 'succeeded' });
   });
 
-  it('records WHO drove the cycle in the liveness file (companion vs manual)', async () => {
+  it('records WHO drove the cycle in the liveness file (companion vs service_host vs manual)', async () => {
     const ws = makeWorkspace({ ingestion: true, consumer: true });
     const previous = process.env.PD_INVOCATION_SOURCE;
     try {
       process.env.PD_INVOCATION_SOURCE = 'companion';
       await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
       expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('companion');
+
+      // Phase 2 (PRI-1280): the Service Host shadow driver identity — without
+      // the third value, stall attribution would misreport it as manual.
+      process.env.PD_INVOCATION_SOURCE = 'service_host';
+      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('service_host');
 
       delete process.env.PD_INVOCATION_SOURCE;
       await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });

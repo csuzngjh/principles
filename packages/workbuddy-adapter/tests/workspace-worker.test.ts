@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { runWorkbuddyWorkspaceWorkerCycle } from '../src/worker/workspace-worker.js';
+import { runWorkbuddyWorkspaceWorkerCycle, readWorkbuddyWorkerLiveness } from '../src/worker/workspace-worker.js';
 import { HOST_TOOL_DECLARATION_VERSION } from '@principles/host-runtime';
 import { makeHome, makeGovernance, cleanupTempDirs } from './helpers/workbench.js';
 
@@ -205,5 +205,76 @@ describe('WorkBuddy worker cycle — bare Pain is evidence only (Phase A)', () =
     expect(result.mode).toBe('degraded');
     expect(result.nextAction).toBeTruthy();
     expect(result.report?.reconcile.ok).toBe(false);
+  });
+});
+
+describe('WorkBuddy worker cycle — cycle liveness (Phase 2, PRI-1280)', () => {
+  it('a completed cycle records start, completion, duration, mode and the driver identity', async () => {
+    const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
+    const previous = process.env.PD_INVOCATION_SOURCE;
+    try {
+      process.env.PD_INVOCATION_SOURCE = 'service_host';
+      const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+      expect(result.mode).toBe('ready');
+      const liveness = readWorkbuddyWorkerLiveness(governance);
+      expect(liveness).not.toBeNull();
+      expect(liveness?.lastCycleDriver).toBe('service_host');
+      expect(liveness?.lastCycleMode).toBe('ready');
+      expect(liveness?.runningStage).toBeNull();
+      expect(liveness?.stageDeadline).toBeNull();
+      expect(typeof liveness?.lastCycleStartedAt).toBe('string');
+      expect(typeof liveness?.lastCycleCompletedAt).toBe('string');
+      expect(typeof liveness?.lastCycleDurationMs).toBe('number');
+      // FR-10: registration/PID presence is NOT health — the completion
+      // FACTS above are the evidence the Service Host health projection reads.
+      expect(liveness?.lastCycleCompletedAt).not.toBe(liveness?.lastCycleStartedAt);
+    } finally {
+      if (previous === undefined) delete process.env.PD_INVOCATION_SOURCE;
+      else process.env.PD_INVOCATION_SOURCE = previous;
+    }
+  });
+
+  it('driver mapping covers all three identities (companion / service_host / manual)', async () => {
+    const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
+    const previous = process.env.PD_INVOCATION_SOURCE;
+    try {
+      for (const [source, expected] of [['companion', 'companion'], ['service_host', 'service_host'], [undefined, 'manual']] as const) {
+        if (source === undefined) delete process.env.PD_INVOCATION_SOURCE;
+        else process.env.PD_INVOCATION_SOURCE = source;
+        await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+        expect(readWorkbuddyWorkerLiveness(governance)?.lastCycleDriver).toBe(expected);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.PD_INVOCATION_SOURCE;
+      else process.env.PD_INVOCATION_SOURCE = previous;
+    }
+  });
+
+  it('a degraded cycle records the degradation reason in the liveness file', async () => {
+    const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
+    fs.writeFileSync(path.join(governance, '.state', 'trajectory.db'), 'definitely not a sqlite database');
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(result.mode).toBe('degraded');
+    const liveness = readWorkbuddyWorkerLiveness(governance);
+    expect(liveness?.lastCycleMode).toBe('degraded');
+    expect(String(liveness?.lastDegradedReason ?? '')).toContain('reconcile');
+  });
+
+  it('a host-flag CONFIG pause keeps a fresh paused heartbeat (same PRI-1264 discipline as Codex)', async () => {
+    const governance = makeWorkerWorkspace({ workbuddy: false });
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(result.mode).toBe('paused');
+    const liveness = readWorkbuddyWorkerLiveness(governance);
+    expect(liveness?.runningStage).toBe('paused');
+    expect(liveness?.stageDeadline).toBeNull();
+    const started = Date.parse(liveness?.lastCycleStartedAt ?? '');
+    expect(Number.isFinite(started)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(60_000);
+  });
+
+  it('readWorkbuddyWorkerLiveness returns null for an unreadable/missing record', () => {
+    const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
+    expect(readWorkbuddyWorkerLiveness(governance)).toBeNull();
+    expect(readWorkbuddyWorkerLiveness(path.join(os.tmpdir(), 'pd-workbuddy-no-such-ws'))).toBeNull();
   });
 });
