@@ -116,6 +116,8 @@ export interface AdapterCycleResult {
     readonly cancelled: boolean;
     readonly stdoutTruncated: boolean;
     readonly stderrTail?: string;
+    /** Settled before the child's stdio fully drained (leaked descendant pipes). */
+    readonly closePending?: boolean;
     readonly environmentReport: WorkerEnvironmentReport;
   };
   /** Worker mode when the CLI result parsed ('ready' | 'paused' | 'degraded'). */
@@ -438,6 +440,7 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         cancelled: proc.cancelled,
         stdoutTruncated: proc.stdoutTruncated,
         ...(proc.stderrTail.length > 0 ? { stderrTail: boundedTail(proc.stderrTail) } : {}),
+        ...(proc.closePending === true ? { closePending: true } : {}),
         environmentReport,
       };
 
@@ -519,6 +522,17 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
           businessProgress: emptyProgress,
         });
       }
+      if (proc.termSignal !== null) {
+        // CodeRabbit review fix: a signal kill that is neither our deadline
+        // nor our cancel is an EXTERNAL termination (e.g. OOM/SIGTERM) — it
+        // must not be classified by whatever stdout was captured.
+        return assemble({
+          outcome: 'failed',
+          reason: `worker_terminated_by_signal:${proc.termSignal}`,
+          nextAction: 'The Worker child was terminated by a signal outside the bounded-timeout/cancel paths; investigate the external kill before re-running.',
+          businessProgress: { ...emptyProgress, evidenceReason: evidenceReason ?? 'not_attempted' },
+        });
+      }
       if (parsed === null) {
         const reason = parseProblem === 'timeout' || parseProblem === 'cancelled' || parseProblem === 'spawn'
           ? 'worker_result_missing'
@@ -549,6 +563,22 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
       };
 
       if (mode === 'paused') {
+        // CodeRabbit review fix: a paused cycle may still carry non-blocking
+        // degradations (WorkBuddy runs catch-up before the pause early-return).
+        // Dropping them would exit 0 over a real failure — surface them as a
+        // degraded outcome instead.
+        const degradations = Array.isArray(parsed.degradations)
+          ? parsed.degradations.filter((d): d is string => typeof d === 'string' && d.length > 0).slice(0, 5)
+          : [];
+        if (degradations.length > 0) {
+          return assemble({
+            outcome: 'degraded',
+            reason: `paused_with_degradations:${degradations.join('|').slice(0, 160)}`,
+            nextAction: workerNextAction ?? 'The cycle paused AND reported non-blocking degradations; investigate the degradation before treating the pause as clean.',
+            businessProgress,
+            workerMode: mode,
+          });
+        }
         return assemble({ outcome: 'paused', reason: workerReason ?? 'paused', nextAction: workerNextAction, businessProgress, workerMode: mode });
       }
       if (mode === 'degraded') {

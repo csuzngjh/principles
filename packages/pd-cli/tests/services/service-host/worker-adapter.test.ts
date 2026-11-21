@@ -748,3 +748,75 @@ describe('environment + liveness projection', () => {
     expect(result.cycleOutcome).toBe('cycle_completed_without_business_progress');
   });
 });
+
+describe('CR review fixes — signal kill + paused degradations', () => {
+  it('a Worker killed by an EXTERNAL signal (exitCode null, termSignal set) is failed, never a completed cycle', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-signaled',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          exitCode: null,
+          termSignal: 'SIGTERM',
+          stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }),
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('failed');
+    expect(result.reason).toContain('worker_terminated_by_signal');
+    expect(result.reason).toContain('SIGTERM');
+    expect(result.worker.termSignal).toBe('SIGTERM');
+  });
+
+  it('a paused Worker result carrying catch-up degradations is degraded, not a clean pause', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-paused-degraded',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({
+            workspaceDir: workspace,
+            mode: 'paused',
+            reason: 'internalization_auto_consumer_disabled',
+            degradations: ['catch_up:consent_records_unreadable', 'catch_up:openclaw_bridge_missing'],
+          }),
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('degraded');
+    expect(result.reason).toContain('paused_with_degradations');
+    expect(result.reason).toContain('catch_up');
+  });
+
+  it('a clean paused result (no degradations) still maps to paused', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-paused-clean',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({ workspaceDir: workspace, mode: 'paused', reason: 'internalization_auto_consumer_disabled' }),
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('paused');
+    expect(result.reason).toBe('internalization_auto_consumer_disabled');
+  });
+});

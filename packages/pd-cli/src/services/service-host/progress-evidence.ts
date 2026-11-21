@@ -35,6 +35,8 @@ const TASK_SNAPSHOT_SQL =
 export interface TaskProgressSnapshot {
   /** taskId → status (the durable state machine position). */
   readonly tasks: ReadonlyMap<string, string>;
+  /** taskId → updatedAt at snapshot time (per-task write timestamp). */
+  readonly taskUpdatedAt: ReadonlyMap<string, string>;
   readonly maxUpdatedAt: string | null;
   /** False when no state.db exists yet (empty task set, not an error). */
   readonly storePresent: boolean;
@@ -90,13 +92,13 @@ export function readTaskProgressSnapshot(workspaceDir: string): TaskProgressRead
     if (!fs.statSync(dbPath).isFile()) {
       return {
         ok: true,
-        snapshot: { tasks: new Map(), maxUpdatedAt: null, storePresent: false },
+        snapshot: { tasks: new Map(), taskUpdatedAt: new Map(), maxUpdatedAt: null, storePresent: false },
       };
     }
   } catch {
     return {
       ok: true,
-      snapshot: { tasks: new Map(), maxUpdatedAt: null, storePresent: false },
+      snapshot: { tasks: new Map(), taskUpdatedAt: new Map(), maxUpdatedAt: null, storePresent: false },
     };
   }
   let db: Database.Database;
@@ -109,13 +111,15 @@ export function readTaskProgressSnapshot(workspaceDir: string): TaskProgressRead
   try {
     const rows: unknown[] = db.prepare(TASK_SNAPSHOT_SQL).all(SNAPSHOT_LIMIT);
     const tasks = new Map<string, string>();
+    const taskUpdatedAt = new Map<string, string>();
     let maxUpdatedAt: string | null = null;
     for (const row of rows) {
       if (!isTaskRow(row)) continue;
       tasks.set(row.taskId, row.status);
+      taskUpdatedAt.set(row.taskId, row.updatedAt);
       if (maxUpdatedAt === null || row.updatedAt > maxUpdatedAt) maxUpdatedAt = row.updatedAt;
     }
-    return { ok: true, snapshot: { tasks, maxUpdatedAt, storePresent: true } };
+    return { ok: true, snapshot: { tasks, taskUpdatedAt, maxUpdatedAt, storePresent: true } };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, reason: `progress_snapshot_read_failed:${message.slice(0, 160)}` };
@@ -132,18 +136,22 @@ export function readTaskProgressSnapshot(workspaceDir: string): TaskProgressRead
  * Diff two snapshots into progress evidence. A change is a NEW taskId or a
  * STATUS transition; updatedAt-only movement (lease renewal) does not count.
  *
- * `changedAt` is the AFTER snapshot's `maxUpdatedAt`: snapshots are ordered
- * updated_at DESC, and any new/transitioned task write either re-bumps the
- * max task or inserts above the previous max — so when anything changed, the
- * newest task-write timestamp IS the progress timestamp. When nothing
- * changed it is null (a completed-but-empty cycle keeps the prior value at
- * the status layer, task §6).
+ * `changedAt` is the max `updatedAt` over the tasks that ACTUALLY changed —
+ * never the snapshot's global max: an unchanged task's lease renewal can hold
+ * a later updatedAt than the real transition, and the renewal is deliberately
+ * not progress (CodeRabbit review fix). When nothing changed it is null (a
+ * completed-but-empty cycle keeps the prior value at the status layer, §6).
  */
 export function diffTaskProgress(before: TaskProgressSnapshot, after: TaskProgressSnapshot): TaskProgressEvidence {
   let changedCount = 0;
+  let changedAt: string | null = null;
   for (const [taskId, status] of after.tasks) {
     const previous = before.tasks.get(taskId);
-    if (previous === undefined || previous !== status) changedCount += 1;
+    if (previous === undefined || previous !== status) {
+      changedCount += 1;
+      const stamp = after.taskUpdatedAt.get(taskId);
+      if (stamp !== undefined && (changedAt === null || stamp > changedAt)) changedAt = stamp;
+    }
   }
   // A task REMOVED between snapshots (e.g. cleanup) is not business progress
   // for this contract — only new/transitioned tasks count.
@@ -151,6 +159,6 @@ export function diffTaskProgress(before: TaskProgressSnapshot, after: TaskProgre
   return {
     taskStateChanged,
     changedCount,
-    changedAt: taskStateChanged ? after.maxUpdatedAt : null,
+    changedAt: taskStateChanged ? changedAt : null,
   };
 }

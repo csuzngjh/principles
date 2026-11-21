@@ -7,7 +7,7 @@
  * no-handover evidence (manifest bytes identical, no scheduler side
  * effects).
  */
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -575,4 +575,75 @@ describe('F7: a degraded cycle with real task progress carries the evidenced tim
     expect(result.executions[0]?.lastProgressAt).toBe('2026-11-21T12:00:00Z');
     expect(result.executions[0]?.lastProgressSource).toBe('task_state_change');
   });
+});
+
+describe('CR review fixes — canonical-identity dedupe + shared workspace deadline', () => {
+  it('M1: the same workspace passed twice (real path + symlink) is dispatched ONCE; the duplicate is refused', async () => {
+    const home = tempHome();
+    const ws = codexWorkspace(home, 'dup-ws');
+    installSandbox(home, [ws]);
+    const alias = path.join(home, 'dup-ws-alias');
+    symlinkSync(ws, alias, 'dir');
+    let dispatched = 0;
+    const counting = fakeAdapter('codex');
+    const spy: WorkerAdapter = {
+      ...counting,
+      executeOnce: async (input) => {
+        dispatched += 1;
+        return counting.executeOnce(input);
+      },
+    };
+    const result = await runServiceShadowOnce({
+      workspaces: [ws, alias],
+      trustedHomeDir: home,
+      probes: { adapters: { codex: spy, workbuddy: fakeAdapter('workbuddy') } },
+    });
+    expectCompleted(result);
+    expect(dispatched).toBe(1);
+    const dup = result.executions.find((e) => e.refusalReason === 'duplicate_workspace_selection');
+    expect(dup).toBeDefined();
+    expect(dup?.requestedDir).toBe(alias);
+    expect(dup?.admission).toBe('refused');
+  });
+
+  it('M2: serial bound adapters share ONE per-workspace deadline — an exhausted budget records the timeout without dispatching', async () => {
+    const home = tempHome();
+    const ws = codexWorkspace(home, 'budget-ws');
+    // Also bind workbuddy so the workspace runs TWO serial adapters.
+    writeFileSync(
+      path.join(ws, '.pd', 'host-tool-semantics', 'workbuddy.json'),
+      JSON.stringify(validDeclaration('workbuddy')),
+      'utf8',
+    );
+    installSandbox(home, [ws]);
+    let wbDispatched = 0;
+    const slowCodex: WorkerAdapter = {
+      ...fakeAdapter('codex'),
+      executeOnce: async (input) => {
+        // Consume the whole 1s shared budget inside the codex cycle.
+        await new Promise((resolve) => setTimeout(resolve, 1_200));
+        return fakeAdapter('codex', { outcome: 'degraded' }).executeOnce(input);
+      },
+    };
+    const wbSpy: WorkerAdapter = {
+      ...fakeAdapter('workbuddy'),
+      executeOnce: async (input) => {
+        wbDispatched += 1;
+        return fakeAdapter('workbuddy').executeOnce(input);
+      },
+    };
+    const result = await runServiceShadowOnce({
+      workspaces: [ws],
+      trustedHomeDir: home,
+      timeoutMs: 1_000,
+      probes: { adapters: { codex: slowCodex, workbuddy: wbSpy } },
+    });
+    expectCompleted(result);
+    expect(wbDispatched).toBe(0); // never started — budget was already gone
+    const exhausted = result.executions.find((e) => e.refusalReason === 'workspace_timeout_budget_exhausted');
+    expect(exhausted?.hostKind).toBe('workbuddy');
+    expect(exhausted?.admission).toBe('admitted');
+    expect(exhausted?.workspaceState).toBe('failed');
+    expect(result.executions).toHaveLength(2);
+  }, 20_000);
 });

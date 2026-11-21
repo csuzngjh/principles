@@ -25,8 +25,14 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function snapshot(entries: readonly [string, string][], maxUpdatedAt: string | null): TaskProgressSnapshot {
-  return { tasks: new Map(entries), maxUpdatedAt };
+function snapshot(entries: readonly (readonly [string, string, string?])[], maxUpdatedAt: string | null): TaskProgressSnapshot {
+  const tasks = new Map<string, string>();
+  const taskUpdatedAt = new Map<string, string>();
+  for (const [id, status, stamp] of entries) {
+    tasks.set(id, status);
+    taskUpdatedAt.set(id, stamp ?? maxUpdatedAt ?? '1970-01-01T00:00:00Z');
+  }
+  return { tasks, taskUpdatedAt, maxUpdatedAt };
 }
 
 describe('diffTaskProgress (pure)', () => {
@@ -46,6 +52,19 @@ describe('diffTaskProgress (pure)', () => {
     expect(diff.taskStateChanged).toBe(true);
     expect(diff.changedCount).toBe(1);
     expect(diff.changedAt).toBe('2026-11-21T10:05:00Z');
+  });
+
+  it('CR review fix: changedAt is the CHANGED task’s timestamp — an unchanged task’s later lease renewal never wins', () => {
+    const before = snapshot([['t1', 'pending'], ['t2', 'leased']], '2026-11-21T10:00:00Z');
+    // t1 transitioned at 10:05; t2 only renewed its lease at 10:09.
+    const after = snapshot(
+      [['t1', 'succeeded', '2026-11-21T10:05:00Z'], ['t2', 'leased', '2026-11-21T10:09:00Z']],
+      '2026-11-21T10:09:00Z',
+    );
+    const diff = diffTaskProgress(before, after);
+    expect(diff.taskStateChanged).toBe(true);
+    expect(diff.changedCount).toBe(1);
+    expect(diff.changedAt).toBe('2026-11-21T10:05:00Z'); // NOT the snapshot max 10:09
   });
 
   it('a updatedAt-only bump (lease renewal, SAME status) is NOT progress — the empty-cycle rule (task §6)', () => {

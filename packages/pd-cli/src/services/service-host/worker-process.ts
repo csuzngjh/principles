@@ -51,6 +51,13 @@ export interface WorkerProcessResult {
   readonly cancelled: boolean;
   /** Structured spawn failure (ENOENT/EACCES on node or entry) — never a fake exit. */
   readonly spawnError?: string;
+  /**
+   * The run settled before the child's stdio fully closed: a descendant that
+   * inherited our pipes kept them open past the drain deadline. The exit
+   * facts above come from the 'exit' event, not 'close' — observability for a
+   * cleanup leak, never silently a clean finish (CodeRabbit review fix).
+   */
+  readonly closePending?: boolean;
   readonly durationMs: number;
 }
 const DEFAULT_KILL_GRACE_MS = 5_000;
@@ -61,6 +68,14 @@ function signalAborted(signal: AbortSignal | undefined): boolean {
 
 const DEFAULT_MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const STDERR_TAIL_BYTES = 16 * 1024;
+/**
+ * How long to keep draining stdio after the child 'exit's before settling.
+ * A Worker descendant that inherited our stdout/stderr pipes can otherwise
+ * keep 'close' pending FOREVER — after SIGKILL the direct child is dead but
+ * the coordinator would hang (and never release the install lock) waiting
+ * for a close event that never arrives (CodeRabbit review fix).
+ */
+const STDIO_DRAIN_DEADLINE_MS = 2_000;
 
 interface RunState {
   settled: boolean;
@@ -69,6 +84,7 @@ interface RunState {
   spawnError?: string;
   timedOut: boolean;
   cancelled: boolean;
+  sawClose: boolean;
 }
 
 /**
@@ -82,7 +98,7 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
   const doSpawn = options.spawnFn ?? spawn;
 
   return new Promise<WorkerProcessResult>((resolve) => {
-    const state: RunState = { settled: false, exitCode: null, termSignal: null, timedOut: false, cancelled: false };
+    const state: RunState = { settled: false, exitCode: null, termSignal: null, timedOut: false, cancelled: false, sawClose: false };
     // R2 review fix: an already-cancelled signal returns the cancelled
     // outcome BEFORE spawn — otherwise an interrupt delivered between two
     // queued workspaces would still start the next Worker just to kill it.
@@ -118,7 +134,12 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
     let stderrBytes = 0;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    let drainTimer: ReturnType<typeof setTimeout> | undefined;
     let terminated = false;
+    // Forward-declared so the terminate ladder and the drain settle can reach
+    // each other's helpers without a use-before-define cycle.
+    let finish: () => void;
+    let scheduleDrainSettle: () => void;
 
     const terminate = (timedOut: boolean, cancelled: boolean): void => {
       if (terminated || state.settled) return;
@@ -130,13 +151,15 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
       } catch {
         // Already gone — the close handler will settle.
       }
-      // Bounded forced termination after the grace window (task §8.5).
+      // Bounded forced termination after the grace window (task §8.5), and
+      // then a bounded settle even if 'exit' never arrives at all.
       graceTimer = setTimeout(() => {
         try {
           child.kill('SIGKILL');
         } catch {
           // Already gone.
         }
+        scheduleDrainSettle();
       }, killGraceMs);
     };
 
@@ -144,11 +167,17 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
       terminate(false, true);
     };
 
-    const finish = (): void => {
+    scheduleDrainSettle = (): void => {
+      if (drainTimer !== undefined || state.settled) return;
+      drainTimer = setTimeout(() => finish(), STDIO_DRAIN_DEADLINE_MS);
+    };
+
+    finish = (): void => {
       if (state.settled) return;
       state.settled = true;
       if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
       if (graceTimer !== undefined) clearTimeout(graceTimer);
+      if (drainTimer !== undefined) clearTimeout(drainTimer);
       options.signal?.removeEventListener('abort', onAbort);
       resolve({
         exitCode: state.exitCode,
@@ -159,8 +188,13 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
         timedOut: state.timedOut,
         cancelled: state.cancelled,
         ...(state.spawnError !== undefined ? { spawnError: state.spawnError } : {}),
+        ...(state.sawClose === false ? { closePending: true } : {}),
         durationMs: Date.now() - startedAt,
       });
+      // Settled without 'close': release our pipe ends so a leaked
+      // descendant cannot keep fd handles (and this process) alive.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
     };
 
     child.on('error', (error: Error & { code?: string }) => {
@@ -186,9 +220,18 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
         stderrWindow.shift();
       }
     });
+    // 'exit' fires on process termination; 'close' additionally waits for
+    // the piped stdio to close — which a leaked descendant can delay forever.
+    // Capture the exit facts immediately and bound the remaining drain.
+    child.on('exit', (code, signal) => {
+      state.exitCode = code;
+      state.termSignal = signal;
+      scheduleDrainSettle();
+    });
     child.on('close', (code, signal) => {
       state.exitCode = code;
       state.termSignal = signal;
+      state.sawClose = true;
       finish();
     });
 

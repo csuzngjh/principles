@@ -137,3 +137,22 @@ describe('runWorkerProcess (real fixture children)', () => {
     expect(result.stderrTail).toContain('Cannot find module');
   });
 });
+
+describe('leaked-descendant pipe hold (CR review fix)', () => {
+  it('a descendant holding the stdio pipes cannot hang the run — the bounded drain settles with closePending', async () => {
+    const started = Date.now();
+    const result = await runWorkerProcess({
+      cliEntry: path.join(FIXTURES, 'leak-descendant.mjs'),
+      args: [],
+      env: {},
+      timeoutMs: 30_000,
+    });
+    // The worker exited 0 and produced its result; 'close' can only fire
+    // when the leaked descendant exits (~4s) — the 2s drain deadline wins.
+    expect(result.exitCode).toBe(0);
+    expect(result.timedOut).toBe(false);
+    expect(result.closePending).toBe(true);
+    expect(result.stdout).toContain('"ok":true');
+    expect(Date.now() - started).toBeLessThan(3_500);
+  }, 20_000);
+});

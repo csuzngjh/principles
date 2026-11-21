@@ -434,6 +434,9 @@ async function completeShadowRun(identity: InstallIdentity, context: {
   // cancelled run never starts a Worker only to terminate it. The function
   // indirection keeps repeated checks un-narrowed by TypeScript.
   const isAborted = (): boolean => options.signal?.aborted === true;
+  // CR review fix: dedupe by canonical identity — the same workspace passed
+  // via a symlink AND its real path must still get exactly ONE cycle.
+  const dispatchedIdentities = new Set<string>();
 
   for (const requested of options.workspaces) {
     if (isAborted()) break;
@@ -461,6 +464,13 @@ async function completeShadowRun(identity: InstallIdentity, context: {
       );
       continue;
     }
+    if (dispatchedIdentities.has(requestedIdentity)) {
+      refuse(
+        'duplicate_workspace_selection',
+        'The same canonical workspace was selected more than once (e.g. via a symlink plus its real path). Select it once; shadow runs at most one cycle per bound host per workspace.',
+      );
+      continue;
+    }
     if (entry.verdict !== 'authorized') {
       refuse(
         `workspace_not_authorized:${entry.verdict}${entry.reason !== undefined ? `:${entry.reason}` : ''}`,
@@ -480,8 +490,13 @@ async function completeShadowRun(identity: InstallIdentity, context: {
       continue;
     }
 
+    dispatchedIdentities.add(requestedIdentity);
     const descriptor = buildDescriptor(entry);
     const hostKinds = options.hostFilter !== undefined ? [options.hostFilter] : [...WORKER_HOST_KINDS];
+    // CR review fix: `perWorkspaceTimeoutMs` is the budget for the WHOLE
+    // workspace — serial bound adapters share one deadline instead of each
+    // receiving a fresh full timeout.
+    const workspaceDeadline = Date.now() + timeoutMs;
     let ranAny = false;
     for (const hostKind of hostKinds) {
       // R2 review fix: same pre-dispatch check inside the host loop — an
@@ -493,13 +508,30 @@ async function completeShadowRun(identity: InstallIdentity, context: {
         continue; // Not binding evidence for THIS host — not an error; other hosts may still run.
       }
       ranAny = true;
+      const remainingMs = workspaceDeadline - Date.now();
+      if (remainingMs <= 0) {
+        // Budget exhausted by an earlier adapter on this workspace — record
+        // the timeout truthfully instead of starting another Worker.
+        executions.push({
+          requestedDir: requested,
+          canonicalDir: entry.canonicalDir,
+          hostKind,
+          admission: 'admitted',
+          workspaceState: 'failed',
+          refusalReason: 'workspace_timeout_budget_exhausted',
+          refusalNextAction: 'The per-workspace timeout budget was consumed by an earlier adapter cycle on this workspace; raise --timeout-ms or select hosts in separate runs.',
+          lastProgressAt: previousProgress.at.get(requestedIdentity) ?? null,
+          lastProgressSource: previousProgress.at.has(requestedIdentity) ? 'previous_run' : null,
+        });
+        continue;
+      }
       let result: AdapterCycleResult;
       try {
         result = await adapter.executeOnce({
           workspaceDir: entry.canonicalDir,
           activeRelease,
           invocationId: randomUUID(),
-          timeoutMs,
+          timeoutMs: remainingMs,
           ...(options.signal !== undefined ? { signal: options.signal } : {}),
           identity,
           inheritedEnv: context.env,
