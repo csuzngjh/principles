@@ -11,7 +11,6 @@ import { evaluateCandidateAdmissions, normalizePainProvenance } from './admissio
 import { shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evidence-guards.js';
 import {
   denyAllSourceMaterialAuthorization,
-  filterEvidenceByAuthorization,
   findUnauthorizedSourceRef,
   type SourceMaterialAuthorizationPort,
 } from './source-material-authorization.js';
@@ -657,17 +656,20 @@ export async function evaluateAndPersistAdmissionFromStore(
   // persisted copies so a re-run sees empty, not revoked, evidence.
   const authorization = input.sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization;
   {
-    let ingressPayload: { evidence?: unknown } | null = null;
+    let ingressPayload: Record<string, unknown> | null = null;
     try {
       const parsed: unknown = JSON.parse(ingressTask.diagnosticJson ?? '{}');
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        ingressPayload = parsed as { evidence?: unknown };
+        const record: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(parsed)) record[key] = value;
+        ingressPayload = record;
       }
     } catch {
       ingressPayload = null;
     }
-    const ingressRefs = Array.isArray(ingressPayload?.evidence)
-      ? (ingressPayload.evidence as unknown[]).map((entry) => (typeof entry === 'object' && entry !== null && !Array.isArray(entry) && typeof (entry as { sourceRef?: unknown }).sourceRef === 'string' ? (entry as { sourceRef: string }).sourceRef : ''))
+    const ingressEvidence: unknown = ingressPayload?.evidence;
+    const ingressRefs = Array.isArray(ingressEvidence)
+      ? ingressEvidence.map((entry) => (typeof entry === 'object' && entry !== null && !Array.isArray(entry) && typeof (entry as { sourceRef?: unknown }).sourceRef === 'string' ? (entry as { sourceRef: string }).sourceRef : ''))
       : [];
     const ingressBlocked = findUnauthorizedSourceRef(ingressRefs, authorization);
     if (ingressBlocked !== null) {
@@ -681,7 +683,7 @@ export async function evaluateAndPersistAdmissionFromStore(
       const correction = reentry.correctionEvidence;
       if (correction === undefined) return false;
       const channel = typeof (correction as { channel?: unknown }).channel === 'string' ? (correction as { channel: string }).channel : '';
-      const ingressHost = typeof (ingressPayload as { hostKind?: unknown } | null)?.hostKind === 'string' ? (ingressPayload as { hostKind: string }).hostKind : '';
+      const ingressHost = typeof ingressPayload?.hostKind === 'string' ? ingressPayload.hostKind : '';
       if (channel.startsWith('codex')) return !authorization.isHostSourceMaterialAuthorized('codex').authorized;
       if (channel.startsWith('workbuddy')) return !authorization.isHostSourceMaterialAuthorized('workbuddy').authorized;
       if (channel.length === 0 && (ingressHost === 'codex' || ingressHost === 'workbuddy')) {
