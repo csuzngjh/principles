@@ -717,6 +717,7 @@ export {
   PD_HOME_MODES,
   PD_HOME_FAILURE_REASONS,
   resolvePdHome,
+  resolveRealUserHome,
   isPathWithinRoot,
   type PdHomeMode,
   type PdHomePaths,
@@ -726,6 +727,15 @@ export {
   type PdHomeResolution,
   type ResolvePdHomeOptions,
 } from './pd-home.js';
+export {
+  ACTIVE_RELEASE_SCHEMA_VERSION,
+  activeReleaseRecordPath,
+  parseActiveReleaseRecord,
+  readActiveReleaseRecord,
+  type ActiveReleaseFailureReason,
+  type ActiveReleaseRecord,
+  type ActiveReleaseVerdict,
+} from './active-release.js';
 
 /**
  * Codex host-persistent binding location. The versioned payload directory is
@@ -828,5 +838,8 @@ export {
   type HostWorkspaceClaimVia,
   type HostClaimReaders,
   type HostClaimOptions,
+  type JsonFileReadStatus,
+  type BindingReadDiagnostic,
+  type DirReadStatus,
   type ForeignWorkspaceOwnerVerdict,
 } from './mcp-binding-contract.js';

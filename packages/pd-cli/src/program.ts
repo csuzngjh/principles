@@ -855,6 +855,29 @@ workbuddyCmd
     });
   });
 
+// ── pd service — PD Service Host (SPEC-PD-SERVICE-HOST-001 / ADR-0020 §11.6) ──
+// Phase 1: the read-only run-once coordinator. Discovers manifest-authorized
+// and claim-validated Workspaces, projects each Workspace's read-only owner
+// state, takes the install-level single-instance lock and writes the
+// versioned operational status. NO Worker is started and NO consumer
+// ownership changes in Phase 1; `--dry-run` is required accordingly.
+const serviceCmd = program
+  .command('service')
+  .description('PD Service Host operations (Phase 1: read-only dry-run coordinator)');
+
+serviceCmd
+  .command('run-once')
+  .description('Run one bounded Service Host coordinator execution (Phase 1: dry-run only — discovers workspaces and reports owner state; starts no worker)')
+  .option('--dry-run', 'Required in Phase 1: execute the read-only discovery dry-run (no worker, no ownership change)', false)
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleServiceRunOnce } = await import('./commands/service-run-once.js');
+    await handleServiceRunOnce({
+      dryRun: opts.dryRun === true,
+      json: opts.json === true,
+    });
+  });
+
 const internalizationCmd = runtimeCmd
   .command('internalization')
   .description('Internalization Engine operator visibility');

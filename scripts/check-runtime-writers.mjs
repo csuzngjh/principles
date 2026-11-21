@@ -66,6 +66,10 @@ export const ALLOWED_RUNTIME_WRITERS = [
     reason: 'Dev e2e journey driver: all writes land in an mkdtemp sandbox under the system temp dir.',
   },
   {
+    file: 'packages/pd-cli/src/services/service-host/status/service-run-status.ts',
+    reason: 'PRI-1279 (Service Host Phase 1): writes ONLY the PD-owned run metadata <pdHome>/service/run-once-status.json (SPEC-PD-SERVICE-HOST-001 §9: 小型版本化 operational status 文件); the canonical runtime tree appears solely in a comment naming the caller-provided active-release record path, which this module only reads; layout ownership stays with @principles/install-layout.',
+  },
+  {
     file: 'scripts/dev/codex-r1-installed-gate.mjs',
     reason: 'Dev R1 installed-state gate: sandboxed in mkdtemp; never points HOME at the real install.',
   },
