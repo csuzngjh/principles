@@ -58,6 +58,15 @@ export interface WorkerProcessResult {
    * cleanup leak, never silently a clean finish (CodeRabbit review fix).
    */
   readonly closePending?: boolean;
+  /**
+   * P2-05 (final-remediation review): honest termination state. `exit` is
+   * the direct child leaving the run state; `close` is all stdio released;
+   * `terminationConfirmed` is only true when close was observed — when
+   * close is pending we cannot claim the process tree is fully gone.
+   */
+  readonly exitObserved?: boolean;
+  readonly closeObserved?: boolean;
+  readonly terminationConfirmed?: boolean;
   readonly durationMs: number;
 }
 const DEFAULT_KILL_GRACE_MS = 5_000;
@@ -84,6 +93,7 @@ interface RunState {
   spawnError?: string;
   timedOut: boolean;
   cancelled: boolean;
+  sawExit: boolean;
   sawClose: boolean;
 }
 
@@ -98,7 +108,7 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
   const doSpawn = options.spawnFn ?? spawn;
 
   return new Promise<WorkerProcessResult>((resolve) => {
-    const state: RunState = { settled: false, exitCode: null, termSignal: null, timedOut: false, cancelled: false, sawClose: false };
+    const state: RunState = { settled: false, exitCode: null, termSignal: null, timedOut: false, cancelled: false, sawExit: false, sawClose: false };
     // R2 review fix: an already-cancelled signal returns the cancelled
     // outcome BEFORE spawn — otherwise an interrupt delivered between two
     // queued workspaces would still start the next Worker just to kill it.
@@ -107,7 +117,9 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
       state.cancelled = true;
       resolve({
         exitCode: null, termSignal: null, stdout: '', stdoutTruncated: false, stderrTail: '',
-        timedOut: false, cancelled: true, durationMs: Date.now() - startedAt,
+        timedOut: false, cancelled: true,
+        exitObserved: false, closeObserved: false, terminationConfirmed: false,
+        durationMs: Date.now() - startedAt,
       });
       return;
     }
@@ -117,12 +129,22 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
         env: options.env,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        // P2-05: on POSIX the child becomes a process-group leader so the
+        // termination ladder can signal the whole group (same-group
+        // descendants are killed with their parent). Windows has no
+        // process-group signaling — `taskkill /T` equivalents belong to the
+        // platform path; there the direct-child SIGKILL plus the stdio drain
+        // deadline are what bound the coordinator, and a detached
+        // descendant can outlive the run (recorded via closePending).
+        detached: process.platform !== 'win32',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       resolve({
         exitCode: null, termSignal: null, stdout: '', stdoutTruncated: false, stderrTail: '',
-        timedOut: false, cancelled: false, spawnError: `spawn_threw:${message}`, durationMs: Date.now() - startedAt,
+        timedOut: false, cancelled: false, spawnError: `spawn_threw:${message}`,
+        exitObserved: false, closeObserved: false, terminationConfirmed: false,
+        durationMs: Date.now() - startedAt,
       });
       return;
     }
@@ -141,24 +163,37 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
     let finish: () => void;
     let scheduleDrainSettle: () => void;
 
+    /**
+     * Signal the child's process GROUP when we lead one (POSIX `detached`),
+     * falling back to the direct child — ESRCH/EACCES mean the group is
+     * already gone or non-signalable, not a kill failure to fabricate over.
+     */
+    const signalTree = (sig: 'SIGTERM' | 'SIGKILL'): void => {
+      if (process.platform !== 'win32' && child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, sig);
+          return;
+        } catch {
+          // Group already gone — try the direct child anyway.
+        }
+      }
+      try {
+        child.kill(sig);
+      } catch {
+        // Already gone — the close handler will settle.
+      }
+    };
+
     const terminate = (timedOut: boolean, cancelled: boolean): void => {
       if (terminated || state.settled) return;
       terminated = true;
       state.timedOut = timedOut;
       state.cancelled = cancelled;
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        // Already gone — the close handler will settle.
-      }
+      signalTree('SIGTERM');
       // Bounded forced termination after the grace window (task §8.5), and
       // then a bounded settle even if 'exit' never arrives at all.
       graceTimer = setTimeout(() => {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          // Already gone.
-        }
+        signalTree('SIGKILL');
         scheduleDrainSettle();
       }, killGraceMs);
     };
@@ -189,6 +224,10 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
         cancelled: state.cancelled,
         ...(state.spawnError !== undefined ? { spawnError: state.spawnError } : {}),
         ...(state.sawClose === false ? { closePending: true } : {}),
+        // P2-05: report the observed facts, never an inferred "tree dead".
+        exitObserved: state.sawExit,
+        closeObserved: state.sawClose,
+        terminationConfirmed: state.sawClose,
         durationMs: Date.now() - startedAt,
       });
       // Settled without 'close': release our pipe ends so a leaked
@@ -226,6 +265,7 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
     child.on('exit', (code, signal) => {
       state.exitCode = code;
       state.termSignal = signal;
+      state.sawExit = true;
       scheduleDrainSettle();
     });
     child.on('close', (code, signal) => {

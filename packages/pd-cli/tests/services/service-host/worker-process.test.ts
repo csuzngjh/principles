@@ -156,3 +156,45 @@ describe('leaked-descendant pipe hold (CR review fix)', () => {
     expect(Date.now() - started).toBeLessThan(3_500);
   }, 20_000);
 });
+
+describe('P2-05 final-remediation — process-group termination', () => {
+  it('a same-group descendant dies WITH the worker: close observed, terminationConfirmed', async () => {
+    if (process.platform === 'win32') return;
+    const startedAt = Date.now();
+    const result = await runWorkerProcess({
+      cliEntry: path.join(FIXTURES, 'hang-with-descendant.mjs'),
+      args: [],
+      env: {},
+      timeoutMs: 500,
+      killGraceMs: 300,
+    });
+    const elapsed = Date.now() - startedAt;
+    expect(result.timedOut).toBe(true);
+    expect(result.exitObserved).toBe(true);
+    // Group SIGKILL reaps the descendant too → pipes close → 'close' fires.
+    expect(result.closeObserved).toBe(true);
+    expect(result.terminationConfirmed).toBe(true);
+    expect(result.closePending).toBeUndefined();
+    // settle deadline + drain must both hold — never a coordinator hang
+    expect(elapsed).toBeLessThan(10_000);
+  });
+
+  it('honest status when a DETACHED descendant outlives the worker (closePending, never confirmed)', async () => {
+    const result = await runWorkerProcess({
+      cliEntry: path.join(FIXTURES, 'leak-descendant.mjs'),
+      args: [],
+      env: {},
+      timeoutMs: 15_000,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.exitObserved).toBe(true);
+    if (result.closePending === true) {
+      // POSIX detached-descendant case: truthfully reported, not "dead".
+      expect(result.closeObserved).toBe(false);
+      expect(result.terminationConfirmed).toBe(false);
+    } else {
+      expect(result.closeObserved).toBe(true);
+      expect(result.terminationConfirmed).toBe(true);
+    }
+  });
+});
