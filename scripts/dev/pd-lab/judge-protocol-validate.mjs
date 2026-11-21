@@ -127,8 +127,24 @@ function packageProblem(blindPackage) {
   if (blindPackage.comparisonQuestion !== JUDGE_PROTOCOL.comparisonQuestion)
     return "blindPackage.comparisonQuestion must be the frozen jp-pd-lab@1 question";
   for (const field of ["context", "outputA", "outputB"]) {
-    if (blindPackage[field].trim().length === 0)
-      return `blindPackage.${field} must be non-empty`;
+    if (blindPackage[field].trim().length === 0) {
+      // The builder keeps a raw prefix slice verbatim, so a context whose
+      // leading characters are whitespace can legitimately truncate to a
+      // whitespace-only package — the truncation fact marks it lossy and an
+      // UNKNOWN record bound to it stays valid evidence. Judged OUTPUTS may
+      // never go blank: a side with no content cannot be compared.
+      const truncationOk =
+        field === "context" &&
+        Array.isArray(blindPackage.truncation) &&
+        blindPackage.truncation.some(
+          (t) =>
+            isPlainObject(t) &&
+            t.truncatedSide === "CONTEXT" &&
+            Number.isInteger(t.originalChars) &&
+            t.originalChars > 0,
+        );
+      if (!truncationOk) return `blindPackage.${field} must be non-empty`;
+    }
   }
   if (blindPackage.truncation !== undefined) {
     if (!Array.isArray(blindPackage.truncation))
@@ -344,11 +360,12 @@ function main() {
   const perRecord = [];
   // P1-6: judgmentId is globally unique at the bundle level — a duplicate
   // marks BOTH occurrences invalid, and derived-record lookup below binds by
-  // entry index, never by find() on judgmentId.
+  // entry object identity, never by find() on judgmentId and never by a
+  // stringified id pair (which can collide).
   const judgmentIdFirstIndex = new Map();
-  // Index binding: judgmentId+packageId -> perRecord index (P1-6). No
+  // Entry-object binding: bundle entry -> its perRecord row (P1-6). No
   // downstream lookup ever scans perRecord with find().
-  const derivedByKey = new Map();
+  const derivedByEntry = new Map();
 
   for (const entry of bundle.entries) {
     const recIndex = perRecord.length;
@@ -412,7 +429,7 @@ function main() {
         restoredVerdict: null,
         failed: false,
       };
-      derivedByKey.set(`${judgmentId}${packageId}`, recIndex);
+      derivedByEntry.set(entry, perRecord[recIndex]);
       continue;
     }
     const { blindPackage, secretBinding, record, rawResponse } = entry;
@@ -587,7 +604,7 @@ function main() {
         ? record.comparisonInputDigest
         : null,
     };
-    derivedByKey.set(`${judgmentId}${packageId}`, recIndex);
+    derivedByEntry.set(entry, perRecord[recIndex]);
   }
 
   // Swap pairs: mechanically detected counterpart packages plus declared
@@ -749,7 +766,7 @@ function main() {
       }
     }
     swapPairs.push(
-      pairReport(entry, resolved, swapProblemCodes, perRecord, derivedByKey),
+      pairReport(entry, resolved, swapProblemCodes, derivedByEntry),
     );
   }
 
@@ -762,25 +779,108 @@ function main() {
     isPlainObject(entry?.record),
   );
   const assignmentMap = new Map();
-  const derivedFor = (entry) => {
-    const idx = derivedByKey.get(
-      `${String(entry.record.judgmentId)}${String(entry.blindPackage?.packageId ?? "<missing>")}`,
-    );
-    return idx === undefined ? null : perRecord[idx];
-  };
+  const derivedFor = (entry) => derivedByEntry.get(entry) ?? null;
   for (const entry of recordEntries) {
     const key = String(entry.record.assignmentKey ?? "<missing>");
     if (!assignmentMap.has(key)) assignmentMap.set(key, []);
     assignmentMap.get(key).push({ entry, derived: derivedFor(entry) });
   }
 
+  // Structured assignment declarations (optional): the bundle may carry the
+  // T4-shaped assignment components for each comparison key it contains. The
+  // composed wire key has no escaping — a component containing '+' or '@' can
+  // only be attributed through a declaration, never by reverse-splitting.
+  const ASSIGNMENT_COMPONENT_FIELDS = [
+    "candidateConfigId",
+    "caseId",
+    "caseVersion",
+    "opportunityId",
+    "repetitionId",
+    "referenceId",
+  ];
+  const declaredAssignments = new Map();
+  if (bundle.assignments !== undefined) {
+    if (!Array.isArray(bundle.assignments))
+      fail("bundle.assignments must be an array when present", 2);
+    for (const a of bundle.assignments) {
+      if (
+        !isPlainObject(a) ||
+        !ASSIGNMENT_COMPONENT_FIELDS.every((f) => isNonEmptyString(a[f]))
+      ) {
+        report({
+          packageId: "<merge>",
+          judgmentId: "<merge>",
+          code: "INVALID_ASSIGNMENT_DECLARATION",
+          message:
+            "each bundle.assignments entry needs non-empty candidateConfigId/caseId/caseVersion/opportunityId/repetitionId/referenceId",
+        });
+        continue;
+      }
+      const composed = `${a.candidateConfigId}+${a.caseId}@${a.caseVersion}+${a.opportunityId}+${a.repetitionId}+${a.referenceId}`;
+      if (declaredAssignments.has(composed)) {
+        report({
+          packageId: "<merge>",
+          judgmentId: "<merge>",
+          code: "DUPLICATE_ASSIGNMENT_DECLARATION",
+          message: `bundle.assignments declares ${composed} more than once`,
+        });
+        continue;
+      }
+      declaredAssignments.set(composed, a);
+    }
+  }
+
+  // Arbitration structural gate BEFORE the merge: a record that fails the
+  // protocol's own shape check is not evidence and never reaches
+  // mergeJudgments — the INVALID_ARBITRATION_RECORD problem fails the bundle.
+  const validArbitrations = [];
+  for (const arbitration of arbitrations) {
+    const arbProblem = arbitrationProblem(arbitration);
+    if (arbProblem !== null) {
+      report({
+        packageId: "<arbitration>",
+        judgmentId: String(arbitration?.arbitrationId ?? "<missing>"),
+        code: "INVALID_ARBITRATION_RECORD",
+        message: `arbitration ${arbitration?.arbitrationId ?? "<missing>"}: ${arbProblem}`,
+      });
+    } else {
+      validArbitrations.push(arbitration);
+    }
+  }
+
   // T4 plan assignments are keyed by composed component fields
-  // (`cfg+case@ver+opp+rep+ref`); decompose each T7a assignmentKey back so
-  // merge and report see the identical keys.
+  // (`cfg+case@ver+opp+rep+ref`). A declared structured assignment is
+  // authoritative; the string fallback only applies when every component is
+  // separator-free, which is the only unambiguous case.
   const assignmentComponentsFor = (key) => {
+    const declared = declaredAssignments.get(key);
+    if (declared !== undefined) {
+      return {
+        candidateConfigId: declared.candidateConfigId,
+        caseId: declared.caseId,
+        caseVersion: declared.caseVersion,
+        opportunityId: declared.opportunityId,
+        repetitionId: declared.repetitionId,
+        referenceId: declared.referenceId,
+        ...(isNonEmptyString(declared.scenarioId)
+          ? { scenarioId: declared.scenarioId }
+          : {}),
+        ...(isNonEmptyString(declared.candidateTrajectoryRef)
+          ? { candidateTrajectoryRef: declared.candidateTrajectoryRef }
+          : {}),
+        ...(isNonEmptyString(declared.referenceTrajectoryRef)
+          ? { referenceTrajectoryRef: declared.referenceTrajectoryRef }
+          : {}),
+        ...(isNonEmptyString(declared.expectationRef)
+          ? { expectationRef: declared.expectationRef }
+          : {}),
+      };
+    }
     const parts = String(key).split("+");
     if (parts.length !== 5) return null;
-    const [caseId, caseVersion] = parts[1].split("@");
+    const caseParts = parts[1].split("@");
+    if (caseParts.length !== 2) return null;
+    const [caseId, caseVersion] = caseParts;
     for (const part of [
       parts[0],
       caseId,
@@ -800,7 +900,7 @@ function main() {
       referenceId: parts[4],
     };
   };
-  const mergeAssignments = [];
+  const mergeComponentsByKey = new Map();
   for (const key of [...assignmentMap.keys()].sort()) {
     const components = assignmentComponentsFor(key);
     if (components === null) {
@@ -808,80 +908,90 @@ function main() {
         packageId: "<merge>",
         judgmentId: "<merge>",
         code: "ASSIGNMENT_KEY_UNDECOMPOSABLE",
-        message: `assignment key ${key} cannot be decomposed into T4 plan components — the merge cannot attribute it`,
+        message: `assignment key ${key} has no structured declaration and cannot be decomposed unambiguously into T4 plan components — the merge cannot attribute it`,
       });
       continue;
     }
-    mergeAssignments.push({
-      ...components,
+    mergeComponentsByKey.set(key, {
       // Placeholder bindings for fields the merge gates only on presence
       // (G2): trajectory/expectation binding is owned by the admission
-      // layer, not this validator.
+      // layer, not this validator. Declared values override.
       scenarioId: "scn-t7a",
       candidateTrajectoryRef: "t7a-candidate-trajectory",
       referenceTrajectoryRef: "t7a-reference-trajectory",
       expectationRef: "t7a-expectation",
+      ...components,
     });
   }
 
-  const mergeJudgmentsInput = [];
-  const mergeBlindMap = {};
-  for (const entry of recordEntries) {
-    const derived = derivedFor(entry);
-    if (derived === null || !derived.valid) continue;
-    mergeJudgmentsInput.push(entry.record);
-    if (isPlainObject(entry.secretBinding?.identityMap))
-      mergeBlindMap[entry.record.judgmentId] = entry.secretBinding.identityMap;
-  }
-  // The preregistered slot registry drives T4's seat count
-  // (requiredJudgments) exactly as the production plan would; without one,
-  // the seats are the slots of the records that actually enter the merge —
-  // the registry disclosure above already flagged the weaker provenance.
-  const mergeSlotIds =
-    slotRegistry !== null
-      ? [...slotRegistry].sort()
-      : [
-          ...new Set(
-            mergeJudgmentsInput
-              .map((record) => record.judgeSlotId)
-              .filter((id) => isNonEmptyString(id)),
-          ),
-        ].sort();
-  const merged = mergeJudgments({
-    plan: {
-      schemaVersion: "pd-lab-plan.v1",
-      judgeProtocolRef: JUDGE_PROTOCOL_REF,
-      judgeProtocol: {
-        requiredJudgments: Math.max(mergeSlotIds.length, 1),
-        ...(mergeSlotIds.length > 0
-          ? { judgeSlots: mergeSlotIds.map((judgeSlotId) => ({ judgeSlotId })) }
-          : {}),
+  // Per-comparison merge: every assignmentKey merges under ITS OWN seat
+  // count — a preregistered registry applies to every comparison, otherwise
+  // the seats are the slots that actually entered this comparison (a FAILED
+  // attempt's seat counts; an invalid record never sits). An unrelated
+  // comparison can never inflate or starve this one's requiredJudgments.
+  const finalComparisons = [];
+  for (const key of [...mergeComponentsByKey.keys()].sort()) {
+    const groupRecords = [];
+    const groupBlind = {};
+    for (const { entry, derived } of assignmentMap.get(key)) {
+      if (derived === null || !derived.valid) continue;
+      groupRecords.push(entry.record);
+      if (isPlainObject(entry.secretBinding?.identityMap))
+        groupBlind[entry.record.judgmentId] = entry.secretBinding.identityMap;
+    }
+    const mergeSlotIds =
+      slotRegistry !== null
+        ? [...slotRegistry].sort()
+        : [
+            ...new Set(
+              groupRecords
+                .map((record) => record.judgeSlotId)
+                .filter((id) => isNonEmptyString(id)),
+            ),
+          ].sort();
+    const groupMerged = mergeJudgments({
+      plan: {
+        schemaVersion: "pd-lab-plan.v1",
+        judgeProtocolRef: JUDGE_PROTOCOL_REF,
+        judgeProtocol: {
+          requiredJudgments: Math.max(mergeSlotIds.length, 1),
+          ...(mergeSlotIds.length > 0
+            ? {
+                judgeSlots: mergeSlotIds.map((judgeSlotId) => ({
+                  judgeSlotId,
+                })),
+              }
+            : {}),
+        },
+        assignments: [mergeComponentsByKey.get(key)],
       },
-      assignments: mergeAssignments,
-    },
-    judgments: mergeJudgmentsInput,
-    arbitrations,
-    blindmap: { map: mergeBlindMap },
-  });
-  // Every merge problem is audit evidence of this bundle too; merge-side
-  // evidence problems/disclosures ride the same report channel.
-  for (const mergeProblem of merged.problems) {
-    report({
-      packageId: "<merge>",
-      judgmentId: "<merge>",
-      code: mergeProblem.code,
-      message: `T4 merge: ${mergeProblem.message}`,
+      judgments: groupRecords,
+      arbitrations: validArbitrations.filter(
+        (a) => a.assignmentKey === key,
+      ),
+      blindmap: { map: groupBlind },
     });
-  }
-  for (const mergeProblem of merged.evidenceProblems) {
-    disclosures.push({
-      code: mergeProblem.code,
-      message: `T4 merge: ${mergeProblem.message}`,
-    });
+    // Every merge problem is audit evidence of this bundle too; merge-side
+    // evidence problems/disclosures ride the same report channel.
+    for (const mergeProblem of groupMerged.problems) {
+      report({
+        packageId: "<merge>",
+        judgmentId: "<merge>",
+        code: mergeProblem.code,
+        message: `T4 merge [${key}]: ${mergeProblem.message}`,
+      });
+    }
+    for (const mergeProblem of groupMerged.evidenceProblems) {
+      disclosures.push({
+        code: mergeProblem.code,
+        message: `T4 merge [${key}]: ${mergeProblem.message}`,
+      });
+    }
+    finalComparisons.push(...groupMerged.finalComparisons);
   }
 
   const finalsByKey = new Map(
-    merged.finalComparisons.map((fc) => [fc.assignmentKey, fc]),
+    finalComparisons.map((fc) => [fc.assignmentKey, fc]),
   );
   const matchedArbitrations = new Set();
   const perAssignment = [...assignmentMap.keys()].sort().map((key) => {
@@ -894,8 +1004,7 @@ function main() {
       restored.length > 0 &&
       restored.every((verdict) => verdict === restored[0]);
     const arbitration =
-      arbitrations.find((a) => isPlainObject(a) && a.assignmentKey === key) ??
-      null;
+      validArbitrations.find((a) => a.assignmentKey === key) ?? null;
     if (arbitration) matchedArbitrations.add(arbitration);
     const fc = finalsByKey.get(key) ?? null;
     return {
@@ -922,8 +1031,9 @@ function main() {
         : {}),
     };
   });
-  // An arbitration that binds no assignment in this bundle is not evidence.
-  for (const arbitration of arbitrations) {
+  // A structurally valid arbitration that binds no assignment in this
+  // bundle is not evidence (malformed ones were already rejected above).
+  for (const arbitration of validArbitrations) {
     if (!matchedArbitrations.has(arbitration)) {
       report({
         packageId: "<arbitration>",
@@ -968,7 +1078,7 @@ function main() {
   process.exitCode = valid ? 0 : 1;
 }
 
-function pairReport(entry, partnerEntry, swapProblemCodes, perRecord, derivedByKey) {
+function pairReport(entry, partnerEntry, swapProblemCodes, derivedByEntry) {
   const pkg = entry.blindPackage;
   const partnerPackage = partnerEntry.blindPackage;
   const partnerRecord = partnerEntry.record;
@@ -986,14 +1096,9 @@ function pairReport(entry, partnerEntry, swapProblemCodes, perRecord, derivedByK
           partnerRecord.identityMap,
         )
       : null;
-  const findDerived = (record, packageId) => {
-    const idx = derivedByKey.get(
-      `${String(record?.judgmentId ?? "<missing>")}${packageId}`,
-    );
-    return idx === undefined ? null : perRecord[idx];
-  };
-  const leftDerived = findDerived(entry.record, String(pkg.packageId));
-  const rightDerived = findDerived(partnerRecord, String(partnerPackage.packageId));
+  const findDerived = (e) => derivedByEntry.get(e) ?? null;
+  const leftDerived = findDerived(entry);
+  const rightDerived = findDerived(partnerEntry);
   const recordsValid =
     leftDerived !== null &&
     leftDerived.valid &&

@@ -2283,3 +2283,187 @@ describe("null-vs-absent parity with T4 (P2-1)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Devin Review round on the P1/P2 remediation: per-comparison seat counts,
+// entry-identity binding, legal truncation parity, declared assignments,
+// and structurally gated arbitrations.
+// ---------------------------------------------------------------------------
+
+describe("per-comparison seat counts (review finding 1)", () => {
+  it("an unrelated comparison's seats never inflate this one's requiredJudgments", () => {
+    const built = healthyPackage();
+    const keyA = "cfg-a+case-1@v1+opp-1+rep-1+ref-1";
+    const keyB = "cfg-b+case-2@v1+opp-2+rep-2+ref-2";
+    const jA = healthyRecord(built, "A_BETTER", "j-a", keyA, {
+      judgeSlotId: "slot-a",
+    });
+    const jB = healthyRecord(built, "A_BETTER", "j-b", keyB, {
+      judgeSlotId: "slot-b",
+    });
+    const entry = (record: any) => ({
+      blindPackage: built.blindPackage,
+      secretBinding: built.secretBinding,
+      record,
+      rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+    });
+    const { report } = validateBundle("independent-seats", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [entry(jA), entry(jB)],
+    });
+    const byKey = Object.fromEntries(
+      report.perAssignment.map((a: any) => [a.assignmentKey, a]),
+    );
+    // Each comparison is judged on its own single seat — before the fix both
+    // were demanded two seats and went UNKNOWN.
+    expect(byKey[keyA].outcome).toBe("CANDIDATE_BETTER");
+    expect(byKey[keyB].outcome).toBe("CANDIDATE_BETTER");
+  });
+});
+
+describe("entry-identity binding (review finding 2)", () => {
+  it("colliding judgmentId+packageId pairs never leak validity between entries", () => {
+    // `judge-1`/`23` and `judge-12`/`3` concatenate to the same lookup key.
+    const built23 = healthyPackage({ packageId: "23" });
+    const built3 = healthyPackage({ packageId: "3" });
+    const invalid = healthyRecord(built23, "A_BETTER", "judge-1", undefined, {
+      judgeSlotId: "slot-23",
+    });
+    const valid = healthyRecord(built3, "A_BETTER", "judge-12", undefined, {
+      judgeSlotId: "slot-3",
+    });
+    const entries = (order: string) => {
+      const bad = {
+        blindPackage: built23.blindPackage,
+        secretBinding: built23.secretBinding,
+        record: invalid,
+        // no rawResponse -> RAW_RESPONSE_MISSING -> invalid
+      };
+      const good = {
+        blindPackage: built3.blindPackage,
+        secretBinding: built3.secretBinding,
+        record: valid,
+        rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+      };
+      return order === "good-first" ? [good, bad] : [bad, good];
+    };
+    for (const order of ["bad-first", "good-first"]) {
+      const { report } = validateBundle(`collision-${order}`, {
+        schema: "pd-lab-judge-protocol-bundle.v1",
+        entries: entries(order),
+      });
+      // The invalid entry stays invalid; the valid entry's vote is not lost
+      // or stolen — the outcome is identical in both orders.
+      const assignment = report.perAssignment[0];
+      expect(assignment.outcome, order).toBe("CANDIDATE_BETTER");
+      expect(
+        report.perRecord.find(
+          (r: any) => r.judgmentId === "judge-12" && r.packageId === "3",
+        ).valid,
+        order,
+      ).toBe(true);
+    }
+  });
+});
+
+describe("legal truncation parity with the builder (review finding 3)", () => {
+  it("a whitespace-only truncated CONTEXT prefix is a valid lossy package", () => {
+    const built = healthyPackage({
+      context: "\nOwner expects bounded scope and honest reporting.",
+      maxContextChars: 1,
+    });
+    expect(built.blindPackage.context).toBe("\n");
+    expect(built.blindPackage.truncation).toEqual([
+      expect.objectContaining({ truncatedSide: "CONTEXT" }),
+    ]);
+    const record = healthyRecord(built, "UNKNOWN", "j-ws");
+    const { report, run } = validateBundle("ws-truncation", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        {
+          blindPackage: built.blindPackage,
+          secretBinding: built.secretBinding,
+          record,
+          rawResponse: rawResponseOf({ displayVerdict: "UNKNOWN" }),
+        },
+      ],
+    });
+    expect(run.status).toBe(0);
+    expect(report.perRecord[0].valid).toBe(true);
+  });
+});
+
+describe("declared structured assignments (review finding 4)", () => {
+  it("separator-bearing components merge through bundle.assignments", () => {
+    const built = healthyPackage();
+    const assignmentKey =
+      "cfg+case@v1.2.3+build.7+opp+rep+ref";
+    const j1 = healthyRecord(built, "A_BETTER", "j-1", assignmentKey, {
+      judgeSlotId: "slot-1",
+    });
+    const entry = {
+      blindPackage: built.blindPackage,
+      secretBinding: built.secretBinding,
+      record: j1,
+      rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+    };
+    // Without a declaration the separator-bearing key is honestly flagged.
+    const undeclared = validateBundle("key-undeclared", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [entry],
+    });
+    expect(
+      undeclared.report.problems.map((p: { code: string }) => p.code),
+    ).toContain("ASSIGNMENT_KEY_UNDECOMPOSABLE");
+    // With the T4-shaped declaration the same key merges correctly.
+    const declared = validateBundle("key-declared", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [entry],
+      assignments: [
+        {
+          candidateConfigId: "cfg",
+          caseId: "case",
+          caseVersion: "v1.2.3+build.7",
+          opportunityId: "opp",
+          repetitionId: "rep",
+          referenceId: "ref",
+        },
+      ],
+    });
+    expect(declared.run.status).toBe(0);
+    expect(declared.report.perAssignment[0].outcome).toBe("CANDIDATE_BETTER");
+  });
+});
+
+describe("structurally gated arbitrations (review finding 5)", () => {
+  it("an empty-bound arbitration is INVALID_ARBITRATION_RECORD, never evidence", () => {
+    const built = healthyPackage();
+    const j1 = healthyRecord(built, "A_BETTER", "j-1");
+    const j2 = healthyRecord(built, "B_BETTER", "j-2");
+    const entry = (record: any, verdict: string) => ({
+      blindPackage: built.blindPackage,
+      secretBinding: built.secretBinding,
+      record,
+      rawResponse: rawResponseOf({ displayVerdict: verdict }),
+    });
+    const { run, report } = validateBundle("empty-arb", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [entry(j1, "A_BETTER"), entry(j2, "B_BETTER")],
+      arbitrations: [
+        {
+          arbitrationId: "a-1",
+          assignmentKey: j1.assignmentKey,
+          boundJudgmentIds: [],
+          boundComparisonInputDigests: [],
+          verdict: "TIE",
+        },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(report.problems.map((p: { code: string }) => p.code)).toContain(
+      "INVALID_ARBITRATION_RECORD",
+    );
+    // And it never resolved the conflict — the unit stays UNKNOWN.
+    expect(report.perAssignment[0].outcome).toBe("UNKNOWN");
+  });
+});
