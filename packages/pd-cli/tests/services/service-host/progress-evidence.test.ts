@@ -4,7 +4,7 @@
  * (lease renewal) does NOT — plus a real state-store roundtrip through the
  * read-only snapshot reader.
  */
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, chmodSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -129,3 +129,36 @@ describe('readTaskProgressSnapshot (real store)', () => {
     if (!corrupt.ok) expect(corrupt.reason).toContain('progress_snapshot');
   });
 });
+
+describe('readTaskProgressSnapshot — stat classification (P2-03 final-remediation)', () => {
+  it('a NON-FILE at the store path is evidence-unavailable, never an empty store', () => {
+    const workspace = tempDir();
+    mkdirSync(path.join(workspace, '.pd', 'state.db'), { recursive: true });
+    const read = readTaskProgressSnapshot(workspace);
+    expect(read.ok).toBe(false);
+    if (!read.ok) expect(read.reason).toBe('progress_snapshot_not_a_file');
+  });
+
+  it('an unreadable parent (EACCES/EPERM) is evidence-unavailable — ENOENT-only is the empty case', () => {
+    if (process.platform === 'win32') return;
+    const workspace = tempDir();
+    const pdDir = path.join(workspace, '.pd');
+    mkdirSync(pdDir, { recursive: true });
+    chmodSyncSafe(pdDir, 0o000);
+    try {
+      const read = readTaskProgressSnapshot(workspace);
+      expect(read.ok).toBe(false);
+      if (!read.ok) expect(read.reason).toMatch(/^progress_snapshot_stat_failed:(EACCES|EPERM)$/);
+    } finally {
+      chmodSyncSafe(pdDir, 0o755);
+    }
+  });
+});
+
+function chmodSyncSafe(dir: string, mode: number): void {
+  try {
+    chmodSync(dir, mode);
+  } catch {
+    // Platform without chmod semantics — the test above skips on win32.
+  }
+}

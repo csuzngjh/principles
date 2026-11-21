@@ -86,20 +86,29 @@ function openReadonly(dbPath: string): Database.Database {
  * Read the (taskId → status) task snapshot. Side-effect free: a missing
  * state.db is an empty snapshot; the reader never creates the store.
  */
+function emptySnapshot(): TaskProgressRead {
+  return {
+    ok: true,
+    snapshot: { tasks: new Map(), taskUpdatedAt: new Map(), maxUpdatedAt: null, storePresent: false },
+  };
+}
+
 export function readTaskProgressSnapshot(workspaceDir: string): TaskProgressRead {
   const dbPath = path.join(path.resolve(workspaceDir), '.pd', 'state.db');
+  // P2-03 (final-remediation review): stat errors are CLASSIFIED — only a
+  // genuine ENOENT is the empty-task-set case; every other failure
+  // (EACCES/EPERM/EIO, a non-regular path, an unreadable parent) is
+  // evidence-unavailable, never a fabricated "empty store".
+  let stat: fs.Stats;
   try {
-    if (!fs.statSync(dbPath).isFile()) {
-      return {
-        ok: true,
-        snapshot: { tasks: new Map(), taskUpdatedAt: new Map(), maxUpdatedAt: null, storePresent: false },
-      };
-    }
-  } catch {
-    return {
-      ok: true,
-      snapshot: { tasks: new Map(), taskUpdatedAt: new Map(), maxUpdatedAt: null, storePresent: false },
-    };
+    stat = fs.statSync(dbPath);
+  } catch (error) {
+    const code = (error as { code?: string }).code ?? 'unknown';
+    if (code === 'ENOENT') return emptySnapshot();
+    return { ok: false, reason: `progress_snapshot_stat_failed:${code}` };
+  }
+  if (!stat.isFile()) {
+    return { ok: false, reason: 'progress_snapshot_not_a_file' };
   }
   let db: Database.Database;
   try {
