@@ -42,7 +42,7 @@
 
 ## 6. 合成协议校验（已执行，无需 D2/D5）
 
-测试入口：`npm run test:scripts`（`scripts/__tests__/pd-lab-judge-protocol.test.ts`，44 用例，全部通过；真实 CLI 子进程驱动 `npm run lab:judge-validate`）。
+测试入口：`npm run test:scripts`（`scripts/__tests__/pd-lab-judge-protocol.test.ts`，45 用例，全部通过；真实 CLI 子进程驱动 `npm run lab:judge-validate`）。
 
 | 校验面 | 结果 |
 | --- | --- |
@@ -59,7 +59,7 @@
 | lossyInput | PASS（截断→标记+位置事实；有损判胜=非法记录；交换后截断侧随内容移动；完整输入不得标记有损） |
 | 复现性 | PASS（同一 bundle 两次校验输出逐字节一致；协议 digest 稳定） |
 
-统计与资格测试：`scripts/__tests__/pd-lab-t6-qualification.test.ts`，25 用例全部通过（见第 8、10、13 节）。
+统计与资格测试：`scripts/__tests__/pd-lab-t6-qualification.test.ts`，32 用例全部通过（见第 8、10、13 节）。
 
 ## 7. 输入完整性
 
@@ -119,7 +119,7 @@
 npm run lab:qualify -- --input <qualification-input.json> --out <dir>
 ```
 
-三态判定规则（`scripts/dev/pd-lab/t6-qualification.mjs`，纯函数，25 项边界测试）：
+三态判定规则（`scripts/dev/pd-lab/t6-qualification.mjs`，纯函数，32 项测试）：
 
 - **BLOCKED**：授权/完整性不合格、n=0、D2/D5 未批准、实时校准未运行或失败、或出现无授权活动记录（停止条件）。
 - **EXPLORATORY_ONLY**：门全过但 n < n_min(α)、或 n < 预注册最低组数、或精度目标未达、或 Owner 盲评未通过。探索性 T6 需 D2 明确批准 + 预注册标记探索性；`promotePossible` 恒 false——**探索性结果绝不产生 PROMOTE**。
@@ -152,6 +152,17 @@ npm run lab:qualify -- --input <qualification-input.json> --out <dir>
 新增资格层问题码：`D6_NOT_APPROVED`、`CALIBRATION_STATUS_COUNT_CONFLICT`、`OWNER_REVIEW_STATUS_COUNT_CONFLICT`、`EVIDENCE_MISSING_FOR_CLAIM`、`EVIDENCE_ARTIFACT_INVALID`、`EVIDENCE_CLAIM_MISMATCH`、`PREREGISTRATION_DRIFT`；交换层 `SWAP_OF_INVALID`、`SWAP_PARTNER_MISSING`、`SWAP_CONTENT_MISMATCH`、`SWAP_IDENTITY_NOT_INVERTED`、`SWAP_DISPLAY_ORDER_MISMATCH`、`SWAP_TRUNCATION_MISMATCH`、`SWAP_DIGEST_MISMATCH`、`SWAP_DUPLICATE_PAIRING`、`SWAP_PARTNER_INVALID`；仲裁 `INVALID_ARBITRATION_RECORD`；披露 `AUTHORITY_PROVENANCE_UNVERIFIED`（本地完整性核验不能证明批准者身份，如实披露）。
 
 真实事实不变：真实模型调用 0 次、Owner 盲评 0 样本、D2/D5/D6 均未批准、真实 T6 资格 BLOCKED。合成一致性测试只证明引擎行为，不冒充真实校准。
+
+### 12.1 Devin Review 第二轮加固（commit `9faad0de7`）
+
+终审整改合入后 Devin Review 报告 6 项 fail-closed 缺口，逐项修复并回归：
+
+- 校准成功证据只统计 `SUCCEEDED` 唯一调用（`modelCallCount`），失败调用仍计入审计总数（`auditCallCount`，`UNAUTHORIZED_MODEL_CALLS_RECORDED` 使用审计总数）——`PASSED` + 全失败调用不再能通过。
+- 批准记录的 `scope` 必须严格等于其绑定的证据槽位——D5 批准文件不能再被填进 d2 栏。
+- 预注册成为声明性分析参数的必备证据：未绑定 → `EVIDENCE_MISSING_FOR_CLAIM`（不再回退采用输入 α/最小组数）；校准的 `precisionTarget` 必须等于预注册的冻结目标（缺锚 → `EVIDENCE_ARTIFACT_INVALID`，不一致 → `EVIDENCE_CLAIM_MISMATCH`）。
+- 数据路径授权只认双方约定的正向态 `realDataProbe.status === "RAN_WITH_D6"`（闭集），其余任何取值一律拒绝。
+- 分组映射第二层绑定：source-groups 文件 `digest` 必须等于准入报告记录的 `sourceGroups.digest`，误选不同合并规则的分组文件即拒绝。
+- 交换配对先全局登记显式 `swapOf` 关系再推断：已绑定包不再被二次推断抢占，未声明包只配对唯一未占位反像，歧义 → `SWAP_OF_INVALID`——两对同内容的合法交换不再被误报 `SWAP_DUPLICATE_PAIRING`。
 
 ## 13. Complexity Delta
 
