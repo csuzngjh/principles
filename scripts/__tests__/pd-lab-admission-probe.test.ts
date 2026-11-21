@@ -50,6 +50,10 @@ import {
   runNpmLabProbe,
   tmpRoot,
   sha256File,
+  TEST_DIR,
+  createFifo,
+  runProbeWithTimeout,
+  runProbeWithEnv,
 } from './fixtures/pd-lab-admission-probe-helpers.mjs';
 
 const require = createRequire(import.meta.url);
@@ -1818,6 +1822,182 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     const runB = runProbe(['--dataset', worldB.datasetPath, '--snapshot', worldB.snapshotDir, '--out', worldB.outDir]);
     expect(runB.status).toBe(0);
     expect(codesOf(readOut(worldB.outDir), 'S01')).toContain('DIGEST_MISMATCH');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r3 final remediation — started_at-only retention evidence, FIFO
+// non-blocking refusal, fd lifecycle fault injection.
+// ---------------------------------------------------------------------------
+
+describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI subprocess)', () => {
+  it('Case A: positive retention evidence with NO other gap → SOURCE_RETENTION_EXPIRED, INCOMPLETE, paths blocked', () => {
+    const world = buildWorld('r3-ret-only', {
+      sessions: [
+        {
+          sessionId: 'sess-ret-a',
+          startedAt: T0, // 10:00
+          userTurns: [
+            { turnIndex: 2, createdAt: '2026-09-01T10:06:00.000Z' },
+            { turnIndex: 3, createdAt: '2026-09-01T10:07:00.000Z' },
+          ],
+          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z' }, { createdAt: '2026-09-01T10:07:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-ret-a', createdAt: '2026-09-01T10:08:00.000Z' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    // No gapReason fires (contiguous turns, complete roles, earliest turn
+    // BEFORE the pain) — yet the positive evidence must stand alone.
+    expect(codesOf(out, 'S01')).toContain('SOURCE_RETENTION_EXPIRED');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP');
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_RETENTION_EXPIRED');
+    expect(problem.impact).toContain('passes all internal continuity checks');
+    expect(problem.impact).toContain('strictly precedes earliest surviving turn');
+  });
+
+  it('Case B: started_at EQUAL to the earliest surviving turn is NOT positive evidence', () => {
+    const world = buildWorld('r3-ret-eq', {
+      sessions: [
+        {
+          sessionId: 'sess-ret-b',
+          startedAt: '2026-09-01T10:06:00.000Z', // == earliest surviving turn
+          userTurns: [{ turnIndex: 0, createdAt: '2026-09-01T10:06:00.000Z' }, { turnIndex: 1, createdAt: '2026-09-01T10:07:00.000Z' }],
+          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-ret-b', createdAt: '2026-09-01T10:08:00.000Z' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const codes = codesOf(readOut(world.outDir), 'S01');
+    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
+    expect(codes).not.toContain('SOURCE_GAP');
+  });
+
+  it('Case C: unparseable started_at is never positive evidence; a real gap keeps SOURCE_GAP semantics', () => {
+    const world = buildWorld('r3-ret-badts', {
+      sessions: [
+        {
+          sessionId: 'sess-ret-c',
+          startedAt: 'not-a-timestamp',
+          userTurns: [{ turnIndex: 0, createdAt: '2026-09-01T10:06:00.000Z' }],
+          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-ret-c', createdAt: PAIN_AT }], // pain BEFORE the only surviving turn → real gap
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const codes = codesOf(out, 'S01');
+    expect(codes).toContain('SOURCE_GAP');
+    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
+  });
+
+  it('Case D: production turn_index (from 2, contiguous) with started_at == earliest turn → no retention claim', () => {
+    const first = '2026-09-01T10:06:00.000Z';
+    const world = buildWorld('r3-ret-prod', {
+      sessions: [
+        {
+          sessionId: 'sess-ret-d',
+          startedAt: first, // == earliest surviving turn (nextUserTurnIndex semantics)
+          userTurns: [{ turnIndex: 2, createdAt: first }, { turnIndex: 3, createdAt: first }],
+          assistantTurns: [{ createdAt: first }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-ret-d', createdAt: '2026-09-01T10:08:00.000Z' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const codes = codesOf(readOut(world.outDir), 'S01');
+    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
+    expect(codes).not.toContain('SOURCE_GAP');
+  });
+});
+
+describe('r3 P1-02: FIFO at a blob path is refused without blocking (real CLI subprocess, POSIX)', () => {
+  const BLOB = `assistant-${'b'.repeat(64)}.txt`;
+
+  function fifoWorld() {
+    return buildWorld('r3-fifo', {
+      sessions: [{ sessionId: 'sess-fifo', startedAt: T0, userTurns: [{ turnIndex: 0, blobRef: BLOB }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-fifo' }],
+    });
+  }
+
+  it('a writer-less FIFO at the manifest blob path is refused within the timeout, never read', (ctx) => {
+    if (process.platform === 'win32') {
+      ctx.skip(); // FIFOs are a POSIX special-file type; Windows keeps its junction/symlink/dir refusals
+      return;
+    }
+    const world = fifoWorld();
+    const fifoPath = path.join(world.snapshotDir, 'blobs', BLOB);
+    fs.rmSync(fifoPath); // replace the real blob file
+    if (!createFifo(fifoPath)) {
+      ctx.skip(); // mkfifo unavailable on this image — POSIX CI carries the case
+      return;
+    }
+    const before = fingerprintTree(world.root);
+    // 3s bound: the pre-fix probe would block forever on open(O_RDONLY) of a
+    // writer-less FIFO and be killed with signal SIGTERM (status null).
+    const run = runProbeWithTimeout(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir], 3_000);
+    expect(run.signal).toBeNull(); // completed, not killed
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'TURN_BLOB_MISSING');
+    expect(problem).toBeDefined();
+    expect(problem.impact).toContain('not a regular file'); // FIFO classified via fstat, never read
+    expect(codesOf(out, 'S01')).not.toContain('DIGEST_MISMATCH'); // FIFO content was never consumed
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED'); // no READY from an unreadable blob
+    // Nothing else touched, nothing new outside --out, temp state clean.
+    const after = fingerprintTree(world.root);
+    const stripOut = (tree: Map<string, { sha256: string; mtimeMs: number }>) =>
+      new Map([...tree].filter(([rel]) => !rel.startsWith('probe-out/')));
+    expect([...stripOut(before).keys()].sort()).toEqual([...stripOut(after).keys()].sort());
+    for (const [rel, meta] of stripOut(before)) {
+      expect(after.get(rel), `source file ${rel} unchanged`).toEqual(meta);
+    }
+  });
+});
+
+describe('r3 P2-01: fstat failure closes the opened fd exactly once (fault injection through the real CLI)', () => {
+  const BLOB = `assistant-${'a'.repeat(64)}.txt`;
+  // TEST_DIR already IS the fixtures dir (dirname of the helpers module).
+  const PRELOAD = path.resolve(TEST_DIR, 'pd-lab-probe-fault-inject.cjs').replace(/\\/g, '/');
+
+  function fdWorld() {
+    return buildWorld('r3-fd', {
+      sessions: [{ sessionId: 'sess-fd', startedAt: T0, userTurns: [{ turnIndex: 0, blobRef: BLOB }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-fd' }],
+    });
+  }
+
+  it('open-success → fstat-throw → structured refusal, and closeSync called exactly once for the faulted fd', () => {
+    const world = fdWorld();
+    const logPath = path.join(world.root, 'close-log.txt');
+    const run = runProbeWithEnv(
+      ['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir],
+      {
+        PRI1257_FAULT: 'fstat',
+        PRI1257_FAULT_LOG: logPath,
+        NODE_OPTIONS: `--require ${PRELOAD}`,
+      },
+    );
+    expect(run.status).toBe(0); // structured refusal — not a crash, not a hang
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'TURN_BLOB_MISSING');
+    expect(problem).toBeDefined();
+    expect(problem.impact).toContain('could not be verified/read'); // unreadable classification preserved
+    expect(codesOf(out, 'S01')).not.toContain('DIGEST_MISMATCH'); // no content was consumed
+    // The faulted descriptor was closed EXACTLY once (no leak, no double close).
+    const log = fs.readFileSync(logPath, 'utf8').trim().split('\n');
+    expect(log).toEqual(['FAULT_FD_CLOSE=1']);
   });
 });
 

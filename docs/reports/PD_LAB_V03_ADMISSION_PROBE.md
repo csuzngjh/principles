@@ -165,7 +165,17 @@ TECH §5.2 表之外的 CONTRACT §2.4 首批代码实现位置：
 | R570 时区偏移轨迹误判缺口 | 属实：最早轮次按字符串选取、顺序按字符串比较 | 最早轮次与顺序判定全部改为 isoTimeValue 时刻比较；不可解析时间独立成缺口原因（不静默跳过） | 混合偏移正常顺序正控（零缺口）；跨偏移真实倒序负控（检出） |
 | R889 期望依赖工具输出缺口不计入完整性 | 属实：标注 BLOCKED 但 completeness 仍 COMPLETE，完整案例数虚高 | dependsOnToolOutput && TOOL_RESULT_PREVIEW_ONLY → completeness 派生 INCOMPLETE；PIPELINE_REPLAY 独立 READY 语义保持 | replay READY + labeling BLOCKED + completeness INCOMPLETE 三断言用例 |
 
-## 13. Complexity Delta
+## 13. r3 最终整改（3 项，2026-11-21）
+
+最终独立复审 3 项发现全部修复；测试 102 → **108**（107 执行 + 1 POSIX FIFO 用例在 Windows 平台显式跳过，Linux CI 真实执行）。
+
+| 发现 | 根因 | 修复 | 测试 |
+| --- | --- | --- | --- |
+| P1-01 started_at-only 保留证据被 gap 检测门控 | 保留证据只在 gapReasons 非空时参与判定——一个"存活窗口内部完全连续、但 started_at 严格早于最早存活轮"的会话（10:00 建、10:06/10:07 存活、10:08 Pain）不会得到任何 SOURCE_* 判定，积极证据被丢弃 | 保留证据独立判定：`started_at` 有效且**严格早于**最早存活轮时刻 → 无条件 `SOURCE_RETENTION_EXPIRED`（impact 区分"伴随其他缺口"与"仅凭积极证据"两种表述）；不可解析/相等不构成积极证据；turn_index 非零起点旧错误不回归；不推断缺失内容 | Case A 正控（无其他 gap 仍 RETENTION+INCOMPLETE+BLOCKED）/Case B 相等边界/Case C 不可解析+真实缺口保持 SOURCE_GAP/Case D 生产编号兼容 |
+| P1-02 POSIX FIFO 永久阻塞 | `open(O_RDONLY)` 对无写入者的 FIFO 会等待写入者——probe 可能被单条夹持的 blob 路径永久挂起 | 采用 `residue-delete.mjs` `readRegularFileNoFollow` 的同一旗标纪律：POSIX 追加 `O_NONBLOCK`（win32 显式 0）——O_NONBLOCK 只让 open 非阻塞，类型裁决仍完全来自 fstat；FIFO/目录/其他非普通文件一律拒绝，内容读取仍只经已验证 fd，不回退路径读取 | POSIX 真实 FIFO 用例（3s 超时边界：完成而非被杀、`not a regular file` 拒绝、无 DIGEST_MISMATCH 即零读取、无 READY、源文件集+sha+mtime 不变）；Windows 显式跳过，junction/symlink/dir 拒绝测试继续执行 |
+| P2-01 fstat 异常 fd 泄漏 | openSync 与 fstatSync 同一 try/catch：open 成功后 fstat 抛出会直接进入 catch 返回，fd 未关闭 | fd 生命周期重组：open 成功立即进入**单一 finally 托管区**——fstat/验证/身份绑定/哈希/异常返回全部在区内，任何成功、拒绝、异常路径都恰好关闭一次；close 异常不掩盖原始拒绝原因；错误分类不变（fstat 失败仍归 `unreadable`） | 故障注入（`NODE_OPTIONS=--require` CJS preload 在 ESM 图加载前打补丁，实证对 `import {fstatSync} from 'node:fs'` 可见）：首 fstat 确定性抛出→CLI 结构化拒绝（exit 0 + unreadable impact）、故障 fd 恰好一次 close（计数日志恰一行 `FAULT_FD_CLOSE=1`）、无内容消费 |
+
+## 14. Complexity Delta
 
 ```text
 New durable source of truth: NO   （admission-report/source-groups/remediation-queue 均为可复算派生物）

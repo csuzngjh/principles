@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 const { applyTrajectorySchemaBase } = require('@principles/core/runtime');
 
-const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
+export const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '..', '..', '..');
 export const SCRIPT = path.join(REPO_ROOT, 'scripts', 'dev', 'pd-lab', 'admission-probe.mjs');
 export const SCRIPT_SOURCE = fs.readFileSync(SCRIPT, 'utf8');
@@ -98,6 +98,41 @@ export function runNpmLabProbe(args) {
     cwd: REPO_ROOT,
     shell: process.platform === 'win32',
   });
+}
+
+/**
+ * r3 P2-01 fault-injection driver: runs the REAL CLI with a CJS preload
+ * (NODE_OPTIONS=--require) that patches node:fs BEFORE the ESM graph loads —
+ * a preload patch is visible to the CLI's `import { fstatSync } from
+ * 'node:fs'` bindings (verified empirically). Extra env is additive.
+ */
+export function runProbeWithEnv(args, extraEnv = {}) {
+  const env = { ...process.env, ...extraEnv };
+  if (typeof env.NODE_OPTIONS === 'string' && env.NODE_OPTIONS.includes('--require')) {
+    env.NODE_OPTIONS = env.NODE_OPTIONS.replace(/\\/g, '/');
+  }
+  return spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: 'utf8',
+    timeout: 180_000,
+    cwd: REPO_ROOT,
+    env,
+  });
+}
+
+/** r3 P1-02: bounded-time CLI run (proves the probe finishes, not hangs). */
+export function runProbeWithTimeout(args, timeoutMs) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    cwd: REPO_ROOT,
+  });
+}
+
+/** r3 P1-02: create a POSIX FIFO at `pathStr`. Returns true on success; the
+ * caller skips the FIFO case when the platform cannot create one. */
+export function createFifo(pathStr) {
+  const run = spawnSync('mkfifo', [pathStr], { encoding: 'utf8', timeout: 10_000 });
+  return run.status === 0;
 }
 
 // ---------------------------------------------------------------------------

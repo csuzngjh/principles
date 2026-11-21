@@ -949,18 +949,23 @@ function analyzeSession(sample, facts) {
 
   // Retention evidence (CONTRACT §2.4): POSITIVE proof that earlier rows once
   // existed — the session's preserved started_at strictly precedes the
-  // earliest surviving turn. PRODUCTION SEMANTICS (r2 review R600):
-  // nextUserTurnIndex (openclaw-plugin/src/hooks/prompt.ts) numbers the first
-  // recorded user turn as host-user-message-count + 1, so a NORMAL OpenClaw
-  // session's turn_index starts ABOVE 0. A non-zero start is therefore NOT a
-  // deletion signal (CONTRACT §2.4's turn_index example assumes 0-based
-  // numbering, which this producer does not use — the probe implements the
-  // sound subset and the deviation is documented in the report). Absent
-  // positive evidence, an observation stays SOURCE_GAP (DT-07).
-  const retentionEvidence = [];
+  // earliest surviving turn. This evidence is evaluated on its own and stands
+  // ALONE: a session whose surviving window passes every internal continuity
+  // check is still missing the history that existed before the earliest
+  // surviving row (r3 P1-01 — the evidence must not be gated on other gap
+  // findings). PRODUCTION SEMANTICS (r2 review R600): nextUserTurnIndex
+  // (openclaw-plugin/src/hooks/prompt.ts) numbers the first recorded user
+  // turn as host-user-message-count + 1, so a NORMAL OpenClaw session's
+  // turn_index starts ABOVE 0 — a non-zero start is NOT a deletion signal
+  // (CONTRACT §2.4's turn_index example assumes 0-based numbering, which this
+  // producer does not use; the deviation is documented in the report).
+  // started_at that is unparseable or merely EQUAL to the earliest surviving
+  // turn is never positive evidence; an unparseable started_at also never
+  // becomes a gap on its own.
+  let positiveRetention = false;
   const startedAtMs = session && typeof session.started_at === 'string' ? isoTimeValue(session.started_at) : null;
   if (earliestTurnAtMs !== null && startedAtMs !== null && startedAtMs < earliestTurnAtMs) {
-    retentionEvidence.push(`sessions.started_at ${session.started_at} precedes earliest surviving turn ${earliestTurnAt}`);
+    positiveRetention = true;
   }
 
   const painAtMs = isoTimeValue(sample.createdAt);
@@ -1009,28 +1014,36 @@ function analyzeSession(sample, facts) {
   }
   const gapObserved = gapReasons.length > 0 ? gapReasons.join('; ') : null;
 
-  if (gapObserved !== null) {
-    if (retentionEvidence.length > 0) {
-      problems.push(
-        makeProblem(
-          'SOURCE_RETENTION_EXPIRED',
-          `session:${sessionId}`,
-          evidence,
-          `Source rows for this session were removed by retention: ${gapObserved}. Positive retention evidence: ${retentionEvidence.join('; ')}. Earlier turns existed and are no longer recoverable from this snapshot.`,
-          'Recover the full-fidelity turns from the host-native session storage if authorized, or re-snapshot before retention removes rows; do not reconstruct missing turns by inference.',
-        ),
-      );
-    } else {
-      problems.push(
-        makeProblem(
-          'SOURCE_GAP',
-          `session:${sessionId}`,
-          evidence,
-          `Trajectory gap without retention evidence: ${gapObserved}. Both readings are possible — the rows never existed (normal session boundary, DT-07) or they were removed and no evidence survives to prove it. This probe does NOT claim retention expiry without positive evidence.`,
-          'If the pre-pain turns matter for the study, cross-check the host-native session file under an authorized full-fidelity scope before treating the gap as a normal boundary.',
-        ),
-      );
-    }
+  // Retention evidence decides INDEPENDENTLY of the gap findings (r3 P1-01):
+  // positive evidence → SOURCE_RETENTION_EXPIRED whether or not any other gap
+  // check fired; without positive evidence a gap stays SOURCE_GAP (DT-07).
+  // A session with positive evidence and NO other gap reason is still
+  // incomplete — the rows between started_at and the earliest surviving turn
+  // existed and are gone, even though the surviving window looks internally
+  // continuous.
+  if (positiveRetention) {
+    const evidenceLine = `sessions.started_at ${session.started_at} strictly precedes earliest surviving turn ${earliestTurnAt}`;
+    problems.push(
+      makeProblem(
+        'SOURCE_RETENTION_EXPIRED',
+        `session:${sessionId}`,
+        evidence,
+        gapObserved !== null
+          ? `Source rows for this session were removed by retention: ${gapObserved}. Positive retention evidence: ${evidenceLine}. Earlier turns existed and are no longer recoverable from this snapshot.`
+          : `Earlier rows for this session existed and are no longer in this snapshot, even though the surviving window passes all internal continuity checks. Positive retention evidence: ${evidenceLine}. The surviving turns alone do not represent the full conversation the session actually had.`,
+        'Recover the full-fidelity turns from the host-native session storage if authorized, or re-snapshot before retention removes rows; do not reconstruct missing turns by inference.',
+      ),
+    );
+  } else if (gapObserved !== null) {
+    problems.push(
+      makeProblem(
+        'SOURCE_GAP',
+        `session:${sessionId}`,
+        evidence,
+        `Trajectory gap without retention evidence: ${gapObserved}. Both readings are possible — the rows never existed (normal session boundary, DT-07) or they were removed and no evidence survives to prove it. This probe does NOT claim retention expiry without positive evidence.`,
+        'If the pre-pain turns matter for the study, cross-check the host-native session file under an authorized full-fidelity scope before treating the gap as a normal boundary.',
+      ),
+    );
   }
 
   // Blob references (TURN_BLOB_MISSING / DIGEST_MISMATCH) + digest cache filled by caller.
@@ -1766,9 +1779,12 @@ function buildRemediationQueue(perSample) {
 // no-follow open → fd identity re-verification → read/hash via the fd.
 // ---------------------------------------------------------------------------
 import { constants as FS_CONSTANTS } from 'node:fs';
-// O_NOFOLLOW is POSIX-only; on Windows the lstat+realpath checks carry the
-// symlink guarantee (junctions/symlinks surface on lstat as reparse points).
-const O_NOFOLLOW = FS_CONSTANTS.O_NOFOLLOW ?? 0;
+// O_NOFOLLOW / O_NONBLOCK are POSIX-only (same discipline as the reference
+// readRegularFileNoFollow in scripts/dev/lib/residue-delete.mjs); on Windows
+// the flags are 0 and the junction/symlink/special-file refusals come from
+// the open-then-verify steps instead.
+const O_NOFOLLOW = process.platform === 'win32' ? 0 : (FS_CONSTANTS.O_NOFOLLOW ?? 0);
+const O_NONBLOCK = process.platform === 'win32' ? 0 : (FS_CONSTANTS.O_NONBLOCK ?? 0);
 const O_RDONLY = FS_CONSTANTS.O_RDONLY ?? 0;
 
 /**
@@ -1822,17 +1838,19 @@ function readBlobFileSafely(blobsDir, ref, cache) {
     }
     const blobPath = path.join(blobsDir, ref);
     // OPEN FIRST (CodeQL js/file-system-race — same single-fd resolution as
-    // the PRI-1138 precedent): every content operation happens through the
-    // opened descriptor; the path operations that follow only BIND the opened
-    // object to a verified location, so a swap between any two steps is
-    // caught by the dev/ino identity comparison instead of being exploitable.
+    // the PRI-1138 precedent), with the residue-delete.mjs
+    // readRegularFileNoFollow flag discipline: O_NONBLOCK on POSIX so a FIFO
+    // (or any special file without a writer) fails open() fast instead of
+    // blocking the probe forever — O_NONBLOCK only makes the OPEN
+    // non-blocking, the type decision still comes exclusively from fstat
+    // (r3 P1-02). Windows takes no O_NONBLOCK/O_NOFOLLOW (neither flag
+    // exists meaningfully there); junction/symlink refusal there comes from
+    // the open-then-verify steps below, unchanged.
     //  1. open — POSIX O_NOFOLLOW refuses a final-component symlink
     //     atomically (ELOOP); ENOENT classifies as missing.
     let fd;
-    let fdst;
     try {
-      fd = openSync(blobPath, O_RDONLY | O_NOFOLLOW);
-      fdst = fstatSync(fd);
+      fd = openSync(blobPath, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
     } catch (error) {
       const message = String(error?.message ?? error);
       if (/ELOOP|too many symbolic link/i.test(message)) {
@@ -1843,9 +1861,15 @@ function readBlobFileSafely(blobsDir, ref, cache) {
       }
       return { ok: false, reason: 'unreadable', detail: `blob ${ref} could not be opened: ${message.slice(0, 120)}` };
     }
+    // fd is allocated — every path below (fstat, verification, refusal
+    // returns, hashing, unexpected throws) is inside ONE finally-managed
+    // region so the descriptor is closed exactly once and no failure mode
+    // can leak it (r3 P2-01).
     try {
       //  2. the opened object must be a regular file (O_RDONLY opens a
-      //     directory successfully on Linux — the fstat check refuses it).
+      //     directory successfully on Linux and a writer-less FIFO
+      //     immediately with O_NONBLOCK — the fstat check refuses both).
+      const fdst = fstatSync(fd);
       if (!fdst.isFile()) {
         return { ok: false, reason: 'not_regular_file', detail: `blob ${ref} is not a regular file at open time` };
       }
@@ -1913,8 +1937,13 @@ function readBlobFileSafely(blobsDir, ref, cache) {
         hash.update(read === chunk.length ? chunk : chunk.subarray(0, read));
       }
       return { ok: true, sha256: hash.digest('hex') };
+    } catch (error) {
+      // Unexpected internal failure (fstat/read/identity plumbing) — a
+      // structured refusal, never a raw stack through the CLI, with the fd
+      // still closed by the finally below.
+      return { ok: false, reason: 'unreadable', detail: `blob ${ref} could not be verified/read: ${String(error?.message ?? error).slice(0, 120)}` };
     } finally {
-      try { closeSync(fd); } catch { /* fd already closed */ }
+      try { closeSync(fd); } catch { /* the one and only close for this fd */ }
     }
   })();
   cache.set(ref, outcome);
