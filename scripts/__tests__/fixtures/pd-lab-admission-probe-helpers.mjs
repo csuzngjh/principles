@@ -1,0 +1,497 @@
+/**
+ * PRI-1257 / PD-Lab v0.3 T7a-Data — test fixtures and subprocess driver.
+ *
+ * Lives under fixtures/ as .mjs so the subprocess execution primitive keeps a
+ * literal command position (argv-array form, never a composed shell string)
+ * and the synthetic-world builders stay importable from the .ts suite
+ * (same pattern as the T3b/T5 fixtures).
+ *
+ * Everything here is synthetic: REAL trajectory schema via
+ * `applyTrajectorySchemaBase`, fake dataset, fake blob manifest. No real
+ * full-fidelity data, no network, no model calls.
+ */
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const Database = require('better-sqlite3');
+const { applyTrajectorySchemaBase, runTrajectoryRetentionBatches, ensureTrajectoryRetentionIndexes } = require('@principles/core/runtime');
+
+/**
+ * r6 P1-a: run the REAL production sweeper with a DETERMINISTIC injectable
+ * clock. The scripted `nowValues` are returned by hooks.now() in call order
+ * (call 1 = run start; then one call per remaining-budget check / batch start
+ * / batch duration), which lets a test stop the sweep at an exact point —
+ * e.g. right after the assistant_turns batch commits, with the user_turns
+ * batch never started.
+ */
+export function runRealRetentionSweepWithHooks(snapshotDbPath, cutoffIso, nowValues) {
+  const db = new Database(snapshotDbPath);
+  try {
+    ensureTrajectoryRetentionIndexes(db);
+    let call = 0;
+    return runTrajectoryRetentionBatches(db, {
+      policy: { batchSize: 500, runBudgetMs: 1000 },
+      cutoff: cutoffIso,
+      hooks: {
+        now: () => {
+          call += 1;
+          return call <= nowValues.length ? nowValues[call - 1] : nowValues[nowValues.length - 1];
+        },
+      },
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(TEST_DIR, '..', '..', '..');
+export const SCRIPT = path.join(REPO_ROOT, 'scripts', 'dev', 'pd-lab', 'admission-probe.mjs');
+export const SCRIPT_SOURCE = fs.readFileSync(SCRIPT, 'utf8');
+
+/** CONTRACT §2.4 first-batch problem codes — the closed set the probe may emit.
+ *  r8 adds INGRESS_HOST_UNRESOLVABLE, TOOL_RESULT_MISSING and
+ *  EXPECTATION_VISIBILITY_UNPROVEN (CONTRACT §2.4 r8 amendment). */
+export const CONTRACT_PROBLEM_CODES = [
+  'SOURCE_GAP',
+  'SOURCE_RETENTION_EXPIRED',
+  'TURN_BLOB_MISSING',
+  'TOOL_RESULT_PREVIEW_ONLY',
+  'PAIN_ANCHOR_MISSING',
+  'EXPECTATION_UNRESOLVED',
+  'AUTHORIZATION_UNVERIFIED',
+  'REFERENCE_UNAVAILABLE',
+  'DIGEST_MISMATCH',
+  'FUTURE_INFORMATION',
+  'ENVIRONMENT_UNAVAILABLE',
+  'INGRESS_HOST_UNRESOLVABLE',
+  'TOOL_RESULT_MISSING',
+  'EXPECTATION_VISIBILITY_UNPROVEN',
+];
+
+export const T0 = '2026-09-01T10:00:00.000Z'; // session start / early turns
+export const T1 = '2026-09-01T10:02:00.000Z'; // later turns
+export const PAIN_AT = '2026-09-01T10:05:00.000Z'; // pain trigger
+
+export function tmpRoot() {
+  const raw = process.env.TMPDIR ?? process.env.TMP ?? process.env.TEMP;
+  return fs.realpathSync(typeof raw === 'string' && raw.length > 0 ? raw : os.tmpdir());
+}
+
+export function sha256File(p) {
+  return createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+}
+
+/** rel path -> { sha256, mtimeMs } for every file under `dir` (Dirent-safe walk). */
+export function fingerprintTree(dir) {
+  const out = new Map();
+  const walk = (current, prefix) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      const st = fs.lstatSync(full);
+      if (st.isDirectory()) {
+        walk(full, `${prefix}${entry.name}/`);
+        continue;
+      }
+      if (st.isFile()) {
+        out.set(`${prefix}${entry.name}`, { sha256: sha256File(full), mtimeMs: st.mtimeMs });
+      }
+    }
+  };
+  walk(dir, '');
+  return out;
+}
+
+/**
+ * Subprocess driver: the REAL CLI through `npm run lab:probe`'s script.
+ * Command position is the literal interpreter; all inputs go as argv.
+ */
+export function runProbe(args) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: 'utf8',
+    timeout: 120_000,
+    cwd: REPO_ROOT,
+  });
+}
+
+/**
+ * Drive the npm alias itself (`npm run lab:probe -- <argv>`) so the
+ * package.json wiring is under test, not just the script file.
+ */
+export function runNpmLabProbe(args) {
+  return spawnSync('npm', ['run', 'lab:probe', '--', ...args], {
+    encoding: 'utf8',
+    timeout: 180_000,
+    cwd: REPO_ROOT,
+    shell: process.platform === 'win32',
+  });
+}
+
+/**
+ * r3 P2-01 fault-injection driver: runs the REAL CLI with a CJS preload that
+ * patches node:fs BEFORE the ESM graph loads — a preload patch is visible to
+ * the CLI's `import { fstatSync } from 'node:fs'` bindings (verified
+ * empirically). The preload is passed as `--require <path>` CHILD ARGV, NOT
+ * through NODE_OPTIONS: Node splits NODE_OPTIONS on whitespace, so a preload
+ * path containing a space would end the CLI before it starts (r4 review).
+ * Extra env is additive.
+ */
+export function runProbeWithEnv(args, extraEnv = {}, nodeArgvPrefix = []) {
+  return spawnSync(process.execPath, [...nodeArgvPrefix, SCRIPT, ...args], {
+    encoding: 'utf8',
+    timeout: 180_000,
+    cwd: REPO_ROOT,
+    env: { ...process.env, ...extraEnv },
+  });
+}
+
+/** r3 P1-02: bounded-time CLI run (proves the probe finishes, not hangs). */
+export function runProbeWithTimeout(args, timeoutMs) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    cwd: REPO_ROOT,
+  });
+}
+
+/** r3 P1-02: create a POSIX FIFO at `pathStr`. Returns true on success; the
+ * caller skips the FIFO case when the platform cannot create one. */
+export function createFifo(pathStr) {
+  const run = spawnSync('mkfifo', [pathStr], { encoding: 'utf8', timeout: 10_000 });
+  return run.status === 0;
+}
+
+/**
+ * r5 Case H: run the REAL production retention sweep
+ * (`runTrajectoryRetentionBatches` from @principles/core/runtime — the exact
+ * sweeper the host runtime and workers call) over the fixture's
+ * trajectory.db with the given cutoff. Fixture rows are AGED by the test
+ * (mirroring the passage of time); the DELETION itself is always performed
+ * by this production logic, never by test-side DELETEs.
+ */
+export function runRealRetentionSweep(snapshotDbPath, cutoffIso) {
+  const db = new Database(snapshotDbPath);
+  try {
+    ensureTrajectoryRetentionIndexes(db);
+    return runTrajectoryRetentionBatches(db, {
+      policy: { batchSize: 500, runBudgetMs: 10_000 },
+      cutoff: cutoffIso,
+      hooks: { now: () => Date.now() },
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * r5 Case H1/L: plant an immortal signal_confirmations row referencing the
+ * given turn rowids (production writes such rows while the referenced turns
+ * exist; the table is NOT swept, so the reference survives their deletion).
+ */
+export function plantSignalConfirmation(snapshotDbPath, { id, sessionId, userTurnRowid, referencesAssistantTurnId, createdAt }) {
+  const db = new Database(snapshotDbPath);
+  try {
+    db.prepare(
+      'INSERT INTO signal_confirmations (id, session_id, user_turn_rowid, occurrence_id, excerpt, terms_json, suggested_type, status, attempts, created_at, references_assistant_turn_id, assistant_turn_count_known, recent_assistant_turns_json)'
+        + ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      id,
+      sessionId,
+      userTurnRowid,
+      `occ-${id}`,
+      'planted confirmation excerpt',
+      JSON.stringify(['term']),
+      'correction',
+      'confirmed',
+      1,
+      createdAt,
+      referencesAssistantTurnId ?? null,
+      1,
+      '[]',
+    );
+  } finally {
+    db.close();
+  }
+}
+
+/** Count surviving rows of a swept table for a session (post-sweep assertion). */
+export function countSessionRows(snapshotDbPath, table, sessionId) {
+  const db = new Database(snapshotDbPath, { readonly: true });
+  try {
+    return db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE session_id = ?`).get(sessionId).n;
+  } finally {
+    db.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synthetic world builder (REAL schema, synthetic content)
+// ---------------------------------------------------------------------------
+
+export function buildWorld(label, options) {
+  const root = fs.mkdtempSync(path.join(tmpRoot(), `pd-lab-probe-${label}-`));
+  const snapshotDir = path.join(root, 'snapshot');
+  const blobsDir = path.join(snapshotDir, 'blobs');
+  fs.mkdirSync(blobsDir, { recursive: true });
+
+  const bodyMarkers = [];
+  const blobFiles = new Map(); // ref -> body
+
+  const db = new Database(path.join(snapshotDir, 'trajectory.db'));
+  applyTrajectorySchemaBase(db);
+
+  // P2-4 (active-WAL test support): keep the auto checkpoint off so committed
+  // frames stay in the -wal sidecar for the probe to recover.
+  if (options.journalMode === 'wal') {
+    db.pragma('journal_mode = WAL');
+    db.pragma('wal_autocheckpoint = 0');
+  }
+
+  const omittedSampleRows = new Set(options.omitSampleRows ?? []);
+  // Extra pain rows (r4: the /pd-pain-before-first-turn scenario needs an
+  // explaining pain event at the session start, alongside the sample's own
+  // pain row).
+  const extraPainRows = options.extraPainRows ?? [];
+  options.samples.forEach((sample, sampleIndex) => {
+    if (omittedSampleRows.has(sample.caseId)) {
+      return; // the test inserts this sample's rows itself (active-WAL scenario)
+    }
+    const painCreatedAt = sample.pain?.timeOverride ?? sample.createdAt ?? PAIN_AT;
+    const painSession = sample.pain?.sessionOverride ?? sample.sessionId;
+    const painId = sample.pain?.idOverride ?? sample.painId ?? sampleIndex + 1;
+    if (sample.pain?.omitRow !== true) {
+      db.prepare('INSERT INTO pain_events (id, session_id, source, score, created_at) VALUES (?, ?, ?, ?, ?)').run(
+        painId,
+        painSession,
+        'user_frustration',
+        80,
+        painCreatedAt,
+      );
+    }
+    for (const extra of extraPainRows) {
+      db.prepare('INSERT INTO pain_events (id, session_id, source, score, created_at) VALUES (?, ?, ?, ?, ?)').run(
+        extra.id,
+        extra.sessionId,
+        extra.source ?? 'user_frustration',
+        extra.score ?? 80,
+        extra.createdAt,
+      );
+    }
+    const sessionId = sample.sessionId;
+    if (sessionId.length === 0) {
+      return; // no session to build turns for
+    }
+    if (sample.noSessionRows !== true && !options.sessions.some((s) => s.sessionId === sessionId)) {
+      options.sessions.push({
+        sessionId,
+        startedAt: T0,
+        userTurns: [{ turnIndex: 0 }],
+        assistantTurns: [{ createdAt: T0 }],
+      });
+    }
+  });
+
+  for (const session of options.sessions) {
+    if (!session.omitSessionRow) {
+      db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)').run(
+        session.sessionId,
+        session.startedAt ?? T0,
+        T0,
+      );
+    }
+    for (const turn of session.userTurns ?? []) {
+      const body = `user-body-${session.sessionId}-${turn.turnIndex}-CONFIDENTIAL-MARKER`;
+      bodyMarkers.push(body);
+      if (turn.blobRef) {
+        blobFiles.set(turn.blobRef, `blob-body-${turn.blobRef}-CONFIDENTIAL-MARKER`);
+      }
+      db.prepare(
+        'INSERT INTO user_turns (session_id, turn_index, raw_text, blob_ref, raw_excerpt, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(session.sessionId, turn.turnIndex, turn.blobRef ? null : body, turn.blobRef ?? null, 'excerpt', turn.createdAt ?? T0);
+    }
+    for (const turn of session.assistantTurns ?? []) {
+      const body = `assistant-body-${session.sessionId}-${bodyMarkers.length}-CONFIDENTIAL-MARKER`;
+      bodyMarkers.push(body);
+      if (turn.blobRef) {
+        blobFiles.set(turn.blobRef, `blob-body-${turn.blobRef}-CONFIDENTIAL-MARKER`);
+      }
+      db.prepare(
+        'INSERT INTO assistant_turns (session_id, run_id, provider, model, sanitized_text, usage_json, empathy_signal_json, blob_ref, raw_excerpt, created_at)'
+          + ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(session.sessionId, 'run-1', 'prov', 'model', turn.blobRef ? '[blob]' : body, '{}', '{}', turn.blobRef ?? null, 'excerpt', turn.createdAt ?? T0);
+    }
+    let callIndex = 0;
+    for (const call of session.toolCalls ?? []) {
+      callIndex += 1;
+      // resultPreview: null is a REAL producer state (no result → NULL preview,
+      // after-tool-call-helpers.ts) and must be plantable — only an UNSET
+      // field defaults to the healthy short 'ok' preview. createdAt defaults
+      // to T0 (pre-trigger) and can be overridden per call.
+      const preview = call.resultPreview === undefined ? 'ok' : call.resultPreview;
+      if (preview !== null && preview.length > 20) {
+        bodyMarkers.push(preview);
+      }
+      db.prepare(
+        'INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, result_preview, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(session.sessionId, `tool-${callIndex}`, 'success', call.paramsJson ?? '{}', preview, call.createdAt ?? T0);
+    }
+  }
+  if (options.journalMode === 'wal') {
+    if (options.keepOpen !== true) {
+      // Silent-WAL scenario: a clean close checkpoints and REMOVES the
+      // -wal/-shm sidecars; the header keeps journal_mode=WAL.
+      db.close();
+    }
+  } else {
+    db.pragma('journal_mode = DELETE');
+    db.close();
+  }
+  // With keepOpen the writer connection stays open so committed frames remain
+  // un-checkpointed in -wal (active-WAL scenario); the caller closes it.
+  // Manifest and dataset are written before any early return below.
+
+  for (const [ref, extraBody] of options.blobBodies ?? new Map()) {
+    blobFiles.set(ref, extraBody);
+  }
+  const files = [];
+  for (const [ref, body] of blobFiles) {
+    fs.writeFileSync(path.join(blobsDir, ref), body, 'utf8');
+    files.push({
+      path: `blobs/${ref}`,
+      ref,
+      bytes: Buffer.byteLength(body, 'utf8'),
+      sha256: createHash('sha256').update(body, 'utf8').digest('hex'),
+      referenceCount: 1,
+      referencedBy: ['assistant_turns'],
+    });
+  }
+  if (options.corruptManifestEntry) {
+    for (const entry of files) {
+      options.corruptManifestEntry(entry);
+    }
+  }
+  if (options.dropBlob) {
+    fs.rmSync(path.join(blobsDir, options.dropBlob));
+  }
+  const manifest = {
+    schema: 'pd-lab-blob-manifest.v1',
+    generatedAt: '2026-11-20T00:00:00.000Z',
+    sourceWorkspace: 'synthetic',
+    blobDir: 'blobs',
+    ok: true,
+    consistencyStatus: 'CONSISTENT_WITHIN_WINDOW',
+    consistencyReasons: [],
+    files,
+    counts: { referencedDistinct: files.length, referencedRows: files.length, copied: files.length, orphansNotCopied: 0 },
+  };
+  fs.writeFileSync(path.join(snapshotDir, 'blob-manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+
+  const dataset = {
+    spec: 'PD-SPEC-001',
+    frozenAt: '2026-11-15T00:00:00.000Z',
+    samples: options.samples.map((sample, sampleIndex) => ({
+      experimentPainId: sample.caseId,
+      painEvent: {
+        id: sample.pain?.idOverride ?? sample.painId ?? sampleIndex + 1,
+        session_id: sample.sessionId,
+        source: 'user_frustration',
+        score: 80,
+        reason: sample.reason ?? 'synthetic reason',
+        created_at: sample.createdAt ?? PAIN_AT,
+        host_kind: sample.hostKind ?? 'openclaw',
+      },
+      evidenceRefs: sample.evidenceRefs ?? [],
+    })),
+  };
+  const datasetPath = path.join(root, 'dataset.json');
+  fs.writeFileSync(datasetPath, JSON.stringify(dataset, null, 2), 'utf8');
+
+  // Active-WAL scenario: the caller receives the OPEN writer connection and
+  // must close it itself (world.db.close()) after inserting its own committed
+  // rows; those frames stay un-checkpointed in -wal for the probe to recover.
+  return {
+    root,
+    datasetPath,
+    snapshotDir,
+    outDir: path.join(root, 'probe-out'),
+    bodyMarkers,
+    db: options.keepOpen === true ? db : null,
+    journalMode: options.journalMode === 'wal' ? 'wal' : 'delete',
+  };
+}
+
+/** A fully valid single-session, single-sample world (the positive control). */
+export function buildHealthyWorld(label) {
+  return buildWorld(label, {
+    sessions: [
+      {
+        sessionId: 'sess-healthy',
+        startedAt: T0,
+        userTurns: [{ turnIndex: 0 }, { turnIndex: 1, createdAt: T1 }],
+        assistantTurns: [{ createdAt: T0 }, { createdAt: T1 }],
+        toolCalls: [{ paramsJson: '{"cmd":"ls"}', resultPreview: 'ok' }],
+      },
+    ],
+    samples: [{ caseId: 'S01', sessionId: 'sess-healthy', evidenceRefs: ['session:sess-healthy'] }],
+  });
+}
+
+/** Write JSON at a fixed filename inside a test-owned directory. */
+export function writeJson(root, name, value) {
+  const file = path.join(root, name);
+  fs.writeFileSync(file, JSON.stringify(value, null, 2), 'utf8');
+  return file;
+}
+
+/** Read the probe's output artifacts. */
+export function readOut(outDir, verifyMode = false) {
+  const report = JSON.parse(fs.readFileSync(path.join(outDir, 'admission-report.json'), 'utf8'));
+  const queue = JSON.parse(fs.readFileSync(path.join(outDir, 'remediation-queue.json'), 'utf8'));
+  const groups = verifyMode ? null : JSON.parse(fs.readFileSync(path.join(outDir, 'source-groups.json'), 'utf8'));
+  return { report, groups, queue };
+}
+
+export function codesOf(out, caseId) {
+  return out.report.perSample.find((s) => s.caseId === caseId).problems.map((p) => p.code);
+}
+
+export function healthyExpectations() {
+  return { S01: { expectationId: 'exp-1', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: false } };
+}
+
+export function healthyAuthorizations() {
+  // A FULLY verifiable grant (CONTRACT §2.1: scope, purpose, validity window,
+  // withdrawal state): purpose matches the probe's default --study-purpose,
+  // and the window covers any plausible evaluation instant.
+  return {
+    S01: {
+      status: 'granted',
+      scope: 'full_fidelity',
+      purpose: 'pd-lab-admission-probe',
+      effectiveAt: '2020-01-01T00:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    },
+  };
+}
+
+/** A full valid grant for an arbitrary caseId (positive control building block). */
+export function fullGrant(caseId) {
+  return {
+    status: 'granted',
+    scope: 'full_fidelity',
+    purpose: 'pd-lab-admission-probe',
+    effectiveAt: '2020-01-01T00:00:00.000Z',
+    expiresAt: '2099-01-01T00:00:00.000Z',
+  };
+}
+
+/** Parse the last stderr line of a failed probe run into its structured reason. */
+export function stderrReason(run) {
+  return JSON.parse(run.stderr.trim().split('\n').pop());
+}
