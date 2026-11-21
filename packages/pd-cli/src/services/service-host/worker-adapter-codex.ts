@@ -24,24 +24,30 @@ function isPlainRecordLoose(value: unknown): value is Record<string, unknown> {
 
 /**
  * Sum the persisted-row counts of a parsed Codex catch-up report (F5):
- * `report.catchUp.rollouts[] → outcome{status:'ok', inserted:number}`.
- * Non-'ok' outcomes (degraded/skipped) and absent/malformed fields count 0.
+ * `report.catchUp.rollouts[] → outcome{status:'ok', inserted, enriched}`.
+ * R4 review fix: BOTH counters are persisted progress — `enriched` is a
+ * successful replay that completed an EXISTING trajectory with no new row
+ * (a session whose live trail only needed transcript catch-up evidence).
+ * `duplicates` stays excluded: re-ingesting already-persisted rows is no
+ * progress. Non-'ok' outcomes (degraded/skipped) and absent/malformed
+ * fields count 0.
  */
-function countCodexCatchUpInserts(parsed: Record<string, unknown>): number {
+function countCodexCatchUpPersisted(parsed: Record<string, unknown>): number {
   const catchUp = readReportSection(parsed, 'catchUp');
   if (catchUp === null) return 0;
   const { rollouts } = catchUp;
   if (!Array.isArray(rollouts)) return 0;
-  let inserted = 0;
+  let persisted = 0;
   for (const rollout of rollouts) {
     if (!isPlainRecordLoose(rollout)) continue;
     const { outcome } = rollout;
     if (!isPlainRecordLoose(outcome)) continue;
     if (outcome.status !== 'ok') continue;
-    const count = outcome.inserted;
-    if (typeof count === 'number' && Number.isFinite(count) && count > 0) inserted += count;
+    const { inserted, enriched } = outcome;
+    if (typeof inserted === 'number' && Number.isFinite(inserted) && inserted > 0) persisted += inserted;
+    if (typeof enriched === 'number' && Number.isFinite(enriched) && enriched > 0) persisted += enriched;
   }
-  return inserted;
+  return persisted;
 }
 
 export function createCodexWorkerAdapter() {
@@ -59,10 +65,11 @@ export function createCodexWorkerAdapter() {
         // F5 review fix: a Codex catch-up rollout entry records a CHECKED
         // session, not a write — re-examining an already-synced session
         // still yields an entry (replay outcome `{status:'ok', inserted:0}`).
-        // Only rollouts that actually persisted rows (outcome.status 'ok'
-        // with inserted > 0) count as progress; everything else is guarded
+        // R4 review fix: `enriched` (existing trajectory completed from the
+        // transcript) is real persisted progress alongside `inserted`;
+        // duplicate-only results stay excluded. Everything else is guarded
         // as zero (rc-4: element-level validation on the parsed array).
-        catchUpProcessed: countCodexCatchUpInserts(parsed),
+        catchUpProcessed: countCodexCatchUpPersisted(parsed),
       };
     },
   });

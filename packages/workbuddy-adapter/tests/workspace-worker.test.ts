@@ -304,6 +304,31 @@ describe('WorkBuddy worker cycle — cycle liveness (Phase 2, PRI-1280)', () => 
     }
   });
 
+  it('R5: a manual/companion cycle CLEARS the previous shadow run\'s invocation id from liveness', async () => {
+    const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
+    const previousSource = process.env.PD_INVOCATION_SOURCE;
+    const previousId = process.env.PD_INVOCATION_ID;
+    try {
+      // A shadow-driven cycle records the coordinator's invocation id…
+      process.env.PD_INVOCATION_SOURCE = 'service_host';
+      process.env.PD_INVOCATION_ID = 'inv-shadow-999';
+      await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+      expect(readWorkbuddyWorkerLiveness(governance)?.lastInvocationId).toBe('inv-shadow-999');
+      // …then a manual cycle (no PD_INVOCATION_ID) must not keep wearing it.
+      process.env.PD_INVOCATION_SOURCE = 'manual';
+      delete process.env.PD_INVOCATION_ID;
+      await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+      const liveness = readWorkbuddyWorkerLiveness(governance);
+      expect(liveness?.lastCycleDriver).toBe('manual');
+      expect(liveness?.lastInvocationId ?? null).toBeNull();
+    } finally {
+      if (previousSource === undefined) delete process.env.PD_INVOCATION_SOURCE;
+      else process.env.PD_INVOCATION_SOURCE = previousSource;
+      if (previousId === undefined) delete process.env.PD_INVOCATION_ID;
+      else process.env.PD_INVOCATION_ID = previousId;
+    }
+  });
+
   it('readWorkbuddyWorkerLiveness returns null for an unreadable/missing record', () => {
     const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
     expect(readWorkbuddyWorkerLiveness(governance)).toBeNull();

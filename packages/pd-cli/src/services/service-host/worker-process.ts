@@ -54,6 +54,11 @@ export interface WorkerProcessResult {
   readonly durationMs: number;
 }
 const DEFAULT_KILL_GRACE_MS = 5_000;
+/** Function indirection keeps the abort check un-narrowed across the two checkpoints. */
+function signalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
 const DEFAULT_MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const STDERR_TAIL_BYTES = 16 * 1024;
 
@@ -78,6 +83,18 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
 
   return new Promise<WorkerProcessResult>((resolve) => {
     const state: RunState = { settled: false, exitCode: null, termSignal: null, timedOut: false, cancelled: false };
+    // R2 review fix: an already-cancelled signal returns the cancelled
+    // outcome BEFORE spawn — otherwise an interrupt delivered between two
+    // queued workspaces would still start the next Worker just to kill it.
+    if (signalAborted(options.signal)) {
+      state.settled = true;
+      state.cancelled = true;
+      resolve({
+        exitCode: null, termSignal: null, stdout: '', stdoutTruncated: false, stderrTail: '',
+        timedOut: false, cancelled: true, durationMs: Date.now() - startedAt,
+      });
+      return;
+    }
     let child: ChildProcess;
     try {
       child = doSpawn(options.nodePath ?? process.execPath, [options.cliEntry, ...options.args], {
@@ -178,7 +195,7 @@ export function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerP
     if (options.timeoutMs > 0) {
       deadlineTimer = setTimeout(() => terminate(true, false), options.timeoutMs);
     }
-    if (options.signal?.aborted === true) {
+    if (signalAborted(options.signal)) {
       terminate(false, true);
     } else {
       options.signal?.addEventListener('abort', onAbort, { once: true });

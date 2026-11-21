@@ -160,12 +160,15 @@ export function codexWorkerCycleDriver(): 'companion' | 'service_host' | 'manual
  * F13 (TD §5.2): the coordinator passes a unique invocation id; when
  * present it lands in the liveness record so the shared per-workspace file
  * can be correlated back to the exact Service Host invocation.
+ * R5 review fix: a manual/companion cycle carries NO invocation id, so the
+ * patch must CLEAR the field — otherwise a completed manual run would keep
+ * masquerading under the previous shadow run's id.
  */
 function invocationIdLivenessPatch(): Record<string, unknown> {
   const invocationId = process.env.PD_INVOCATION_ID;
   return typeof invocationId === 'string' && invocationId.length > 0
     ? { lastInvocationId: invocationId }
-    : {};
+    : { lastInvocationId: null };
 }
 
 export function readCodexWorkerLiveness(workspaceDir: string): Record<string, unknown> | null {

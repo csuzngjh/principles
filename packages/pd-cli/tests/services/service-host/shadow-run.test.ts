@@ -434,6 +434,37 @@ describe('F6: the cross-run progress projection survives A→B→A and dry-runs'
     expect(Object.keys(store.entries).length).toBeGreaterThanOrEqual(1);
   });
 
+  it('R3: a corrupt store fails the merge with recovery guidance and preserves the ORIGINAL file byte-for-byte', async () => {
+    const home = tempHome();
+    const wsC = codexWorkspace(home, 'fresh-progress-ws');
+    const pdHome = installSandbox(home, [wsC]);
+    const storeFile = shadowProgressPath(pdHome);
+    mkdirSync(path.dirname(storeFile), { recursive: true });
+    // One VALID old entry + one INVALID old entry — the whole file reads
+    // corrupt, but it still carries recoverable history for other workspaces.
+    const original = `${JSON.stringify({
+      schemaVersion: 'pd.shadow-progress.v1',
+      entries: {
+        '/valid/old-ws': { lastProgressAt: '2026-11-20T08:00:00Z', source: 'task_state_change', updatedAt: '2026-11-20T08:00:00Z' },
+        '/invalid/old-ws': { bogus: true },
+      },
+    }, null, 2)}\n`;
+    writeFileSync(storeFile, original, 'utf8');
+    const result = await runServiceShadowOnce({
+      workspaces: [wsC],
+      trustedHomeDir: home,
+      probes: { adapters: { codex: fakeAdapter('codex', { outcome: 'cycle_completed', lastProgressAt: '2026-11-21T13:00:00Z', taskStateChanged: true }), workbuddy: fakeAdapter('workbuddy') } },
+    });
+    expectCompleted(result);
+    // This run's own progress is still reported truthfully via the status…
+    expect(result.executions[0]?.lastProgressAt).toBe('2026-11-21T13:00:00Z');
+    expect(result.status.shadow?.progressCarryVerdict).toBe('corrupt');
+    // …the merge failure is surfaced with guidance…
+    expect(result.status.nextAction).toContain('progress projection could not be updated');
+    // …and the file was NOT replaced by a this-run-only projection.
+    expect(readFileSync(storeFile, 'utf8')).toBe(original);
+  });
+
   it('a corrupt projection store degrades observably (progressCarryVerdict) without deleting the file', async () => {
     const home = tempHome();
     const ws = codexWorkspace(home, 'corrupt-carry-ws');
@@ -452,6 +483,75 @@ describe('F6: the cross-run progress projection survives A→B→A and dry-runs'
     expect(result.executions[0]?.lastProgressAt).toBeNull();
     // Preservation over cleanup: the corrupt file is still there.
     expect(existsSync(storeFile)).toBe(true);
+  });
+});
+
+describe('R2: an interrupt stops the dispatch queue, not just the in-flight worker', () => {
+  it('abort during workspace A prevents workspace B from ever dispatching; executed results + status + lock settle', async () => {
+    const home = tempHome();
+    const wsA = codexWorkspace(home, 'abort-a');
+    const wsB = codexWorkspace(home, 'abort-b');
+    installSandbox(home, [wsA, wsB]);
+    const controller = new AbortController();
+    let bDispatched = 0;
+    const abortingCodex: WorkerAdapter = {
+      hostKind: 'codex',
+      adapterVersion: WORKER_ADAPTER_CONTRACT_VERSION,
+      supports: () => ({ supported: true }),
+      executeOnce: async (input) => {
+        if (input.workspaceDir === path.resolve(wsB)) bDispatched += 1;
+        controller.abort(); // the interrupt lands while A is in flight
+        return fakeAdapter('codex', { outcome: 'cancelled' }).executeOnce(input);
+      },
+    };
+    const result = await runServiceShadowOnce({
+      workspaces: [wsA, wsB],
+      trustedHomeDir: home,
+      signal: controller.signal,
+      probes: { adapters: { codex: abortingCodex, workbuddy: fakeAdapter('workbuddy') } },
+    });
+    expectCompleted(result);
+    // Exactly ONE dispatch happened — B's Worker was never started.
+    expect(bDispatched).toBe(0);
+    expect(result.executions).toHaveLength(1);
+    expect(result.executions[0]?.execution?.cycleOutcome).toBe('cancelled');
+    expect(result.executions[0]?.workspaceState).toBe('failed');
+    // The persisted status is truthful: only A's (cancelled) execution exists.
+    const persisted = JSON.parse(readFileSync(serviceRunStatusPath(path.join(home, '.pd')), 'utf8')) as { shadow?: { executions?: unknown[] } };
+    expect(persisted.shadow?.executions).toHaveLength(1);
+    // The install lock was released — a fresh run can acquire it immediately.
+    const rerun = await runServiceShadowOnce({
+      workspaces: [wsA],
+      trustedHomeDir: home,
+      probes: { adapters: { codex: fakeAdapter('codex'), workbuddy: fakeAdapter('workbuddy') } },
+    });
+    expect(rerun.ok && rerun.outcome === 'completed').toBe(true);
+  });
+
+  it('a signal aborted before the run starts dispatches nothing at all', async () => {
+    const home = tempHome();
+    const ws = codexWorkspace(home, 'pre-aborted-ws');
+    installSandbox(home, [ws]);
+    const controller = new AbortController();
+    controller.abort();
+    let dispatched = 0;
+    const counting = fakeAdapter('codex');
+    const spy: WorkerAdapter = {
+      ...counting,
+      executeOnce: async (input) => {
+        dispatched += 1;
+        return counting.executeOnce(input);
+      },
+    };
+    const result = await runServiceShadowOnce({
+      workspaces: [ws],
+      trustedHomeDir: home,
+      signal: controller.signal,
+      probes: { adapters: { codex: spy, workbuddy: fakeAdapter('workbuddy') } },
+    });
+    expectCompleted(result);
+    expect(dispatched).toBe(0);
+    expect(result.executions).toHaveLength(0);
   });
 });
 

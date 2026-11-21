@@ -26,7 +26,7 @@ import { loadPdConfigForPlugin } from '@principles/host-runtime';
 import type { InstallIdentity } from './install-identity.js';
 import type { ActiveReleaseFacts } from './status/service-run-status.js';
 import type { WorkspaceDiscoveryVerdict } from './workspace-discovery.js';
-import { buildWorkerEnvironment, type WorkerEnvironmentReport } from './worker-env.js';
+import { buildWorkerEnvironment, LAUNCH_CONTROL_ENV_VARS, type WorkerEnvironmentReport } from './worker-env.js';
 import { runWorkerProcess, type WorkerProcessOptions, type WorkerProcessResult } from './worker-process.js';
 import {
   diffTaskProgress,
@@ -250,11 +250,12 @@ function boundedTail(value: string): string {
   return sanitizeWorkerText(value, STDERR_TAIL_PERSIST);
 }
 
-/** Env var names that can never be re-admitted through the credential allowlist (pointer set, worker-env.ts). */
+/** Env var names that can never be re-admitted through the credential allowlist (pointer set + runtime-launch steering names, worker-env.ts — one deny-list, two checkpoints). */
 const POINTER_ENV_NAMES = new Set([
   'PD_EXPERIMENT_ROOT', 'PD_WORKSPACE_DIR', 'OPENCLAW_STATE_DIR', 'OPENCLAW_HOME',
   'PD_COMPANION_WORKER_IPC', 'PD_INVOCATION_SOURCE', 'HOME', 'USERPROFILE', 'CODEX_HOME',
   'WORKBUDDY_CONFIG_DIR',
+  ...LAUNCH_CONTROL_ENV_VARS,
 ]);
 
 /**

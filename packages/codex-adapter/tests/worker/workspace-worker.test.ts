@@ -1257,6 +1257,31 @@ describe('worker cycle — PRI-1264 driver liveness + degraded catch-up recovery
     }
   });
 
+  it('R5: a manual/companion cycle CLEARS the previous shadow run\'s invocation id from liveness', async () => {
+    const ws = makeWorkspace({ ingestion: true, consumer: true });
+    const previousSource = process.env.PD_INVOCATION_SOURCE;
+    const previousId = process.env.PD_INVOCATION_ID;
+    try {
+      // A shadow-driven cycle records the coordinator's invocation id…
+      process.env.PD_INVOCATION_SOURCE = 'service_host';
+      process.env.PD_INVOCATION_ID = 'inv-shadow-555';
+      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(readCodexWorkerLiveness(ws.root)?.lastInvocationId).toBe('inv-shadow-555');
+      // …then a manual cycle (no PD_INVOCATION_ID) must not keep wearing it.
+      delete process.env.PD_INVOCATION_SOURCE;
+      delete process.env.PD_INVOCATION_ID;
+      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      const liveness = readCodexWorkerLiveness(ws.root);
+      expect(liveness?.lastCycleDriver).toBe('manual');
+      expect(liveness?.lastInvocationId ?? null).toBeNull();
+    } finally {
+      if (previousSource === undefined) delete process.env.PD_INVOCATION_SOURCE;
+      else process.env.PD_INVOCATION_SOURCE = previousSource;
+      if (previousId === undefined) delete process.env.PD_INVOCATION_ID;
+      else process.env.PD_INVOCATION_ID = previousId;
+    }
+  });
+
   it('PRI-1264 review: a CONFIG pause (host.codex disabled) keeps the liveness heartbeat alive — no false stall', async () => {
     // The Companion stall detector reads the last COMPLETED cycle age; a
     // paused worker used to return WITHOUT refreshing the record, so a fresh

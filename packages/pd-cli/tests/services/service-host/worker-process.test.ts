@@ -4,6 +4,7 @@
  * SIGTERM→grace→SIGKILL ladder, SIGTERM-ignoring children, and caller
  * cancellation — all against REAL fixture child processes.
  */
+import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -100,6 +101,27 @@ describe('runWorkerProcess (real fixture children)', () => {
     expect(result.cancelled).toBe(true);
     expect(result.timedOut).toBe(false);
   }, 20_000);
+
+  it('an already-aborted signal returns cancelled BEFORE spawning (R2 review fix)', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let spawned = 0;
+    const result = await runWorkerProcess({
+      cliEntry: path.join(FIXTURES, 'echo-json.mjs'),
+      args: [],
+      env: {},
+      timeoutMs: 15_000,
+      signal: controller.signal,
+      spawnFn: ((...spawnArgs: Parameters<typeof spawn>) => {
+        spawned += 1;
+        return spawn(...spawnArgs);
+      }) as typeof spawn,
+    });
+    expect(result.cancelled).toBe(true);
+    expect(result.timedOut).toBe(false);
+    // No Worker was ever started for the queued workspace.
+    expect(spawned).toBe(0);
+  });
 
   it('a missing entry script is a worker failure (nonzero exit + stderr), never a fake success', async () => {
     const result = await runWorkerProcess({

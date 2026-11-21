@@ -572,6 +572,70 @@ describe('environment + liveness projection', () => {
     expect(result.lastProgressAt).not.toBeNull();
   });
 
+  it('R4: a catch-up replay that ENRICHES an existing trajectory (inserted=0, enriched>0) counts as progress', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-enrich',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({
+            workspaceDir: workspace,
+            mode: 'ready',
+            report: {
+              catchUp: {
+                status: 'ok',
+                // The replay persisted catch-up evidence onto an EXISTING
+                // trajectory — zero new rows, real progress.
+                rollouts: [{ rolloutIdentity: 'r1', outcome: { status: 'ok', inserted: 0, enriched: 1 } }],
+                remainingLagRollouts: [],
+              },
+            },
+          }),
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('cycle_completed');
+    expect(result.businessProgress.catchUpProcessed).toBe(1);
+    expect(result.lastProgressAt).not.toBeNull();
+  });
+
+  it('R4: a duplicate-only catch-up replay (inserted=0, enriched=0, duplicates>0) still counts as NO progress', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-dup-only',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({
+            workspaceDir: workspace,
+            mode: 'ready',
+            report: {
+              catchUp: {
+                status: 'ok',
+                rollouts: [{ rolloutIdentity: 'r1', outcome: { status: 'ok', inserted: 0, enriched: 0, duplicates: 4 } }],
+                remainingLagRollouts: [],
+              },
+            },
+          }),
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('cycle_completed_without_business_progress');
+    expect(result.businessProgress.catchUpProcessed).toBe(0);
+    expect(result.lastProgressAt).toBeNull();
+  });
+
   it('F7: a degraded cycle with a REAL task change records the evidenced progress timestamp', async () => {
     const workspace = await workspaceWithStore();
     const adapter = createCodexWorkerAdapter();
@@ -648,6 +712,39 @@ describe('environment + liveness projection', () => {
     // The PERSISTED report carries NAMES only — the value never lands there.
     expect(JSON.stringify(result.worker.environmentReport)).toContain('TEAM_LLM_AUTH');
     expect(JSON.stringify(result.worker.environmentReport)).not.toContain('fixture-inert-value');
+    expect(result.cycleOutcome).toBe('cycle_completed_without_business_progress');
+  });
+
+  it('R1: a workspace config declaring NODE_OPTIONS as its apiKeyEnv cannot inject launch settings into the child', async () => {
+    const workspace = tempDir();
+    mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    const handle = await createRuntimeStateHandle({ workspaceDir: workspace, readonly: false, bootstrapIfMissing: true });
+    await handle.close().catch(() => undefined);
+    const config = getDefaultPdConfig();
+    (config.runtimeProfiles as Record<string, unknown>)['hostile-profile'] = {
+      type: 'pi-ai', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'NODE_OPTIONS',
+    };
+    writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify(config), 'utf8');
+    const captured: WorkerProcessOptions[] = [];
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-launch-vars',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      inheritedEnv: { NODE_OPTIONS: '--require /tmp/evil.js', TEAM_LLM_AUTH: 'fixture-inert-value' },
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async (options) => {
+          captured.push(options);
+          return procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }) });
+        },
+      },
+    });
+    // The config-declared launch variable is refused at BOTH checkpoints —
+    // the parent's NODE_OPTIONS value never reaches the Worker child.
+    expect(captured[0]?.env.NODE_OPTIONS).toBeUndefined();
     expect(result.cycleOutcome).toBe('cycle_completed_without_business_progress');
   });
 });

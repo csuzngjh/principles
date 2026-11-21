@@ -45,6 +45,52 @@ const POINTER_ENV_VARS = [
   'WORKBUDDY_CONFIG_DIR',
 ] as const;
 
+/**
+ * Runtime-launch steering variables (R1 review fix): these are read by the
+ * Node runtime / its loaders BEFORE the Worker entry executes, so a name in
+ * this set can never be re-admitted — not by the system allowlist, not by
+ * the generic credential pattern, and NOT by a workspace-config-declared
+ * `apiKeyEnv`. An admitted-workspace config can name its own credential
+ * variables; it cannot use that channel to inject launch settings the
+ * isolation boundary exists to keep out (`NODE_OPTIONS --require`, TLS
+ * trust weakening, OpenSSL engine configs, native-library preload).
+ * Exported so the config-name collector (worker-adapter.ts) refuses the
+ * same names at collection time — one deny-list, two checkpoints.
+ */
+export const LAUNCH_CONTROL_ENV_VARS = [
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'NODE_EXTRA_CA_CERTS',
+  'NODE_REPL_HISTORY',
+  'NODE_REPL_EXTERNAL_MODULE',
+  'NODE_TLS_REJECT_UNAUTHORIZED',
+  'NODE_NO_WARNINGS',
+  'NODE_PENDING_DEPRECATION',
+  'NODE_DEBUG',
+  'NODE_DEBUG_NATIVE',
+  'NODE_DISABLE_COLORS',
+  'NODE_REDIRECT_WARNINGS',
+  'NODE_PRESERVE_SYMLINKS',
+  'NODE_PRESERVE_SYMLINKS_MAIN',
+  'NODE_COMPILE_CACHE',
+  'NODE_COMPILE_CACHE_DIR',
+  'NODE_USE_ENV_PROXY',
+  'NODE_USE_LARGE_PAGES',
+  'NODE_SNAPSHOT_SAVE',
+  'NODE_SNAPSHOT_BLOB',
+  'NODE_V8_COVERAGE',
+  'UV_THREADPOOL_SIZE',
+  'UV_USE_IO_URING',
+  'OPENSSL_CONF',
+  'OPENSSL_MODULES',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+] as const;
+
 /** OS basics allowed through verbatim (values are not secrets). */
 const SYSTEM_ALLOWLIST_COMMON = ['PATH'] as const;
 const SYSTEM_ALLOWLIST_WIN32 = [
@@ -145,6 +191,7 @@ export function buildWorkerEnvironment(args: {
   const platform = args.platform ?? process.platform;
   const caseInsensitive = platform === 'win32';
   const pointerSet = new Set<string>(POINTER_ENV_VARS.map((name) => (caseInsensitive ? name.toUpperCase() : name)));
+  const launchControlSet = new Set<string>(LAUNCH_CONTROL_ENV_VARS.map((name) => (caseInsensitive ? name.toUpperCase() : name)));
   const systemNames = [
     ...SYSTEM_ALLOWLIST_COMMON,
     ...(platform === 'win32' ? SYSTEM_ALLOWLIST_WIN32 : SYSTEM_ALLOWLIST_POSIX),
@@ -153,13 +200,18 @@ export function buildWorkerEnvironment(args: {
   const allowSet = new Set<string>(systemNames.map((name) => (caseInsensitive ? name.toUpperCase() : name)));
 
   const configCredentialSet = new Set<string>(
-    (args.credentialEnvAllowlist ?? []).filter((name) => isCredentialName(name) && !pointerSet.has(caseInsensitive ? name.toUpperCase() : name))
-      .map((name) => (caseInsensitive ? name.toUpperCase() : name)),
+    (args.credentialEnvAllowlist ?? []).filter((name) => {
+      const key = caseInsensitive ? name.toUpperCase() : name;
+      return isCredentialName(name) && !pointerSet.has(key) && !launchControlSet.has(key);
+    }).map((name) => (caseInsensitive ? name.toUpperCase() : name)),
   );
 
   const isAllowed = (name: string): boolean => {
     const key = caseInsensitive ? name.toUpperCase() : name;
     if (pointerSet.has(key)) return false;
+    // Launch-control denial outranks every admission channel — a declared
+    // `apiKeyEnv` name can never steer the runtime launch (R1 review fix).
+    if (launchControlSet.has(key)) return false;
     if (allowSet.has(key)) return true;
     if (configCredentialSet.has(key)) return true;
     return CREDENTIAL_NAME_RE.test(key);

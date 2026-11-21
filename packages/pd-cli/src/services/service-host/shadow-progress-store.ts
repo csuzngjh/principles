@@ -118,7 +118,23 @@ export function mergeShadowProgress(
 ): { ok: true; path: string; evicted: number } | { ok: false; reason: string; nextAction: string } {
   const file = shadowProgressPath(pdHome);
   const read = readShadowProgress(pdHome);
-  const merged: Map<string, ShadowProgressEntry> = read.ok ? new Map(read.entries) : new Map();
+  // R3 review fix: only a genuinely MISSING file may seed an empty merge —
+  // a corrupt or unreadable store fails the merge with recovery guidance
+  // and the ORIGINAL FILE IS PRESERVED verbatim. Starting from an empty
+  // set here used to atomically replace the file with just this run's
+  // updates, silently deleting every other workspace's valid history. This
+  // run's own progress is still reported truthfully through the status
+  // file; the projection keeps its (recoverable) previous contents.
+  if (!read.ok) {
+    return {
+      ok: false,
+      reason: `shadow_progress_store_${read.verdict}:${read.reason}`,
+      nextAction:
+        `The existing progress projection at ${file} could not be read, so this run's progress was NOT merged and the file was left untouched. ` +
+        'Inspect or restore it from backup; to start a fresh projection, delete the file manually and re-run — the store never self-destructs a corrupt record.',
+    };
+  }
+  const merged: Map<string, ShadowProgressEntry> = new Map(read.entries);
   for (const [key, entry] of updates) {
     merged.set(key, entry);
   }

@@ -181,6 +181,43 @@ describe('allowlist passthrough', () => {
     expect(env.CODEX_HOME).not.toBe('/evil/codex');
   });
 
+  it('R1: a config-declared Node launch variable can never be re-admitted as a credential', () => {
+    const { env, report } = buildWorkerEnvironment({
+      identity: identity(),
+      hostKind: 'codex',
+      inheritedEnv: {
+        NODE_OPTIONS: '--require /tmp/evil.js',
+        NODE_TLS_REJECT_UNAUTHORIZED: '0',
+        NODE_EXTRA_CA_CERTS: '/evil/ca.pem',
+        NODE_PATH: '/evil/modules',
+        LD_PRELOAD: '/evil.so',
+      },
+      credentialEnvAllowlist: ['NODE_OPTIONS', 'NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_EXTRA_CA_CERTS', 'NODE_PATH', 'LD_PRELOAD'],
+      platform: 'linux',
+    });
+    // The workspace config can name its own credentials, but it can never use
+    // that channel to inject runtime-launch settings into the Worker child.
+    expect(env.NODE_OPTIONS).toBeUndefined();
+    expect(env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined();
+    expect(env.NODE_EXTRA_CA_CERTS).toBeUndefined();
+    expect(env.NODE_PATH).toBeUndefined();
+    expect(env.LD_PRELOAD).toBeUndefined();
+    expect(report.passedThrough).not.toContain('NODE_OPTIONS');
+    expect(report.passedThrough).not.toContain('LD_PRELOAD');
+  });
+
+  it('R1: the launch-control denial is case-insensitive on win32 too', () => {
+    const { env } = buildWorkerEnvironment({
+      identity: identity(),
+      hostKind: 'workbuddy',
+      inheritedEnv: { node_options: '--require C:\\evil.js', Node_Path: 'D:\\evil' },
+      credentialEnvAllowlist: ['node_options', 'Node_Path'],
+      platform: 'win32',
+    });
+    expect(env.node_options).toBeUndefined();
+    expect(env.Node_Path).toBeUndefined();
+  });
+
   it('F4: malformed config allowlist names are ignored', () => {
     const longName = 'A'.repeat(80);
     const { env } = buildWorkerEnvironment({

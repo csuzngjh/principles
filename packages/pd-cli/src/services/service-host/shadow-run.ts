@@ -429,7 +429,14 @@ async function completeShadowRun(identity: InstallIdentity, context: {
   const previousProgress = readPreviousProgress(identity.pdHome);
   const executions: ShadowExecutionRecord[] = [];
 
+  // R2 review fix: an interrupt must stop the QUEUE, not just the
+  // in-flight worker — check before dispatching each workspace/adapter so a
+  // cancelled run never starts a Worker only to terminate it. The function
+  // indirection keeps repeated checks un-narrowed by TypeScript.
+  const isAborted = (): boolean => options.signal?.aborted === true;
+
   for (const requested of options.workspaces) {
+    if (isAborted()) break;
     const requestedIdentity = workspaceIdentity(requested);
     const entry = entriesByIdentity.get(requestedIdentity);
 
@@ -477,6 +484,9 @@ async function completeShadowRun(identity: InstallIdentity, context: {
     const hostKinds = options.hostFilter !== undefined ? [options.hostFilter] : [...WORKER_HOST_KINDS];
     let ranAny = false;
     for (const hostKind of hostKinds) {
+      // R2 review fix: same pre-dispatch check inside the host loop — an
+      // interrupt between two bound adapters skips the queued one.
+      if (isAborted()) break;
       const adapter = context.adapters[hostKind];
       const support = adapter.supports(descriptor);
       if (!support.supported) {
@@ -531,6 +541,10 @@ async function completeShadowRun(identity: InstallIdentity, context: {
       });
     }
     if (!ranAny) {
+      // The abort landed between the workspace gate and the first adapter
+      // dispatch — skip this workspace entirely rather than recording a
+      // refusal the workspace never earned.
+      if (isAborted()) break;
       const supported = hostKinds.join('|');
       refuse(
         `no_adapter_supports_workspace:${supported}`,
