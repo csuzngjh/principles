@@ -64,6 +64,8 @@
     "lab:summary": "node experiment/prompt-v2/scripts/ab/ab-blind-summary.mjs",
     "lab:card": "node scripts/dev/pd-lab/build-decision-input.mjs",
     "lab:probe": "node scripts/dev/pd-lab/admission-probe.mjs",
+    "lab:judge-validate": "node scripts/dev/pd-lab/judge-protocol-validate.mjs",
+    "lab:qualify": "node scripts/dev/pd-lab/t6-qualify.mjs",
     "dev:evolution-evidence": "node scripts/dev/pipeline-evolution/collect-evidence.mjs",
     "dev:pl-pilot": "node scripts/dev/principle-learning-lab/run-pilot.mjs",
     "dev:prr-rehearsal": "node scripts/dev/principle-learning-lab/prr/run-prr-rehearsal.mjs --dataset .tmp/prr-ac-fixtures --out .tmp/prr-ac-rehearsal",
