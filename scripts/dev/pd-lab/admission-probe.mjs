@@ -836,32 +836,148 @@ function collectSessionFacts(db, sessionId) {
       // smallest window that decides the UTF-16 truncation form (see
       // analyzeSession): a string longer than 501 code points is longer than
       // 500 UTF-16 units in every encoding, so it cannot be the form.
-      'SELECT id, params_json, length(result_preview) AS preview_cp_len, substr(result_preview, -501) AS preview_window'
+      'SELECT id, params_json, created_at, length(result_preview) AS preview_cp_len, substr(result_preview, -501) AS preview_window'
         + ' FROM tool_calls WHERE session_id = ? ORDER BY id',
     )
     .all(sessionId);
   return { session, userTurns, assistantTurns, toolCalls };
 }
 
+// ── Session-start origin & historical-prefix completeness (r5) ──────────────
+//
+// Two INDEPENDENT dimensions, deliberately not conflated:
+//
+// A. WHY did the session start at started_at? The first writer of the
+//    sessions row fixes started_at at its own instant and later writers only
+//    update updated_at (trajectory.ts upsert). Non-turn creators exist:
+//    manual pain ingress (pain-signal-observability.ts) creates the session
+//    at the pain's time and leaves an immortal pain_events row there; the
+//    tool-evidence writer (production-pain-evidence.ts) creates it at the
+//    tool event's time; turn writers create it at the turn's time.
+//
+// B. Is the surviving trajectory the COMPLETE history of the session?
+//    Neither started_at, nor the pain row's existence, nor turn_index
+//    continuity proves this. The only sound evidence:
+//      PROVEN_COMPLETE  — started_at equals the earliest surviving TRAJECTORY
+//                         row instant (turns ∪ tool_calls): the first writer
+//                         is a row that still exists, so nothing preceded it.
+//      PROVEN_INCOMPLETE — positive vanished-row evidence: a surviving
+//                         retention-immune row (user_turns /
+//                         signal_confirmations / correction_samples) references
+//                         a turn rowid that no longer exists (AUTOINCREMENT
+//                         rowids are never reused and references pointed at
+//                         rows that existed when written ⇒ the referenced row
+//                         was deleted), OR the start is UNEXPLAINED (the
+//                         first writer was a sweepable trajectory row and no
+//                         non-turn record accounts for it — the creator row
+//                         is gone).
+//      UNKNOWN          — everything else, notably the manual-pain-first
+//                         class: the pain row explains WHY the session starts
+//                         at T, but whether trajectory rows existed between T
+//                         and the earliest surviving turn (a complete
+//                         pain-first session vs swept early turns) is not
+//                         decidable from this snapshot. UNKNOWN is never
+//                         upgraded to PROVEN_COMPLETE.
+//    Retention writes NO persisted audit trail, and the producer persists no
+//    expected-origin field — the unresolvable class is disclosed in the
+//    report instead of being guessed in either direction.
+
+const START_EXPLANATIONS = ['EXPLAINED_BY_MANUAL_PAIN', 'EXPLAINED_BY_TOOL_EVIDENCE', 'EXPLAINED_BY_TURN_WRITER', 'UNEXPLAINED', 'NOT_APPLICABLE'];
+const PREFIX_STATES = ['PROVEN_COMPLETE', 'PROVEN_INCOMPLETE', 'UNKNOWN'];
+
+/** Earliest surviving trajectory row instant for the session (turns ∪ tool
+ * calls), or null when no parseable trajectory row exists. */
+function earliestTrajectoryRowInstantMs(facts) {
+  const times = [
+    ...facts.userTurns.map((t) => (typeof t.created_at === 'string' ? isoTimeValue(t.created_at) : null)),
+    ...facts.assistantTurns.map((t) => (typeof t.created_at === 'string' ? isoTimeValue(t.created_at) : null)),
+    ...facts.toolCalls.map((t) => (typeof t.created_at === 'string' ? isoTimeValue(t.created_at) : null)),
+  ].filter((ms) => ms !== null);
+  return times.length > 0 ? times.reduce((a, b) => (a <= b ? a : b)) : null;
+}
+
 /**
- * Session-start origin explanation (r4 review): does a retention-immune
- * non-turn record explain this session's started_at instant? Manual pain
- * ingress creates the session at the pain's time and leaves a pain_events
- * row (pain_events is NOT swept by trajectory retention), so a pain row at
- * the started_at instant proves the start came from that record — the diff
-  * to the earliest surviving turn then proves nothing about vanished turns.
+ * Dimension A: the session-start origin explanation, from the creators' real
+ * persisted records only (instant equality — never proximity guessing).
  */
-function collectStartExplanation(db, sessionId, startedAtMs) {
+function collectStartOrigin(db, sessionId, startedAtMs, earliestTrajectoryRowMs) {
   if (startedAtMs === null) {
-    return false;
+    return 'NOT_APPLICABLE';
   }
-  const sessionPainRows = db
+  // Pain creator: an immortal pain_events row at the started_at instant.
+  const painRows = db
     .prepare('SELECT created_at FROM pain_events WHERE session_id = ?')
     .all(sessionId);
-  return sessionPainRows.some((row) => {
-    const rowMs = typeof row.created_at === 'string' ? isoTimeValue(row.created_at) : null;
-    return rowMs !== null && rowMs === startedAtMs;
-  });
+  if (painRows.some((row) => {
+    const ms = typeof row.created_at === 'string' ? isoTimeValue(row.created_at) : null;
+    return ms !== null && ms === startedAtMs;
+  })) {
+    return 'EXPLAINED_BY_MANUAL_PAIN';
+  }
+  // Tool-evidence creator: a tool_calls row at the started_at instant.
+  const toolRows = db
+    .prepare('SELECT created_at FROM tool_calls WHERE session_id = ?')
+    .all(sessionId);
+  if (toolRows.some((row) => {
+    const ms = typeof row.created_at === 'string' ? isoTimeValue(row.created_at) : null;
+    return ms !== null && ms === startedAtMs;
+  })) {
+    return 'EXPLAINED_BY_TOOL_EVIDENCE';
+  }
+  // Turn creator: the started_at IS the earliest surviving trajectory row.
+  if (earliestTrajectoryRowMs !== null && startedAtMs === earliestTrajectoryRowMs) {
+    return 'EXPLAINED_BY_TURN_WRITER';
+  }
+  if (earliestTrajectoryRowMs !== null && startedAtMs < earliestTrajectoryRowMs) {
+    return 'UNEXPLAINED';
+  }
+  return 'NOT_APPLICABLE'; // started_at later than every row (clock regression) — disclosed, never guessed
+}
+
+/**
+ * Dimension B positive-incompleteness evidence (N1): surviving rows that
+ * reference turn rowids which no longer exist. All referencing tables here
+ * are retention-immune (user_turns itself is swept but a SURVIVING row's
+ * reference is equally valid); AUTOINCREMENT rowids are never reused and the
+ * references were written pointing at rows that existed — a missing target
+ * therefore proves that row was deleted.
+ */
+function collectMissingTurnReferences(db, sessionId) {
+  const checks = [
+    {
+      label: 'user_turns.references_assistant_turn_id',
+      sql: 'SELECT COUNT(*) AS n FROM user_turns ut WHERE ut.session_id = ? AND ut.references_assistant_turn_id IS NOT NULL'
+        + ' AND NOT EXISTS (SELECT 1 FROM assistant_turns at WHERE at.session_id = ut.session_id AND at.id = ut.references_assistant_turn_id)',
+    },
+    {
+      label: 'signal_confirmations.references_assistant_turn_id',
+      sql: 'SELECT COUNT(*) AS n FROM signal_confirmations sc WHERE sc.session_id = ? AND sc.references_assistant_turn_id IS NOT NULL'
+        + ' AND NOT EXISTS (SELECT 1 FROM assistant_turns at WHERE at.session_id = sc.session_id AND at.id = sc.references_assistant_turn_id)',
+    },
+    {
+      label: 'signal_confirmations.user_turn_rowid',
+      sql: 'SELECT COUNT(*) AS n FROM signal_confirmations sc WHERE sc.session_id = ?'
+        + ' AND NOT EXISTS (SELECT 1 FROM user_turns ut WHERE ut.session_id = sc.session_id AND ut.id = sc.user_turn_rowid)',
+    },
+    {
+      label: 'correction_samples.bad_assistant_turn_id',
+      sql: 'SELECT COUNT(*) AS n FROM correction_samples cs WHERE cs.session_id = ?'
+        + ' AND NOT EXISTS (SELECT 1 FROM assistant_turns at WHERE at.session_id = cs.session_id AND at.id = cs.bad_assistant_turn_id)',
+    },
+    {
+      label: 'correction_samples.user_correction_turn_id',
+      sql: 'SELECT COUNT(*) AS n FROM correction_samples cs WHERE cs.session_id = ?'
+        + ' AND NOT EXISTS (SELECT 1 FROM user_turns ut WHERE ut.session_id = cs.session_id AND ut.id = cs.user_correction_turn_id)',
+    },
+  ];
+  const missing = [];
+  for (const check of checks) {
+    const row = db.prepare(check.sql).get(sessionId);
+    if (row && Number(row.n) > 0) {
+      missing.push({ reference: check.label, count: Number(row.n) });
+    }
+  }
+  return missing;
 }
 
 /**
@@ -934,7 +1050,7 @@ function validatePainAnchor(db, sample) {
   return { ok: true, problem: null, row };
 }
 
-function analyzeSession(sample, facts, startedAtExplainedByPainEvent) {
+function analyzeSession(sample, facts, startExplanation, prefixCompleteness, prefixMissingReferences) {
   const problems = [];
   const { session, userTurns, assistantTurns, toolCalls } = facts;
   const sessionId = sample.sessionId;
@@ -989,13 +1105,13 @@ function analyzeSession(sample, facts, startedAtExplainedByPainEvent) {
   // call) that no longer exists — positive proof of vanished rows. The
   // evidence still stands ALONE (r3 P1-01): it does not wait for other gap
   // findings. Unparseable or merely-equal started_at is never positive.
-  let positiveRetention = false;
+  // ── Dimension A (start explanation) + Dimension B (prefix completeness) ──
+  // Both are computed by the caller (main) inside its guarded query window:
+  // startExplanation ∈ START_EXPLANATIONS, prefixCompleteness ∈ PREFIX_STATES,
+  // prefixMissingReferences = the N1 positive-evidence details. See the
+  // block comment above collectStartOrigin for the sound-evidence contract.
   const startedAtMs = session && typeof session.started_at === 'string' ? isoTimeValue(session.started_at) : null;
-  if (earliestTurnAtMs !== null && startedAtMs !== null && startedAtMs < earliestTurnAtMs) {
-    // startedAtExplainedByPainEvent is computed by the caller (main) inside
-    // its guarded query window — see collectStartExplanation.
-    positiveRetention = !startedAtExplainedByPainEvent;
-  }
+  const earliestTrajectoryRowMs = earliestTrajectoryRowInstantMs(facts);
 
   const painAtMs = isoTimeValue(sample.createdAt);
   const gapReasons = [];
@@ -1043,34 +1159,48 @@ function analyzeSession(sample, facts, startedAtExplainedByPainEvent) {
   }
   const gapObserved = gapReasons.length > 0 ? gapReasons.join('; ') : null;
 
-  // Retention evidence decides INDEPENDENTLY of the gap findings (r3 P1-01):
-  // positive evidence → SOURCE_RETENTION_EXPIRED whether or not any other gap
-  // check fired; without positive evidence a gap stays SOURCE_GAP (DT-07).
-  // A session with positive evidence and NO other gap reason is still
-  // incomplete — the rows between started_at and the earliest surviving turn
-  // existed and are gone, even though the surviving window looks internally
-  // continuous.
-  if (positiveRetention) {
-    const evidenceLine = `sessions.started_at ${session.started_at} strictly precedes earliest surviving turn ${earliestTurnAt}`;
+  // Combination rules (r5): the two dimensions decide INDEPENDENTLY.
+  //   PROVEN_INCOMPLETE → SOURCE_RETENTION_EXPIRED (positive vanished-row
+  //     evidence: a dangling turn reference or an unexplained start whose
+  //     creator row is gone) — whether or not any other gap check fired.
+  //   UNKNOWN → SOURCE_GAP even when every internal continuity check passes:
+  //     the snapshot cannot prove whether trajectory rows existed between the
+  //     session start and the earliest surviving row (notably the
+  //     manual-pain-first class, where a complete session and a swept session
+  //     are observationally identical). UNKNOWN is never upgraded.
+  //   PROVEN_COMPLETE → only the ordinary gapReasons apply (DT-07 unchanged).
+  if (prefixCompleteness === 'PROVEN_INCOMPLETE') {
+    const referenceDetail = prefixMissingReferences.length > 0
+      ? prefixMissingReferences.map((m) => `${m.reference} ×${m.count}`).join(', ')
+      : null;
+    const evidenceLine = referenceDetail !== null
+      ? `Surviving retention-immune rows reference turn rows that no longer exist (${referenceDetail}) — the referenced rows were deleted (AUTOINCREMENT rowids are never reused).`
+      : `sessions.started_at ${session.started_at} strictly precedes the earliest surviving trajectory row and no non-turn record explains the start — the first writer was a sweepable trajectory row that no longer exists.`;
     problems.push(
       makeProblem(
         'SOURCE_RETENTION_EXPIRED',
         `session:${sessionId}`,
         evidence,
         gapObserved !== null
-          ? `Source rows for this session were removed by retention: ${gapObserved}. Positive retention evidence: ${evidenceLine}. Earlier turns existed and are no longer recoverable from this snapshot.`
-          : `Earlier rows for this session existed and are no longer in this snapshot, even though the surviving window passes all internal continuity checks. Positive retention evidence: ${evidenceLine}. The surviving turns alone do not represent the full conversation the session actually had.`,
-        'Recover the full-fidelity turns from the host-native session storage if authorized, or re-snapshot before retention removes rows; do not reconstruct missing turns by inference.',
+          ? `Source rows for this session were removed by retention: ${gapObserved}. Positive vanished-row evidence: ${evidenceLine} Earlier rows are no longer recoverable from this snapshot.`
+          : `Earlier trajectory rows for this session existed and are no longer in this snapshot, even though the surviving window passes all internal continuity checks. Positive vanished-row evidence: ${evidenceLine} The surviving rows alone do not represent the full conversation the session actually had.`,
+        'Recover the full-fidelity turns from the host-native session storage if authorized, or re-snapshot before retention removes rows; do not reconstruct missing rows by inference.',
       ),
     );
-  } else if (gapObserved !== null) {
+  } else if (prefixCompleteness === 'UNKNOWN' || gapObserved !== null) {
+    const prefixNote = prefixCompleteness === 'UNKNOWN'
+      ? 'Historical prefix completeness cannot be proven from this snapshot: the session start is not attributable to a surviving trajectory row, and neither a complete session nor a retention-swept one can be excluded from the observable fields (the producer persists no expected-origin record and retention writes no audit trail).'
+      : null;
+    const gapDetail = gapObserved !== null
+      ? `Trajectory gap without positive retention evidence: ${gapObserved}.`
+      : 'No internal continuity gap was observed in the surviving window.';
     problems.push(
       makeProblem(
         'SOURCE_GAP',
         `session:${sessionId}`,
         evidence,
-        `Trajectory gap without retention evidence: ${gapObserved}. Both readings are possible — the rows never existed (normal session boundary, DT-07) or they were removed and no evidence survives to prove it. This probe does NOT claim retention expiry without positive evidence.`,
-        'If the pre-pain turns matter for the study, cross-check the host-native session file under an authorized full-fidelity scope before treating the gap as a normal boundary.',
+        `${gapDetail} ${prefixNote} Both readings are possible — the rows never existed (normal session boundary, DT-07) or they were removed and no evidence survives to prove it. This probe does NOT claim retention expiry without positive evidence and does NOT treat the prefix as complete without positive evidence either.`,
+        'If the pre-pain turns matter for the study, cross-check the host-native session file under an authorized full-fidelity scope before treating the boundary as normal, or supply producer-side origin provenance; until the prefix is proven the sample stays out of full-history-dependent paths.',
       ),
     );
   }
@@ -2083,19 +2213,40 @@ function main() {
       problems.push(painAnchor.problem);
     }
 
-    // Session-start origin explanation (r4): is the session's started_at
-    // explained by a retention-immune non-turn record (a pain_events row at
-    // the same instant)? Computed inside the same guarded query window.
-    let startedAtExplainedByPainEvent = false;
+    // Session-start origin (dimension A) + historical prefix completeness
+    // (dimension B), computed inside the same guarded query window (r5).
+    let startExplanation = 'NOT_APPLICABLE';
+    let prefixCompleteness = 'UNKNOWN';
+    let prefixMissingReferences = [];
     if (facts !== null && facts.session !== null && typeof facts.session.started_at === 'string') {
       try {
-        startedAtExplainedByPainEvent = collectStartExplanation(db, sample.sessionId, isoTimeValue(facts.session.started_at));
+        const startedAtMs = isoTimeValue(facts.session.started_at);
+        const earliestTrajectoryRowMs = earliestTrajectoryRowInstantMs(facts);
+        startExplanation = collectStartOrigin(db, sample.sessionId, startedAtMs, earliestTrajectoryRowMs);
+        prefixMissingReferences = collectMissingTurnReferences(db, sample.sessionId);
+        // Dimension B (three-state, sound evidence only):
+        //   PROVEN_COMPLETE — started_at == earliest surviving trajectory row:
+        //     the first writer is a row that still exists ⇒ nothing preceded.
+        //   PROVEN_INCOMPLETE — dangling turn references (N1), or an
+        //     UNEXPLAINED start (the first writer was a sweepable trajectory
+        //     row and no non-turn record accounts for it ⇒ that row is gone).
+        //   UNKNOWN — everything else, notably the manual-pain-first class
+        //     (a complete session and a swept one are observationally
+        //     identical); never upgraded to complete.
+        if (earliestTrajectoryRowMs !== null && startedAtMs !== null && startedAtMs === earliestTrajectoryRowMs) {
+          prefixCompleteness = 'PROVEN_COMPLETE';
+        } else if (prefixMissingReferences.length > 0
+          || (startExplanation === 'UNEXPLAINED' && startedAtMs !== null && earliestTrajectoryRowMs !== null && startedAtMs < earliestTrajectoryRowMs)) {
+          prefixCompleteness = 'PROVEN_INCOMPLETE';
+        } else {
+          prefixCompleteness = 'UNKNOWN';
+        }
       } catch (error) {
         db.close();
         if (dbAccess.staged !== null) {
           removeStagingRoot(dbAccess.staged.root);
         }
-        structuralFailure('trajectory_query_failed', 'the session-start explanation query failed; the snapshot database has an unexpected shape', {
+        structuralFailure('trajectory_query_failed', 'the session-start origin/prefix query failed; the snapshot database has an unexpected shape', {
           sessionId: sample.sessionId,
           caseId: sample.caseId,
           cause: String(error?.message ?? error),
@@ -2104,7 +2255,7 @@ function main() {
     }
 
     const sessionAnalysis = facts !== null
-      ? analyzeSession(sample, facts, startedAtExplainedByPainEvent)
+      ? analyzeSession(sample, facts, startExplanation, prefixCompleteness, prefixMissingReferences)
       : { problems: [], blobRefs: [], previewOnlyRows: [], session: null, userTurns: [], assistantTurns: [], toolCalls: [] };
 
     // TURN_BLOB_MISSING / DIGEST_MISMATCH against the snapshot's manifest,
@@ -2200,6 +2351,9 @@ function main() {
       executableForDeclaredPath: classification.executable,
       notEvaluatedReason: classification.notEvaluatedReason ?? null,
       authorizationStatus: authorizationAnalysis.status,
+      sessionStartExplanation: facts !== null ? startExplanation : 'NOT_APPLICABLE',
+      prefixCompleteness: facts !== null ? prefixCompleteness : 'UNKNOWN',
+      prefixMissingReferenceCount: facts !== null ? prefixMissingReferences.reduce((sum, m) => sum + m.count, 0) : 0,
       expectationBasis: expectationAnalysis.basis,
       expectationDependsOnToolOutput: expectationAnalysis.dependsOnToolOutput,
       problems,

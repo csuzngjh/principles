@@ -185,7 +185,58 @@ TECH §5.2 表之外的 CONTRACT §2.4 首批代码实现位置：
 | NODE_OPTIONS 空格拆分 | Node 按空白拆分 NODE_OPTIONS，含空格的 preload 路径未加引号使 CLI 启动即败 | preload 改经**子进程 argv**（`node --require <path> probe.mjs …`），不经 NODE_OPTIONS；新增含空格目录的回归（复制 preload 到 `preload dir with spaces/` 后 --require 仍启动并完成） | 空格路径回归用例（argv 单元素传递，CLI 正常启动+故障注入照常生效） |
 | FIFO 对账盲区 | `fingerprintTree` 只记录普通文件——FIFO 被删/替换不会使前后对账失败 | FIFO 用例补 lstat 身份断言（前后 `isFIFO()` + dev/ino 相等，绝不打开管道） | 已并入 FIFO 用例（Linux CI 执行） |
 
-## 15. Complexity Delta
+## 15. r5 最终整改：起点解释与前缀完整性解耦（2026-11-21）
+
+r5 复审核心发现：r4 把"pain 行解释了 started_at"直接当作"前缀完整"——**解释了会话为何在此刻创建，不等于创建后没有发生过其他历史事件**。整改将两个维度彻底拆分，测试 112 → **118**（117 执行 + 1 Windows FIFO 平台跳过）。
+
+### 生产语义核实（本轮重读源码）
+
+| 事实 | 位置 | 结论 |
+| --- | --- | --- |
+| manual Pain 建会话时间 | `pain-signal-observability.ts:129-145` | 以 Pain 时刻 INSERT sessions（ON CONFLICT 只更新 updated_at）；pain_events 行同流写入且 **immortal** |
+| session upsert 保留 started_at | `trajectory.ts:399-405` | 确认（r2 已证） |
+| 会话创建者完整清单 | 全库 `INSERT INTO sessions`/`upsertSession` 枚举 | 轮次写入器（recordUserTurn/recordAssistantTurn/recordSession）、manual-pain 观测写入器、工具证据写入器（production-pain-evidence.ts:405/555，同流写 tool_calls 行） |
+| 各创建者的持久化证据 | 同上 | 轮次创建者→可清扫轮次行；manual-pain→immortal pain_events 行（同时刻）；工具证据→可清扫 tool_calls 行（同时刻） |
+| nextUserTurnIndex 起始编号 | `prompt.ts:121-127` | 新会话=宿主用户消息数+1（≥2），非 0 基；**不持久化预期起点** |
+| turn_index 能否证明前缀 | 同上 | 不能——起始编号无持久化锚点，连续性不证明起点 |
+| 清扫实际删除 | `trajectory-retention.ts:468` TRAJECTORY_RETENTION_TABLES | tool_calls/assistant_turns/user_turns（+governance_observations expired 类）；pain_events/sessions/signal_confirmations/correction_samples 均 immortal |
+| 清扫审计痕迹 | 全模块无 INSERT | **清扫不写任何持久化审计**——清扫后无法从库内证明"发生过清扫" |
+| 独立历史来源 | signal_confirmations/correction_samples | immortal 表携带指向可清扫轮次行号的引用（references_assistant_turn_id/user_turn_rowid/bad_assistant_turn_id/user_correction_turn_id）；AUTOINCREMENT 行号不复用 ⇒ **存活行引用已消失的轮次行号=该行被删除的正向证明（N1）** |
+| T1 快照来源边界 | 快照形态 | 两库+blob，无清扫元数据 |
+
+### 算法（两个独立维度）
+
+**维度 A — Start Explanation**（枚举：EXPLAINED_BY_MANUAL_PAIN / EXPLAINED_BY_TOOL_EVIDENCE / EXPLAINED_BY_TURN_WRITER / UNEXPLAINED / NOT_APPLICABLE）：只按创建者**真实持久化证据**判定——pain_events 行与 started_at **时刻相等**→MANUAL_PAIN；tool_calls 行同时刻→TOOL_EVIDENCE；started_at==最早存活轨迹行（轮次∪tool_calls 的最早时刻）→TURN_WRITER；started_at 早于最早轨迹行且无任何非轮次记录解释→UNEXPLAINED；其余（不可解析/晚于所有行/无行）→NOT_APPLICABLE。禁止时间邻近猜测。
+
+**维度 B — Prefix Completeness**（三态）：
+- **PROVEN_COMPLETE**：started_at 时刻==最早存活轨迹行时刻 → 首写入者是仍存活的轨迹行 → 其前不可能有任何行（更早的写入者会把 started_at 设得更早）。
+- **PROVEN_INCOMPLETE**：N1 存活 immortal 行引用已消失的轮次行号（正向删除证据）；或 N2 UNEXPLAINED 差值（首写入者是可清扫轨迹行且已消失）。
+- **UNKNOWN**：其余全部——**尤其是 manual-pain-first 类**（完整会话与被清扫会话在该快照中可观察字段完全相同，见下"不可区分性"）；UNKNOWN 永不升级为 COMPLETE。
+
+**组合规则**（按 r5 指令表）：PROVEN_INCOMPLETE → `SOURCE_RETENTION_EXPIRED`（正向证据）+ INCOMPLETE + 全路径阻断；UNKNOWN → `SOURCE_GAP`（"前缀完整性无法证明"）+ INCOMPLETE + 全路径阻断——即使存活窗口内部全部连续检查通过；PROVEN_COMPLETE → 仅常规 gapReasons（DT-07 语义不变）。
+
+### 可识别性约束（如实披露）
+
+**Case E（pain-first 完整会话）与 Case H（早期轮次被真清扫）在快照中可观察字段完全相同**——生产者不持久化预期起点，清扫不留审计，pain 行只解释起点不证明其后的历史。因此两者都判 UNKNOWN → SOURCE_GAP → INCOMPLETE → 阻断；**宁可如实报告证据不足，也不放行**。要区分两者需要生产者侧新增 provenance（如首写入者类别或预期起点字段）——必要性在此披露，实现属生产变更、超出本 PR 范围，未偷偷引入。turn-created 会话（Case I）不受影响：其起点解释本身即完整性证明（PROVEN_COMPLETE 可达）。
+
+### Case 矩阵（全部真实 CLI 子进程）
+
+| Case | 输入 | 预期→实际 | 断言要点 |
+| --- | --- | --- | --- |
+| A（r3 保持） | started_at 10:00、存活轮 10:06+、无解释记录 | RETENTION_EXPIRED（N2）→✓ 实际一致；INCOMPLETE+BLOCKED | 证据文案更新为 N2 表述 |
+| B/D（保持） | started_at==最早轮 | PROVEN_COMPLETE→零 SOURCE_*→✓ | — |
+| C（保持） | started_at 不可解析+真实缺口 | UNKNOWN+gapReasons→SOURCE_GAP→✓ | — |
+| E（重写） | 评审原例：10:00 /pd-pain+10:01–10:04 两对完整轮+10:05 数据集 Pain | EXPLAINED_BY_MANUAL_PAIN + UNKNOWN → SOURCE_GAP+INCOMPLETE+BLOCKED→✓ 实际一致；**不产生 RETENTION_EXPIRED** | impact 含 "cannot be proven"；报告字段 sessionStartExplanation/prefixCompleteness 断言 |
+| F（r4 保持） | 解释+独立 gapReasons 缺口 | SOURCE_GAP（不被解释掩盖）→✓ | — |
+| G（r4 保持） | 无解释差值 | PROVEN_INCOMPLETE→RETENTION→✓ | — |
+| **H1** | pain-first+早期轮 aged+**真清扫**+immortal signal_confirmations 引用被清扫轮 | PROVEN_INCOMPLETE（N1）→RETENTION_EXPIRED+INCOMPLETE+BLOCKED→✓ 实际一致 | sweep.outcome=completed、清扫后行数断言、impact 含 "reference turn rows that no longer exist" |
+| **H2** | 同 H1 但无 immortal 引用 | UNKNOWN→SOURCE_GAP+INCOMPLETE+BLOCKED→✓ 实际一致；**绝不 PROVEN_COMPLETE** | EXPLAINED_BY_MANUAL_PAIN + UNKNOWN 断言 |
+| **I** | 轮次创建者（started_at==首行，无非轮次同时刻记录） | PROVEN_COMPLETE→READY→✓ 实际一致 | EXPLAINED_BY_TURN_WRITER+PROVEN_COMPLETE+零 SOURCE_*（除 ENVIRONMENT） |
+| **J** | 仅有 Pain 解释+无前缀证明 | UNKNOWN→SOURCE_GAP+INCOMPLETE+BLOCKED→✓ 实际一致 | — |
+| **K** | 非零 turn_index+解释起点 | UNKNOWN→SOURCE_GAP；**不判 RETENTION**→✓ 实际一致 | — |
+| **L** | 解释起点+独立 N1 缺口（真清扫+引用悬空） | PROVEN_INCOMPLETE→RETENTION_EXPIRED（正确正向代码）→✓ 实际一致 | 解释不掩盖缺口；impact 含引用细节 |
+
+## 16. Complexity Delta
 
 ```text
 New durable source of truth: NO   （admission-report/source-groups/remediation-queue 均为可复算派生物）

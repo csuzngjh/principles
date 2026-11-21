@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
-const { applyTrajectorySchemaBase } = require('@principles/core/runtime');
+const { applyTrajectorySchemaBase, runTrajectoryRetentionBatches, ensureTrajectoryRetentionIndexes } = require('@principles/core/runtime');
 
 export const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '..', '..', '..');
@@ -132,6 +132,69 @@ export function runProbeWithTimeout(args, timeoutMs) {
 export function createFifo(pathStr) {
   const run = spawnSync('mkfifo', [pathStr], { encoding: 'utf8', timeout: 10_000 });
   return run.status === 0;
+}
+
+/**
+ * r5 Case H: run the REAL production retention sweep
+ * (`runTrajectoryRetentionBatches` from @principles/core/runtime — the exact
+ * sweeper the host runtime and workers call) over the fixture's
+ * trajectory.db with the given cutoff. Fixture rows are AGED by the test
+ * (mirroring the passage of time); the DELETION itself is always performed
+ * by this production logic, never by test-side DELETEs.
+ */
+export function runRealRetentionSweep(snapshotDbPath, cutoffIso) {
+  const db = new Database(snapshotDbPath);
+  try {
+    ensureTrajectoryRetentionIndexes(db);
+    return runTrajectoryRetentionBatches(db, {
+      policy: { batchSize: 500, runBudgetMs: 10_000 },
+      cutoff: cutoffIso,
+      hooks: { now: () => Date.now() },
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * r5 Case H1/L: plant an immortal signal_confirmations row referencing the
+ * given turn rowids (production writes such rows while the referenced turns
+ * exist; the table is NOT swept, so the reference survives their deletion).
+ */
+export function plantSignalConfirmation(snapshotDbPath, { id, sessionId, userTurnRowid, referencesAssistantTurnId, createdAt }) {
+  const db = new Database(snapshotDbPath);
+  try {
+    db.prepare(
+      'INSERT INTO signal_confirmations (id, session_id, user_turn_rowid, occurrence_id, excerpt, terms_json, suggested_type, status, attempts, created_at, references_assistant_turn_id, assistant_turn_count_known, recent_assistant_turns_json)'
+        + ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      id,
+      sessionId,
+      userTurnRowid,
+      `occ-${id}`,
+      'planted confirmation excerpt',
+      JSON.stringify(['term']),
+      'correction',
+      'confirmed',
+      1,
+      createdAt,
+      referencesAssistantTurnId ?? null,
+      1,
+      '[]',
+    );
+  } finally {
+    db.close();
+  }
+}
+
+/** Count surviving rows of a swept table for a session (post-sweep assertion). */
+export function countSessionRows(snapshotDbPath, table, sessionId) {
+  const db = new Database(snapshotDbPath, { readonly: true });
+  try {
+    return db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE session_id = ?`).get(sessionId).n;
+  } finally {
+    db.close();
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -54,6 +54,9 @@ import {
   createFifo,
   runProbeWithTimeout,
   runProbeWithEnv,
+  runRealRetentionSweep,
+  plantSignalConfirmation,
+  countSessionRows,
 } from './fixtures/pd-lab-admission-probe-helpers.mjs';
 
 const require = createRequire(import.meta.url);
@@ -1858,7 +1861,7 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
     const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_RETENTION_EXPIRED');
     expect(problem.impact).toContain('passes all internal continuity checks');
-    expect(problem.impact).toContain('strictly precedes earliest surviving turn');
+    expect(problem.impact).toContain('strictly precedes the earliest surviving trajectory row');
   });
 
   it('Case B: started_at EQUAL to the earliest surviving turn is NOT positive evidence', () => {
@@ -1920,13 +1923,16 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(codes).not.toContain('SOURCE_GAP');
   });
 
-  it('Case E (r4, reviewer example): /pd-pain before the first turn explains started_at — a COMPLETE session enters experiments', () => {
-    // Owner submits /pd-pain at 10:00 (pain row written, session created at
-    // 10:00), then two complete contiguous turn pairs 10:01–10:04, then the
-    // dataset pain at 10:05. The snapshot retains EVERYTHING — the started_at
-    // diff is explained by the retention-immune pain row, so no SOURCE_* may
-    // fire and the sample must reach READY.
-    const world = buildWorld('r4-pdpain', {
+  it('Case E (r5): /pd-pain before the first turn explains the START but cannot prove the PREFIX — SOURCE_GAP, blocked', () => {
+    // Owner submits /pd-pain at 10:00 (pain row + session start at 10:00),
+    // then two complete contiguous turn pairs 10:01–10:04, then the dataset
+    // pain at 10:05. The pain row EXPLAINS the start (dimension A), but no
+    // persisted evidence proves whether trajectory rows existed between the
+    // pain and the first surviving turn — a complete pain-first session and a
+    // swept one are observationally identical (dimension B = UNKNOWN), so the
+    // sample must NOT be treated as prefix-complete (r5: 已解释+UNKNOWN →
+    // INCOMPLETE; never upgraded).
+    const world = buildWorld('r5-pdpain', {
       sessions: [
         {
           sessionId: 'sess-pain-first',
@@ -1948,14 +1954,152 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
       samples: [{ caseId: 'S01', sessionId: 'sess-pain-first', createdAt: '2026-09-01T10:05:00.000Z' }],
       extraPainRows: [{ id: 900, sessionId: 'sess-pain-first', createdAt: '2026-09-01T10:00:00.000Z' }],
     });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_MANUAL_PAIN');
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED'); // no positive sweep evidence — never claimed
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_GAP');
+    expect(problem.impact).toContain('cannot be proven');
+  });
+
+  it('Case I (r5): turn-created session whose start IS the earliest surviving trajectory row → PROVEN_COMPLETE, passes', () => {
+    // No non-turn creator: the first writer IS the surviving first turn, so
+    // nothing preceded it — positive completeness evidence from the
+    // started_at binding itself.
+    const world = buildWorld('r5-case-i', {
+      sessions: [
+        {
+          sessionId: 'sess-turn-created',
+          startedAt: '2026-09-01T10:01:00.000Z', // == the first turn's instant
+          userTurns: [{ turnIndex: 1, createdAt: '2026-09-01T10:01:00.000Z' }, { turnIndex: 2, createdAt: '2026-09-01T10:02:00.000Z' }],
+          assistantTurns: [{ createdAt: '2026-09-01T10:01:30.000Z' }, { createdAt: '2026-09-01T10:02:30.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-turn-created', createdAt: '2026-09-01T10:05:00.000Z' }],
+    });
     const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
     const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
-    const sample = readOut(world.outDir).report.perSample[0];
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_TURN_WRITER');
+    expect(sample.prefixCompleteness).toBe('PROVEN_COMPLETE');
     expect(sample.completeness).toBe('COMPLETE_FOR_ANALYSIS');
-    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+  });
+
+  it('Case J (r5): only a pain explanation, no prefix proof → UNKNOWN → SOURCE_GAP + INCOMPLETE + BLOCKED', () => {
+    const world = buildWorld('r5-case-j', {
+      sessions: [
+        {
+          sessionId: 'sess-j',
+          startedAt: '2026-09-01T10:00:00.000Z',
+          userTurns: [{ turnIndex: 2, createdAt: '2026-09-01T10:06:00.000Z' }, { turnIndex: 3, createdAt: '2026-09-01T10:07:00.000Z' }],
+          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z' }, { createdAt: '2026-09-01T10:07:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-j', createdAt: '2026-09-01T10:08:00.000Z' }],
+      extraPainRows: [{ id: 900, sessionId: 'sess-j', createdAt: '2026-09-01T10:00:00.000Z' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_MANUAL_PAIN');
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+
+  it('Case K (r5): non-zero turn_index alone is neither retention evidence nor completeness proof', () => {
+    // Pain-explained start + contiguous turns starting at index 5: the
+    // non-zero index triggers neither SOURCE_RETENTION_EXPIRED (r2 R600) nor
+    // PROVEN_COMPLETE — the prefix verdict is UNKNOWN.
+    const world = buildWorld('r5-case-k', {
+      sessions: [
+        {
+          sessionId: 'sess-k',
+          startedAt: '2026-09-01T10:00:00.000Z',
+          userTurns: [{ turnIndex: 5, createdAt: '2026-09-01T10:06:00.000Z' }, { turnIndex: 6, createdAt: '2026-09-01T10:07:00.000Z' }],
+          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-k', createdAt: '2026-09-01T10:08:00.000Z' }],
+      extraPainRows: [{ id: 900, sessionId: 'sess-k', createdAt: '2026-09-01T10:00:00.000Z' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
+    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+  });
+
+  it('Case L (r5): an explained start does NOT mask an independent dangling-reference gap', () => {
+    // Pain-explained start + a surviving user turn referencing an assistant
+    // turn that a REAL sweep removed — the positive vanished-row evidence
+    // must surface as SOURCE_RETENTION_EXPIRED despite the explanation.
+    const EARLY_ASSISTANT_BODY_MARKER = 'r5-case-l-early';
+    const world = buildWorld('r5-case-l', {
+      sessions: [
+        {
+          sessionId: 'sess-l',
+          startedAt: '2026-09-01T10:00:00.000Z',
+          userTurns: [
+            { turnIndex: 2, createdAt: '2026-09-01T10:01:00.000Z' },
+            { turnIndex: 3, createdAt: '2026-09-01T10:06:00.000Z' },
+          ],
+          assistantTurns: [
+            { createdAt: '2026-09-01T10:01:30.000Z' },
+            { createdAt: '2026-09-01T10:06:30.000Z' },
+          ],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-l', createdAt: '2026-09-01T10:08:00.000Z' }],
+      extraPainRows: [{ id: 900, sessionId: 'sess-l', createdAt: '2026-09-01T10:00:00.000Z' }],
+    });
+    // The early user turn (rowid via query) references the early assistant
+    // turn; both early rows are then aged and removed by the REAL sweeper.
+    const db = new Database(path.join(world.snapshotDir, 'trajectory.db'));
+    const earlyUser = db.prepare("SELECT id FROM user_turns WHERE session_id = 'sess-l' AND created_at = '2026-09-01T10:01:00.000Z'").get();
+    const earlyAssistant = db.prepare("SELECT id FROM assistant_turns WHERE session_id = 'sess-l' AND created_at = '2026-09-01T10:01:30.000Z'").get();
+    db.prepare('UPDATE user_turns SET references_assistant_turn_id = ? WHERE id = ?').run(earlyAssistant.id, earlyUser.id);
+    db.prepare("UPDATE user_turns SET created_at = '2026-05-01T10:01:00.000Z' WHERE id = ?").run(earlyUser.id);
+    db.prepare("UPDATE assistant_turns SET created_at = '2026-05-01T10:01:30.000Z' WHERE id = ?").run(earlyAssistant.id);
+    db.close();
+    plantSignalConfirmation(path.join(world.snapshotDir, 'trajectory.db'), {
+      id: 'sc-l',
+      sessionId: 'sess-l',
+      userTurnRowid: earlyUser.id,
+      referencesAssistantTurnId: earlyAssistant.id,
+      createdAt: '2026-09-01T10:02:00.000Z',
+    });
+    const sweep = runRealRetentionSweep(path.join(world.snapshotDir, 'trajectory.db'), '2026-09-01T00:00:00.000Z');
+    expect(sweep.outcome).toBe('completed');
+    expect(countSessionRows(path.join(world.snapshotDir, 'trajectory.db'), 'user_turns', 'sess-l')).toBe(1);
+    expect(countSessionRows(path.join(world.snapshotDir, 'trajectory.db'), 'assistant_turns', 'sess-l')).toBe(1);
+
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_MANUAL_PAIN'); // start still explained
+    expect(sample.prefixCompleteness).toBe('PROVEN_INCOMPLETE'); // the independent gap is NOT masked
+    expect(codesOf(out, 'S01')).toContain('SOURCE_RETENTION_EXPIRED');
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_RETENTION_EXPIRED');
+    expect(problem.impact).toContain('reference turn rows that no longer exist');
   });
 
   it('Case F (r4): an explained started_at diff does NOT mask an independent continuity gap', () => {
@@ -2122,6 +2266,106 @@ describe('r3 P2-01: fstat failure closes the opened fd exactly once (fault injec
     expect(run.status).toBe(0); // started and completed — space did not split the argv
     const log = fs.readFileSync(logPath, 'utf8').trim().split('\n');
     expect(log).toEqual(['FAULT_FD_CLOSE=1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r5 Case H — early turns removed by the REAL production retention sweeper
+// (runTrajectoryRetentionBatches from @principles/core/runtime). The fixture
+// only AGES the early rows (mirroring the passage of time); the deletion is
+// always performed by the production logic, never by test-side DELETEs.
+// ---------------------------------------------------------------------------
+
+describe('r5 Case H: real retention sweep of early turns (real CLI subprocess)', () => {
+  const CUTOFF = '2026-09-01T00:00:00.000Z'; // Sep rows survive, aged May rows are swept
+
+  /**
+   * Pain-first session: pain at 10:00 (creator), EARLY turn pair at
+   * 10:01/10:01:30 (later aged + swept), LATER complete pair at
+   * 10:06/10:06:30 (survive, contiguous), dataset pain at 10:08.
+   */
+  function sweepWorld(label: string) {
+    const world = buildWorld(label, {
+      sessions: [
+        {
+          sessionId: 'sess-swept',
+          startedAt: '2026-09-01T10:00:00.000Z',
+          userTurns: [
+            { turnIndex: 2, createdAt: '2026-09-01T10:01:00.000Z' },
+            { turnIndex: 3, createdAt: '2026-09-01T10:06:00.000Z' },
+          ],
+          assistantTurns: [
+            { createdAt: '2026-09-01T10:01:30.000Z' },
+            { createdAt: '2026-09-01T10:06:30.000Z' },
+          ],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-swept', createdAt: '2026-09-01T10:08:00.000Z' }],
+      extraPainRows: [{ id: 900, sessionId: 'sess-swept', createdAt: '2026-09-01T10:00:00.000Z' }],
+    });
+    const db = new Database(path.join(world.snapshotDir, 'trajectory.db'));
+    const earlyUser = db.prepare("SELECT id FROM user_turns WHERE session_id = 'sess-swept' AND created_at = '2026-09-01T10:01:00.000Z'").get();
+    const earlyAssistant = db.prepare("SELECT id FROM assistant_turns WHERE session_id = 'sess-swept' AND created_at = '2026-09-01T10:01:30.000Z'").get();
+    db.close();
+    return { world, earlyUser, earlyAssistant };
+  }
+
+  function ageAndSweep(world: { snapshotDir: string }, earlyUser: { id: number }, earlyAssistant: { id: number }) {
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    const db = new Database(dbPath);
+    db.prepare('UPDATE user_turns SET created_at = ? WHERE id = ?').run('2026-05-01T10:01:00.000Z', earlyUser.id);
+    db.prepare('UPDATE assistant_turns SET created_at = ? WHERE id = ?').run('2026-05-01T10:01:30.000Z', earlyAssistant.id);
+    db.pragma('journal_mode = DELETE');
+    db.close();
+    const sweep = runRealRetentionSweep(dbPath, CUTOFF);
+    expect(sweep.outcome).toBe('completed');
+    expect(countSessionRows(dbPath, 'user_turns', 'sess-swept')).toBe(1);
+    expect(countSessionRows(dbPath, 'assistant_turns', 'sess-swept')).toBe(1);
+  }
+
+  it('H1: a surviving immortal reference into the swept range → SOURCE_RETENTION_EXPIRED (positive evidence)', () => {
+    const { world, earlyUser, earlyAssistant } = sweepWorld('r5-h1');
+    // Production wrote this confirmation while the early turns existed; the
+    // table is NOT swept, so the reference outlives them.
+    plantSignalConfirmation(path.join(world.snapshotDir, 'trajectory.db'), {
+      id: 'sc-h1',
+      sessionId: 'sess-swept',
+      userTurnRowid: earlyUser.id,
+      referencesAssistantTurnId: earlyAssistant.id,
+      createdAt: '2026-09-01T10:02:00.000Z',
+    });
+    ageAndSweep(world, earlyUser, earlyAssistant);
+
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(sample.prefixCompleteness).toBe('PROVEN_INCOMPLETE');
+    expect(codesOf(out, 'S01')).toContain('SOURCE_RETENTION_EXPIRED');
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_RETENTION_EXPIRED');
+    expect(problem.impact).toContain('reference turn rows that no longer exist');
+  });
+
+  it('H2: swept early turns with NO surviving reference → prefix UNKNOWN → SOURCE_GAP (never PROVEN_COMPLETE)', () => {
+    const { world, earlyUser, earlyAssistant } = sweepWorld('r5-h2');
+    ageAndSweep(world, earlyUser, earlyAssistant);
+
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    // The pain row explains the start; the surviving window is internally
+    // continuous — yet nothing distinguishes this snapshot from a complete
+    // pain-first session, so the prefix verdict MUST be UNKNOWN and the
+    // sample must NOT reach READY.
+    expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_MANUAL_PAIN');
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
+    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
   });
 });
 
