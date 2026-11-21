@@ -39,8 +39,6 @@ import { readPromotedEvidenceWindow } from './promoted-evidence-reader.js';
 import {
   denyAllSourceMaterialAuthorization,
   filterEvidenceByAuthorization,
-  hostKindFromGovernanceSourceRef,
-  isGovernanceSourceRef,
   type SourceMaterialAuthorizationPort,
   type SourceMaterialHostKind,
 } from '../../source-material-authorization.js';
