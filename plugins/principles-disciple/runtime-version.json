@@ -1,5 +1,5 @@
 {
-  "codexAdapter": "0.13.1",
+  "codexAdapter": "0.14.0",
   "hostRuntime": "4.5.1",
   "core": "8.0.1",
   "mcpServer": "0.4.4",
