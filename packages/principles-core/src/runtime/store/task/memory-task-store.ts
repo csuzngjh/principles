@@ -4,6 +4,10 @@
 import type { TaskRecord } from '../../task-status.js';
 import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-store.js';
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** PRI-1274 (B1 / P1-3): the admission-disposition state from the task's
  * `diagnostic_json.recovery.state`, or null when absent/unparseable — the
  * memory-store twin of SQLite's `json_extract(... , '$.recovery.state')`. */
@@ -11,11 +15,10 @@ function readRecoveryStateFromDiagnosticJson(diagnosticJson: string | null | und
   if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return null;
   try {
     const parsed: unknown = JSON.parse(diagnosticJson);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    const record = parsed as Record<string, unknown>;
-    const {recovery} = record;
-    if (typeof recovery !== 'object' || recovery === null || Array.isArray(recovery)) return null;
-    const {state} = (recovery as Record<string, unknown>);
+    if (!isPlainObject(parsed)) return null;
+    const { recovery } = parsed;
+    if (!isPlainObject(recovery)) return null;
+    const { state } = recovery;
     return typeof state === 'string' ? state : null;
   } catch {
     return null;
