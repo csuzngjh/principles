@@ -58,16 +58,39 @@ import { findBlindViolations } from "../../../experiment/prompt-v2/scripts/ab/ab
 
 export const JUDGE_PROTOCOL_REF = "jp-pd-lab@1";
 
-export const PROTOCOL_VERDICTS = ["A_BETTER", "TIE", "B_BETTER", "UNKNOWN"];
+/**
+ * Recursive freeze: the exported protocol vocabulary and definition must be
+ * immutable all the way down — a caller that could mutate a nested array or
+ * object would silently change parse/validation behavior AFTER the content
+ * digest was computed, breaking the digest's binding to the frozen
+ * definition (PR #2740 remediation: shallow Object.freeze was not enough).
+ */
+function deepFreeze(value) {
+  if (value !== null && typeof value === "object") {
+    for (const key of Object.keys(value)) deepFreeze(value[key]);
+    Object.freeze(value);
+  }
+  return value;
+}
 
-export const DISPLAY_ORDERS = ["AB", "BA"];
+export const PROTOCOL_VERDICTS = deepFreeze([
+  "A_BETTER",
+  "TIE",
+  "B_BETTER",
+  "UNKNOWN",
+]);
 
-export const ARM_ROLES = ["candidate", "reference"];
+export const DISPLAY_ORDERS = deepFreeze(["AB", "BA"]);
+
+export const ARM_ROLES = deepFreeze(["candidate", "reference"]);
 
 // CONTRACT 5.1: the judge/generator model-family relation is an explicit
 // disclosure, not a hidden item. Same-family is a DECLARED limitation; an
 // undisclosed relation is not a legal record.
-export const MODEL_RELATION_DISCLOSURES = ["SAME_FAMILY", "DIFFERENT_FAMILY"];
+export const MODEL_RELATION_DISCLOSURES = deepFreeze([
+  "SAME_FAMILY",
+  "DIFFERENT_FAMILY",
+]);
 
 // The frozen protocol definition. Every behavior-relevant constant lives
 // here so `judgeProtocolDigest()` binds them all: changing any of it is a
@@ -110,11 +133,16 @@ export const JUDGE_PROTOCOL = Object.freeze({
   displayOrderPolicy:
     "display positions are frozen per package at build time; a position exchange is a SEPARATE package whose outputs are exchanged and whose identity binding is inverted",
   arbitrationPolicy:
-    "conflicting judgments enter the frozen blind arbitration path (CONTRACT 5.2); unresolved conflicts stay UNKNOWN and are never averaged",
+    "conflicting judgments enter the frozen blind arbitration path (CONTRACT 5.2); an arbitration must bind every participating judgment id AND its comparisonInputDigest; unresolved or incompletely bound conflicts stay UNKNOWN and are never averaged",
+  judgeSlotPolicy:
+    "every judgment record is attributed to exactly one judge slot (judgeSlotId); a missing slot binding is never defaulted, and without a preregistered slot registry the slot's preregistration check is disclosed as unverified, never reported as verified (CONTRACT 5.2a)",
   attemptPolicy:
-    "failed attempts are preserved audit records (attemptStatus FAILED) and never vote (CONTRACT 5.2a)",
+    "a non-FAILED record must carry its positive-integer attempt number — a missing attempt is never defaulted to 1; failed attempts are preserved audit records (attemptStatus FAILED) and never vote (CONTRACT 5.2a)",
+  positionExchangePolicy:
+    "a position exchange is valid only as a complete semantic swap: exchanged outputs byte-identical, identical context/rubricVersion/judgeProtocolRef/comparisonQuestion, inverted identity map, flipped display order, truncation sides swapped by role, and one shared role-canonical comparisonInputDigest; incomplete or invalid exchanges never enter the flip-rate denominator and UNKNOWN/FAILED results are disclosed separately, never counted as consistent",
   modelRelationDisclosureVocabulary: MODEL_RELATION_DISCLOSURES,
 });
+deepFreeze(JUDGE_PROTOCOL);
 
 // ---------------------------------------------------------------------------
 // canonicalJson — IDENTICAL semantics to alignment-report.mjs /
@@ -625,15 +653,18 @@ export const PROTOCOL_RECORD_PROBLEM_CODES = Object.freeze([
   "EVIDENCE_INVALID",
   "EVIDENCE_SIDES_INVALID",
   "ATTEMPT_INVALID",
+  "ATTEMPT_MISSING",
   "ATTEMPT_STATUS_INVALID",
   "JUDGE_SLOT_ID_INVALID",
+  "JUDGE_SLOT_BINDING_MISSING",
   "MODEL_BLOCK_INVALID",
   "RELATION_DISCLOSURE_INVALID",
   "REASON_MISSING",
   "DIGEST_INVALID",
+  "PROTOCOL_DIGEST_MISMATCH",
 ]);
 
-function identityMapProblem(identityMap) {
+export function identityMapProblem(identityMap) {
   if (!isPlainObject(identityMap)) return "identityMap must be an object";
   const { A, B } = identityMap;
   if (!ARM_ROLES.includes(A) || !ARM_ROLES.includes(B) || A === B) {
@@ -747,13 +778,47 @@ export function validateProtocolRecord(record) {
   if (record.attempt !== undefined && !isPositiveInteger(record.attempt)) {
     problem("ATTEMPT_INVALID", "attempt must be a positive integer");
   }
-  if (
-    record.judgeSlotId !== undefined &&
-    !isNonEmptyString(record.judgeSlotId)
-  ) {
+  // CONTRACT 5.2a + T4 parity: a non-FAILED vote candidate must carry its
+  // attempt number. It is never defaulted — a missing attempt means the
+  // attempt's audit position cannot be verified, so the record is invalid.
+  if (attemptStatus !== "FAILED" && record.attempt === undefined) {
+    problem(
+      "ATTEMPT_MISSING",
+      "a non-FAILED record requires its positive-integer attempt number (never defaulted)",
+    );
+  }
+  // CONTRACT 5.2a + T4 parity: every judgment record must be attributed to
+  // its judge slot. A missing binding is never defaulted to some slot.
+  if (record.judgeSlotId === undefined) {
+    problem(
+      "JUDGE_SLOT_BINDING_MISSING",
+      "every judgment record requires a judgeSlotId (never defaulted)",
+    );
+  } else if (!isNonEmptyString(record.judgeSlotId)) {
     problem(
       "JUDGE_SLOT_ID_INVALID",
       "judgeSlotId must be a non-empty string when present",
+    );
+  }
+  // Every formal record binds the protocol definition it was produced under:
+  // ref AND content digest (recomputed from the frozen definition at
+  // validation time — an old-protocol record is never silently accepted).
+  if (isNonEmptyString(record.judgeProtocolDigest)) {
+    if (record.judgeProtocolDigest !== judgeProtocolDigest()) {
+      problem(
+        "PROTOCOL_DIGEST_MISMATCH",
+        `judgeProtocolDigest does not match the current ${JUDGE_PROTOCOL_REF} digest`,
+      );
+    }
+  } else if (record.judgeProtocolDigest !== undefined) {
+    problem(
+      "DIGEST_INVALID",
+      "judgeProtocolDigest must match sha256:<64 lowercase hex>",
+    );
+  } else {
+    problem(
+      "FIELD_MISSING",
+      "judgeProtocolDigest must be a non-empty string (binds the record to the frozen protocol definition)",
     );
   }
 
@@ -948,6 +1013,7 @@ export function buildProtocolRecord(input) {
       secretBinding.identityMap,
     ),
     rubricVersion: JUDGE_PROTOCOL.rubricVersion,
+    judgeProtocolDigest: judgeProtocolDigest(),
     attempt: input.attempt,
     ...(input.attemptStatus !== undefined
       ? { attemptStatus: input.attemptStatus }

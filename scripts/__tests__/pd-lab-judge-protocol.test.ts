@@ -447,11 +447,17 @@ describe("validateProtocolRecord", () => {
       ATTEMPT_INVALID: (r) => {
         r.attempt = 0;
       },
+      ATTEMPT_MISSING: (r) => {
+        delete r.attempt;
+      },
       ATTEMPT_STATUS_INVALID: (r) => {
         r.attemptStatus = "RETRY";
       },
       JUDGE_SLOT_ID_INVALID: (r) => {
         r.judgeSlotId = "";
+      },
+      JUDGE_SLOT_BINDING_MISSING: (r) => {
+        delete r.judgeSlotId;
       },
       MODEL_BLOCK_INVALID: (r) => {
         r.judgeModel = { provider: "x", model: "y" };
@@ -464,6 +470,9 @@ describe("validateProtocolRecord", () => {
       },
       DIGEST_INVALID: (r) => {
         r.comparisonInputDigest = "not-a-digest";
+      },
+      PROTOCOL_DIGEST_MISMATCH: (r) => {
+        r.judgeProtocolDigest = `sha256:${"0".repeat(64)}`;
       },
     };
     expect(Object.keys(mutations).sort()).toEqual(
@@ -1138,6 +1147,112 @@ describe("protocol records merge through T4 mergeJudgments", () => {
     });
   });
 
+  it("T7a record checks and T4 mergeJudgments agree on slot/attempt integrity (P1-2)", () => {
+    const built = healthyPackage();
+    const blindmapOf = (record: { identityMap: unknown }, id: string) => ({
+      map: { [id]: record.identityMap },
+    });
+    // Missing slot: T7a flags JUDGE_SLOT_BINDING_MISSING on the record AND
+    // T4 gates the same unit UNKNOWN with the same code — same judgment.
+    const noSlot = healthyRecord(built, "A_BETTER", "j-ns") as unknown as Record<
+      string,
+      unknown
+    >;
+    delete noSlot.judgeSlotId;
+    expect(
+      validateProtocolRecord(noSlot).problems.map(
+        (p: { code: string }) => p.code,
+      ),
+    ).toContain("JUDGE_SLOT_BINDING_MISSING");
+    const mergedNoSlot = mergeJudgments({
+      plan: minimalPlan(1),
+      judgments: [noSlot],
+      blindmap: blindmapOf(noSlot, "j-ns"),
+    });
+    expect(mergedNoSlot.evidenceProblems.map((p: { code: string }) => p.code)).toContain(
+      "JUDGE_SLOT_BINDING_MISSING",
+    );
+    expect(mergedNoSlot.finalComparisons[0].verdict).toBe("UNKNOWN");
+    // Missing attempt: same agreement.
+    const noAttempt = healthyRecord(
+      built,
+      "A_BETTER",
+      "j-na",
+    ) as unknown as Record<string, unknown>;
+    delete noAttempt.attempt;
+    expect(
+      validateProtocolRecord(noAttempt).problems.map(
+        (p: { code: string }) => p.code,
+      ),
+    ).toContain("ATTEMPT_MISSING");
+    const mergedNoAttempt = mergeJudgments({
+      plan: minimalPlan(1),
+      judgments: [noAttempt],
+      blindmap: blindmapOf(noAttempt, "j-na"),
+    });
+    expect(
+      mergedNoAttempt.evidenceProblems.map((p: { code: string }) => p.code),
+    ).toContain("ATTEMPT_MISSING");
+    // Two same-slot records with DIFFERENT restored verdicts conflict in T4
+    // (one seat, no averaging) — and the second record adds no extra seat.
+    const retryAgree1 = healthyRecord(built, "A_BETTER", "j-r1", undefined, {
+      judgeSlotId: "slot-shared",
+    });
+    const retryAgree2 = healthyRecord(
+      built,
+      "A_BETTER",
+      "j-r2",
+      undefined,
+      { judgeSlotId: "slot-shared", attempt: 2 },
+    );
+    const mergedAgree = mergeJudgments({
+      plan: minimalPlan(1),
+      judgments: [retryAgree1, retryAgree2],
+      blindmap: {
+        map: { "j-r1": retryAgree1.identityMap, "j-r2": retryAgree2.identityMap },
+      },
+    });
+    expect(mergedAgree.finalComparisons[0].verdict).toBe("CANDIDATE_BETTER");
+    const retryConflict = healthyRecord(
+      built,
+      "B_BETTER",
+      "j-r3",
+      undefined,
+      { judgeSlotId: "slot-shared", attempt: 2 },
+    );
+    const mergedConflict = mergeJudgments({
+      plan: minimalPlan(1),
+      judgments: [retryAgree1, retryConflict],
+      blindmap: {
+        map: {
+          "j-r1": retryAgree1.identityMap,
+          "j-r3": retryConflict.identityMap,
+        },
+      },
+    });
+    expect(
+      mergedConflict.evidenceProblems.map((p: { code: string }) => p.code),
+    ).toContain("CONFLICTING_ATTEMPT_RECORDS");
+    expect(mergedConflict.finalComparisons[0].verdict).toBe("UNKNOWN");
+    // A FAILED attempt never votes: preserved but excluded.
+    const failed = healthyRecord(
+      built,
+      "A_BETTER",
+      "j-f",
+      undefined,
+      { attemptStatus: "FAILED", judgeSlotId: "slot-f" },
+    ) as unknown as Record<string, unknown>;
+    delete failed.displayVerdict;
+    delete failed.reason;
+    delete failed.evidence;
+    const mergedFailed = mergeJudgments({
+      plan: minimalPlan(1),
+      judgments: [failed],
+      blindmap: blindmapOf(failed, "j-f"),
+    });
+    expect(mergedFailed.finalComparisons[0].verdict).toBe("UNKNOWN");
+  });
+
   it("a lossy UNKNOWN record never votes a win (CONTRACT 5.1 lossy policy through T4)", () => {
     const truncated = buildJudgePackage({
       packageId: "pkg-lossy",
@@ -1160,6 +1275,629 @@ describe("protocol records merge through T4 mergeJudgments", () => {
       reasonCode: "JUDGMENTS_UNKNOWN",
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// PR #2740 remediation: deep freeze, record binding, complete semantic swap,
+// T4-parity arbitration binding, per-record validity, CLI exception safety.
+// ---------------------------------------------------------------------------
+
+describe("protocol deep freeze and record binding (P1-2/P1-3)", () => {
+  it("the protocol definition and exported vocabularies are frozen all the way down", () => {
+    expect(Object.isFrozen(JUDGE_PROTOCOL)).toBe(true);
+    expect(Object.isFrozen(JUDGE_PROTOCOL.specRefs)).toBe(true);
+    expect(Object.isFrozen(JUDGE_PROTOCOL.unknownPolicy)).toBe(true);
+    expect(Object.isFrozen(JUDGE_PROTOCOL.lossyInputPolicy)).toBe(true);
+    for (const arr of [
+      JUDGE_PROTOCOL.verdictVocabulary,
+      JUDGE_PROTOCOL.outputContract ? [0] : [],
+    ]) {
+      void arr;
+    }
+    const before = judgeProtocolDigest();
+    // Mutation attempts on nested structure are impossible in strict mode —
+    // and the digest is invariant either way.
+    expect(() => {
+      (JUDGE_PROTOCOL.verdictVocabulary as string[]).push("MAYBE");
+    }).toThrow();
+    expect(() => {
+      (JUDGE_PROTOCOL.unknownPolicy as Record<string, unknown>).explicitOnly =
+        false;
+    }).toThrow();
+    expect(judgeProtocolDigest()).toBe(before);
+  });
+
+  it("records bind the protocol digest; a stale or missing digest is rejected", () => {
+    const built = healthyPackage();
+    const record = healthyRecord(built, "A_BETTER") as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(record.judgeProtocolDigest).toBe(judgeProtocolDigest());
+    record.judgeProtocolDigest = `sha256:${"9".repeat(64)}`;
+    expect(
+      validateProtocolRecord(record).problems.map(
+        (p: { code: string }) => p.code,
+      ),
+    ).toContain("PROTOCOL_DIGEST_MISMATCH");
+    delete record.judgeProtocolDigest;
+    expect(
+      validateProtocolRecord(record).problems.map(
+        (p: { code: string }) => p.code,
+      ),
+    ).toContain("FIELD_MISSING");
+  });
+
+  it("missing judgeSlotId is never defaulted; missing attempt is never defaulted (T4 parity)", () => {
+    const built = healthyPackage();
+    const noSlot = healthyRecord(built, "A_BETTER") as unknown as Record<
+      string,
+      unknown
+    >;
+    delete noSlot.judgeSlotId;
+    expect(
+      validateProtocolRecord(noSlot).problems.map(
+        (p: { code: string }) => p.code,
+      ),
+    ).toContain("JUDGE_SLOT_BINDING_MISSING");
+    const noAttempt = healthyRecord(built, "A_BETTER") as unknown as Record<
+      string,
+      unknown
+    >;
+    delete noAttempt.attempt;
+    expect(
+      validateProtocolRecord(noAttempt).problems.map(
+        (p: { code: string }) => p.code,
+      ),
+    ).toContain("ATTEMPT_MISSING");
+    // A FAILED record may keep no attempt; its slot binding is still required.
+    const failedNoSlot = healthyRecord(
+      built,
+      "A_BETTER",
+      "j-f",
+      undefined,
+      { attemptStatus: "FAILED" },
+    ) as unknown as Record<string, unknown>;
+    delete failedNoSlot.judgeSlotId;
+    expect(
+      validateProtocolRecord(failedNoSlot).problems.map(
+        (p: { code: string }) => p.code,
+      ),
+    ).toContain("JUDGE_SLOT_BINDING_MISSING");
+    const failedNoAttempt = healthyRecord(
+      built,
+      "A_BETTER",
+      "j-f2",
+      undefined,
+      { attemptStatus: "FAILED" },
+    ) as unknown as Record<string, unknown>;
+    delete failedNoAttempt.attempt;
+    delete failedNoAttempt.displayVerdict;
+    delete failedNoAttempt.reason;
+    delete failedNoAttempt.evidence;
+    expect(validateProtocolRecord(failedNoAttempt).problems).toEqual([]);
+  });
+});
+
+describe("complete semantic swap verification via real CLI (P0-2)", () => {
+  const makePair = () => {
+    const original = healthyPackage();
+    const swapped = swapJudgePackage(
+      original.blindPackage,
+      original.secretBinding,
+      "pkg-1:swap",
+    );
+    return { original, swapped };
+  };
+  const entryOf = (
+    built: ReturnType<typeof healthyPackage>,
+    verdict: string,
+    judgmentId: string,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    blindPackage: built.blindPackage,
+    secretBinding: built.secretBinding,
+    rawResponse: rawResponseOf({ displayVerdict: verdict }),
+    record: healthyRecord(built, verdict, judgmentId),
+    ...extra,
+  });
+  const bundle = (entries: unknown[], extra: Record<string, unknown> = {}) => ({
+    schema: "pd-lab-judge-protocol-bundle.v1",
+    entries,
+    ...extra,
+  });
+  const codes = (report: { problems: { code: string }[] }) =>
+    report.problems.map((p) => p.code);
+
+  it("a content swap without the inverted identity map is rejected (and flips the digest)", () => {
+    const { original, swapped } = makePair();
+    const badBinding = {
+      // Swapped package but the ORIGINAL (non-inverted) binding.
+      packageId: "pkg-1:swap",
+      displayOrder: original.secretBinding.displayOrder,
+      identityMap: original.secretBinding.identityMap,
+    };
+    const record = healthyRecord(swapped, "A_BETTER", "j-2") as unknown as Record<
+      string,
+      unknown
+    >;
+    record.identityMap = original.secretBinding.identityMap;
+    record.displayOrder = original.secretBinding.displayOrder;
+    const { run, report } = validateBundle(
+      "swap-map-not-inverted",
+      bundle([
+        entryOf(original, "A_BETTER", "j-1", { swapOf: "pkg-1:swap" }),
+        {
+          blindPackage: swapped.blindPackage,
+          secretBinding: badBinding,
+          rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+          record,
+        },
+      ]),
+    );
+    expect(run.status).toBe(1);
+    expect(codes(report)).toContain("SWAP_IDENTITY_NOT_INVERTED");
+    expect(codes(report)).toContain("SWAP_DISPLAY_ORDER_MISMATCH");
+    expect(report.positionExchange.invalidPairs).toBe(1);
+  });
+
+  it("a swap whose context/rubric/question changed is rejected", () => {
+    const { original, swapped } = makePair();
+    const tamperedPkg = {
+      ...swapped.blindPackage,
+      context: `${swapped.blindPackage.context}!`,
+    };
+    const record = healthyRecord(swapped, "B_BETTER", "j-2") as unknown as Record<
+      string,
+      unknown
+    >;
+    record.comparisonInputDigest = comparisonInputDigestOf(
+      tamperedPkg,
+      swapped.secretBinding.identityMap,
+    );
+    const { run, report } = validateBundle(
+      "swap-context-drift",
+      bundle([
+        entryOf(original, "A_BETTER", "j-1", { swapOf: "pkg-1:swap" }),
+        {
+          blindPackage: tamperedPkg,
+          secretBinding: swapped.secretBinding,
+          rawResponse: rawResponseOf({ displayVerdict: "B_BETTER" }),
+          record,
+        },
+      ]),
+    );
+    expect(run.status).toBe(1);
+    // The exchanged sides no longer mirror: the content check names it. The
+    // role-canonical digest only covers the swapped arms, so context drift
+    // is caught by content, not by the digest.
+    expect(codes(report)).toContain("SWAP_CONTENT_MISMATCH");
+  });
+
+  it("a swap that does not exchange the truncation sides by role is rejected", () => {
+    const original = buildJudgePackage({
+      packageId: "pkg-lossy",
+      context: "ctx",
+      outputCandidate: "x".repeat(50),
+      outputReference: "y",
+      identityMap: { A: "candidate", B: "reference" },
+      displayOrder: "AB",
+      maxOutputChars: 10,
+    });
+    const swapped = swapJudgePackage(
+      original.blindPackage,
+      original.secretBinding,
+      "pkg-lossy:swap",
+    );
+    expect(swapped.ok).toBe(true);
+    // Tamper: the swap must carry the truncation on side B (the candidate
+    // moved to B); keeping it on A truncates the wrong arm.
+    const badPkg = {
+      ...swapped.blindPackage,
+      truncation: [{ truncatedSide: "A", truncatedAt: 10, originalChars: 50 }],
+    };
+    const badRecord = healthyRecord(swapped, "UNKNOWN", "j-2") as unknown as Record<
+      string,
+      unknown
+    >;
+    badRecord.truncation = [
+      { truncatedSide: "A", truncatedAt: 10, originalChars: 50 },
+    ];
+    badRecord.comparisonInputDigest = comparisonInputDigestOf(
+      badPkg,
+      swapped.secretBinding.identityMap,
+    );
+    const { run, report } = validateBundle(
+      "swap-truncation-side",
+      bundle([
+        {
+          blindPackage: original.blindPackage,
+          secretBinding: original.secretBinding,
+          rawResponse: rawResponseOf({
+            displayVerdict: "UNKNOWN",
+            unknownReason: "insufficient comparable evidence",
+          }),
+          record: healthyRecord(original, "UNKNOWN", "j-1"),
+          swapOf: "pkg-lossy:swap",
+        },
+        {
+          blindPackage: badPkg,
+          secretBinding: swapped.secretBinding,
+          rawResponse: rawResponseOf({
+            displayVerdict: "UNKNOWN",
+            unknownReason: "insufficient comparable evidence",
+          }),
+          record: badRecord,
+        },
+      ]),
+    );
+    expect(run.status).toBe(1);
+    expect(codes(report)).toContain("SWAP_TRUNCATION_MISMATCH");
+    expect(codes(report)).toContain("SWAP_DIGEST_MISMATCH");
+  });
+
+  it("UNKNOWN verdicts and invalid records are disclosed separately, never counted consistent", () => {
+    const { original, swapped } = makePair();
+    const { report } = validateBundle(
+      "swap-unknowns",
+      bundle([
+        {
+          ...entryOf(original, "UNKNOWN", "j-1", { swapOf: "pkg-1:swap" }),
+        },
+        { ...entryOf(swapped, "UNKNOWN", "j-2") },
+      ]),
+    );
+    expect(report.positionExchange.undetermined).toBe(1);
+    expect(report.positionExchange.consistent).toBe(0);
+    // A record that fails validation never enters the exchange denominator.
+    const badRecord = healthyRecord(swapped, "B_BETTER", "j-2") as unknown as Record<
+      string,
+      unknown
+    >;
+    badRecord.comparisonInputDigest = `sha256:${"0".repeat(64)}`;
+    const { report: invalidReport } = validateBundle(
+      "swap-invalid-record",
+      bundle([
+        entryOf(original, "A_BETTER", "j-1", { swapOf: "pkg-1:swap" }),
+        {
+          blindPackage: swapped.blindPackage,
+          secretBinding: swapped.secretBinding,
+          rawResponse: rawResponseOf({ displayVerdict: "B_BETTER" }),
+          record: badRecord,
+        },
+      ]),
+    );
+    expect(invalidReport.positionExchange.evaluatedPairs).toBe(0);
+    expect(invalidReport.positionExchange.consistent).toBe(0);
+    expect(invalidReport.positionExchange.invalidPairs).toBe(1);
+  });
+
+  it("duplicate pairing, missing target and malformed swapOf are named problems", () => {
+    const { original, swapped } = makePair();
+    // pkg-1 <-> pkg-1:swap is bound; a THIRD entry that also has the
+    // counter-image shape declares pkg-1 as its partner — one package must
+    // not be paired twice.
+    const third = swapJudgePackage(
+      original.blindPackage,
+      original.secretBinding,
+      "pkg-1b:swap",
+    );
+    const { run, report } = validateBundle(
+      "swap-dupe",
+      bundle([
+        entryOf(original, "A_BETTER", "j-1", { swapOf: "pkg-1:swap" }),
+        entryOf(swapped, "B_BETTER", "j-2"),
+        entryOf(third, "A_BETTER", "j-3", { swapOf: "pkg-1" }),
+      ]),
+    );
+    expect(run.status).toBe(1);
+    expect(codes(report)).toContain("SWAP_DUPLICATE_PAIRING");
+    const missing = validateBundle(
+      "swap-missing-target",
+      bundle([entryOf(original, "A_BETTER", "j-1", { swapOf: "pkg-ghost" })]),
+    );
+    expect(codes(missing.report)).toContain("SWAP_PARTNER_MISSING");
+    const malformed = validateBundle(
+      "swap-malformed-of",
+      bundle([entryOf(original, "A_BETTER", "j-1", { swapOf: 42 })]),
+    );
+    expect(codes(malformed.report)).toContain("SWAP_OF_INVALID");
+  });
+});
+
+describe("arbitration binding parity with T4 (P0-3)", () => {
+  const setup = () => {
+    const built = healthyPackage();
+    const swapped = swapJudgePackage(
+      built.blindPackage,
+      built.secretBinding,
+      "pkg-1:swap",
+    );
+    const j1 = healthyRecord(built, "A_BETTER", "j-1");
+    const j2 = healthyRecord(swapped, "A_BETTER", "j-2");
+    const entries = [
+      {
+        blindPackage: built.blindPackage,
+        secretBinding: built.secretBinding,
+        rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+        record: j1,
+      },
+      {
+        blindPackage: swapped.blindPackage,
+        secretBinding: swapped.secretBinding,
+        rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+        record: j2,
+      },
+    ];
+    return { j1, j2, entries };
+  };
+  const arbitration = (j1: any, j2: any, overrides: Record<string, unknown> = {}) => ({
+    arbitrationId: "arb-1",
+    assignmentKey: j1.assignmentKey,
+    verdict: "CANDIDATE_BETTER",
+    boundJudgmentIds: [j1.judgmentId, j2.judgmentId],
+    boundComparisonInputDigests: [
+      j1.comparisonInputDigest,
+      j2.comparisonInputDigest,
+    ],
+    ...overrides,
+  });
+  const codes = (report: { problems: { code: string }[] }) =>
+    report.problems.map((p) => p.code);
+
+  it("missing/tampered/partial digest bindings stay UNKNOWN — never resolve", () => {
+    const { j1, j2, entries } = setup();
+    const base = {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries,
+    };
+    // Digest set missing entirely -> the arbitration record itself is invalid.
+    const noDigests = validateBundle("arb-no-digests", {
+      ...base,
+      arbitrations: [
+        {
+          arbitrationId: "a",
+          assignmentKey: j1.assignmentKey,
+          verdict: "TIE",
+          boundJudgmentIds: ["j-1", "j-2"],
+        },
+      ],
+    });
+    expect(codes(noDigests.report)).toContain("INVALID_ARBITRATION_RECORD");
+    // Tampered digest -> binding incomplete -> UNKNOWN.
+    const tampered = validateBundle("arb-tampered-digest", {
+      ...base,
+      arbitrations: [
+        arbitration(j1, j2, {
+          boundComparisonInputDigests: [
+            j1.comparisonInputDigest,
+            `sha256:${"0".repeat(64)}`,
+          ],
+        }),
+      ],
+    });
+    expect(tampered.report.perAssignment[0].outcome).toBe("UNKNOWN");
+    expect(
+      tampered.report.perAssignment[0].arbitrationBindingComplete,
+    ).toBe(false);
+    // Partial ids -> UNKNOWN; extra ids -> UNKNOWN.
+    for (const bound of [
+      ["j-1"],
+      ["j-1", "j-2", "j-ghost"],
+    ]) {
+      const variant = validateBundle(`arb-ids-${bound.length}`, {
+        ...base,
+        arbitrations: [
+          arbitration(j1, j2, { boundJudgmentIds: bound }),
+        ],
+      });
+      expect(variant.report.perAssignment[0].outcome).toBe("UNKNOWN");
+    }
+    // Partial digest set -> UNKNOWN. Two records of the SAME assignment on
+    // different comparison inputs carry two distinct digests; binding only
+    // one is incomplete.
+    const otherPkg = healthyPackage({
+      packageId: "pkg-2",
+      outputCandidate: "a different candidate output",
+    });
+    const j3 = healthyRecord(otherPkg, "B_BETTER", "j-3", j1.assignmentKey);
+    const partialDigest = validateBundle("arb-partial-digest", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        entries[0],
+        {
+          blindPackage: otherPkg.blindPackage,
+          secretBinding: otherPkg.secretBinding,
+          rawResponse: rawResponseOf({ displayVerdict: "B_BETTER" }),
+          record: j3,
+        },
+      ],
+      arbitrations: [
+        arbitration(j1, j3, {
+          boundComparisonInputDigests: [j1.comparisonInputDigest],
+        }),
+      ],
+    });
+    expect(partialDigest.report.perAssignment[0].outcome).toBe("UNKNOWN");
+  });
+
+  it("missing arbitrationId / unknown assignmentKey are invalid records", () => {
+    const { j1, j2, entries } = setup();
+    const base = { schema: "pd-lab-judge-protocol-bundle.v1", entries };
+    const noId = validateBundle("arb-no-id", {
+      ...base,
+      arbitrations: [arbitration(j1, j2, { arbitrationId: undefined })],
+    });
+    expect(codes(noId.report)).toContain("INVALID_ARBITRATION_RECORD");
+    const orphan = validateBundle("arb-orphan", {
+      ...base,
+      arbitrations: [
+        arbitration(j1, j2, { assignmentKey: "no-such-assignment" }),
+      ],
+    });
+    expect(codes(orphan.report)).toContain("INVALID_ARBITRATION_RECORD");
+  });
+
+  it("a completely bound UNKNOWN arbitration keeps the outcome UNKNOWN", () => {
+    const { j1, j2, entries } = setup();
+    const { report } = validateBundle("arb-unknown", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries,
+      arbitrations: [arbitration(j1, j2, { verdict: "UNKNOWN" })],
+    });
+    expect(report.perAssignment[0].arbitrationBindingComplete).toBe(true);
+    expect(report.perAssignment[0].outcome).toBe("UNKNOWN");
+  });
+});
+
+describe("per-record validity aggregation via real CLI (P1-1)", () => {
+  it("an invalid record is excluded from voting and its assignment stays UNKNOWN", () => {
+    const built = healthyPackage();
+    const swapped = swapJudgePackage(
+      built.blindPackage,
+      built.secretBinding,
+      "pkg-1:swap",
+    );
+    const j1 = healthyRecord(built, "A_BETTER", "j-1");
+    const bad = healthyRecord(swapped, "A_BETTER", "j-2") as unknown as Record<
+      string,
+      unknown
+    >;
+    bad.comparisonInputDigest = `sha256:${"0".repeat(64)}`;
+    const { run, report } = validateBundle("invalid-record-vote", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        {
+          blindPackage: built.blindPackage,
+          secretBinding: built.secretBinding,
+          rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+          record: j1,
+        },
+        {
+          blindPackage: swapped.blindPackage,
+          secretBinding: swapped.secretBinding,
+          rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+          record: bad,
+        },
+      ],
+    });
+    expect(run.status).toBe(1);
+    const badRow = report.perRecord.find(
+      (r: { judgmentId: string }) => r.judgmentId === "j-2",
+    );
+    expect(badRow.valid).toBe(false);
+    expect(badRow.problemCodes).toContain("COMPARISON_INPUT_DIGEST_MISMATCH");
+    const assignment = report.perAssignment[0];
+    // Only j-1 votes — the invalid record never enters the judgment set.
+    expect(assignment.votingJudgments).toEqual(["j-1"]);
+    expect(assignment.outcome).toBe("CANDIDATE_BETTER");
+  });
+
+  it("a slot not in the preregistered registry is flagged; no registry is disclosed unverified", () => {
+    const built = healthyPackage();
+    const entries = [
+      {
+        blindPackage: built.blindPackage,
+        secretBinding: built.secretBinding,
+        rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+        record: healthyRecord(built, "A_BETTER", "j-1"),
+      },
+    ];
+    const noRegistry = validateBundle("slot-no-registry", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries,
+    });
+    expect(
+      noRegistry.report.disclosures.map((d: { code: string }) => d.code),
+    ).toContain("JUDGE_SLOT_REGISTRATION_UNVERIFIED");
+    const wrongSlot = validateBundle("slot-wrong-registry", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      judgeSlots: ["slot-other"],
+      entries,
+    });
+    expect(
+      wrongSlot.report.problems.map((p: { code: string }) => p.code),
+    ).toContain("JUDGE_SLOT_NOT_PREREGISTERED");
+    const rightSlot = validateBundle("slot-right-registry", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      judgeSlots: ["slot-j-1"],
+      entries,
+    });
+    expect(rightSlot.run.status).toBe(0);
+  });
+});
+
+describe("CLI exception safety on malformed input (P1-4)", () => {
+  const entry = (overrides: Record<string, unknown>) => {
+    const built = healthyPackage();
+    return {
+      blindPackage: built.blindPackage,
+      secretBinding: built.secretBinding,
+      rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+      record: healthyRecord(built, "A_BETTER"),
+      ...overrides,
+    };
+  };
+  const malformed = (name: string, entries: unknown[]) =>
+    validateBundle(name, {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries,
+    });
+
+  it(
+    "malformed packages/bindings/records produce named problems, never a crash",
+    { timeout: 60_000 },
+    () => {
+    const cases: Array<[string, unknown[]]> = [
+      ["mal-null-pkg", [{ ...entry({}), blindPackage: null }]],
+      ["mal-array-pkg", [{ ...entry({}), blindPackage: [1, 2] }]],
+      ["mal-empty-pkg", [{ ...entry({}), blindPackage: {} }]],
+      ["mal-empty-binding", [{ ...entry({}), secretBinding: {} }]],
+      ["mal-no-binding", [{ ...entry({}), secretBinding: undefined }]],
+      [
+        "mal-bad-map",
+        [
+          {
+            ...entry({}),
+            secretBinding: {
+              displayOrder: "AB",
+              identityMap: { A: "candidate", B: "candidate" },
+            },
+          },
+        ],
+      ],
+      [
+        "mal-bad-truncation",
+        [
+          {
+            ...entry({}),
+            blindPackage: {
+              ...healthyPackage().blindPackage,
+              truncation: [null],
+            },
+          },
+        ],
+      ],
+      ["mal-null-record", [{ ...entry({}), record: null }]],
+    ];
+    for (const [name, entries] of cases) {
+      const { run, report } = malformed(name, entries);
+      expect(run.status, name).toBe(1);
+      expect(report.problems.length, name).toBeGreaterThan(0);
+      expect(run.stderr, name).not.toContain("TypeError");
+    }
+    // A malformed arbitration record is a named problem, not a crash.
+    const { run, report } = validateBundle("mal-arb", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [entry({})],
+      arbitrations: [{ verdict: "TIE" }, "not-an-object"],
+    });
+    expect(run.status).toBe(1);
+    expect(report.problems.map((p: { code: string }) => p.code)).toContain(
+      "INVALID_ARBITRATION_RECORD",
+    );
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

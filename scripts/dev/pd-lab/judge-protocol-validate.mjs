@@ -33,12 +33,23 @@ import {
   checkPackageForLeaks,
   comparisonInputDigestOf,
   restoreDisplayVerdict,
+  identityMapProblem,
+  DISPLAY_ORDERS,
 } from "./judge-protocol.mjs";
 
 const USAGE = [
   "usage: judge-protocol-validate.mjs \\",
   "  --bundle <judge-protocol-bundle.json> --out <dir>",
 ].join("\n");
+
+const ARBITRATION_VERDICTS = [
+  "CANDIDATE_BETTER",
+  "TIE",
+  "REFERENCE_BETTER",
+  "UNKNOWN",
+];
+const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+const TRUNCATION_SIDES = ["A", "B", "CONTEXT"];
 
 function fail(message, code) {
   process.stderr.write(`judge-protocol-validate: ${message}\n${USAGE}\n`);
@@ -86,6 +97,156 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+// Structural pre-checks before any digest computation — a malformed package
+// or binding must produce a named problem, never an unhandled throw
+// (P1-4: exception safety, closed problem codes only).
+function packageProblem(blindPackage) {
+  if (!isPlainObject(blindPackage)) return "blindPackage must be an object";
+  if (!isNonEmptyString(blindPackage.packageId))
+    return "blindPackage.packageId must be a non-empty string";
+  for (const field of [
+    "judgeProtocolRef",
+    "rubricVersion",
+    "comparisonQuestion",
+    "context",
+    "outputA",
+    "outputB",
+  ]) {
+    if (typeof blindPackage[field] !== "string")
+      return `blindPackage.${field} must be a string`;
+  }
+  if (blindPackage.truncation !== undefined) {
+    if (!Array.isArray(blindPackage.truncation))
+      return "blindPackage.truncation must be an array when present";
+    for (const entry of blindPackage.truncation) {
+      if (!isPlainObject(entry))
+        return "each truncation entry must be an object";
+      if (!TRUNCATION_SIDES.includes(entry.truncatedSide))
+        return "truncation entry truncatedSide must be A, B or CONTEXT";
+      if (
+        !Number.isInteger(entry.truncatedAt) ||
+        entry.truncatedAt <= 0 ||
+        !Number.isInteger(entry.originalChars) ||
+        entry.originalChars <= 0
+      )
+        return "truncation entry truncatedAt/originalChars must be positive integers";
+    }
+  }
+  return null;
+}
+
+function bindingProblem(secretBinding) {
+  if (!isPlainObject(secretBinding)) return "secretBinding must be an object";
+  if (!DISPLAY_ORDERS.includes(secretBinding.displayOrder))
+    return `secretBinding.displayOrder must be one of ${DISPLAY_ORDERS.join(" | ")}`;
+  const mapError = identityMapProblem(secretBinding.identityMap);
+  if (mapError) return `secretBinding.identityMap: ${mapError}`;
+  return null;
+}
+
+// Role-canonical truncation facts (candidate/reference/context), identical
+// normalization to comparisonInputDigestOf — used to verify that a swap
+// exchanged the truncation sides by arm role, never by display letter.
+function truncationRoleCanonical(blindPackage, identityMap) {
+  if (
+    !Array.isArray(blindPackage.truncation) ||
+    blindPackage.truncation.length === 0
+  )
+    return null;
+  const byRole = {};
+  for (const entry of blindPackage.truncation) {
+    const role =
+      entry.truncatedSide === "CONTEXT"
+        ? "context"
+        : entry.truncatedSide === "A"
+          ? identityMap.A
+          : identityMap.B;
+    byRole[role] = {
+      originalChars: entry.originalChars,
+      truncatedAt: entry.truncatedAt,
+    };
+  }
+  return byRole;
+}
+
+/**
+ * A position exchange is only valid as a COMPLETE semantic swap (P0-2):
+ * exchanged outputs byte-identical, identical context/rubric/protocol ref/
+ * comparison question, the identity map truly inverted, the display order
+ * flipped, truncation sides swapped by role, and one shared role-canonical
+ * comparison input digest. Returns the list of violated check codes.
+ */
+function verifySwapPair(pkgA, bindingA, pkgB, bindingB) {
+  const codes = [];
+  if (
+    !(
+      pkgB.outputA === pkgA.outputB &&
+      pkgB.outputB === pkgA.outputA &&
+      pkgB.context === pkgA.context &&
+      pkgB.rubricVersion === pkgA.rubricVersion &&
+      pkgB.judgeProtocolRef === pkgA.judgeProtocolRef &&
+      pkgB.comparisonQuestion === pkgA.comparisonQuestion
+    )
+  )
+    codes.push("SWAP_CONTENT_MISMATCH");
+  if (
+    !(
+      bindingB.identityMap.A === bindingA.identityMap.B &&
+      bindingB.identityMap.B === bindingA.identityMap.A
+    )
+  )
+    codes.push("SWAP_IDENTITY_NOT_INVERTED");
+  if (
+    bindingA.displayOrder === bindingB.displayOrder ||
+    !DISPLAY_ORDERS.includes(bindingA.displayOrder) ||
+    !DISPLAY_ORDERS.includes(bindingB.displayOrder)
+  )
+    codes.push("SWAP_DISPLAY_ORDER_MISMATCH");
+  if (
+    canonicalJson(
+      truncationRoleCanonical(pkgA, bindingA.identityMap),
+    ) !== canonicalJson(truncationRoleCanonical(pkgB, bindingB.identityMap))
+  )
+    codes.push("SWAP_TRUNCATION_MISMATCH");
+  try {
+    if (
+      comparisonInputDigestOf(pkgA, bindingA.identityMap) !==
+      comparisonInputDigestOf(pkgB, bindingB.identityMap)
+    )
+      codes.push("SWAP_DIGEST_MISMATCH");
+  } catch {
+    codes.push("SWAP_DIGEST_MISMATCH");
+  }
+  return codes;
+}
+
+// One arbitration record, structural gate mirroring T4's
+// parseArbitrationRecords (arbitrationId + assignmentKey + bound judgment
+// ids + bound comparison input digests + a final-verdict verdict).
+function arbitrationProblem(arbitration) {
+  if (!isPlainObject(arbitration))
+    return "arbitration record must be an object";
+  if (!isNonEmptyString(arbitration.arbitrationId))
+    return "arbitration.arbitrationId must be a non-empty string";
+  if (!isNonEmptyString(arbitration.assignmentKey))
+    return "arbitration.assignmentKey must be a non-empty string";
+  if (
+    !Array.isArray(arbitration.boundJudgmentIds) ||
+    arbitration.boundJudgmentIds.length === 0 ||
+    !arbitration.boundJudgmentIds.every(isNonEmptyString)
+  )
+    return "arbitration.boundJudgmentIds must be a non-empty array of judgment ids";
+  if (
+    !Array.isArray(arbitration.boundComparisonInputDigests) ||
+    arbitration.boundComparisonInputDigests.length === 0 ||
+    !arbitration.boundComparisonInputDigests.every((d) => DIGEST_RE.test(d))
+  )
+    return "arbitration.boundComparisonInputDigests must be a non-empty array of sha256:<hex> digests";
+  if (!ARBITRATION_VERDICTS.includes(arbitration.verdict))
+    return `arbitration.verdict must be one of ${ARBITRATION_VERDICTS.join(" | ")}`;
+  return null;
+}
+
 function main() {
   const options = parseArgs(process.argv.slice(2));
   let bundle;
@@ -107,6 +268,41 @@ function main() {
   const arbitrations = Array.isArray(bundle.arbitrations)
     ? bundle.arbitrations
     : [];
+
+  // Optional preregistered judge-slot registry (T4 parity). When the bundle
+  // carries one, every record's judgeSlotId must be in it; when it does
+  // not, the slot check is disclosed as unverified — never silently verified.
+  const disclosures = [];
+  let slotRegistry = null;
+  if (bundle.judgeSlots !== undefined) {
+    if (
+      !Array.isArray(bundle.judgeSlots) ||
+      !bundle.judgeSlots.every(
+        (slot) =>
+          isNonEmptyString(slot) ||
+          (isPlainObject(slot) &&
+            (isNonEmptyString(slot.judgeSlotId) ||
+              isNonEmptyString(slot.slotId))),
+      )
+    ) {
+      fail(
+        "bundle.judgeSlots must be an array of slot ids or slot objects when present",
+        2,
+      );
+    }
+    slotRegistry = new Set(
+      bundle.judgeSlots.map((slot) =>
+        isNonEmptyString(slot) ? slot : (slot.judgeSlotId ?? slot.slotId),
+      ),
+    );
+  }
+  if (slotRegistry === null) {
+    disclosures.push({
+      code: "JUDGE_SLOT_REGISTRATION_UNVERIFIED",
+      message:
+        "the bundle carries no preregistered judge-slot registry; slot preregistration is unverified, not verified",
+    });
+  }
 
   // Write-once --out (plain mkdir as the concurrency gate, admission-probe
   // precedent): a validation report directory is never silently replaced.
@@ -139,8 +335,13 @@ function main() {
     const judgmentId = isPlainObject(entry?.record)
       ? String(entry.record.judgmentId ?? "<missing>")
       : "<missing>";
-    const note = (code, message) =>
+    // Every problem raised for this entry also marks the record invalid —
+    // record validity is the aggregation of ALL per-entry checks (P1-1).
+    const recordCodes = [];
+    const note = (code, message) => {
       report({ packageId, judgmentId, code, message });
+      recordCodes.push(code);
+    };
 
     if (
       !isPlainObject(entry) ||
@@ -156,7 +357,9 @@ function main() {
         judgmentId,
         packageId,
         valid: false,
+        problemCodes: recordCodes,
         restoredVerdict: null,
+        failed: false,
       });
       continue;
     }
@@ -170,6 +373,13 @@ function main() {
         `package ${packageId} declares protocol ${blindPackage.judgeProtocolRef}, expected ${JUDGE_PROTOCOL_REF}`,
       );
     }
+
+    // 0. Structural gates BEFORE any digest computation (P1-4): malformed
+    //    package/binding shapes are named problems, never unhandled throws.
+    const pkgProblem = packageProblem(blindPackage);
+    if (pkgProblem) note("PACKAGE_INVALID", pkgProblem);
+    const bindProblem = bindingProblem(secretBinding);
+    if (bindProblem) note("BINDING_INVALID", bindProblem);
 
     // 1. CONTRACT 5.1 record schema.
     const schema = validateProtocolRecord(record);
@@ -223,12 +433,29 @@ function main() {
 
     // 3. Digest: recomputed from the package the judge saw, in the
     //    role-canonical form (identity map from the SECRET binding — the
-    //    presentation binding, checked for consistency in step 5).
-    const digest = comparisonInputDigestOf(
-      blindPackage,
-      secretBinding.identityMap,
-    );
-    if (record.comparisonInputDigest !== digest) {
+    //    presentation binding, checked for consistency in step 5). Only
+    //    attempted once the binding is structurally sound (step 0).
+    let digest = null;
+    if (pkgProblem === null && bindProblem === null) {
+      try {
+        digest = comparisonInputDigestOf(
+          blindPackage,
+          secretBinding.identityMap,
+        );
+      } catch (error) {
+        note(
+          "DIGEST_COMPUTATION_FAILED",
+          `comparison input digest could not be computed: ${error.message}`,
+        );
+      }
+    }
+    if (
+      digest !== null &&
+      record.comparisonInputDigest !== digest &&
+      !schema.problems.some(
+        (p) => p.code === "DIGEST_INVALID" || p.code === "FIELD_MISSING",
+      )
+    ) {
       note(
         "COMPARISON_INPUT_DIGEST_MISMATCH",
         `record digest ${record.comparisonInputDigest} != recomputed ${digest}`,
@@ -236,7 +463,8 @@ function main() {
     }
 
     // 4. Leak scan.
-    const violations = checkPackageForLeaks(blindPackage);
+    const violations =
+      pkgProblem === null ? checkPackageForLeaks(blindPackage) : [];
     if (violations.length > 0) {
       note(
         "BLIND_PACKAGE_LEAK",
@@ -271,6 +499,20 @@ function main() {
       );
     }
 
+    // 6. Judge-slot preregistration (CONTRACT 5.2a / T4 parity): the binding
+    //    itself is required by the record schema; when a registry is bound
+    //    into the bundle, membership is verified — never defaulted.
+    if (
+      slotRegistry !== null &&
+      isNonEmptyString(record.judgeSlotId) &&
+      !slotRegistry.has(record.judgeSlotId)
+    ) {
+      note(
+        "JUDGE_SLOT_NOT_PREREGISTERED",
+        `judgeSlotId ${record.judgeSlotId} is not in the bundle's preregistered slot registry`,
+      );
+    }
+
     if (isFailed) failedAttemptsPreserved.push(record.judgmentId);
     const restoredVerdict =
       record.displayVerdict !== undefined
@@ -285,27 +527,46 @@ function main() {
     perRecord.push({
       judgmentId,
       packageId,
-      valid: true,
+      valid: recordCodes.length === 0,
+      problemCodes: recordCodes,
       restoredVerdict,
       failed: isFailed,
+      comparisonInputDigest: isNonEmptyString(record.comparisonInputDigest)
+        ? record.comparisonInputDigest
+        : null,
     });
   }
 
-  // Swap pairs: mechanically detected counterpart packages (same content,
-  // exchanged positions) plus declared swapOf references. Position flips are
-  // a CALIBRATION METRIC (the D5 flip rate), reported as data, never a
-  // validation failure.
+  // Swap pairs: mechanically detected counterpart packages plus declared
+  // swapOf references. A pair only counts as a position exchange when the
+  // swap is COMPLETE semantically (verifySwapPair): exchanged content,
+  // inverted identity map, flipped display order, unchanged context/rubric/
+  // protocol/question, role-swapped truncation, one shared digest. Position
+  // flips are a CALIBRATION METRIC (the D5 flip rate), reported as data;
+  // swap INTEGRITY defects are validation problems, never silently dropped.
   const swapPairs = [];
   const seenSwap = new Set();
+  const pairedPackageIds = new Set();
   for (const entry of bundle.entries) {
     if (!isPlainObject(entry?.blindPackage)) continue;
     const pkg = entry.blindPackage;
+    const pkgId = String(pkg.packageId);
+    const judgmentId = String(entry.record?.judgmentId ?? "<missing>");
+    if (entry.swapOf !== undefined && !isNonEmptyString(entry.swapOf)) {
+      report({
+        packageId: pkgId,
+        judgmentId,
+        code: "SWAP_OF_INVALID",
+        message: "swapOf must be a non-empty package id when present",
+      });
+      continue;
+    }
     const declared = isNonEmptyString(entry.swapOf) ? entry.swapOf : null;
     const partner = declared ? packagesById.get(declared) : null;
     if (declared && !partner) {
       report({
-        packageId: String(pkg.packageId),
-        judgmentId: String(entry.record?.judgmentId ?? "<missing>"),
+        packageId: pkgId,
+        judgmentId,
         code: "SWAP_PARTNER_MISSING",
         message: `swapOf ${declared} does not resolve to a bundle package`,
       });
@@ -313,41 +574,93 @@ function main() {
     }
     const counterKey = (candidate) =>
       candidate &&
+      candidate !== entry &&
+      isPlainObject(candidate.blindPackage) &&
       candidate.blindPackage.outputA === pkg.outputB &&
       candidate.blindPackage.outputB === pkg.outputA &&
       candidate.blindPackage.context === pkg.context;
-    if (!partner) {
-      // Undeclared counterpart: scan mechanically (deterministic order).
-      const found = bundle.entries.find(
-        (candidate) => candidate !== entry && counterKey(candidate),
-      );
-      if (!found) continue;
-      const key = [String(pkg.packageId), String(found.blindPackage.packageId)]
-        .sort()
-        .join("\u0000");
-      if (seenSwap.has(key)) continue;
-      seenSwap.add(key);
-      swapPairs.push(pairReport(pkg, entry, found.blindPackage, found.record));
-      continue;
-    }
-    if (!counterKey(partner)) {
+    let resolved = partner;
+    if (!resolved) {
+      resolved = bundle.entries.find((candidate) => counterKey(candidate));
+      if (!resolved) continue;
+    } else if (!counterKey(partner)) {
       report({
-        packageId: String(pkg.packageId),
-        judgmentId: String(entry.record?.judgmentId ?? "<missing>"),
+        packageId: pkgId,
+        judgmentId,
         code: "SWAP_CONTENT_MISMATCH",
         message: `declared swap partner ${declared} does not carry the exchanged outputs`,
       });
       continue;
     }
-    const key = [String(pkg.packageId), String(declared)].sort().join("\u0000");
+    const partnerId = String(resolved.blindPackage.packageId);
+    const key = [pkgId, partnerId].sort().join(" ");
     if (seenSwap.has(key)) continue;
     seenSwap.add(key);
+    if (pairedPackageIds.has(pkgId) || pairedPackageIds.has(partnerId)) {
+      report({
+        packageId: pkgId,
+        judgmentId,
+        code: "SWAP_DUPLICATE_PAIRING",
+        message: `package ${pkgId} or ${partnerId} is already bound to another position exchange — one package must not be paired twice`,
+      });
+      continue;
+    }
+    pairedPackageIds.add(pkgId);
+    pairedPackageIds.add(partnerId);
+
+    // Full semantic swap verification (P0-2). A pairing problem is a bundle
+    // integrity defect, not a per-record one — it excludes the pair from
+    // the exchange statistics without invalidating the records themselves.
+    const swapProblemCodes = [];
+    if (
+      !isPlainObject(resolved.secretBinding) ||
+      !isPlainObject(resolved.record)
+    ) {
+      swapProblemCodes.push("SWAP_PARTNER_INVALID");
+      report({
+        packageId: pkgId,
+        judgmentId,
+        code: "SWAP_PARTNER_INVALID",
+        message: `swap partner ${partnerId} lacks a complete secretBinding/record pair`,
+      });
+    } else if (
+      !isPlainObject(entry.secretBinding) ||
+      bindingProblem(entry.secretBinding) !== null ||
+      bindingProblem(resolved.secretBinding) !== null ||
+      packageProblem(pkg) !== null ||
+      packageProblem(resolved.blindPackage) !== null
+    ) {
+      swapProblemCodes.push("SWAP_PARTNER_INVALID");
+      report({
+        packageId: pkgId,
+        judgmentId,
+        code: "SWAP_PARTNER_INVALID",
+        message: `position exchange ${pkgId} <-> ${partnerId} has a malformed package or binding`,
+      });
+    } else {
+      for (const code of verifySwapPair(
+        pkg,
+        entry.secretBinding,
+        resolved.blindPackage,
+        resolved.secretBinding,
+      )) {
+        swapProblemCodes.push(code);
+        report({
+          packageId: pkgId,
+          judgmentId,
+          code,
+          message: `position exchange ${pkgId} <-> ${partnerId} fails the semantic swap check ${code}`,
+        });
+      }
+    }
     swapPairs.push(
-      pairReport(pkg, entry, partner.blindPackage, partner.record),
+      pairReport(entry, resolved, swapProblemCodes, perRecord),
     );
   }
 
   // Per-assignment conflict / arbitration summary (CONTRACT 5.2 steps 3-5).
+  // Only VALID, non-FAILED records vote — an invalid record never enters
+  // the judgment set, the exchange stats, or the arbitration bound set.
   const recordEntries = bundle.entries.filter((entry) =>
     isPlainObject(entry?.record),
   );
@@ -363,6 +676,7 @@ function main() {
       ) ?? null;
     assignmentMap.get(key).push({ entry, derived });
   }
+  const matchedArbitrations = new Set();
   const perAssignment = [...assignmentMap.keys()].sort().map((key) => {
     const rows = assignmentMap.get(key);
     const voting = rows
@@ -377,15 +691,44 @@ function main() {
       null;
     let arbitrationComplete = false;
     if (arbitration) {
-      const boundIds = Array.isArray(arbitration.boundJudgmentIds)
-        ? [...arbitration.boundJudgmentIds].sort()
-        : [];
-      const votingIds = voting.map((d) => d.judgmentId).sort();
-      arbitrationComplete =
-        JSON.stringify(boundIds) === JSON.stringify(votingIds) &&
-        ["CANDIDATE_BETTER", "TIE", "REFERENCE_BETTER", "UNKNOWN"].includes(
-          arbitration.verdict,
-        );
+      matchedArbitrations.add(arbitration);
+      const structuralProblem = arbitrationProblem(arbitration);
+      if (structuralProblem !== null) {
+        report({
+          packageId: "<arbitration>",
+          judgmentId: String(arbitration?.arbitrationId ?? "<missing>"),
+          code: "INVALID_ARBITRATION_RECORD",
+          message: `arbitration for ${key}: ${structuralProblem}`,
+        });
+      } else {
+        // T4 boundAll parity (alignment-report.mjs): the arbitration must
+        // bind the FULL participating judgment id set AND the full
+        // participating comparisonInputDigest set — ids and digests are
+        // compared separately, both sorted/unique.
+        const boundIds = [...arbitration.boundJudgmentIds]
+          .sort()
+          .join(" ");
+        const votingIds = voting
+          .map((d) => d.judgmentId)
+          .sort()
+          .join(" ");
+        const boundDigests = [
+          ...new Set(arbitration.boundComparisonInputDigests),
+        ]
+          .sort()
+          .join(" ");
+        const participatingDigests = [
+          ...new Set(
+            voting
+              .map((d) => d.comparisonInputDigest)
+              .filter((d) => d !== null),
+          ),
+        ]
+          .sort()
+          .join(" ");
+        arbitrationComplete =
+          boundIds === votingIds && boundDigests === participatingDigests;
+      }
     }
     const conflict = restored.length > 0 && !allAgree;
     const outcome =
@@ -414,6 +757,17 @@ function main() {
       outcome,
     };
   });
+  // An arbitration that binds no assignment in this bundle is not evidence.
+  for (const arbitration of arbitrations) {
+    if (!matchedArbitrations.has(arbitration)) {
+      report({
+        packageId: "<arbitration>",
+        judgmentId: String(arbitration?.arbitrationId ?? "<missing>"),
+        code: "INVALID_ARBITRATION_RECORD",
+        message: `arbitration ${arbitration?.arbitrationId ?? "<missing>"} references assignment ${arbitration?.assignmentKey ?? "<missing>"} which has no judgment records in this bundle`,
+      });
+    }
+  }
 
   const valid = problems.length === 0;
   const out = {
@@ -427,11 +781,17 @@ function main() {
       problemCount: problems.length,
     },
     problems,
+    disclosures,
+    perRecord,
     positionExchange: {
       pairs: swapPairs,
-      consistent: swapPairs.filter((p) => p.restoredAgrees).length,
-      flipped: swapPairs.filter((p) => !p.restoredAgrees).length,
-      note: "position flips are the D5 calibration metric (flip rate), reported as data — they never invalidate an entry",
+      evaluatedPairs: swapPairs.filter((p) => p.valid).length,
+      consistent: swapPairs.filter((p) => p.result === "consistent").length,
+      flipped: swapPairs.filter((p) => p.result === "flipped").length,
+      undetermined: swapPairs.filter((p) => p.result === "undetermined")
+        .length,
+      invalidPairs: swapPairs.filter((p) => !p.valid).length,
+      note: "position flips are the D5 calibration metric (flip rate), reported as data — only complete, valid semantic swaps enter the denominator; UNKNOWN/FAILED records are disclosed as undetermined, never counted as consistent; swap integrity defects are validation problems",
     },
     perAssignment,
   };
@@ -443,7 +803,10 @@ function main() {
   process.exitCode = valid ? 0 : 1;
 }
 
-function pairReport(pkg, entry, partnerPackage, partnerRecord) {
+function pairReport(entry, partnerEntry, swapProblemCodes, perRecord) {
+  const pkg = entry.blindPackage;
+  const partnerPackage = partnerEntry.blindPackage;
+  const partnerRecord = partnerEntry.record;
   const left =
     entry.record?.displayVerdict !== undefined
       ? restoreDisplayVerdict(
@@ -458,13 +821,40 @@ function pairReport(pkg, entry, partnerPackage, partnerRecord) {
           partnerRecord.identityMap,
         )
       : null;
+  const findDerived = (record, packageId) =>
+    perRecord.find(
+      (r) =>
+        r.judgmentId === String(record?.judgmentId ?? "<missing>") &&
+        r.packageId === packageId,
+    ) ?? null;
+  const leftDerived = findDerived(entry.record, String(pkg.packageId));
+  const rightDerived = findDerived(partnerRecord, String(partnerPackage.packageId));
+  const recordsValid =
+    leftDerived !== null &&
+    leftDerived.valid &&
+    rightDerived !== null &&
+    rightDerived.valid;
+  const pairValid = swapProblemCodes.length === 0 && recordsValid;
+  // consistent only when BOTH restored verdicts are determinate and equal —
+  // UNKNOWN/FAILED/missing results are disclosed as undetermined, never
+  // counted as consistent (P0-2); only valid pairs enter the denominator.
+  let result = null;
+  if (pairValid) {
+    const determinate = (v) =>
+      v === "CANDIDATE_BETTER" || v === "TIE" || v === "REFERENCE_BETTER";
+    result =
+      determinate(left) && determinate(right)
+        ? left === right
+          ? "consistent"
+          : "flipped"
+        : "undetermined";
+  }
   return {
-    packageIds: [
-      String(pkg.packageId),
-      String(partnerPackage.packageId),
-    ].sort(),
+    packageIds: [String(pkg.packageId), String(partnerPackage.packageId)].sort(),
+    valid: pairValid,
+    problemCodes: swapProblemCodes,
     restoredVerdicts: [left, right],
-    restoredAgrees: left !== null && left === right,
+    result,
   };
 }
 

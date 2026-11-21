@@ -9,7 +9,7 @@
 | 项 | 值 |
 | --- | --- |
 | `judgeProtocolRef` | `jp-pd-lab@1` |
-| 协议内容 digest | `sha256:6e1280a39f52d9435e112a075dca03425aa801b681806a6ee7b171dd6e35f65e`（冻结定义的规范化 JSON SHA-256，确定性可复算） |
+| 协议内容 digest | `sha256:82c78a1e399165f08fb5dd22be68a8aef2dbfeff1e8ffb953f2f02668e4459a5`（最终冻结定义的规范化 JSON SHA-256，确定性可复算；PR #2740 终审修订 judgeSlot/attempt/positionExchange/arbitration 策略后重定，本 digest 即交付时唯一权威值） |
 | rubric 版本 | `jp-pd-lab-rubric@1`（比较问题固定为 SPEC §8.2 的"哪个实际行为轨迹更贴近期望"） |
 | 四值判定 | `A_BETTER / TIE / B_BETTER / UNKNOWN`；UNKNOWN 必须带原因；非法输出拒绝、绝不转 TIE |
 | 输出契约 | 三字段行协议（`VERDICT:` / `REASON:` / `UNKNOWN_REASON:`），闭集解析 |
@@ -42,11 +42,11 @@
 
 ## 6. 合成协议校验（已执行，无需 D2/D5）
 
-测试入口：`npm run test:scripts`（`scripts/__tests__/pd-lab-judge-protocol.test.ts`，29 用例，全部通过；真实 CLI 子进程驱动 `npm run lab:judge-validate`）。
+测试入口：`npm run test:scripts`（`scripts/__tests__/pd-lab-judge-protocol.test.ts`，44 用例，全部通过；真实 CLI 子进程驱动 `npm run lab:judge-validate`）。
 
 | 校验面 | 结果 |
 | --- | --- |
-| 记录 schema 闭集 round-trip（ERR-146） | PASS：23 个记录问题码全部可触发、无一越集 |
+| 记录 schema 闭集 round-trip（ERR-146） | PASS：26 个记录问题码全部可触发、无一越集（终审新增 `ATTEMPT_MISSING`、`JUDGE_SLOT_BINDING_MISSING`、`PROTOCOL_DIGEST_MISMATCH`） |
 | 输出解析闭集 round-trip | PASS：10 个 `JUDGE_OUTPUT_*` 码全部可触发 |
 | 四值解析 + UNKNOWN 原因 | PASS（含 CRLF、空原因、非 UNKNOWN 带原因拒绝） |
 | 非法输出 fail-closed | PASS（8 类非法输入全部拒绝且不产生任何 verdict） |
@@ -59,7 +59,7 @@
 | lossyInput | PASS（截断→标记+位置事实；有损判胜=非法记录；交换后截断侧随内容移动；完整输入不得标记有损） |
 | 复现性 | PASS（同一 bundle 两次校验输出逐字节一致；协议 digest 稳定） |
 
-统计与资格测试：`scripts/__tests__/pd-lab-t6-qualification.test.ts`，19 用例全部通过（见第 8、10 节）。
+统计与资格测试：`scripts/__tests__/pd-lab-t6-qualification.test.ts`，25 用例全部通过（见第 8、10、13 节）。
 
 ## 7. 输入完整性
 
@@ -104,7 +104,7 @@
   "ok": true,
   "status": "BLOCKED",
   "blockedReasons": ["DATA_PATH_AUTHORIZATION_INVALID", "DATA_INTEGRITY_UNPROVEN", "NO_READY_SOURCE_GROUPS",
-                     "D2_NOT_APPROVED", "D5_NOT_APPROVED", "MODEL_CALIBRATION_NOT_RUN"],
+                     "D2_NOT_APPROVED", "D5_NOT_APPROVED", "D6_NOT_APPROVED", "MODEL_CALIBRATION_NOT_RUN"],
   "unmetCriteria": [],
   "nMinAlpha": 6, "kAtReadyN": null,
   "t6Permissions": { "confirmatoryT6Allowed": false, "exploratoryT6Allowed": false, "promotePossible": false }
@@ -119,7 +119,7 @@
 npm run lab:qualify -- --input <qualification-input.json> --out <dir>
 ```
 
-三态判定规则（`scripts/dev/pd-lab/t6-qualification.mjs`，纯函数，19 项边界测试）：
+三态判定规则（`scripts/dev/pd-lab/t6-qualification.mjs`，纯函数，25 项边界测试）：
 
 - **BLOCKED**：授权/完整性不合格、n=0、D2/D5 未批准、实时校准未运行或失败、或出现无授权活动记录（停止条件）。
 - **EXPLORATORY_ONLY**：门全过但 n < n_min(α)、或 n < 预注册最低组数、或精度目标未达、或 Owner 盲评未通过。探索性 T6 需 D2 明确批准 + 预注册标记探索性；`promotePossible` 恒 false——**探索性结果绝不产生 PROMOTE**。
@@ -135,7 +135,25 @@ npm run lab:qualify -- --input <qualification-input.json> --out <dir>
 6. `owner-spotcheck-list.mjs` 抽样与 D5 盲评流程待 D5 批准后接线（HANDOFF T7a 第 3 项第 4 层）。
 7. 位置翻转率的实时测量依赖"同一包交换顺序再评一次"的 D2 冻结调用方案；合成层指标已就绪。
 
-## 12. Complexity Delta
+## 12. PR #2740 终审整改记录（本轮交付）
+
+终审指令要求修复已交付机制而非新增功能。逐项位置与验证：
+
+| 项 | 修复 | 位置 | 新增/更新测试 |
+| --- | --- | --- | --- |
+| P0-1 T6 资格门 | 状态/计数一致性表（PASSED+0、NOT_RUN+>0 均为拒绝性冲突；FAILED+>0 保留证据不计通过）；`evidence` 段绑定 `{artifactRef, sha256}`，CLI 按真实字节重算 digest，不符即 exit 1；D2/D5/D6 必须是结构化批准记录（owner-decision 形状），普通 Boolean 不再足够；`readyIndependentSourceGroups` 由 source-groups+admission 报告机械推导（按组 dedup、仅计全 T6 路径 READY 的组，声明≠推导即拒绝）；α/最低组数/精度目标取自冻结预注册，漂移即 `PREREGISTRATION_DRIFT` | `scripts/dev/pd-lab/t6-qualification.mjs`、`t6-qualify.mjs` | 状态/计数表、证据绑定、dedup/非 READY 排除、digest 篡改 exit 1、预注册漂移、三态全一致性 |
+| P0-2 完整语义交换 | `verifySwapPair`：字节级输出交换、identityMap 真反转、context/rubricVersion/judgeProtocolRef/question 不变、displayOrder 翻转、truncation 按角色侧交换（CONTEXT 不换）；digest 仍为同一角色规范化算法 | `judge-protocol-validate.mjs` | 未反转映射、内容漂移、truncation 侧错、UNKNOWN/invalid 不纳入分母、dup/missing/malformed swapOf |
+| P0-3 仲裁绑定 = T4 | `boundAll` 同义：完整参与 judgment id 集 + 完整参与 comparisonInputDigest 集 + assignmentKey + 合法 verdict，id 与 digest 分别比较 | 同上 | 缺/篡改/部分 digest、部分/多余 id、缺 arbitrationId、孤儿仲裁、绑定完整的 UNKNOWN 仲裁 |
+| P1-1 记录有效性聚合 | `perRecord[].valid` 聚合全部检查；无效记录不投票、不进交换统计；FAILED 保留不投票 | 同上 | invalid 记录排除于投票与交换分母 |
+| P1-2 Slot/attempt 完整性 | `judgeSlotId` 缺失 → `JUDGE_SLOT_BINDING_MISSING`（绝不默认）；无预注册席位表 → 披露 `JUDGE_SLOT_REGISTRATION_UNVERIFIED`；非 FAILED 缺 attempt → `ATTEMPT_MISSING`（绝不默认 1）；重用语义与 T4 `mergeJudgments` 逐案一致 | `judge-protocol.mjs`、`judge-protocol-validate.mjs` | T4 集成用例：缺槽/缺 attempt/同槽冲突/FAILED 不投票 |
+| P1-3 深冻结 + digest 保真 | `JUDGE_PROTOCOL` 与全部导出常量数组深冻结；digest 绑定最终冻结定义；记录必绑 `judgeProtocolRef`+`judgeProtocolDigest`+`rubricVersion`，不符 → `PROTOCOL_DIGEST_MISMATCH`（v1 交付前定版，无存量真实记录受影响） | `judge-protocol.mjs` | 冻结不可变 + digest 稳定、记录绑定校验 |
+| P1-4 CLI 异常安全 | 结构校验先于 digest 计算；退出码：参数/不可读 2、JSON/schema 1、证据核验失败 1、BLOCKED 0、校验有问题 1；无裸栈 | 两个 CLI | 9 类畸形包/绑定/记录/仲裁 → 具名问题不崩溃 |
+
+新增资格层问题码：`D6_NOT_APPROVED`、`CALIBRATION_STATUS_COUNT_CONFLICT`、`OWNER_REVIEW_STATUS_COUNT_CONFLICT`、`EVIDENCE_MISSING_FOR_CLAIM`、`EVIDENCE_ARTIFACT_INVALID`、`EVIDENCE_CLAIM_MISMATCH`、`PREREGISTRATION_DRIFT`；交换层 `SWAP_OF_INVALID`、`SWAP_PARTNER_MISSING`、`SWAP_CONTENT_MISMATCH`、`SWAP_IDENTITY_NOT_INVERTED`、`SWAP_DISPLAY_ORDER_MISMATCH`、`SWAP_TRUNCATION_MISMATCH`、`SWAP_DIGEST_MISMATCH`、`SWAP_DUPLICATE_PAIRING`、`SWAP_PARTNER_INVALID`；仲裁 `INVALID_ARBITRATION_RECORD`；披露 `AUTHORITY_PROVENANCE_UNVERIFIED`（本地完整性核验不能证明批准者身份，如实披露）。
+
+真实事实不变：真实模型调用 0 次、Owner 盲评 0 样本、D2/D5/D6 均未批准、真实 T6 资格 BLOCKED。合成一致性测试只证明引擎行为，不冒充真实校准。
+
+## 13. Complexity Delta
 
 ```text
 New durable source of truth: NO   （协议定义/digest 为版本化冻结定义，judgment 记录仍是实验证据；归并权威仍是 T4）
