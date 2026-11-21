@@ -584,8 +584,10 @@ function main() {
       continue;
     }
     // A package already bound as a partner and carrying no declaration of
-    // its own is done — it must not start a second inference.
-    if (pairedPackageIds.has(pkgId)) continue;
+    // its own is done — it must not start a second inference. An explicit
+    // declaration is never skipped: it must reach the pairing checks so a
+    // second claim on an already-bound package reports the conflict.
+    if (pairedPackageIds.has(pkgId) && !declared) continue;
     const counterKey = (candidate) =>
       candidate &&
       candidate !== entry &&

@@ -1626,6 +1626,37 @@ describe("complete semantic swap verification via real CLI (P0-2)", () => {
     expect(report.positionExchange.evaluatedPairs).toBe(2);
     expect(report.positionExchange.invalidPairs).toBe(0);
   });
+
+  it("a chained explicit claim on an already-bound package is still reported", () => {
+    // Regression: being claimed as a partner does not mute a package's own
+    // explicit swapOf — A→B′ paired, then B′→C must still flag the double
+    // binding, in either entry order.
+    const a = healthyPackage();
+    const aSwap = swapJudgePackage(a.blindPackage, a.secretBinding, "pkg-1:swap");
+    const c = healthyPackage({ packageId: "pkg-3" });
+    for (const [name, entries] of [
+      [
+        "swap-chain-fwd",
+        [
+          entryOf(a, "A_BETTER", "j-1", { swapOf: "pkg-1:swap" }),
+          entryOf(aSwap, "B_BETTER", "j-2", { swapOf: "pkg-3" }),
+          entryOf(c, "A_BETTER", "j-3"),
+        ],
+      ],
+      [
+        "swap-chain-rev",
+        [
+          entryOf(a, "A_BETTER", "j-1", { swapOf: "pkg-1:swap" }),
+          entryOf(c, "A_BETTER", "j-3"),
+          entryOf(aSwap, "B_BETTER", "j-2", { swapOf: "pkg-3" }),
+        ],
+      ],
+    ] as const) {
+      const { run, report } = validateBundle(name, bundle([...entries]));
+      expect(run.status).toBe(1);
+      expect(codes(report)).toContain("SWAP_DUPLICATE_PAIRING");
+    }
+  });
 });
 
 describe("arbitration binding parity with T4 (P0-3)", () => {
