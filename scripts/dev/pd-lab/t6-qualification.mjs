@@ -59,6 +59,7 @@
 //   qualifyT6(input, resolvedEvidence?)
 
 import { twoSidedThreshold } from "./alignment-report.mjs";
+import { sourceGroupsDigestOf } from "./admission-probe.mjs";
 import { JUDGE_PROTOCOL_REF, judgeProtocolDigest } from "./judge-protocol.mjs";
 
 export const QUALIFICATION_STATUSES = Object.freeze([
@@ -110,6 +111,8 @@ export const QUALIFICATION_REASON_CODES = Object.freeze([
   // Authorization violations (task stop conditions, fail-loud disclosures).
   "UNAUTHORIZED_MODEL_CALLS_RECORDED",
   "UNAUTHORIZED_OWNER_BLIND_REVIEW_RECORDED",
+  // Statistical boundary: n_min(alpha) search exhausted before any k <= n.
+  "N_MIN_ALPHA_SEARCH_EXHAUSTED",
   // Status/count consistency (an illegal pair is a rejected claim, not a
   // runtime failure).
   "CALIBRATION_STATUS_COUNT_CONFLICT",
@@ -347,7 +350,13 @@ function approvalFromRecord(document, expectedScope) {
     document.scope !== expectedScope
   )
     return { interpretable: false, approved: false };
-  return { interpretable: true, approved: document.approved };
+  return {
+    interpretable: true,
+    approved: document.approved,
+    // An exploratory T6 run needs an explicit exploratory grant on the D2
+    // decision record — a plain approval never covers it.
+    exploratory: document.exploratory === true,
+  };
 }
 
 // n derived mechanically from the bound source-groups artifact cross-checked
@@ -373,11 +382,28 @@ function deriveReadySourceGroups(sourceGroupsDoc, admissionDoc) {
     sourceGroupsDoc.datasetSha256 !== admissionDoc.dataset?.sha256
   )
     return { interpretable: false, datasetBindingMismatch: true };
+  // The declared digest is recomputed from the artifact's OWN contents via
+  // the admission probe's canonical sourceGroupsDigestOf — a tampered
+  // groups/rationales map that kept its old digest is artifact-invalid, and
+  // a mapping the admission run never recorded is rejected below too.
+  let recomputed;
+  try {
+    recomputed = sourceGroupsDigestOf(
+      sourceGroupsDoc.groups,
+      sourceGroupsDoc.rationales ?? {},
+    );
+  } catch {
+    return { interpretable: false, digestRecomputeFailed: true };
+  }
+  if (
+    !isNonEmptyString(sourceGroupsDoc.digest) ||
+    recomputed !== sourceGroupsDoc.digest
+  )
+    return { interpretable: false, contentDigestMismatch: true };
   // The mapping must also be the grouping the admission run actually
   // recorded — two well-formed files for the same dataset can still carry
   // different merge decisions, and both layers of the binding must hold.
   if (
-    !isNonEmptyString(sourceGroupsDoc.digest) ||
     !isNonEmptyString(admissionDoc.sourceGroups?.digest) ||
     sourceGroupsDoc.digest !== admissionDoc.sourceGroups.digest
   )
@@ -387,11 +413,34 @@ function deriveReadySourceGroups(sourceGroupsDoc, admissionDoc) {
     if (isPlainObject(entry) && isNonEmptyString(entry.caseId))
       perSample.set(entry.caseId, entry);
   }
+  // Case-mapping completeness is bidirectional: every case the admission
+  // report probed must be mapped, and the mapping may not name cases the
+  // report never saw.
+  for (const caseId of perSample.keys()) {
+    if (!(caseId in sourceGroupsDoc.groups))
+      return { interpretable: false, unmappedCase: caseId };
+  }
   const groupCases = new Map();
   for (const [caseId, groupId] of Object.entries(sourceGroupsDoc.groups)) {
     if (!isNonEmptyString(groupId) || !isNonEmptyString(caseId)) return fail;
+    if (!perSample.has(caseId))
+      return { interpretable: false, unknownCase: caseId };
     if (!groupCases.has(groupId)) groupCases.set(groupId, []);
     groupCases.get(groupId).push(caseId);
+  }
+  // One session is one source group: the producer keys groups by sessionId
+  // (merges aside), so cases sharing a sessionId spanning multiple groupIds
+  // means the session was split to inflate the independent-group count.
+  const sessionGroups = new Map();
+  for (const entry of perSample.values()) {
+    if (!isNonEmptyString(entry.sessionId)) continue;
+    const groupId = sourceGroupsDoc.groups[entry.caseId];
+    if (
+      sessionGroups.has(entry.sessionId) &&
+      sessionGroups.get(entry.sessionId) !== groupId
+    )
+      return { interpretable: false, sessionSplit: entry.sessionId };
+    sessionGroups.set(entry.sessionId, groupId);
   }
   const groupIds = [...groupCases.keys()].sort();
   const readyGroups = [];
@@ -870,6 +919,11 @@ export function qualifyT6(input, resolvedEvidence = null) {
         verdict: "artifact_invalid",
         datasetBindingMismatch: groupFacts.datasetBindingMismatch === true,
         groupingBindingMismatch: groupFacts.groupingBindingMismatch === true,
+        contentDigestMismatch: groupFacts.contentDigestMismatch === true,
+        digestRecomputeFailed: groupFacts.digestRecomputeFailed === true,
+        unmappedCase: groupFacts.unmappedCase ?? null,
+        unknownCase: groupFacts.unknownCase ?? null,
+        sessionSplit: groupFacts.sessionSplit ?? null,
       };
     } else {
       if (groupFacts.count !== declaredN) addBlocked("EVIDENCE_CLAIM_MISMATCH");
@@ -970,7 +1024,10 @@ export function qualifyT6(input, resolvedEvidence = null) {
 
   // ── Gate evaluation ──────────────────────────────────────────────────────
   const nMinAlpha = nMinForAlpha(alpha);
-  const requiredGroups = Math.max(nMinAlpha, minimumGroups);
+  // Fail-closed: an exhausted search is a BLOCKED verdict, never a null that
+  // Math.max would silently coerce to 0 (P2-2).
+  if (nMinAlpha === null) addBlocked("N_MIN_ALPHA_SEARCH_EXHAUSTED");
+  const requiredGroups = Math.max(nMinAlpha ?? 0, minimumGroups);
   const kAtN = twoSidedThreshold(nEffective, alpha);
 
   // Task stop conditions first: recorded activity without the authorization
@@ -1049,8 +1106,19 @@ export function qualifyT6(input, resolvedEvidence = null) {
       // exploratory approval AND a preregistration marked exploratory (the
       // preregistration marker is enforced at T6 preflight; this flag is the
       // D2 side of that pair).
+      // Double authorization (P1-3): exploratory T6 needs BOTH the frozen
+      // preregistration marked exploratory AND a bound D2 owner-decision
+      // record that explicitly grants exploratory — an input boolean never
+      // suffices on its own.
       exploratoryT6Allowed:
-        status === "EXPLORATORY_ONLY" && input.d2ExploratoryApproval === true,
+        status === "EXPLORATORY_ONLY" &&
+        preregFacts !== null &&
+        preregFacts.interpretable === true &&
+        preregFacts.exploratory === true &&
+        d2Approval !== null &&
+        d2Approval.interpretable === true &&
+        d2Approval.approved === true &&
+        d2Approval.exploratory === true,
       // Exploratory results can NEVER produce PROMOTE; only a
       // CONFIRMATORY_READY qualification may ever carry a promote
       // recommendation, and even there governance decides (SPEC section 10).

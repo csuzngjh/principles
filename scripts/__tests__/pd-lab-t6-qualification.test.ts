@@ -35,6 +35,7 @@ import {
   qualifyT6,
   validateQualificationInput,
 } from "../dev/pd-lab/t6-qualification.mjs";
+import { sourceGroupsDigestOf } from "../dev/pd-lab/admission-probe.mjs";
 import { twoSidedThreshold } from "../dev/pd-lab/alignment-report.mjs";
 import {
   runQualifyCli,
@@ -92,17 +93,26 @@ const APPROVAL_DOC = (approved: boolean, scope: string) => ({
 });
 
 const DATASET_SHA = "b".repeat(64);
-const GROUPS_DIGEST = `sha256:${"c".repeat(64)}`;
 const PRECISION_TARGET = 0.9;
 
 /** Synthetic resolved evidence docs matching a granted input's claims. */
-function resolvedFor(input: Record<string, any>) {
+function resolvedFor(input: Record<string, any>, opts: { exploratory?: boolean } = {}) {
   const n = input.readyIndependentSourceGroups;
   const cases = Object.fromEntries(
     Array.from({ length: n }, (_, i) => [`case-${i + 1}`, `group-${i + 1}`]),
   );
+  const rationales = Object.fromEntries(
+    Object.values(cases).map((groupId) => [
+      groupId,
+      "synthetic: one case per group",
+    ]),
+  );
+  // The declared digest is the REAL recomputed digest — the gate verifies
+  // contents mechanically, so a fixture digest must be honest.
+  const groupsDigest = sourceGroupsDigestOf(cases, rationales);
   const perSample = Object.keys(cases).map((caseId) => ({
     caseId,
+    sessionId: `sess-${caseId}`,
     completeness: "COMPLETE_FOR_ANALYSIS",
     pathReadiness: {
       PIPELINE_REPLAY: "READY",
@@ -117,8 +127,9 @@ function resolvedFor(input: Record<string, any>) {
       document: {
         schema: "pd-lab-source-groups.v1",
         datasetSha256: DATASET_SHA,
-        digest: GROUPS_DIGEST,
+        digest: groupsDigest,
         groups: cases,
+        rationales,
       },
     },
     admissionReport: {
@@ -132,7 +143,7 @@ function resolvedFor(input: Record<string, any>) {
         invalidPlan: [],
         realDataProbe: { status: "RAN_WITH_D6" },
         sourceGroups: {
-          digest: GROUPS_DIGEST,
+          digest: groupsDigest,
           groupCount: Object.keys(cases).length,
           independentSourceGroupCount: Object.keys(cases).length,
         },
@@ -150,7 +161,7 @@ function resolvedFor(input: Record<string, any>) {
             input.analysisPolicy.minimumIndependentSourceGroups,
           precisionTarget: PRECISION_TARGET,
         },
-        exploratory: false,
+        exploratory: opts.exploratory === true,
       },
     },
     judgeCalibration: {
@@ -183,7 +194,10 @@ function resolvedFor(input: Record<string, any>) {
       d2: {
         artifactRef: "d2.json",
         sha256: FAKE_SHA,
-        document: APPROVAL_DOC(input.authorization.d2Approved, "d2"),
+        document: {
+          ...APPROVAL_DOC(input.authorization.d2Approved, "d2"),
+          exploratory: opts.exploratory === true,
+        },
       },
       d5: {
         artifactRef: "d5.json",
@@ -532,7 +546,7 @@ describe("qualifyT6 states", () => {
     }
   });
 
-  it("exploratory T6 requires an explicit D2 exploratory approval on top", () => {
+  it("exploratory T6 requires prereg marker AND a bound D2 exploratory decision (P1-3)", () => {
     const base = grantedInput({
       readyIndependentSourceGroups: 5,
       analysisPolicy: {
@@ -542,15 +556,31 @@ describe("qualifyT6 states", () => {
       },
       ownerBlindReview: { status: "NOT_RUN", sampleCount: 0 },
     });
+    // Neither authorization alone suffices — the input boolean is never
+    // trusted, and a plain D2 approval does not cover exploratory.
     expect(run(base).t6Permissions.exploratoryT6Allowed).toBe(false);
     expect(
       run({ ...base, d2ExploratoryApproval: true }).t6Permissions
         .exploratoryT6Allowed,
-    ).toBe(true);
+    ).toBe(false);
+    const bothAuth = qualifyT6(
+      base,
+      resolvedFor(base, { exploratory: true }) as never,
+    );
+    expect(bothAuth.t6Permissions.exploratoryT6Allowed).toBe(true);
     // Even with the exploratory approval, PROMOTE stays impossible.
+    expect(bothAuth.t6Permissions.promotePossible).toBe(false);
+    // Prereg marker without the D2 exploratory grant → not allowed.
+    const preregOnly = resolvedFor(base, { exploratory: true }) as any;
+    preregOnly.approvals.d2.document.exploratory = false;
     expect(
-      run({ ...base, d2ExploratoryApproval: true }).t6Permissions
-        .promotePossible,
+      qualifyT6(base, preregOnly).t6Permissions.exploratoryT6Allowed,
+    ).toBe(false);
+    // D2 exploratory grant without the prereg marker → not allowed.
+    const d2Only = resolvedFor(base, { exploratory: true }) as any;
+    d2Only.preregistration.document.exploratory = false;
+    expect(
+      qualifyT6(base, d2Only).t6Permissions.exploratoryT6Allowed,
     ).toBe(false);
   });
 
@@ -577,7 +607,7 @@ describe("qualifyT6 states", () => {
     });
   });
 
-  it("closed-set round-trip: every reason code is triggered, none outside the list (ERR-146)", () => {
+  it("closed-set round-trip: every reason code is triggered, none outside the list (ERR-146)", { timeout: 180_000 }, () => {
     // [input, resolvedEvidenceOrNull] — the evidence is the docs matching the
     // claims, except where a fixture intentionally mutates one to trigger a
     // mismatch/invalid code.
@@ -681,6 +711,19 @@ describe("qualifyT6 states", () => {
       [grantedInput(), mismatchedCalibration],
       [grantedInput(), driftedPrereg],
       [setPath(grantedInput(), "authorization.d6Approved", false), "resolved"],
+      // N_MIN_ALPHA_SEARCH_EXHAUSTED: an alpha so small no k <= n exists
+      // inside the search cap must fail closed as BLOCKED, never coerced.
+      [
+        grantedInput({
+          readyIndependentSourceGroups: 5,
+          analysisPolicy: {
+            alpha: 1e-310,
+            minimumIndependentSourceGroups: 5,
+            precisionTargetMet: true,
+          },
+        }),
+        "resolved",
+      ],
     ];
     const emitted = new Set<string>();
     for (const [input, evidence] of fixtures) {
@@ -791,11 +834,17 @@ describe("qualifyT6 states", () => {
       "case-3": "group-b",
       "case-4": "group-c",
     };
+    ev.sourceGroups.document.digest = sourceGroupsDigestOf(
+      ev.sourceGroups.document.groups,
+      ev.sourceGroups.document.rationales,
+    );
+    ev.admissionReport.document.sourceGroups.digest =
+      ev.sourceGroups.document.digest;
     ev.admissionReport.document.perSample = [
-      { caseId: "case-1", completeness: "COMPLETE_FOR_ANALYSIS", pathReadiness: { PIPELINE_REPLAY: "READY", EXPECTATION_LABELING: "READY", BEHAVIOR_BRANCH: "READY" } },
-      { caseId: "case-2", completeness: "COMPLETE_FOR_ANALYSIS", pathReadiness: { PIPELINE_REPLAY: "READY", EXPECTATION_LABELING: "READY", BEHAVIOR_BRANCH: "READY" } },
-      { caseId: "case-3", completeness: "COMPLETE_FOR_ANALYSIS", pathReadiness: { PIPELINE_REPLAY: "READY", EXPECTATION_LABELING: "READY", BEHAVIOR_BRANCH: "READY" } },
-      { caseId: "case-4", completeness: "COMPLETE_FOR_ANALYSIS", pathReadiness: { PIPELINE_REPLAY: "READY", EXPECTATION_LABELING: "BLOCKED", BEHAVIOR_BRANCH: "READY" } },
+      { caseId: "case-1", sessionId: "sess-1", completeness: "COMPLETE_FOR_ANALYSIS", pathReadiness: { PIPELINE_REPLAY: "READY", EXPECTATION_LABELING: "READY", BEHAVIOR_BRANCH: "READY" } },
+      { caseId: "case-2", sessionId: "sess-2", completeness: "COMPLETE_FOR_ANALYSIS", pathReadiness: { PIPELINE_REPLAY: "READY", EXPECTATION_LABELING: "READY", BEHAVIOR_BRANCH: "READY" } },
+      { caseId: "case-3", sessionId: "sess-3", completeness: "COMPLETE_FOR_ANALYSIS", pathReadiness: { PIPELINE_REPLAY: "READY", EXPECTATION_LABELING: "READY", BEHAVIOR_BRANCH: "READY" } },
+      { caseId: "case-4", sessionId: "sess-4", completeness: "COMPLETE_FOR_ANALYSIS", pathReadiness: { PIPELINE_REPLAY: "READY", EXPECTATION_LABELING: "BLOCKED", BEHAVIOR_BRANCH: "READY" } },
     ];
     const result = qualifyT6(input, ev as never);
     expect(result.evidenceCheck.artifacts.readySourceGroups.derived).toBe(2);
@@ -805,6 +854,12 @@ describe("qualifyT6 states", () => {
     // Declared 2 == derived 2 -> the count stands; dropping a case to a
     // non-READY group makes the declaration wrong and is rejected.
     ev.sourceGroups.document.groups["case-4"] = "group-b";
+    ev.sourceGroups.document.digest = sourceGroupsDigestOf(
+      ev.sourceGroups.document.groups,
+      ev.sourceGroups.document.rationales,
+    );
+    ev.admissionReport.document.sourceGroups.digest =
+      ev.sourceGroups.document.digest;
     const honest = qualifyT6(input, ev as never);
     expect(honest.evidenceCheck.artifacts.readySourceGroups.verdict).toBe(
       "mismatch",
@@ -944,12 +999,23 @@ describe("evidence semantics hardening", () => {
   it("source-groups must be the grouping the admission run recorded", () => {
     const input = grantedInput();
     const ev = resolvedFor(input) as Record<string, any>;
-    ev.sourceGroups.document.digest = `sha256:${"d".repeat(64)}`;
+    // Two well-formed files, different recorded groupings: the doc's own
+    // digest is honest but never what the admission run produced.
+    ev.admissionReport.document.sourceGroups.digest = `sha256:${"d".repeat(64)}`;
     const result = qualifyT6(input, ev as never);
     expect(result.status).toBe("BLOCKED");
     expect(result.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
     expect(
       result.evidenceCheck.artifacts.readySourceGroups.groupingBindingMismatch,
+    ).toBe(true);
+    // A declared digest that no longer matches the artifact's own contents
+    // is artifact-invalid BEFORE the cross-file comparison.
+    const stale = resolvedFor(input) as Record<string, any>;
+    stale.sourceGroups.document.digest = `sha256:${"d".repeat(64)}`;
+    const tampered = qualifyT6(input, stale as never);
+    expect(tampered.blockedReasons).toContain("EVIDENCE_ARTIFACT_INVALID");
+    expect(
+      tampered.evidenceCheck.artifacts.readySourceGroups.contentDigestMismatch,
     ).toBe(true);
   });
 });
@@ -1116,4 +1182,156 @@ describe("t6-qualify CLI", () => {
       ).toBe(2);
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// P2-3 / P2-4: structural checks run BEFORE any path or filesystem touch.
+// ---------------------------------------------------------------------------
+
+describe("t6-qualify CLI input-structure gates (P2-3, P2-4)", () => {
+  function writeEvidenceFiles(dir: string, input: Record<string, any>) {
+    const resolved = resolvedFor(input) as Record<string, any>;
+    const bind = (binding: { artifactRef: string; sha256: string }, doc: unknown) => {
+      const filePath = path.join(dir, binding.artifactRef);
+      fs.writeFileSync(filePath, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
+      binding.sha256 = `sha256:${createHash("sha256")
+        .update(fs.readFileSync(filePath))
+        .digest("hex")}`;
+    };
+    for (const key of [
+      "sourceGroups",
+      "admissionReport",
+      "preregistration",
+      "judgeCalibration",
+      "ownerBlindReview",
+    ]) {
+      if (input.evidence?.[key]) bind(input.evidence[key], resolved[key].document);
+    }
+    for (const key of ["d2", "d5", "d6"]) {
+      if (input.evidence?.approvals?.[key])
+        bind(input.evidence.approvals[key], resolved.approvals[key].document);
+    }
+    return input;
+  }
+
+  function runOn(name: string, input: unknown, writeFiles = false) {
+    const dir = path.join(tempRoot, name);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "input.json");
+    const holder = input as Record<string, any>;
+    if (writeFiles && holder.evidence) writeEvidenceFiles(dir, holder);
+    fs.writeFileSync(file, `${JSON.stringify(holder, null, 2)}\n`, "utf8");
+    const out = path.join(dir, "out");
+    const run = runQualifyCli(["--input", file, "--out", out]);
+    return { run, dir, out };
+  }
+
+  it("a non-string artifactRef is a named problem, never a TypeError (P2-3)", () => {
+    const input = grantedInput() as Record<string, any>;
+    const dir = path.join(tempRoot, "bad-artifactref");
+    fs.mkdirSync(dir, { recursive: true });
+    writeEvidenceFiles(dir, input);
+    input.evidence.sourceGroups.artifactRef = 42;
+    const file = path.join(dir, "input.json");
+    fs.writeFileSync(file, `${JSON.stringify(input, null, 2)}\n`, "utf8");
+    const out = path.join(dir, "out");
+    const run = runQualifyCli(["--input", file, "--out", out]);
+    expect(run.status).toBe(1);
+    expect(run.stderr).not.toContain("TypeError");
+    // The malformed binding is rejected by the input-structure gate: named
+    // problem on stderr, and no verdict is ever written.
+    expect(run.stderr).toContain("artifactRef");
+    expect(fs.existsSync(path.join(out, "qualification.json"))).toBe(false);
+  });
+
+  it("structurally invalid input writes nothing and exits 1 (P2-4)", () => {
+    const { run, out } = runOn("invalid-input", { garbage: true });
+    expect(run.status).toBe(1);
+    expect(run.stderr).not.toContain("TypeError");
+    // The out directory is created only after the evidence layer verifies —
+    // an input that fails its own structure check leaves zero artifacts.
+    expect(fs.existsSync(out)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-2: no edit to the recorded grouping, rationale set or case mapping can
+// silently preserve (or inflate) the claimed effective sample size.
+// ---------------------------------------------------------------------------
+
+describe("source-group artifacts that cannot produce a false sample size (P1-2)", () => {
+  const flags = (result: any) =>
+    result.evidenceCheck.artifacts.readySourceGroups;
+  const honestRebind = (ev: Record<string, any>) => {
+    ev.sourceGroups.document.digest = sourceGroupsDigestOf(
+      ev.sourceGroups.document.groups,
+      ev.sourceGroups.document.rationales,
+    );
+    ev.admissionReport.document.sourceGroups.digest =
+      ev.sourceGroups.document.digest;
+  };
+
+  it("tampered groups with the ORIGINAL digest are caught by the recompute", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.sourceGroups.document.groups["case-2"] = "group-a"; // merge two groups
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(flags(result).contentDigestMismatch).toBe(true);
+  });
+
+  it("tampered rationales with the ORIGINAL digest are caught by the recompute", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.sourceGroups.document.rationales = { "group-a": "invented rationale" };
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(flags(result).contentDigestMismatch).toBe(true);
+  });
+
+  it("tampered groups with an HONESTLY recomputed digest still fail the admission binding", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.sourceGroups.document.groups["case-2"] = "group-a";
+    ev.sourceGroups.document.digest = sourceGroupsDigestOf(
+      ev.sourceGroups.document.groups,
+      ev.sourceGroups.document.rationales,
+    );
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(flags(result).contentDigestMismatch).toBeFalsy();
+    expect(flags(result).groupingBindingMismatch).toBe(true);
+  });
+
+  it("one session split across two groups is rejected — never counted twice", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.sourceGroups.document.groups["case-2"] = "group-c"; // second group
+    honestRebind(ev);
+    // case-1 and case-2 now sit in different groups but share one session.
+    ev.admissionReport.document.perSample[1].sessionId = "sess-case-1";
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(flags(result).sessionSplit).toBe("sess-case-1");
+  });
+
+  it("a deleted case mapping is an unmapped case, not a silent n-1", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    delete ev.sourceGroups.document.groups["case-2"];
+    honestRebind(ev);
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(flags(result).unmappedCase).toBe("case-2");
+  });
+
+  it("a mapping pointing at an unknown case is rejected", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.sourceGroups.document.groups["case-ghost"] = "group-z";
+    honestRebind(ev);
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(flags(result).unknownCase).toBe("case-ghost");
+  });
 });

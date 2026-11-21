@@ -77,12 +77,18 @@ function isPlainObject(value) {
 // those bytes, compare to the declared sha256, parse the JSON document. A
 // mismatch or unreadable artifact is a verification failure, never a skip.
 function resolveArtifact(binding, baseDir) {
-  const artifactRef = binding.artifactRef;
   const resolved = {
-    artifactRef,
-    sha256: binding.sha256,
+    artifactRef: isPlainObject(binding) ? binding.artifactRef : null,
+    sha256: isPlainObject(binding) ? binding.sha256 : null,
     verified: false,
   };
+  // Structural validation BEFORE any filesystem work (P2-3): a malformed
+  // binding is a verification failure, never a TypeError into path.resolve.
+  if (!isPlainObject(binding) || typeof binding.artifactRef !== "string" || binding.artifactRef.trim() === "") {
+    resolved.problem = "artifactRef must be a non-empty string";
+    return { resolved, document: null };
+  }
+  const artifactRef = binding.artifactRef;
   const filePath = path.resolve(baseDir, artifactRef);
   let bytes;
   try {
@@ -128,7 +134,7 @@ function main() {
   const evidence = isPlainObject(input.evidence) ? input.evidence : null;
   if (evidence !== null) {
     for (const key of EVIDENCE_KEYS) {
-      if (isPlainObject(evidence[key]) && evidence[key].artifactRef) {
+      if (evidence[key] !== undefined) {
         const { resolved, document } = resolveArtifact(evidence[key], baseDir);
         verification.artifacts[key] = {
           artifactRef: resolved.artifactRef,
@@ -150,7 +156,7 @@ function main() {
     }
     if (isPlainObject(evidence.approvals)) {
       for (const key of APPROVAL_KEYS) {
-        if (isPlainObject(evidence.approvals[key]) && evidence.approvals[key].artifactRef) {
+        if (evidence.approvals[key] !== undefined) {
           if (!isPlainObject(resolvedEvidence.approvals))
             resolvedEvidence.approvals = {};
           const { resolved, document } = resolveArtifact(
@@ -185,6 +191,16 @@ function main() {
     fail(`qualification engine threw: ${error.message}`, 1);
   }
 
+  // P2-4: no output directory exists until the input is computable —
+  // structural invalidity exits before any mkdir, and an evidence
+  // verification failure produces only the audit report.
+  if (!result.ok) {
+    process.stderr.write(
+      `t6-qualify: structurally invalid qualification input:\n  - ${result.inputProblems.join("\n  - ")}\n`,
+    );
+    process.exit(1);
+  }
+
   // Write-once --out (plain mkdir as the concurrency gate, admission-probe
   // precedent): a qualification report directory is never silently replaced.
   const outDir = path.resolve(options.out);
@@ -194,12 +210,6 @@ function main() {
     fail(`cannot create output directory ${outDir}: ${error.message}`, 2);
   }
 
-  if (!result.ok) {
-    process.stderr.write(
-      `t6-qualify: structurally invalid qualification input:\n  - ${result.inputProblems.join("\n  - ")}\n`,
-    );
-    process.exit(1);
-  }
   // Evidence verification failure: structured audit report, exit 1. A
   // tampered artifact never produces a verdict.
   fs.writeFileSync(

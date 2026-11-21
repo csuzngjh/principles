@@ -911,7 +911,11 @@ describe("judge-protocol-validate CLI", () => {
     const assignment = report.perAssignment[0];
     expect(assignment.votingJudgments).toEqual(["j-2"]);
     expect([...assignment.judgmentIds].sort()).toEqual(["j-2", "j-failed", "j-failed-2"]);
-    expect(assignment.outcome).toBe("CANDIDATE_BETTER");
+    // T4 merge parity (P1-1): two judge seats produced no verdict, so the
+    // unit is short of its required seats — the failed attempts stay
+    // disclosed (ATTEMPT_FAILED_EXCLUDED), never a one-vote confirmation.
+    expect(assignment.outcome).toBe("UNKNOWN");
+    expect(assignment.reasonCode).toBe("ATTEMPT_FAILED_EXCLUDED");
   });
 
   it("unresolved conflicts stay UNKNOWN; a completely bound arbitration resolves them (task P2 item 9)", () => {
@@ -2006,5 +2010,276 @@ describe("module purity", () => {
         /\bnew Date\b|\bDate\.now\b/,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Independent-review remediation round 2 (P1/P2): T4 merge reuse, frozen
+// package semantics, evidenceRefs carry-through, global judgmentId
+// uniqueness, and the null/absent boundary.
+// ---------------------------------------------------------------------------
+
+describe("T7a reuses the T4 merge for per-assignment outcomes (P1-1)", () => {
+  const entryFor = (built: any, record: any, raw?: string) => ({
+    blindPackage: built.blindPackage,
+    secretBinding: built.secretBinding,
+    record,
+    ...(raw !== undefined ? { rawResponse: raw } : {}),
+  });
+  const bundleOf = (entries: any[], extra: Record<string, unknown> = {}) => ({
+    schema: "pd-lab-judge-protocol-bundle.v1",
+    entries,
+    ...extra,
+  });
+
+  it("two records with different frozen digests gate the unit (COMPARISON_INPUT_DIGEST_CONFLICT)", () => {
+    const a = healthyPackage();
+    const b = healthyPackage({
+      outputReference: "an entirely different reference trajectory output",
+    });
+    const j1 = healthyRecord(a, "A_BETTER", "j-1");
+    const j2 = healthyRecord(b, "A_BETTER", "j-2");
+    const { report } = validateBundle(
+      "digest-conflict",
+      bundleOf([
+        entryFor(a, j1, rawResponseOf({ displayVerdict: "A_BETTER" })),
+        entryFor(b, j2, rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ]),
+    );
+    const assignment = report.perAssignment[0];
+    expect(assignment.outcome).toBe("UNKNOWN");
+    expect(assignment.reasonCode).toBe("COMPARISON_INPUT_DIGEST_CONFLICT");
+  });
+
+  it("one slot's attempts with conflicting votes gate the unit (T4 slot conflict)", () => {
+    const built = healthyPackage();
+    const j1 = healthyRecord(built, "A_BETTER", "j-1", undefined, {
+      judgeSlotId: "slot-shared",
+      attempt: 1,
+    });
+    const j2 = healthyRecord(built, "B_BETTER", "j-2", undefined, {
+      judgeSlotId: "slot-shared",
+      attempt: 2,
+    });
+    const { report } = validateBundle(
+      "slot-conflict",
+      bundleOf([
+        entryFor(built, j1, rawResponseOf({ displayVerdict: "A_BETTER" })),
+        entryFor(built, j2, rawResponseOf({ displayVerdict: "B_BETTER" })),
+      ]),
+    );
+    const assignment = report.perAssignment[0];
+    expect(assignment.outcome).toBe("UNKNOWN");
+    expect(assignment.reasonCode).toBe("CONFLICTING_ATTEMPT_RECORDS");
+    expect(
+      report.disclosures.map((d: { code: string }) => d.code),
+    ).toContain("CONFLICTING_ATTEMPT_RECORDS");
+  });
+
+  it("the CLI's merge result is identical to calling mergeJudgments directly on the same records", () => {
+    const built = healthyPackage();
+    const j1 = healthyRecord(built, "A_BETTER", "j-1", undefined, {
+      judgeSlotId: "slot-a",
+    });
+    const j2 = healthyRecord(built, "A_BETTER", "j-2", undefined, {
+      judgeSlotId: "slot-b",
+    });
+    const { report } = validateBundle(
+      "merge-parity",
+      bundleOf([
+        entryFor(built, j1, rawResponseOf({ displayVerdict: "A_BETTER" })),
+        entryFor(built, j2, rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ]),
+    );
+    const plan = minimalPlan(2);
+    const direct = mergeJudgments({
+      plan,
+      judgments: [j1, j2],
+      arbitrations: [],
+      blindmap: {
+        map: {
+          "j-1": { A: "candidate", B: "reference" },
+          "j-2": { A: "candidate", B: "reference" },
+        },
+      },
+    });
+    expect(report.perAssignment[0].outcome).toBe(
+      direct.finalComparisons[0].verdict,
+    );
+    expect(report.perAssignment[0].outcome).toBe("CANDIDATE_BETTER");
+  });
+});
+
+describe("frozen protocol semantics on blind packages (P1-4)", () => {
+  it("package fields edited then re-digested are still rejected", () => {
+    const built = healthyPackage();
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["question", { comparisonQuestion: "a rewritten judge question" }],
+      ["rubric", { rubricVersion: "jp-pd-lab-rubric@2" }],
+      ["protocol-ref", { judgeProtocolRef: "jp-pd-lab@2" }],
+      ["empty-outputA", { outputA: "  " }],
+    ];
+    for (const [name, patch] of cases) {
+      const tampered = { ...built.blindPackage, ...patch };
+      const record = healthyRecord(built, "A_BETTER", `j-${name}`, undefined, {
+        // The attacker recomputes the digest over the tampered package —
+        // the frozen comparison still fails before the digest is trusted.
+        comparisonInputDigest: comparisonInputDigestOf(
+          tampered,
+          built.secretBinding.identityMap,
+        ),
+      });
+      const { report, run } = validateBundle(
+        `pkg-tamper-${name}`,
+        {
+          schema: "pd-lab-judge-protocol-bundle.v1",
+          entries: [
+            {
+              blindPackage: tampered,
+              secretBinding: built.secretBinding,
+              record,
+              rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+            },
+          ],
+        },
+      );
+      expect(run.status, name).toBe(1);
+      expect(
+        report.problems.map((p: { code: string }) => p.code),
+        name,
+      ).toContain("PACKAGE_INVALID");
+    }
+  });
+});
+
+describe("evidenceRefs carry through to the T4 FinalComparison (P1-5)", () => {
+  it("buildProtocolRecord emits evidenceRefs and mergeJudgments propagates them", () => {
+    const built = healthyPackage();
+    const record = buildProtocolRecord({
+      judgmentId: "j-ev",
+      assignmentKey: "cfg-candidate+case-1@v1+opp-1+rep-1+ref-1",
+      blindPackage: built.blindPackage,
+      secretBinding: built.secretBinding,
+      parsed: { displayVerdict: "A_BETTER", reason: "cited" },
+      attempt: 1,
+      ...MODELS,
+      judgeSlotId: "slot-ev",
+      evidence: [
+        { side: "A", anchor: "turn:3" },
+        { side: "B", anchor: "turn:5" },
+      ],
+    });
+    expect(record.evidenceRefs).toEqual(["turn:3", "turn:5"]);
+    expect(validateProtocolRecord(record).problems).toEqual([]);
+    const merged = mergeJudgments({
+      plan: minimalPlan(1),
+      judgments: [record],
+      arbitrations: [],
+      blindmap: {
+        map: { "j-ev": { A: "candidate", B: "reference" } },
+      },
+    });
+    const fc = merged.finalComparisons[0];
+    expect(fc.verdict).toBe("CANDIDATE_BETTER");
+    expect(fc.evidenceRefs).toEqual(["turn:3", "turn:5"]);
+  });
+
+  it("evidence anchors without evidenceRefs reject — no silent drop", () => {
+    const built = healthyPackage();
+    const record = healthyRecord(built, "A_BETTER", "j-1") as any;
+    delete record.evidenceRefs;
+    const schema = validateProtocolRecord(record);
+    expect(schema.problems.map((p: { code: string }) => p.code)).toContain(
+      "EVIDENCE_INVALID",
+    );
+  });
+});
+
+describe("global judgmentId uniqueness (P1-6)", () => {
+  it("a duplicated judgmentId invalidates BOTH occurrences, in either order", () => {
+    const built = healthyPackage();
+    for (const order of ["ok-first", "failed-first"]) {
+      const ok = healthyRecord(built, "A_BETTER", "j-dup", undefined, {
+        judgeSlotId: "slot-ok",
+      });
+      const failed = buildProtocolRecord({
+        judgmentId: "j-dup",
+        assignmentKey: ok.assignmentKey,
+        blindPackage: built.blindPackage,
+        secretBinding: built.secretBinding,
+        parsed: {},
+        attempt: 2,
+        attemptStatus: "FAILED",
+        ...MODELS,
+        judgeSlotId: "slot-failed",
+        evidence: [],
+      });
+      const records = order === "ok-first" ? [ok, failed] : [failed, ok];
+      const { report } = validateBundle(`dup-${order}`, {
+        schema: "pd-lab-judge-protocol-bundle.v1",
+        entries: records.map((record) => ({
+          blindPackage: built.blindPackage,
+          secretBinding: built.secretBinding,
+          record,
+          ...(record.attemptStatus === "FAILED"
+            ? {}
+            : { rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }) }),
+        })),
+      });
+      const dupCodes = report.problems.filter(
+        (p: { code: string }) => p.code === "DUPLICATE_JUDGMENT_ID",
+      );
+      expect(dupCodes.length, order).toBeGreaterThanOrEqual(1);
+      for (const row of report.perRecord) {
+        expect(row.problemCodes, order).toContain("DUPLICATE_JUDGMENT_ID");
+        expect(row.valid, order).toBe(false);
+      }
+    }
+  });
+
+  it("the same judgmentId across different packages is still a duplicate", () => {
+    const built = healthyPackage();
+    const swapped = swapJudgePackage(
+      built.blindPackage,
+      built.secretBinding,
+      "pkg-2",
+    );
+    const j1 = healthyRecord(built, "A_BETTER", "j-dup");
+    const j2 = healthyRecord(swapped, "B_BETTER", "j-dup");
+    const { report } = validateBundle("dup-across-pkgs", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        {
+          blindPackage: built.blindPackage,
+          secretBinding: built.secretBinding,
+          record: j1,
+          rawResponse: rawResponseOf({ displayVerdict: "A_BETTER" }),
+        },
+        {
+          blindPackage: swapped.blindPackage,
+          secretBinding: swapped.secretBinding,
+          record: j2,
+          rawResponse: rawResponseOf({ displayVerdict: "B_BETTER" }),
+        },
+      ],
+    });
+    expect(
+      report.problems.filter(
+        (p: { code: string }) => p.code === "DUPLICATE_JUDGMENT_ID",
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(report.totals.validEntries).toBe(0);
+  });
+});
+
+describe("null-vs-absent parity with T4 (P2-1)", () => {
+  it("explicit attemptStatus null is invalid — only absence defaults", () => {
+    const built = healthyPackage();
+    const record = healthyRecord(built, "A_BETTER", "j-null") as any;
+    record.attemptStatus = null;
+    const schema = validateProtocolRecord(record);
+    expect(schema.problems.map((p: { code: string }) => p.code)).toContain(
+      "ATTEMPT_STATUS_INVALID",
+    );
   });
 });

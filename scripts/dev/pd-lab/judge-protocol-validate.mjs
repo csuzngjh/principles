@@ -26,6 +26,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  JUDGE_PROTOCOL,
   JUDGE_PROTOCOL_REF,
   judgeProtocolDigest,
   parseJudgeResponse,
@@ -36,6 +37,7 @@ import {
   identityMapProblem,
   DISPLAY_ORDERS,
 } from "./judge-protocol.mjs";
+import { mergeJudgments } from "./alignment-report.mjs";
 
 const USAGE = [
   "usage: judge-protocol-validate.mjs \\",
@@ -114,6 +116,19 @@ function packageProblem(blindPackage) {
   ]) {
     if (typeof blindPackage[field] !== "string")
       return `blindPackage.${field} must be a string`;
+  }
+  // P1-4: the package must match the FROZEN protocol definition verbatim —
+  // recomputing the digest after editing the question/rubric never launders
+  // a drifted comparison back into jp-pd-lab@1.
+  if (blindPackage.judgeProtocolRef !== JUDGE_PROTOCOL_REF)
+    return `blindPackage.judgeProtocolRef must be ${JUDGE_PROTOCOL_REF}`;
+  if (blindPackage.rubricVersion !== JUDGE_PROTOCOL.rubricVersion)
+    return `blindPackage.rubricVersion must be ${JUDGE_PROTOCOL.rubricVersion}`;
+  if (blindPackage.comparisonQuestion !== JUDGE_PROTOCOL.comparisonQuestion)
+    return "blindPackage.comparisonQuestion must be the frozen jp-pd-lab@1 question";
+  for (const field of ["context", "outputA", "outputB"]) {
+    if (blindPackage[field].trim().length === 0)
+      return `blindPackage.${field} must be non-empty`;
   }
   if (blindPackage.truncation !== undefined) {
     if (!Array.isArray(blindPackage.truncation))
@@ -327,8 +342,16 @@ function main() {
 
   const failedAttemptsPreserved = [];
   const perRecord = [];
+  // P1-6: judgmentId is globally unique at the bundle level — a duplicate
+  // marks BOTH occurrences invalid, and derived-record lookup below binds by
+  // entry index, never by find() on judgmentId.
+  const judgmentIdFirstIndex = new Map();
+  // Index binding: judgmentId+packageId -> perRecord index (P1-6). No
+  // downstream lookup ever scans perRecord with find().
+  const derivedByKey = new Map();
 
   for (const entry of bundle.entries) {
+    const recIndex = perRecord.length;
     const packageId = isPlainObject(entry?.blindPackage)
       ? String(entry.blindPackage.packageId)
       : "<missing>";
@@ -344,6 +367,34 @@ function main() {
     };
 
     if (
+      isPlainObject(entry?.record) &&
+      isNonEmptyString(entry.record.judgmentId)
+    ) {
+      if (judgmentIdFirstIndex.has(entry.record.judgmentId)) {
+        note(
+          "DUPLICATE_JUDGMENT_ID",
+          `judgmentId ${entry.record.judgmentId} appears more than once in the bundle`,
+        );
+        // The earlier occurrence is equally untrusted: which one was "the
+        // original" cannot be proven from the bundle, so neither merges.
+        const firstIdx = judgmentIdFirstIndex.get(entry.record.judgmentId);
+        const first = perRecord[firstIdx];
+        if (first && !first.problemCodes.includes("DUPLICATE_JUDGMENT_ID")) {
+          first.problemCodes.push("DUPLICATE_JUDGMENT_ID");
+          first.valid = false;
+          report({
+            packageId: first.packageId,
+            judgmentId: first.judgmentId,
+            code: "DUPLICATE_JUDGMENT_ID",
+            message: `judgmentId ${entry.record.judgmentId} appears more than once in the bundle`,
+          });
+        }
+      } else {
+        judgmentIdFirstIndex.set(entry.record.judgmentId, recIndex);
+      }
+    }
+
+    if (
       !isPlainObject(entry) ||
       !isPlainObject(entry.blindPackage) ||
       !isPlainObject(entry.secretBinding) ||
@@ -353,14 +404,15 @@ function main() {
         "ENTRY_INVALID",
         "each bundle entry needs blindPackage, secretBinding and record objects",
       );
-      perRecord.push({
+      perRecord[recIndex] = {
         judgmentId,
         packageId,
         valid: false,
         problemCodes: recordCodes,
         restoredVerdict: null,
         failed: false,
-      });
+      };
+      derivedByKey.set(`${judgmentId}${packageId}`, recIndex);
       continue;
     }
     const { blindPackage, secretBinding, record, rawResponse } = entry;
@@ -524,7 +576,7 @@ function main() {
         "display verdict could not be restored through the identity map",
       );
     }
-    perRecord.push({
+    perRecord[recIndex] = {
       judgmentId,
       packageId,
       valid: recordCodes.length === 0,
@@ -534,7 +586,8 @@ function main() {
       comparisonInputDigest: isNonEmptyString(record.comparisonInputDigest)
         ? record.comparisonInputDigest
         : null,
-    });
+    };
+    derivedByKey.set(`${judgmentId}${packageId}`, recIndex);
   }
 
   // Swap pairs: mechanically detected counterpart packages plus declared
@@ -696,28 +749,140 @@ function main() {
       }
     }
     swapPairs.push(
-      pairReport(entry, resolved, swapProblemCodes, perRecord),
+      pairReport(entry, resolved, swapProblemCodes, perRecord, derivedByKey),
     );
   }
 
-  // Per-assignment conflict / arbitration summary (CONTRACT 5.2 steps 3-5).
-  // Only VALID, non-FAILED records vote — an invalid record never enters
-  // the judgment set, the exchange stats, or the arbitration bound set.
+  // Per-assignment merge (P1-1): the SAME T4 mergeJudgments that owns
+  // production voting — Slot/Attempt/Digest gates, FAILED preservation,
+  // duplicate consolidation and the boundAll arbitration check are never
+  // re-implemented in T7a. Only VALID records enter the merge input; an
+  // invalid record never votes, swaps, or sits in an arbitration bound set.
   const recordEntries = bundle.entries.filter((entry) =>
     isPlainObject(entry?.record),
   );
   const assignmentMap = new Map();
+  const derivedFor = (entry) => {
+    const idx = derivedByKey.get(
+      `${String(entry.record.judgmentId)}${String(entry.blindPackage?.packageId ?? "<missing>")}`,
+    );
+    return idx === undefined ? null : perRecord[idx];
+  };
   for (const entry of recordEntries) {
     const key = String(entry.record.assignmentKey ?? "<missing>");
     if (!assignmentMap.has(key)) assignmentMap.set(key, []);
-    const derived =
-      perRecord.find(
-        (r) =>
-          r.judgmentId === String(entry.record.judgmentId) &&
-          r.packageId === String(entry.blindPackage?.packageId ?? "<missing>"),
-      ) ?? null;
-    assignmentMap.get(key).push({ entry, derived });
+    assignmentMap.get(key).push({ entry, derived: derivedFor(entry) });
   }
+
+  // T4 plan assignments are keyed by composed component fields
+  // (`cfg+case@ver+opp+rep+ref`); decompose each T7a assignmentKey back so
+  // merge and report see the identical keys.
+  const assignmentComponentsFor = (key) => {
+    const parts = String(key).split("+");
+    if (parts.length !== 5) return null;
+    const [caseId, caseVersion] = parts[1].split("@");
+    for (const part of [
+      parts[0],
+      caseId,
+      caseVersion,
+      parts[2],
+      parts[3],
+      parts[4],
+    ]) {
+      if (!isNonEmptyString(part)) return null;
+    }
+    return {
+      candidateConfigId: parts[0],
+      caseId,
+      caseVersion,
+      opportunityId: parts[2],
+      repetitionId: parts[3],
+      referenceId: parts[4],
+    };
+  };
+  const mergeAssignments = [];
+  for (const key of [...assignmentMap.keys()].sort()) {
+    const components = assignmentComponentsFor(key);
+    if (components === null) {
+      report({
+        packageId: "<merge>",
+        judgmentId: "<merge>",
+        code: "ASSIGNMENT_KEY_UNDECOMPOSABLE",
+        message: `assignment key ${key} cannot be decomposed into T4 plan components — the merge cannot attribute it`,
+      });
+      continue;
+    }
+    mergeAssignments.push({
+      ...components,
+      // Placeholder bindings for fields the merge gates only on presence
+      // (G2): trajectory/expectation binding is owned by the admission
+      // layer, not this validator.
+      scenarioId: "scn-t7a",
+      candidateTrajectoryRef: "t7a-candidate-trajectory",
+      referenceTrajectoryRef: "t7a-reference-trajectory",
+      expectationRef: "t7a-expectation",
+    });
+  }
+
+  const mergeJudgmentsInput = [];
+  const mergeBlindMap = {};
+  for (const entry of recordEntries) {
+    const derived = derivedFor(entry);
+    if (derived === null || !derived.valid) continue;
+    mergeJudgmentsInput.push(entry.record);
+    if (isPlainObject(entry.secretBinding?.identityMap))
+      mergeBlindMap[entry.record.judgmentId] = entry.secretBinding.identityMap;
+  }
+  // The preregistered slot registry drives T4's seat count
+  // (requiredJudgments) exactly as the production plan would; without one,
+  // the seats are the slots of the records that actually enter the merge —
+  // the registry disclosure above already flagged the weaker provenance.
+  const mergeSlotIds =
+    slotRegistry !== null
+      ? [...slotRegistry].sort()
+      : [
+          ...new Set(
+            mergeJudgmentsInput
+              .map((record) => record.judgeSlotId)
+              .filter((id) => isNonEmptyString(id)),
+          ),
+        ].sort();
+  const merged = mergeJudgments({
+    plan: {
+      schemaVersion: "pd-lab-plan.v1",
+      judgeProtocolRef: JUDGE_PROTOCOL_REF,
+      judgeProtocol: {
+        requiredJudgments: Math.max(mergeSlotIds.length, 1),
+        ...(mergeSlotIds.length > 0
+          ? { judgeSlots: mergeSlotIds.map((judgeSlotId) => ({ judgeSlotId })) }
+          : {}),
+      },
+      assignments: mergeAssignments,
+    },
+    judgments: mergeJudgmentsInput,
+    arbitrations,
+    blindmap: { map: mergeBlindMap },
+  });
+  // Every merge problem is audit evidence of this bundle too; merge-side
+  // evidence problems/disclosures ride the same report channel.
+  for (const mergeProblem of merged.problems) {
+    report({
+      packageId: "<merge>",
+      judgmentId: "<merge>",
+      code: mergeProblem.code,
+      message: `T4 merge: ${mergeProblem.message}`,
+    });
+  }
+  for (const mergeProblem of merged.evidenceProblems) {
+    disclosures.push({
+      code: mergeProblem.code,
+      message: `T4 merge: ${mergeProblem.message}`,
+    });
+  }
+
+  const finalsByKey = new Map(
+    merged.finalComparisons.map((fc) => [fc.assignmentKey, fc]),
+  );
   const matchedArbitrations = new Set();
   const perAssignment = [...assignmentMap.keys()].sort().map((key) => {
     const rows = assignmentMap.get(key);
@@ -731,72 +896,30 @@ function main() {
     const arbitration =
       arbitrations.find((a) => isPlainObject(a) && a.assignmentKey === key) ??
       null;
-    let arbitrationComplete = false;
-    if (arbitration) {
-      matchedArbitrations.add(arbitration);
-      const structuralProblem = arbitrationProblem(arbitration);
-      if (structuralProblem !== null) {
-        report({
-          packageId: "<arbitration>",
-          judgmentId: String(arbitration?.arbitrationId ?? "<missing>"),
-          code: "INVALID_ARBITRATION_RECORD",
-          message: `arbitration for ${key}: ${structuralProblem}`,
-        });
-      } else {
-        // T4 boundAll parity (alignment-report.mjs): the arbitration must
-        // bind the FULL participating judgment id set AND the full
-        // participating comparisonInputDigest set — ids and digests are
-        // compared separately, both sorted/unique.
-        const boundIds = [...arbitration.boundJudgmentIds]
-          .sort()
-          .join(" ");
-        const votingIds = voting
-          .map((d) => d.judgmentId)
-          .sort()
-          .join(" ");
-        const boundDigests = [
-          ...new Set(arbitration.boundComparisonInputDigests),
-        ]
-          .sort()
-          .join(" ");
-        const participatingDigests = [
-          ...new Set(
-            voting
-              .map((d) => d.comparisonInputDigest)
-              .filter((d) => d !== null),
-          ),
-        ]
-          .sort()
-          .join(" ");
-        arbitrationComplete =
-          boundIds === votingIds && boundDigests === participatingDigests;
-      }
-    }
-    const conflict = restored.length > 0 && !allAgree;
-    const outcome =
-      restored.length === 0
-        ? "UNKNOWN"
-        : allAgree
-          ? restored[0]
-          : arbitrationComplete && arbitration.verdict !== "UNKNOWN"
-            ? arbitration.verdict
-            : "UNKNOWN";
+    if (arbitration) matchedArbitrations.add(arbitration);
+    const fc = finalsByKey.get(key) ?? null;
     return {
       assignmentKey: key,
       judgmentIds: rows
         .map((row) => String(row.entry.record.judgmentId ?? "<missing>"))
         .sort(),
+      // Diagnostics only — the T4 merge decides who actually voted.
       votingJudgments: voting.map((d) => d.judgmentId).sort(),
       restoredVerdicts: restored.sort(),
-      conflict,
+      conflict: restored.length > 0 && !allAgree,
       arbitrationDeclared: arbitration !== null,
-      arbitrationBindingComplete: arbitrationComplete,
-      resolvedBy: allAgree
-        ? "CONSISTENT_JUDGMENTS"
-        : arbitrationComplete && arbitration.verdict !== "UNKNOWN"
-          ? "BLIND_ARBITRATION"
-          : "UNRESOLVED",
-      outcome,
+      // A fully bound arbitration stays "binding complete" even when its own
+      // verdict is UNKNOWN — binding completeness is about the bound set,
+      // not the outcome (T4 reasonCode ARBITRATED | ARBITRATION_UNCERTAIN).
+      arbitrationBindingComplete:
+        fc !== null &&
+        (fc.reasonCode === "ARBITRATED" ||
+          fc.reasonCode === "ARBITRATION_UNCERTAIN"),
+      resolvedBy: fc !== null ? fc.resolvedBy : "UNRESOLVED",
+      outcome: fc !== null ? fc.verdict : "UNKNOWN",
+      ...(fc !== null
+        ? { reasonCode: fc.reasonCode, arbitrationRef: fc.arbitrationRef }
+        : {}),
     };
   });
   // An arbitration that binds no assignment in this bundle is not evidence.
@@ -845,7 +968,7 @@ function main() {
   process.exitCode = valid ? 0 : 1;
 }
 
-function pairReport(entry, partnerEntry, swapProblemCodes, perRecord) {
+function pairReport(entry, partnerEntry, swapProblemCodes, perRecord, derivedByKey) {
   const pkg = entry.blindPackage;
   const partnerPackage = partnerEntry.blindPackage;
   const partnerRecord = partnerEntry.record;
@@ -863,12 +986,12 @@ function pairReport(entry, partnerEntry, swapProblemCodes, perRecord) {
           partnerRecord.identityMap,
         )
       : null;
-  const findDerived = (record, packageId) =>
-    perRecord.find(
-      (r) =>
-        r.judgmentId === String(record?.judgmentId ?? "<missing>") &&
-        r.packageId === packageId,
-    ) ?? null;
+  const findDerived = (record, packageId) => {
+    const idx = derivedByKey.get(
+      `${String(record?.judgmentId ?? "<missing>")}${packageId}`,
+    );
+    return idx === undefined ? null : perRecord[idx];
+  };
   const leftDerived = findDerived(entry.record, String(pkg.packageId));
   const rightDerived = findDerived(partnerRecord, String(partnerPackage.packageId));
   const recordsValid =

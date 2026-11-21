@@ -763,16 +763,18 @@ export function validateProtocolRecord(record) {
     );
   }
 
+  // T4 parseJudgmentRecords parity (P2-1): only `undefined` means "not
+  // provided" — an explicit null is an invalid value, never a silent absent.
   const attemptStatus =
     record.attemptStatus === undefined ? null : record.attemptStatus;
   if (
-    attemptStatus !== null &&
+    record.attemptStatus !== undefined &&
     attemptStatus !== "FAILED" &&
     attemptStatus !== "SUCCEEDED"
   ) {
     problem(
       "ATTEMPT_STATUS_INVALID",
-      "attemptStatus must be FAILED or SUCCEEDED when present",
+      "attemptStatus must be FAILED or SUCCEEDED when present (explicit null is invalid, only absence defaults)",
     );
   }
   if (record.attempt !== undefined && !isPositiveInteger(record.attempt)) {
@@ -945,6 +947,36 @@ export function validateProtocolRecord(record) {
       );
     }
   }
+  // T4 mergeJudgments reads `evidenceRefs` (flat anchor list) — the field the
+  // FinalComparison inherits. When the record carries sided anchors, the
+  // flat list must be exactly those anchors (P1-5): no silent drop, no
+  // anchors that disagree with the side-bound evidence.
+  const anchors = evidenceValid ? evidence.map((entry) => entry.anchor) : null;
+  if (record.evidenceRefs !== undefined) {
+    if (
+      !Array.isArray(record.evidenceRefs) ||
+      !record.evidenceRefs.every(isNonEmptyString)
+    ) {
+      problem(
+        "EVIDENCE_INVALID",
+        "evidenceRefs must be an array of non-empty anchor strings when present",
+      );
+    } else if (
+      anchors !== null &&
+      JSON.stringify([...record.evidenceRefs].sort()) !==
+        JSON.stringify([...anchors].sort())
+    ) {
+      problem(
+        "EVIDENCE_INVALID",
+        "evidenceRefs must contain exactly the anchors of the sided evidence entries",
+      );
+    }
+  } else if (evidenceValid) {
+    problem(
+      "EVIDENCE_INVALID",
+      "evidenceRefs is required when evidence anchors are present — the T4 merge reads evidenceRefs, not evidence",
+    );
+  }
 
   const judgeModelProblem = modelBlockProblem(record.judgeModel, "judgeModel");
   if (judgeModelProblem) problem("MODEL_BLOCK_INVALID", judgeModelProblem);
@@ -1035,6 +1067,12 @@ export function buildProtocolRecord(input) {
           side: entry.side,
           anchor: entry.anchor,
         }))
+      : [],
+    // T4 mergeJudgments reads `evidenceRefs` (flat anchors); `evidence`
+    // keeps the A/B side information (P1-5). Both stay in the record so the
+    // verified anchors reach FinalComparison without a field remap.
+    evidenceRefs: Array.isArray(input.evidence)
+      ? input.evidence.map((entry) => entry.anchor)
       : [],
     judgeModel: { ...input.judgeModel },
     generatorModel: { ...input.generatorModel },

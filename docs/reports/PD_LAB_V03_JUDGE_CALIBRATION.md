@@ -42,7 +42,7 @@
 
 ## 6. 合成协议校验（已执行，无需 D2/D5）
 
-测试入口：`npm run test:scripts`（`scripts/__tests__/pd-lab-judge-protocol.test.ts`，45 用例，全部通过；真实 CLI 子进程驱动 `npm run lab:judge-validate`）。
+测试入口：`npm run test:scripts`（`scripts/__tests__/pd-lab-judge-protocol.test.ts`，56 用例，全部通过；真实 CLI 子进程驱动 `npm run lab:judge-validate`）。
 
 | 校验面 | 结果 |
 | --- | --- |
@@ -59,7 +59,7 @@
 | lossyInput | PASS（截断→标记+位置事实；有损判胜=非法记录；交换后截断侧随内容移动；完整输入不得标记有损） |
 | 复现性 | PASS（同一 bundle 两次校验输出逐字节一致；协议 digest 稳定） |
 
-统计与资格测试：`scripts/__tests__/pd-lab-t6-qualification.test.ts`，32 用例全部通过（见第 8、10、13 节）。
+统计与资格测试：`scripts/__tests__/pd-lab-t6-qualification.test.ts`，40 用例全部通过（见第 8、10、13 节）。
 
 ## 7. 输入完整性
 
@@ -119,7 +119,7 @@
 npm run lab:qualify -- --input <qualification-input.json> --out <dir>
 ```
 
-三态判定规则（`scripts/dev/pd-lab/t6-qualification.mjs`，纯函数，32 项测试）：
+三态判定规则（`scripts/dev/pd-lab/t6-qualification.mjs`，纯函数，40 项测试）：
 
 - **BLOCKED**：授权/完整性不合格、n=0、D2/D5 未批准、实时校准未运行或失败、或出现无授权活动记录（停止条件）。
 - **EXPLORATORY_ONLY**：门全过但 n < n_min(α)、或 n < 预注册最低组数、或精度目标未达、或 Owner 盲评未通过。探索性 T6 需 D2 明确批准 + 预注册标记探索性；`promotePossible` 恒 false——**探索性结果绝不产生 PROMOTE**。

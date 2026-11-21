@@ -70,6 +70,7 @@ import {
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3'); // same resolution as snapshot-and-discover.mjs / tests
@@ -201,7 +202,7 @@ function canonicalJson(value) {
   return encoded;
 }
 
-function sourceGroupsDigestOf(groups, rationales) {
+export function sourceGroupsDigestOf(groups, rationales) {
   const payload = {
     groups: Object.fromEntries(Object.entries(groups).sort(([a], [b]) => (a < b ? -1 : 1))),
     rationales,
@@ -2790,4 +2791,9 @@ function main() {
   }
 }
 
-main();
+// Run as a CLI only — the module is also imported for its exported helpers
+// (sourceGroupsDigestOf is the canonical source-groups digest, reused by
+// t6-qualification.mjs for mechanical re-derivation).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}
