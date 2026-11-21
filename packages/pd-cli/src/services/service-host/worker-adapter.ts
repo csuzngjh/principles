@@ -404,15 +404,15 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         evidenceReadable: false,
         evidenceReason: 'not_attempted',
       };
-      const finish = (outcome: AdapterCycleOutcome, extra: { reason?: string; nextAction?: string; worker?: Partial<AdapterCycleResult['worker']> }) => {
+      const finish = (outcome: AdapterCycleOutcome, extra: { reason?: string; nextAction?: string; worker?: Partial<AdapterCycleResult['worker']>; lastProgressAt?: string; businessProgress?: BusinessProgressEvidence }) => {
         const completedDate = now();
         return {
           ...base,
           cycleOutcome: outcome,
           ...(extra.reason !== undefined ? { reason: extra.reason } : {}),
           ...(extra.nextAction !== undefined ? { nextAction: extra.nextAction } : {}),
-          lastProgressAt: null,
-          businessProgress: emptyProgress,
+          lastProgressAt: extra.lastProgressAt ?? null,
+          businessProgress: extra.businessProgress ?? emptyProgress,
           health: livenessFacts(config, workspaceDir),
           completedAt: completedDate.toISOString(),
           durationMs: Math.max(0, completedDate.getTime() - startedDate.getTime()),
@@ -515,6 +515,23 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
       }
       const after = readSnapshot(workspaceDir, { busyTimeoutMs: remainingBudgetMs() });
       if (remainingBudgetMs() <= 0) {
+        // Still a timeout — but when the read DID succeed and shows a
+        // persisted task-state change, that measured evidence rides the
+        // record. Dropping it loses the change forever: the next run's
+        // baseline is the post-change state, so the transition would
+        // never be diffed again.
+        if (before.ok && after.ok) {
+          const measured = diffTaskProgress(before.snapshot, after.snapshot);
+          if (measured.taskStateChanged) {
+            return finish('timeout', {
+              reason: 'workspace_timeout_budget_exhausted',
+              nextAction: budgetExhaustedNextAction,
+              worker,
+              lastProgressAt: measured.changedAt ?? undefined,
+              businessProgress: { ...emptyProgress, taskStateChanged: true, changedTaskCount: measured.changedCount, evidenceReadable: true },
+            });
+          }
+        }
         return finish('timeout', { reason: 'workspace_timeout_budget_exhausted', nextAction: budgetExhaustedNextAction, worker });
       }
       let taskProgress: TaskProgressEvidence | null = null;
