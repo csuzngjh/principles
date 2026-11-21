@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import {
   collectHostWorkspaceClaims,
   parseInstallManifest,
+  type BindingReadDiagnostic,
   type HostClaimOptions,
   type InstallManifest,
 } from '@principles/install-layout';
@@ -232,7 +233,11 @@ function discoveryIncompleteRoots(hostRoots: readonly HostRootReport[]): HostRoo
 }
 
 /** The operator-facing next action for a completed dry-run. */
-function completedNextAction(discovery: WorkspaceDiscoveryResult, hostRoots: readonly HostRootReport[]): string {
+function completedNextAction(
+  discovery: WorkspaceDiscoveryResult,
+  hostRoots: readonly HostRootReport[],
+  bindingDiagnostics: readonly BindingReadDiagnostic[],
+): string {
   // A host root that exists but could not be listed is a finding of its
   // own (P1-2/P2-1): workspaces under it were NOT silently absent — say
   // so, for env-selected AND default roots alike.
@@ -240,17 +245,22 @@ function completedNextAction(discovery: WorkspaceDiscoveryResult, hostRoots: rea
   const rootNote = blocked.length > 0
     ? ` Host root(s) ${blocked.map((r) => `${r.host}=${r.root} (${r.status}, ${r.source})`).join(', ')} are not listable — workspaces under them were not discoverable; discovery is INCOMPLETE. Fix the permissions/path or unset the env override.`
     : '';
+  // A binding/declaration file that exists but cannot be read or parsed is
+  // degraded evidence (§9.1.8), not "no claim": say which file degraded.
+  const bindingNote = bindingDiagnostics.length > 0
+    ? ` Binding evidence file(s) ${bindingDiagnostics.map((d) => `${d.file} (${d.status})`).join(', ')} could not be read — host claims in them were not discoverable; discovery is INCOMPLETE. Repair the file or its permissions.`
+    : '';
   if (discovery.counts.authorized === 0 && discovery.discoveredTotal > 0) {
     const countsSummary = Object.entries(discovery.counts)
       .map(([verdict, count]) => `${verdict}=${count}`)
       .join(' ');
-    return `No workspace is currently authorized (counts: ${countsSummary}); check the per-workspace reasons below.${rootNote}`;
+    return `No workspace is currently authorized (counts: ${countsSummary}); check the per-workspace reasons below.${rootNote}${bindingNote}`;
   }
   if (discovery.counts.conflicting > 0 || discovery.counts.invalid > 0) {
-    return `Fix the conflicting/invalid workspaces listed below before any future worker phase.${rootNote}`;
+    return `Fix the conflicting/invalid workspaces listed below before any future worker phase.${rootNote}${bindingNote}`;
   }
-  if (rootNote !== '') {
-    return `Discovery dry-run complete.${rootNote} Phase 1 starts no worker.`;
+  if (rootNote !== '' || bindingNote !== '') {
+    return `Discovery dry-run complete.${rootNote}${bindingNote} Phase 1 starts no worker.`;
   }
   return 'Discovery dry-run complete. Phase 1 starts no worker; the next phase (PRI-1280) introduces bounded real cycles behind handover gates.';
 }
@@ -266,6 +276,7 @@ function buildStatus(args: {
   manifest: ServiceRunStatus['manifest'];
   discovery: WorkspaceDiscoveryResult;
   hostRoots: readonly HostRootReport[];
+  bindingDiagnostics: readonly BindingReadDiagnostic[];
   nextAction: string;
 }): ServiceRunStatus {
   return {
@@ -294,10 +305,13 @@ function buildStatus(args: {
       discoveredTotal: args.discovery.discoveredTotal,
       counts: args.discovery.counts,
       hostRoots: args.hostRoots,
-      // A host root that exists but could not be listed makes discovery
-      // INCOMPLETE — the workspace list below may be missing entries, so
-      // "0 workspaces" is never the same fact as "discovery finished".
-      incomplete: discoveryIncompleteRoots(args.hostRoots).length > 0,
+      // A host root that exists but could not be listed, or binding
+      // evidence that exists but could not be read (§9.1.8), makes
+      // discovery INCOMPLETE — the workspace list below may be missing
+      // entries, so "0 workspaces" is never the same fact as "discovery
+      // finished".
+      incomplete:
+        discoveryIncompleteRoots(args.hostRoots).length > 0 || args.bindingDiagnostics.length > 0,
     },
     workspaces: args.discovery.workspaces,
     nextAction: args.nextAction,
@@ -368,6 +382,7 @@ function completeRun(
       manifest: args.manifest ?? { verdict: 'ok', hosts: [], unknownHosts: [], workspacesCount: 0 },
       discovery: args.discovery ?? buildEmptyDiscovery(),
       hostRoots,
+      bindingDiagnostics: [],
       nextAction: args.nextAction,
     });
     return {
@@ -418,12 +433,14 @@ function completeRun(
   // ── 5. Validated per-host claims over ALL resolved host roots (P1-2).
   //    Custom roots (env overrides) reach the collector so workspaces under
   //    them are discoverable; they can never steer pdHome itself.
+  const readDiagnostics: BindingReadDiagnostic[] = [];
   const claimOptions: HostClaimOptions = {
     homeDir: identity.homeDir,
     codexHome: identity.hostRoots.codexHome,
     openclawHome: identity.hostRoots.openclawHome,
     workbuddyConfigDir: identity.hostRoots.workbuddyConfigDir,
     platform: process.platform,
+    readDiagnostics,
   };
   const claims = collectHostWorkspaceClaims(claimOptions);
 
@@ -442,7 +459,8 @@ function completeRun(
     manifest: manifestSection(manifestRead),
     discovery,
     hostRoots,
-    nextAction: completedNextAction(discovery, hostRoots),
+    bindingDiagnostics: readDiagnostics,
+    nextAction: completedNextAction(discovery, hostRoots, readDiagnostics),
   });
   const statusWrite = writeServiceRunStatus(identity.pdHome, status);
   return {

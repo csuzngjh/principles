@@ -207,9 +207,37 @@ export interface HostWorkspaceClaim {
   readonly source: string;
 }
 
+/**
+ * Structured read outcome for one binding/declaration file
+ * (SPEC-PD-SERVICE-HOST-001 §9.1.8): `absent` (ENOENT/ENOTDIR) is a normal
+ * "no claim" fact, while `unreadable` (EACCES/EPERM or any other I/O
+ * failure) and `invalid` (JSON parse error or non-object content) are
+ * DEGRADED evidence — a file that exists but cannot be read must never be
+ * silently treated as "no host claim".
+ */
+export type JsonFileReadStatus =
+  | { readonly kind: 'ok'; readonly value: Record<string, unknown> }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unreadable'; readonly detail: string }
+  | { readonly kind: 'invalid'; readonly detail: string };
+
+/** One unreadable/invalid binding-evidence file observed during collection. */
+export interface BindingReadDiagnostic {
+  readonly file: string;
+  readonly status: 'unreadable' | 'invalid';
+  readonly detail: string;
+}
+
 /** Injectable filesystem surface so the collector stays deterministic in tests. */
 export interface HostClaimReaders {
   readJson(file: string): Record<string, unknown> | undefined;
+  /**
+   * Structured read status. When provided it takes precedence over
+   * `readJson` for claim collection and lets unreadable files surface as
+   * diagnostics instead of absent claims. Readers injected by older tests
+   * may omit it — they keep the `readJson`-only contract.
+   */
+  readJsonStatus?(file: string): JsonFileReadStatus;
   listDir(dir: string): string[] | undefined;
   /** Canonical (realpath) identity, or undefined when unresolvable. */
   realpath(target: string): string | undefined;
@@ -217,6 +245,13 @@ export interface HostClaimReaders {
 
 export interface HostClaimOptions extends McpHostWorkspaceOptions {
   readonly readers?: HostClaimReaders;
+  /**
+   * Optional out-parameter: every binding/declaration file that exists but
+   * could not be read or parsed is appended here (de-duplicated by path) so
+   * Workspace Discovery can mark the result incomplete rather than treating
+   * unreadable evidence as an absent claim.
+   */
+  readonly readDiagnostics?: BindingReadDiagnostic[];
 }
 
 export interface ForeignWorkspaceOwnerVerdict {
@@ -250,6 +285,27 @@ function defaultHostClaimReaders(): HostClaimReaders {
         return undefined;
       }
     },
+    readJsonStatus(file: string): JsonFileReadStatus {
+      let text: string;
+      try {
+        text = fs.readFileSync(file, 'utf8');
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+            ? String(Reflect.get(error, 'code'))
+            : '';
+        // ENOENT/ENOTDIR are honest "not present" facts; anything else is
+        // degraded evidence (EACCES, EPERM, EISDIR, I/O errors …).
+        if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'absent' };
+        return { kind: 'unreadable', detail: code || (error instanceof Error ? error.message : String(error)) };
+      }
+      try {
+        const parsed: unknown = JSON.parse(text);
+        return isRecord(parsed) ? { kind: 'ok', value: parsed } : { kind: 'invalid', detail: 'JSON content is not an object' };
+      } catch (error) {
+        return { kind: 'invalid', detail: error instanceof Error ? error.message : String(error) };
+      }
+    },
     listDir(dir: string): string[] | undefined {
       try {
         return fs.readdirSync(dir);
@@ -267,11 +323,38 @@ function defaultHostClaimReaders(): HostClaimReaders {
   };
 }
 
+/**
+ * Read a binding/declaration JSON file while honoring SPEC §9.1.8: an
+ * existing-but-unreadable file is recorded as a diagnostic (degraded
+ * evidence), never silently mapped to "no claim". `absent` and `invalid`
+ * still yield `undefined` — `invalid` additionally records a diagnostic.
+ */
+function readJsonChecked(
+  readers: HostClaimReaders,
+  file: string,
+  diagnostics: BindingReadDiagnostic[] | undefined,
+): Record<string, unknown> | undefined {
+  if (readers.readJsonStatus === undefined) {
+    // Legacy injected readers keep the readJson-only contract: `undefined`
+    // means "no usable object" and cannot be diagnosed further.
+    return readers.readJson(file);
+  }
+  const status = readers.readJsonStatus(file);
+  if (status.kind === 'ok') return status.value;
+  if (status.kind === 'unreadable' || status.kind === 'invalid') {
+    if (diagnostics !== undefined && !diagnostics.some((d) => d.file === file)) {
+      diagnostics.push({ file, status: status.kind, detail: status.detail });
+    }
+  }
+  return undefined;
+}
+
 function readWorkspaceFromDeclaration(
   readers: HostClaimReaders,
   file: string,
+  diagnostics: BindingReadDiagnostic[] | undefined,
 ): string | undefined {
-  const parsed = readers.readJson(file);
+  const parsed = readJsonChecked(readers, file, diagnostics);
   if (parsed === undefined) return undefined;
   const value = parsed.workspace;
   if (typeof value !== 'string' || value.trim().length === 0) return undefined;
@@ -378,9 +461,9 @@ export function validateMcpBinding(raw: unknown, expectedHost: McpBindingHost, p
 function readWorkspaceFromBinding(
   readers: HostClaimReaders,
   file: string,
-  target: {host: McpBindingHost; platform: string},
+  target: {host: McpBindingHost; platform: string; diagnostics: BindingReadDiagnostic[] | undefined},
 ): string | undefined {
-  const parsed = readers.readJson(file);
+  const parsed = readJsonChecked(readers, file, target.diagnostics);
   if (parsed === undefined) return undefined;
   // Fail-closed: only a FULLY VALID binding (host, schemaVersion,
   // workspaceDir, runtimeDir, canonical serverEntry — the same shape check
@@ -422,7 +505,7 @@ export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly 
   // fixed `<home>/.openclaw` read misses a declaration under a custom root
   // and accepts a binding the launcher then refuses (review 2026-11-18).
   for (const file of [path.join(openclawHome, PD_DECLARATION_FILENAME), path.join(home, '.principles', PD_DECLARATION_FILENAME)]) {
-    const declared = readWorkspaceFromDeclaration(readers, file);
+    const declared = readWorkspaceFromDeclaration(readers, file, options.readDiagnostics);
     if (declared !== undefined) {
       claims.push({host: 'openclaw', workspaceDir: declared, via: 'host_declaration', source: file});
     }
@@ -432,13 +515,13 @@ export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly 
   for (const entry of entries) {
     if (typeof entry !== 'string' || !entry.startsWith(CODEX_PLUGIN_DATA_PREFIX)) continue;
     const binding = path.join(dataRoot, entry, 'mcp-binding.json');
-    const bound = readWorkspaceFromBinding(readers, binding, {host: 'codex', platform: options.platform});
+    const bound = readWorkspaceFromBinding(readers, binding, {host: 'codex', platform: options.platform, diagnostics: options.readDiagnostics});
     if (bound !== undefined) {
       claims.push({host: 'codex', workspaceDir: bound, via: 'payload_binding', source: binding});
     }
   }
   const wbBinding = path.join(home, ...WB_MARKETPLACE_PAYLOAD_SEGMENTS, 'mcp-binding.json');
-  const wbBound = readWorkspaceFromBinding(readers, wbBinding, {host: 'workbuddy', platform: options.platform});
+  const wbBound = readWorkspaceFromBinding(readers, wbBinding, {host: 'workbuddy', platform: options.platform, diagnostics: options.readDiagnostics});
   if (wbBound !== undefined) {
     claims.push({host: 'workbuddy', workspaceDir: wbBound, via: 'payload_binding', source: wbBinding});
   }
@@ -448,7 +531,7 @@ export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly 
   // Missing/corrupt/invalid binding → no claim (fail-closed), matching the
   // launcher's refuse-to-start rule.
   const ocBinding = path.join(openclawHome, ...OPENCLAW_EXTENSION_SEGMENTS, 'mcp-binding.json');
-  const ocBound = readWorkspaceFromBinding(readers, ocBinding, {host: 'openclaw', platform: options.platform});
+  const ocBound = readWorkspaceFromBinding(readers, ocBinding, {host: 'openclaw', platform: options.platform, diagnostics: options.readDiagnostics});
   if (ocBound !== undefined) {
     claims.push({host: 'openclaw', workspaceDir: ocBound, via: 'payload_binding', source: ocBinding});
   }

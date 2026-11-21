@@ -578,7 +578,50 @@ describe('manifest fail-closed (malformed ≠ empty)', () => {
     runServiceRunOnce({ env: {}, trustedHomeDir: home });
     const serviceDir = path.join(home, '.pd', 'service');
     const entries = readdirSync(serviceDir);
-    // Exactly the status file; the lock and its temp artifacts are gone.
-    expect(entries.sort()).toEqual(['run-once-status.json']);
+    // The status file plus the arbitration gate db (a stable, reusable
+    // arbiter — not a per-attempt artifact); the lock itself is gone.
+    expect(entries.sort()).toEqual(['run-once-status.json', 'service-run-gate.db']);
+  });
+});
+
+describe('P2 binding-evidence diagnostics (SPEC §9.1.8)', () => {
+  it('an unparseable payload binding marks discovery incomplete — degraded evidence, never absent', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    // The OpenClaw payload binding exists but cannot be parsed — §9.1.8
+    // degraded evidence. Default openclawHome resolves to <home>/.openclaw.
+    const bindingFile = path.join(home, '.openclaw', 'extensions', 'principles-disciple', 'mcp-binding.json');
+    mkdirSync(path.dirname(bindingFile), { recursive: true });
+    writeFileSync(bindingFile, 'not json {', 'utf8');
+    const result = runServiceRunOnce({ env: {}, trustedHomeDir: home });
+    expectCompleted(result);
+    expect(result.status.discovery.incomplete).toBe(true);
+    expect(result.status.nextAction).toContain('mcp-binding.json');
+    expect(result.status.nextAction).toContain('INCOMPLETE');
+    // And no openclaw payload claim was silently assumed absent-by-absence:
+    // the file simply contributes no claim while the diagnostic surfaces.
+  });
+
+  it('an unreadable binding file (directory at the binding path) marks discovery incomplete', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    // A directory where the binding JSON must live: read fails EISDIR —
+    // degraded evidence under the same §9.1.8 contract.
+    const bindingFile = path.join(home, '.openclaw', 'extensions', 'principles-disciple', 'mcp-binding.json');
+    mkdirSync(bindingFile, { recursive: true });
+    const result = runServiceRunOnce({ env: {}, trustedHomeDir: home });
+    expectCompleted(result);
+    expect(result.status.discovery.incomplete).toBe(true);
+    expect(result.status.nextAction).toContain('INCOMPLETE');
+  });
+
+  it('a healthy run has no binding diagnostics and stays complete', () => {
+    const home = tempHome();
+    const ws = path.join(home, 'clawd');
+    mkdirSync(path.join(ws, '.pd'), { recursive: true });
+    installSandbox(home, [ws]);
+    const result = runServiceRunOnce({ env: {}, trustedHomeDir: home });
+    expectCompleted(result);
+    expect(result.status.discovery.incomplete).toBe(false);
   });
 });

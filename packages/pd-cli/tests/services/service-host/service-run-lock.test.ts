@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync, existsSyn
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
+import Database from 'better-sqlite3';
 import {
   SERVICE_RUN_LOCK_STALE_MS,
   acquireServiceRunLock,
@@ -16,6 +17,11 @@ import {
   releaseServiceRunLock,
   serviceRunLockPath,
 } from '../../../src/services/service-host/locking/service-run-lock.js';
+
+/** The arbitration gate path mirrors the module's private derivation. */
+function gateDbPath(home: string): string {
+  return path.join(path.dirname(serviceRunLockPath(home)), 'service-run-gate.db');
+}
 
 const dirs: string[] = [];
 function tempHome(): string {
@@ -160,12 +166,13 @@ describe('acquireServiceRunLock', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(phases).toEqual(['mutex-acquired', 'stale-verified', 'lock-removed']);
-    // The mutex was released once the takeover finished.
+    // No file mutex exists under SQLite arbitration — the gate DB holds
+    // no residual locks once the transaction commits.
     expect(existsSync(`${lockPath}.mtx`)).toBe(false);
     releaseServiceRunLock(result.handle);
   });
 
-  it('a FRESH takeover mutex blocks the takeover path entirely — the stale lock stays byte-identical', () => {
+  it('a live arbitration gate blocks the takeover path entirely — the stale lock stays byte-identical', () => {
     const home = tempHome();
     const lockPath = serviceRunLockPath(home);
     mkdirSync(path.dirname(lockPath), { recursive: true });
@@ -173,13 +180,42 @@ describe('acquireServiceRunLock', () => {
     writeFileSync(lockPath, staleBody, 'utf8');
     const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
     utimesSync(lockPath, old, old);
-    // A live mutex = a takeover in progress right now.
-    writeFileSync(`${lockPath}.mtx`, `${process.pid} mtxlive ${new Date().toISOString()}`, 'utf8');
+    // Another process holds BEGIN IMMEDIATE — our acquire must report
+    // `held` (SQLITE_BUSY → held), never reclaim the gate by file age.
+    const gate = new Database(gateDbPath(home));
+    gate.exec('BEGIN IMMEDIATE');
+    try {
+      const result = acquireServiceRunLock(home, { probes: { processAlive: () => 'dead' } });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.kind).toBe('held');
+      expect(readFileSync(lockPath, 'utf8')).toBe(staleBody);
+    } finally {
+      gate.exec('ROLLBACK');
+      gate.close();
+    }
+    // After the gate frees, the stale lock is recoverable again.
+    const recovered = acquireServiceRunLock(home, { probes: { processAlive: () => 'dead' } });
+    expect(recovered.ok).toBe(true);
+    if (recovered.ok) releaseServiceRunLock(recovered.handle);
+  });
+
+  it('an unusable arbitration gate fails closed as unwritable — never decides outside arbitration', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    // A directory where the gate database must live: open fails.
+    mkdirSync(gateDbPath(home));
     const result = acquireServiceRunLock(home, { probes: { processAlive: () => 'dead' } });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.kind).toBe('held');
-    expect(readFileSync(lockPath, 'utf8')).toBe(staleBody);
+    expect(result.kind).toBe('unwritable');
+    // And release, unable to arbitrate, must NOT unlink outside the gate:
+    // plant a foreign body — it stays byte-identical.
+    const foreignBody = '424244 foreigntoken 2026-01-01T00:00:00.000Z';
+    writeFileSync(lockPath, foreignBody, 'utf8');
+    releaseServiceRunLock({ lockPath, token: 'x', body: `${process.pid} mine 2026-01-01T00:00:00.000Z` });
+    expect(readFileSync(lockPath, 'utf8')).toBe(foreignBody);
   });
 
   it('an abandoned (stale) takeover mutex is broken and swept — takeover still succeeds', () => {
@@ -283,6 +319,7 @@ describe('acquireServiceRunLock', () => {
     const second = acquireServiceRunLock(home, { probes: { processAlive: () => 'dead' } });
     expect(second.ok).toBe(false);
     if (!second.ok) expect(second.kind).toBe('corrupt');
+    // The arbitration transaction rolled back — no residual gate hold.
     expect(existsSync(`${lockPath}.mtx`)).toBe(false);
   });
 

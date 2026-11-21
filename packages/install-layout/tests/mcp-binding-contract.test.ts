@@ -17,7 +17,9 @@ import {
   MCP_BINDING_SCHEMA_VERSION,
   MCP_BINDING_SHAPE_CODES,
   validateMcpBinding,
+  type BindingReadDiagnostic,
   type HostClaimReaders,
+  type JsonFileReadStatus,
 } from '../src/mcp-binding-contract.js';
 
 const RUNTIME = path.resolve('/pd/runtime');
@@ -407,5 +409,116 @@ describe('declaration-based workspace ownership (PRI-1247 reopen)', () => {
     expect(collectHostWorkspaceClaims(custom).filter((claim) => claim.via === 'host_declaration'))
       .toEqual([]);
     expect(findForeignWorkspaceOwner('codex', declaredOpenClaw, custom).owners).toEqual([]);
+  });
+});
+
+// ── SPEC-PD-SERVICE-HOST-001 §9.1.8: unreadable binding evidence is degraded,
+//    never "no claim" (P2) ────────────────────────────────────────────────────
+
+describe('binding read diagnostics (§9.1.8)', () => {
+  const home = path.resolve('/home/owner');
+  const codexHome = path.join(home, '.codex');
+  const ocBinding = path.join(home, '.openclaw', 'extensions', 'principles-disciple', 'mcp-binding.json');
+
+  /** Readers whose readJsonStatus reports each file's structured outcome. */
+  function statusReaders(statuses: Record<string, JsonFileReadStatus>): HostClaimReaders {
+    return {
+      readJson(file: string) {
+        const status = statuses[file];
+        return status !== undefined && status.kind === 'ok' ? status.value : undefined;
+      },
+      readJsonStatus(file: string) {
+        return statuses[file] ?? { kind: 'absent' };
+      },
+      listDir() {
+        return undefined;
+      },
+      realpath() {
+        return undefined;
+      },
+    };
+  }
+
+  const okStatus = (workspaceDir: string): JsonFileReadStatus => ({
+    kind: 'ok',
+    value: {
+      schemaVersion: 'pd.mcp-binding.v1', host: 'openclaw', workspaceDir,
+      runtimeDir: '/x', serverEntry: getCanonicalMcpServerEntry('openclaw', '/x'),
+      versions: {mcpServer: '0.1.0'},
+    },
+  });
+
+  it('ENOENT is an honest absent — no diagnostic, no claim', () => {
+    const readDiagnostics: BindingReadDiagnostic[] = [];
+    const claims = collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers: statusReaders({}), readDiagnostics});
+    expect(claims.filter((claim) => claim.via !== 'default')).toEqual([]);
+    expect(readDiagnostics).toEqual([]);
+  });
+
+  it('EACCES/EPERM record an unreadable diagnostic — never folded into "no claim"', () => {
+    for (const errno of ['EACCES', 'EPERM', 'EIO']) {
+      const readDiagnostics: BindingReadDiagnostic[] = [];
+      const readers = statusReaders({[ocBinding]: {kind: 'unreadable', detail: errno}});
+      const claims = collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers, readDiagnostics});
+      // Still no claim (fail-closed) — but the evidence is recorded, not lost.
+      expect(claims.filter((claim) => claim.via === 'payload_binding')).toEqual([]);
+      expect(readDiagnostics).toEqual([{file: ocBinding, status: 'unreadable', detail: errno}]);
+    }
+  });
+
+  it('a JSON parse error records an invalid diagnostic', () => {
+    const readDiagnostics: BindingReadDiagnostic[] = [];
+    const readers = statusReaders({[ocBinding]: {kind: 'invalid', detail: 'Unexpected token'}});
+    collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers, readDiagnostics});
+    expect(readDiagnostics).toEqual([{file: ocBinding, status: 'invalid', detail: 'Unexpected token'}]);
+  });
+
+  it('diagnostics propagate through findForeignWorkspaceOwner and de-duplicate by file', () => {
+    const readDiagnostics: BindingReadDiagnostic[] = [];
+    const readers = statusReaders({[ocBinding]: {kind: 'unreadable', detail: 'EACCES'}});
+    // Direct collect + a foreign-owner probe both walk the same binding —
+    // the file is recorded exactly once.
+    collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers, readDiagnostics});
+    findForeignWorkspaceOwner('codex', path.join(home, 'ws'), {homeDir: home, platform: 'posix', readers, readDiagnostics});
+    expect(readDiagnostics).toEqual([{file: ocBinding, status: 'unreadable', detail: 'EACCES'}]);
+  });
+
+  it('an unreadable declaration is degraded evidence too, not an absent declaration', () => {
+    const file = path.join(home, '.openclaw', 'principles-disciple.json');
+    const readDiagnostics: BindingReadDiagnostic[] = [];
+    const readers = statusReaders({[file]: {kind: 'unreadable', detail: 'EACCES'}});
+    collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers, readDiagnostics});
+    expect(readDiagnostics).toEqual([{file, status: 'unreadable', detail: 'EACCES'}]);
+  });
+
+  it('legacy readers without readJsonStatus keep the readJson contract — no diagnostics channel', () => {
+    const readDiagnostics: BindingReadDiagnostic[] = [];
+    const legacy: HostClaimReaders = {
+      readJson() {
+        return undefined; // could be absent OR unreadable — unknowable, and not claimed as absent-by-proof
+      },
+      listDir() {
+        return undefined;
+      },
+      realpath() {
+        return undefined;
+      },
+    };
+    const claims = collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers: legacy, readDiagnostics});
+    expect(claims.filter((claim) => claim.via !== 'default')).toEqual([]);
+    expect(readDiagnostics).toEqual([]);
+  });
+
+  it('a valid binding alongside an unreadable one still forms its claim — diagnostics are per-file', () => {
+    const boundWs = path.join(home, 'bound-ws');
+    const wbFile = path.join(home, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json');
+    const readDiagnostics: BindingReadDiagnostic[] = [];
+    const readers = statusReaders({
+      [ocBinding]: okStatus(boundWs),
+      [wbFile]: {kind: 'unreadable', detail: 'EPERM'},
+    });
+    const claims = collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers, readDiagnostics});
+    expect(claims.map((claim) => `${claim.host}:${claim.workspaceDir}`)).toContain(`openclaw:${boundWs}`);
+    expect(readDiagnostics).toEqual([{file: wbFile, status: 'unreadable', detail: 'EPERM'}]);
   });
 });
