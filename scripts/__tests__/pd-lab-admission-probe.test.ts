@@ -55,6 +55,7 @@ import {
   runProbeWithTimeout,
   runProbeWithEnv,
   runRealRetentionSweep,
+  runRealRetentionSweepWithHooks,
   plantSignalConfirmation,
   countSessionRows,
 } from './fixtures/pd-lab-admission-probe-helpers.mjs';
@@ -67,7 +68,7 @@ const Database = require('better-sqlite3'); // same resolution as the helpers fi
 // ---------------------------------------------------------------------------
 
 describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
-  it('healthy sample: COMPLETE_FOR_ANALYSIS, PIPELINE_REPLAY + EXPECTATION_LABELING READY, BEHAVIOR_BRANCH BLOCKED', () => {
+  it('healthy sample: internally continuous but prefix UNKNOWN → SOURCE_GAP, INCOMPLETE, all paths blocked (r6)', () => {
     const world = buildHealthyWorld('healthy');
     const exp = writeJson(world.root, 'exp.json', healthyExpectations());
     const auth = writeJson(world.root, 'auth.json', healthyAuthorizations());
@@ -76,18 +77,24 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
 
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
-    expect(sample.completeness).toBe('COMPLETE_FOR_ANALYSIS');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
-    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('READY');
-    // Environment evidence is structurally absent from a T1 snapshot →
-    // BEHAVIOR_BRANCH stays BLOCKED even though the other paths are READY.
+    // r6 soundness: created_at is a timestamp, not a row identity — started_at
+    // equality with the earliest surviving row cannot identify the first
+    // writer (bare recordSession creations are legal, prompt.ts:659), so the
+    // prefix verdict is UNKNOWN and the sample is honestly blocked until
+    // producer-side provenance exists.
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
     expect(sample.pathReadiness.BEHAVIOR_BRANCH).toBe('BLOCKED');
-    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
     expect(sample.executableForDeclaredPath).toEqual({
-      PIPELINE_REPLAY: true,
-      EXPECTATION_LABELING: true,
+      PIPELINE_REPLAY: false,
+      EXPECTATION_LABELING: false,
       BEHAVIOR_BRANCH: false,
     });
+    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_GAP');
+    expect(problem.impact).toContain('cannot be proven');
   });
 
   it('DT-02: session with no turn rows → SOURCE_GAP, INCOMPLETE, remediation entry (not a complete case)', () => {
@@ -178,15 +185,23 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     });
     const auth = writeJson(world.root, 'auth.json', healthyAuthorizations());
 
-    // Without an expectation record: preview-only does NOT block replay.
+    // Without an expectation record: preview-only is RECORDED. r6: the
+    // prefix verdict is UNKNOWN for every session (no first-writer identity
+    // anchor), so PIPELINE_REPLAY is honestly BLOCKED by SOURCE_GAP — the
+    // "preview-only does not block replay" rule stays implemented in
+    // classifySample (TOOL_RESULT_PREVIEW_ONLY is not in the replay blocking
+    // set) but is masked at CLI level until producer provenance exists.
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--authorizations', auth]);
     expect(run.status).toBe(0);
     let out = readOut(world.outDir);
     expect(codesOf(out, 'S01')).toContain('TOOL_RESULT_PREVIEW_ONLY');
-    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6)
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
     expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED'); // EXPECTATION_UNRESOLVED present
 
-    // Resolved expectation NOT depending on tool output: labeling READY.
+    // Resolved expectation NOT depending on tool output: the labeling path's
+    // own expectation blocker clears — its remaining blocker is the shared
+    // prefix UNKNOWN, not the preview.
     const out2Dir = path.join(world.root, 'out-b');
     const exp2 = writeJson(world.root, 'exp2.json', {
       S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: false },
@@ -194,9 +209,10 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     const run2 = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', out2Dir, '--expectations', exp2, '--authorizations', auth]);
     expect(run2.status).toBe(0);
     out = readOut(out2Dir);
-    expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('READY');
+    expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED'); // SOURCE_GAP only
 
-    // Expectation depends on tool output: preview-only blocks the labeling path.
+    // Expectation depends on tool output: preview-only blocks the labeling
+    // path in its own right (visible as the completeness downgrade too).
     const out3Dir = path.join(world.root, 'out-c');
     const exp3 = writeJson(world.root, 'exp3.json', {
       S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: true },
@@ -205,7 +221,7 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     expect(run3.status).toBe(0);
     out = readOut(out3Dir);
     expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
-    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
   });
 
   it('DT-03: blob missing from snapshot → TURN_BLOB_MISSING; blob hash mismatch → DIGEST_MISMATCH', () => {
@@ -240,7 +256,7 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     const codes = codesOf(readOut(world.outDir), 'S01');
     expect(codes).toContain('TURN_BLOB_MISSING');
     expect(codes).toContain('DIGEST_MISMATCH');
-    expect(codes).not.toContain('SOURCE_GAP'); // inline text absent but rows exist on both sides
+    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor) // inline text absent but rows exist on both sides
   });
 
   it('PAIN_ANCHOR_MISSING: empty session_id on the pain event; case still gets a complete single-case group', () => {
@@ -265,7 +281,7 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     let out = readOut(world.outDir);
     expect(codesOf(out, 'S01')).toContain('EXPECTATION_UNRESOLVED');
     expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
-    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED'); // prefix UNKNOWN (r6)
 
     const unresolvedDir = path.join(world.root, 'out-b');
     const expFile = writeJson(world.root, 'exp.json', { S01: { basis: 'EXPLICIT_AT_TIME', resolved: false } });
@@ -333,9 +349,9 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
-    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
     expect(out.report.perSample[0].pathReadiness.BEHAVIOR_BRANCH).toBe('BLOCKED');
-    expect(out.report.perSample[0].completeness).toBe('COMPLETE_FOR_ANALYSIS');
+    expect(out.report.perSample[0].completeness).toBe('INCOMPLETE'); // prefix UNKNOWN is a completeness blocker (r6)
   });
 
   it('structured evidenceRefs that do not resolve → REFERENCE_UNAVAILABLE (3 kinds); non-structural refs are not guessed', () => {
@@ -394,7 +410,7 @@ describe('retention discrimination (DT-07)', () => {
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
-    expect(codes).not.toContain('SOURCE_GAP');
+    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 
@@ -421,7 +437,7 @@ describe('retention discrimination (DT-07)', () => {
     expect(problem.impact).toContain('Both readings are possible');
   });
 
-  it('positive retention evidence (session created strictly before earliest surviving turn) → SOURCE_RETENTION_EXPIRED', () => {
+  it('started_at strictly before the earliest surviving turn WITHOUT positive evidence → SOURCE_GAP, never retention (r6: bare recordSession creators are legal)', () => {
     const lateStart = '2026-09-01T10:06:00.000Z';
     const world = buildWorld('ret-expired', {
       sessions: [
@@ -438,8 +454,14 @@ describe('retention discrimination (DT-07)', () => {
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const codes = codesOf(out, 'S01');
-    expect(codes).toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codes).not.toContain('SOURCE_GAP');
+    // r6 soundness: recordSession({sessionId}) is a legal bare creator
+    // (prompt.ts:659), so an unexplained started_at diff does NOT prove a
+    // sweepable trajectory row was deleted — the prefix verdict is UNKNOWN
+    // and the code is SOURCE_GAP, not SOURCE_RETENTION_EXPIRED.
+    expect(codes).toContain('SOURCE_GAP');
+    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
+    expect(out.report.perSample[0].prefixCompleteness).toBe('UNKNOWN');
+    expect(out.report.perSample[0].sessionStartExplanation).toBe('UNEXPLAINED');
   });
 
   it('PRODUCTION numbering: contiguous turn_index starting at 2 (OpenClaw nextUserTurnIndex semantics) is NORMAL — no gap, no retention claim', () => {
@@ -465,11 +487,11 @@ describe('retention discrimination (DT-07)', () => {
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
-    expect(codes).not.toContain('SOURCE_GAP');
+    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 
-  it('retention-expired rows are NOT remediable (deleted rows are unrecoverable from this snapshot)', () => {
+  it('SOURCE_GAP entries from an unexplained started_at diff are remediable via the host-native session file', () => {
     const lateStart = '2026-09-01T10:06:00.000Z';
     const world = buildWorld('ret-queue', {
       sessions: [
@@ -480,9 +502,13 @@ describe('retention discrimination (DT-07)', () => {
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
-    const entry = out.queue.entries.find((e: { problemCode: string }) => e.problemCode === 'SOURCE_RETENTION_EXPIRED');
+    // r6: an unexplained diff is SOURCE_GAP (bare recordSession creators are
+    // legal) — remediable via the host-native session file, unlike the
+    // positively-proven N1 deletions (see the Case H1 suite).
+    const entry = out.queue.entries.find((e: { problemCode: string }) => e.problemCode === 'SOURCE_GAP');
     expect(entry).toBeDefined();
-    expect(entry.remediable).toBe(false);
+    expect(entry.remediable).toBe(true);
+    expect(out.queue.entries.find((e: { problemCode: string }) => e.problemCode === 'SOURCE_RETENTION_EXPIRED')).toBeUndefined();
   });
 });
 
@@ -678,17 +704,27 @@ describe('source groups', () => {
 // ---------------------------------------------------------------------------
 
 describe('path classification and counts', () => {
-  it('PIPELINE_REPLAY READY does not make EXPECTATION_LABELING READY (missing expectation)', () => {
+  it('path readiness stays per-path independent: each path carries only its own blockers (r6: prefix UNKNOWN blocks both honestly)', () => {
     const world = buildHealthyWorld('indep');
     const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    // r6: without a first-writer identity anchor the prefix verdict is
+    // UNKNOWN for every session, so both paths carry the shared SOURCE_GAP
+    // blocker and neither reaches READY. The structural independence of
+    // executableForDeclaredPath (it mirrors pathReadiness per path) is still
+    // asserted — one path's verdict never derives from another's.
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
     expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
-    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(true);
+    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(false);
     expect(sample.executableForDeclaredPath.EXPECTATION_LABELING).toBe(false);
+    // The labeling path carries its own additional blocker (missing
+    // expectation) while the replay path does not — independence in blocking
+    // reasons, verifiable from the problem lists.
+    expect(sample.problems.some((p: { code: string }) => p.code === 'EXPECTATION_UNRESOLVED')).toBe(true);
+    expect(sample.problems.some((p: { code: string }) => p.code === 'SOURCE_GAP')).toBe(true);
   });
 
   it('per-path counts are reported separately (READY/BLOCKED/NOT_EVALUATED)', () => {
@@ -712,7 +748,10 @@ describe('path classification and counts', () => {
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const counts = out.report.counts as { paths: Record<string, Record<string, number>> };
-    expect(counts.paths.PIPELINE_REPLAY).toEqual({ total: 3, READY: 1, BLOCKED: 1, NOT_EVALUATED: 1 });
+    // r6: without a first-writer identity anchor no session reaches
+    // PROVEN_COMPLETE, so PIPELINE_REPLAY has no READY row — the counts stay
+    // per-path independent (S01/S02 blocked, S03 not evaluated).
+    expect(counts.paths.PIPELINE_REPLAY).toEqual({ total: 3, READY: 0, BLOCKED: 2, NOT_EVALUATED: 1 });
     expect(counts.paths.BEHAVIOR_BRANCH).toEqual({ total: 3, READY: 0, BLOCKED: 2, NOT_EVALUATED: 1 });
     expect(counts.problemCodes).toBeDefined();
   });
@@ -1079,7 +1118,7 @@ describe('P1-1 pain anchor truth (real CLI subprocess)', () => {
     const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
-    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
   });
 
   it('malformed pain id (non-integer) → structural rejection before any DB work', () => {
@@ -1195,7 +1234,7 @@ describe('P1-2 authorization completeness (real CLI subprocess)', () => {
     });
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
-    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']); // full valid grant passes
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']); // full valid grant passes
 
     const run2 = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', path.join(world.root, 'out2'), '--expectations', expFile, '--authorizations', scopeOnly]);
     expect(run2.status).toBe(0);
@@ -1213,7 +1252,7 @@ describe('P1-2 authorization completeness (real CLI subprocess)', () => {
     const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile, '--study-purpose', 't7a-real-data-probe']);
     expect(run.status).toBe(0);
-    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
   });
 });
 
@@ -1589,7 +1628,7 @@ describe('P2-4 WAL production read-only discipline (real CLI subprocess)', () =>
     const out = readOut(world.outDir);
     const w01 = out.report.perSample.find((s: { caseId: string }) => s.caseId === 'W01');
     expect(w01).toBeDefined();
-    expect(codesOf(out, 'W01')).not.toContain('SOURCE_GAP');
+    expect(codesOf(out, 'W01')).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6)
 
     // The originals are untouched: no new files, main db and -wal byte-identical.
     const afterSet = new Set(fs.readdirSync(world.snapshotDir));
@@ -1629,7 +1668,7 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0); // no dataset_invalid_structure
     const out = readOut(world.outDir);
-    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
     expect(out.report.perSample[0].hostKind).toBe(''); // unknown attribution preserved, never fabricated as openclaw
   });
 
@@ -1722,7 +1761,7 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
-    expect(codes).not.toContain('SOURCE_GAP');
+    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 
@@ -1750,10 +1789,12 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     expect(problem.impact).toContain('not monotonic');
   });
 
-  it('R600: retention evidence survives the turn_index reversal — started_at-only evidence still yields SOURCE_RETENTION_EXPIRED', () => {
+  it('R600 (r6 revision): started_at-only evidence yields SOURCE_GAP with UNEXPLAINED origin — bare recordSession creators are legal', () => {
     // Session created at 10:00, only rows surviving from 10:06 (turn_index
-    // contiguous from 2 — production numbering): the started_at evidence
-    // alone proves earlier rows existed.
+    // contiguous from 2 — production numbering). r6 soundness: an unexplained
+    // started_at diff does not prove a sweepable trajectory row was deleted,
+    // because a bare recordSession({sessionId}) creation (prompt.ts:659) is a
+    // legal state with no trajectory rows at all.
     const lateStart = '2026-09-01T10:06:00.000Z';
     const world = buildWorld('r2-retention-only', {
       sessions: [
@@ -1768,12 +1809,15 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     });
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
     expect(run.status).toBe(0);
-    const codes = codesOf(readOut(world.outDir), 'S01');
-    expect(codes).toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codes).not.toContain('SOURCE_GAP');
+    const out = readOut(world.outDir);
+    const codes = codesOf(out, 'S01');
+    expect(codes).toContain('SOURCE_GAP');
+    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
+    expect(out.report.perSample[0].sessionStartExplanation).toBe('UNEXPLAINED');
+    expect(out.report.perSample[0].prefixCompleteness).toBe('UNKNOWN');
   });
 
-  it('R889: expectation depends on tool output + preview-only → INCOMPLETE completeness while PIPELINE_REPLAY stays READY', () => {
+  it('R889 (r6 revision): expectation depends on tool output + preview-only → INCOMPLETE completeness; the replay path stays free of the preview blocker', () => {
     const truncated = `${'x'.repeat(497)}...`;
     const world = buildWorld('r9-gap', {
       sessions: [
@@ -1795,9 +1839,14 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     expect(run.status).toBe(0);
     const sample = readOut(world.outDir).report.perSample[0];
     expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY'); // replay semantics independent
-    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(true);
-    expect(sample.completeness).toBe('INCOMPLETE'); // expectation evidence is gapped
+    // r6: the replay path carries ONLY the shared prefix-UNKNOWN blocker —
+    // TOOL_RESULT_PREVIEW_ONLY is not in its blocking set (the production
+    // entry reads the same preview), so no preview-specific problem appears
+    // on the replay side.
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED'); // prefix UNKNOWN (r6), not the preview
+    expect(sample.problems.filter((p: { code: string }) => p.code === 'TOOL_RESULT_PREVIEW_ONLY').length).toBe(1);
+    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(false);
+    expect(sample.completeness).toBe('INCOMPLETE'); // expectation evidence is gapped AND prefix unproven
   });
 
   it('R820/R856 regression anchors: bare granted+scope grant does NOT unblock; evidence-only corrupted blob IS caught', () => {
@@ -1834,7 +1883,7 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
 // ---------------------------------------------------------------------------
 
 describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI subprocess)', () => {
-  it('Case A: positive retention evidence with NO other gap → SOURCE_RETENTION_EXPIRED, INCOMPLETE, paths blocked', () => {
+  it('Case A (r6 revision): started_at-only diff with NO other gap and NO positive evidence → SOURCE_GAP, INCOMPLETE, paths blocked', () => {
     const world = buildWorld('r3-ret-only', {
       sessions: [
         {
@@ -1854,14 +1903,17 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
     // No gapReason fires (contiguous turns, complete roles, earliest turn
-    // BEFORE the pain) — yet the positive evidence must stand alone.
-    expect(codesOf(out, 'S01')).toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP');
+    // BEFORE the pain) — yet the prefix is UNKNOWN: an unexplained started_at
+    // diff does not prove a sweepable row was deleted (bare recordSession
+    // creators are legal, prompt.ts:659), so the honest verdict is SOURCE_GAP.
+    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
+    expect(sample.sessionStartExplanation).toBe('UNEXPLAINED');
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
     expect(sample.completeness).toBe('INCOMPLETE');
     expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
-    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_RETENTION_EXPIRED');
-    expect(problem.impact).toContain('passes all internal continuity checks');
-    expect(problem.impact).toContain('strictly precedes the earliest surviving trajectory row');
+    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_GAP');
+    expect(problem.impact).toContain('cannot be proven');
   });
 
   it('Case B: started_at EQUAL to the earliest surviving turn is NOT positive evidence', () => {
@@ -1880,7 +1932,7 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codes).not.toContain('SOURCE_GAP');
+    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
   });
 
   it('Case C: unparseable started_at is never positive evidence; a real gap keeps SOURCE_GAP semantics', () => {
@@ -1920,7 +1972,7 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codes).not.toContain('SOURCE_GAP');
+    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
   });
 
   it('Case E (r5): /pd-pain before the first turn explains the START but cannot prove the PREFIX — SOURCE_GAP, blocked', () => {
@@ -1968,10 +2020,14 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(problem.impact).toContain('cannot be proven');
   });
 
-  it('Case I (r5): turn-created session whose start IS the earliest surviving trajectory row → PROVEN_COMPLETE, passes', () => {
-    // No non-turn creator: the first writer IS the surviving first turn, so
-    // nothing preceded it — positive completeness evidence from the
-    // started_at binding itself.
+  it('Case I (r6 revision): turn-created session with started_at == earliest surviving row — still UNKNOWN without an identity anchor', () => {
+    // The first writer "is" the surviving first turn — but created_at is a
+    // timestamp, not a row identity: equal timestamps collide across writers,
+    // and a bare recordSession creation could share the instant. Without a
+    // persisted first-writer identity anchor (not in the current schema) the
+    // completeness verdict is honestly UNKNOWN — Case I cannot reach READY
+    // until producer-side provenance exists (r6 audit; disclosed in the
+    // report and flagged as an Owner decision).
     const world = buildWorld('r5-case-i', {
       sessions: [
         {
@@ -1990,10 +2046,10 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
     expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_TURN_WRITER');
-    expect(sample.prefixCompleteness).toBe('PROVEN_COMPLETE');
-    expect(sample.completeness).toBe('COMPLETE_FOR_ANALYSIS');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
-    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    expect(sample.prefixCompleteness).toBe('UNKNOWN'); // no identity anchor → never PROVEN_COMPLETE
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
   });
 
   it('Case J (r5): only a pain explanation, no prefix proof → UNKNOWN → SOURCE_GAP + INCOMPLETE + BLOCKED', () => {
@@ -2126,10 +2182,11 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 
-  it('Case G (r4): started_at diff with NO explaining pain row remains positive retention evidence (stand-alone)', () => {
+  it('Case G (r6 revision): started_at diff with NO explaining pain row → UNEXPLAINED origin, UNKNOWN prefix, SOURCE_GAP', () => {
     // Same shape as the reviewer example but WITHOUT the 10:00 pain row:
-    // nothing in the snapshot explains the start, so the first writer was a
-    // sweepable trajectory row that is gone → SOURCE_RETENTION_EXPIRED.
+    // nothing explains the start — but an unexplained diff does not prove a
+    // sweepable trajectory row was deleted (bare recordSession creations are
+    // legal, prompt.ts:659), so the verdict is SOURCE_GAP, not retention.
     const world = buildWorld('r4-unexplained', {
       sessions: [
         {
@@ -2145,8 +2202,10 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
-    expect(codesOf(out, 'S01')).toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP');
+    expect(sample.sessionStartExplanation).toBe('UNEXPLAINED');
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
     expect(sample.completeness).toBe('INCOMPLETE');
     expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
   });
@@ -2370,6 +2429,250 @@ describe('r5 Case H: real retention sweep of early turns (real CLI subprocess)',
 });
 
 // ---------------------------------------------------------------------------
+// r6 — proof hardening: evidence priority, timestamp-identity audit,
+// recordSession-only states, legacy evidence-source coverage.
+// ---------------------------------------------------------------------------
+
+describe('r6 P1-a: dangling references outrank started_at equality (real sweeper, deterministic budget hook)', () => {
+  it('assistant turn swept mid-run while the started_at-instant user turn survives → PROVEN_INCOMPLETE, never PROVEN_COMPLETE', () => {
+    // Shape: user turn 1 AT the started_at instant (the equality branch's
+    // exact precondition), assistant turn 1 (aged, swept), user turn 2
+    // referencing assistant turn 1. The scripted clock lets the production
+    // sweeper commit the assistant_turns batch and then exhaust the run
+    // budget BEFORE the user_turns batch — the mid-sweep state the old
+    // equality-first branch wrongly upgraded to PROVEN_COMPLETE.
+    const world = buildWorld('r6-priority', {
+      sessions: [
+        {
+          sessionId: 'sess-prio',
+          startedAt: T0, // == user turn 1's instant
+          userTurns: [
+            { turnIndex: 2, createdAt: T0 },
+            { turnIndex: 3, createdAt: '2026-09-01T10:06:00.000Z' },
+          ],
+          assistantTurns: [{ createdAt: '2026-09-01T10:00:30.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-prio', createdAt: '2026-09-01T10:08:00.000Z' }],
+    });
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    const db = new Database(dbPath);
+    const assistant1 = db.prepare("SELECT id FROM assistant_turns WHERE session_id = 'sess-prio' AND created_at = '2026-09-01T10:00:30.000Z'").get();
+    const user2 = db.prepare("SELECT id FROM user_turns WHERE session_id = 'sess-prio' AND created_at = '2026-09-01T10:06:00.000Z'").get();
+    db.prepare('UPDATE user_turns SET references_assistant_turn_id = ? WHERE id = ?').run(assistant1.id, user2.id);
+    db.prepare("UPDATE assistant_turns SET created_at = '2026-05-01T10:00:30.000Z' WHERE id = ?").run(assistant1.id);
+    db.close();
+
+    // Scripted clock: calls 1-6 return 0 (start, tool batch, assistant batch
+    // through its commit), call 7+ jumps past the budget — the user_turns
+    // batch is never started. Deleted rows come ONLY from the production
+    // sweeper.
+    const sweep = runRealRetentionSweepWithHooks(dbPath, '2026-09-01T00:00:00.000Z', [0, 0, 0, 0, 0, 0, 1_000_000]);
+    expect(sweep.deletedByTable.assistant_turns).toBe(1); // production sweeper removed the assistant row
+    expect(countSessionRows(dbPath, 'assistant_turns', 'sess-prio')).toBe(0);
+    expect(countSessionRows(dbPath, 'user_turns', 'sess-prio')).toBe(2); // budget exhausted first — both user turns survive
+
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    // started_at == the earliest surviving trajectory row (user turn 1) —
+    // yet the dangling reference is the higher-priority evidence.
+    expect(sample.prefixCompleteness).toBe('PROVEN_INCOMPLETE');
+    expect(codesOf(out, 'S01')).toContain('SOURCE_RETENTION_EXPIRED');
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_RETENTION_EXPIRED');
+    expect(problem.impact).toContain('reference turn rows that no longer exist');
+  });
+});
+
+describe('r6 P1-b: timestamp equality and recordSession-only states are honestly UNKNOWN (real CLI subprocess)', () => {
+  it('a deleted first-writer row sharing its timestamp with a survivor cannot be distinguished → UNKNOWN, no dangling refs', () => {
+    // user turn 1 at 10:00 (the first writer) is aged and removed by the REAL
+    // sweeper; user turn 2 keeps the SAME original instant 10:00 and
+    // survives; there are no references. Timestamp equality with the earliest
+    // surviving row holds — and must still be UNKNOWN (collisions).
+    const world = buildWorld('r6-collision', {
+      sessions: [
+        {
+          sessionId: 'sess-coll',
+          startedAt: T0,
+          userTurns: [{ turnIndex: 2, createdAt: T0 }, { turnIndex: 3, createdAt: T0 }],
+          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-coll', createdAt: '2026-09-01T10:08:00.000Z' }],
+    });
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    const db = new Database(dbPath);
+    const first = db.prepare("SELECT id FROM user_turns WHERE session_id = 'sess-coll' AND turn_index = 2").get();
+    db.close();
+    // Age ONLY the first writer; turn 2 keeps created_at == started_at.
+    const aged = new Database(dbPath);
+    aged.prepare('UPDATE user_turns SET created_at = ? WHERE id = ?').run('2026-05-01T10:00:00.000Z', first.id);
+    aged.pragma('journal_mode = DELETE');
+    aged.close();
+    const sweep = runRealRetentionSweep(dbPath, '2026-09-01T00:00:00.000Z');
+    expect(sweep.outcome).toBe('completed');
+    expect(sweep.deletedByTable.user_turns).toBe(1);
+    expect(countSessionRows(dbPath, 'user_turns', 'sess-coll')).toBe(1);
+
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const sample = readOut(world.outDir).report.perSample[0];
+    // The survivor's created_at EQUALS started_at and equals the deleted
+    // row's original instant — timestamp equality cannot identify the first
+    // writer, so the verdict stays UNKNOWN even though a row WAS deleted.
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(codesOf(readOut(world.outDir), 'S01')).toContain('SOURCE_GAP');
+    expect(codesOf(readOut(world.outDir), 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
+  });
+
+  it('a bare recordSession-style session start (no trajectory row at the start instant) is a legal state — UNEXPLAINED diff stays UNKNOWN', () => {
+    // The prompt hook (prompt.ts:659) creates sessions via
+    // recordSession({sessionId}) with no trajectory rows; the first turn
+    // arrives later. The started_at diff therefore does NOT prove a swept
+    // row — no dangling references exist here, so the verdict is UNKNOWN.
+    const world = buildWorld('r6-bare', {
+      sessions: [
+        {
+          sessionId: 'sess-bare',
+          startedAt: '2026-09-01T10:00:00.000Z', // bare recordSession instant
+          userTurns: [{ turnIndex: 2, createdAt: '2026-09-01T10:06:00.000Z' }, { turnIndex: 3, createdAt: '2026-09-01T10:07:00.000Z' }],
+          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z' }, { createdAt: '2026-09-01T10:07:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-bare', createdAt: '2026-09-01T10:08:00.000Z' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const sample = readOut(world.outDir).report.perSample[0];
+    expect(sample.sessionStartExplanation).toBe('UNEXPLAINED');
+    expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(codesOf(readOut(world.outDir), 'S01')).toContain('SOURCE_GAP');
+    expect(codesOf(readOut(world.outDir), 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
+  });
+});
+
+describe('r6 P2: legacy snapshots missing optional evidence sources (real CLI subprocess)', () => {
+  function healthyWorldWithOptionalDrops(label: string, drop: string[]) {
+    const world = buildHealthyWorld(label);
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    const db = new Database(dbPath);
+    for (const table of drop) {
+      db.exec(`DROP TABLE ${table}`); // legacy snapshot shape
+    }
+    db.pragma('journal_mode = DELETE');
+    db.close();
+    return world;
+  }
+
+  it('A. snapshot without signal_confirmations completes; the source is disclosed and never read as zero', () => {
+    const world = healthyWorldWithOptionalDrops('r6-nosc', ['signal_confirmations']);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0); // no batch crash
+    const out = readOut(world.outDir);
+    const scSource = out.report.snapshot.prefixEvidence.sources.find((s: { source: string }) => s.source.startsWith('signal_confirmations'));
+    expect(scSource.available).toBe(false);
+    expect(out.report.snapshot.prefixEvidence.coverageComplete).toBe(false);
+    expect(out.report.perSample[0].prefixCompleteness).toBe('UNKNOWN'); // reduced coverage is never upgraded
+    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+  });
+
+  it('B. snapshot without correction_samples completes; the source is disclosed', () => {
+    const world = healthyWorldWithOptionalDrops('r6-nocs', ['correction_samples']);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const csSource = out.report.snapshot.prefixEvidence.sources.find((s: { source: string }) => s.source.startsWith('correction_samples'));
+    expect(csSource.available).toBe(false);
+    expect(out.report.snapshot.prefixEvidence.coverageComplete).toBe(false);
+    expect(out.report.perSample[0].prefixCompleteness).toBe('UNKNOWN');
+  });
+
+  it('C. both optional evidence tables missing → completes with both sources disclosed', () => {
+    const world = healthyWorldWithOptionalDrops('r6-both', ['signal_confirmations', 'correction_samples']);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    expect(out.report.snapshot.prefixEvidence.sources.filter((s: { available: boolean }) => !s.available).length).toBe(4);
+    expect(out.report.snapshot.prefixEvidence.coverageComplete).toBe(false);
+    expect(out.report.perSample[0].prefixCompleteness).toBe('UNKNOWN');
+  });
+
+  it('D. evidence table present but required column missing → source unavailable (legacy migration shape), no crash', () => {
+    const world = buildHealthyWorld('r6-nocol');
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    const db = new Database(dbPath);
+    // Recreate signal_confirmations WITHOUT the references column (legacy shape).
+    db.exec('ALTER TABLE signal_confirmations RENAME TO signal_confirmations_legacy');
+    db.exec(`CREATE TABLE signal_confirmations (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, user_turn_rowid INTEGER NOT NULL UNIQUE,
+      occurrence_id TEXT NOT NULL, excerpt TEXT NOT NULL, terms_json TEXT NOT NULL,
+      suggested_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )`);
+    db.exec('DROP TABLE signal_confirmations_legacy');
+    db.pragma('journal_mode = DELETE');
+    db.close();
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const refSource = out.report.snapshot.prefixEvidence.sources.find((s: { source: string }) => s.source === 'signal_confirmations.references_assistant_turn_id');
+    expect(refSource.available).toBe(false);
+    expect(refSource.tableExists).toBe(true);
+    expect(refSource.columnsPresent).toBe(false);
+    const rowidSource = out.report.snapshot.prefixEvidence.sources.find((s: { source: string }) => s.source === 'signal_confirmations.user_turn_rowid');
+    expect(rowidSource.available).toBe(true); // that column survived the legacy shape
+    expect(out.report.perSample[0].prefixCompleteness).toBe('UNKNOWN');
+  });
+
+  it('E. partial coverage still catches a real dangling reference from an AVAILABLE source → PROVEN_INCOMPLETE', () => {
+    const blobName = `assistant-${'7'.repeat(64)}.txt`;
+    const world = buildWorld('r6-partial-e', {
+      sessions: [
+        {
+          sessionId: 'sess-part',
+          startedAt: T0,
+          userTurns: [
+            { turnIndex: 2, createdAt: T0 },
+            { turnIndex: 3, createdAt: '2026-09-01T10:06:00.000Z', blobRef: blobName },
+          ],
+          assistantTurns: [{ createdAt: '2026-09-01T10:00:30.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-part', createdAt: '2026-09-01T10:08:00.000Z' }],
+    });
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    const db = new Database(dbPath);
+    const assistant1 = db.prepare("SELECT id FROM assistant_turns WHERE session_id = 'sess-part' AND created_at = '2026-09-01T10:00:30.000Z'").get();
+    const user2 = db.prepare("SELECT id FROM user_turns WHERE session_id = 'sess-part' AND created_at = '2026-09-01T10:06:00.000Z'").get();
+    db.prepare('UPDATE user_turns SET references_assistant_turn_id = ? WHERE id = ?').run(assistant1.id, user2.id);
+    db.prepare("UPDATE assistant_turns SET created_at = '2026-05-01T10:00:30.000Z' WHERE id = ?").run(assistant1.id);
+    db.close();
+    // Disable a DIFFERENT source (signal_confirmations dropped) — the
+    // available user_turns source must still catch the dangling reference.
+    const dropDb = new Database(dbPath);
+    dropDb.exec('DROP TABLE signal_confirmations');
+    dropDb.pragma('journal_mode = DELETE');
+    dropDb.close();
+    const sweep = runRealRetentionSweep(dbPath, '2026-09-01T00:00:00.000Z');
+    expect(sweep.deletedByTable.assistant_turns).toBe(1);
+    expect(countSessionRows(dbPath, 'user_turns', 'sess-part')).toBe(2);
+
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(out.report.snapshot.prefixEvidence.coverageComplete).toBe(false); // sc source missing
+    expect(sample.prefixCompleteness).toBe('PROVEN_INCOMPLETE'); // positive evidence from the available source
+    expect(codesOf(out, 'S01')).toContain('SOURCE_RETENTION_EXPIRED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Closed-set round-trip (ERR-146): every CONTRACT code is actually emitted by
 // some case in this suite, and the probe never emits codes outside the list.
 // ---------------------------------------------------------------------------
@@ -2390,11 +2693,16 @@ describe('problem-code closed set (CONTRACT §2.4 / ERR-146 round-trip)', () => 
         },
         { sessionId: 'sess-gone', startedAt: T0, omitSessionRow: true }, // no rows → SOURCE_GAP
         {
-          // retention evidence: started before the (late) surviving rows
+          // r6: this session's early assistant turn is removed by the REAL
+          // production sweeper below, leaving a dangling immortal reference →
+          // SOURCE_RETENTION_EXPIRED via positive identity evidence
           sessionId: 'sess-expired',
           startedAt: T0,
-          userTurns: [{ turnIndex: 0, createdAt: '2026-09-01T10:06:00.000Z', blobRef: blobA }],
-          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z', blobRef: blobB }],
+          userTurns: [
+            { turnIndex: 0, createdAt: '2026-09-01T10:01:00.000Z', blobRef: blobA },
+            { turnIndex: 1, createdAt: '2026-09-01T10:06:00.000Z', blobRef: blobB },
+          ],
+          assistantTurns: [{ createdAt: '2026-09-01T10:01:30.000Z' }],
         },
         {
           // broken tool pairing
@@ -2408,7 +2716,7 @@ describe('problem-code closed set (CONTRACT §2.4 / ERR-146 round-trip)', () => 
       samples: [
         { caseId: 'C01', sessionId: 'sess-ok' }, // preview-only + expectation + authorization + env
         { caseId: 'C02', sessionId: 'sess-gone' }, // SOURCE_GAP
-        { caseId: 'C03', sessionId: 'sess-expired', createdAt: PAIN_AT }, // RETENTION_EXPIRED + blob issues
+        { caseId: 'C03', sessionId: 'sess-expired', createdAt: PAIN_AT }, // RETENTION_EXPIRED (N1) + blob issues
         { caseId: 'C04', sessionId: 'sess-toolbreak', evidenceRefs: ['session:sess-nope'] }, // REFERENCE_UNAVAILABLE ×2
         { caseId: 'C05', sessionId: '' }, // PAIN_ANCHOR_MISSING
       ],
@@ -2419,6 +2727,28 @@ describe('problem-code closed set (CONTRACT §2.4 / ERR-146 round-trip)', () => 
       },
       dropBlob: blobA, // manifest lists it, file removed → TURN_BLOB_MISSING
     });
+    // Plant the immortal reference while the early assistant turn still
+    // exists, then age that turn and remove it with the REAL production
+    // sweeper — the reference dangles afterwards (N1 evidence).
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    const refDb = new Database(dbPath);
+    const earlyUser = refDb.prepare("SELECT id FROM user_turns WHERE session_id = 'sess-expired' AND created_at = '2026-09-01T10:01:00.000Z'").get();
+    const earlyAssistant = refDb.prepare("SELECT id FROM assistant_turns WHERE session_id = 'sess-expired' AND created_at = '2026-09-01T10:01:30.000Z'").get();
+    refDb.close();
+    plantSignalConfirmation(dbPath, {
+      id: 'sc-allcodes',
+      sessionId: 'sess-expired',
+      userTurnRowid: earlyUser.id,
+      referencesAssistantTurnId: earlyAssistant.id,
+      createdAt: '2026-09-01T10:02:00.000Z',
+    });
+    const ageDb = new Database(dbPath);
+    ageDb.prepare("UPDATE assistant_turns SET created_at = '2026-05-01T10:01:30.000Z' WHERE id = ?").run(earlyAssistant.id);
+    ageDb.close();
+    const sweep = runRealRetentionSweep(dbPath, '2026-09-01T00:00:00.000Z');
+    expect(sweep.outcome).toBe('completed');
+    expect(sweep.deletedByTable.assistant_turns).toBe(1);
+
     const expFile = writeJson(world.root, 'exp.json', {
       C01: { basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: true },
       C03: { basis: 'LATER_CLARIFICATION', resolved: true, visibleAt: '2026-12-01T00:00:00.000Z' }, // FUTURE_INFORMATION
@@ -2448,7 +2778,7 @@ describe('problem-code closed set (CONTRACT §2.4 / ERR-146 round-trip)', () => 
     // Spot checks binding specific cases to specific codes.
     expect(codesOf(out, 'C02')).toContain('AUTHORIZATION_UNVERIFIED'); // withdrawn tracked
     expect(codesOf(out, 'C03')).toContain('FUTURE_INFORMATION');
-    expect(codesOf(out, 'C03')).toContain('SOURCE_RETENTION_EXPIRED');
+    expect(codesOf(out, 'C03')).toContain('SOURCE_RETENTION_EXPIRED'); // N1: dangling immortal reference
     expect(codesOf(out, 'C03')).toContain('DIGEST_MISMATCH');
     expect(codesOf(out, 'C05')).toContain('PAIN_ANCHOR_MISSING');
   });

@@ -843,7 +843,7 @@ function collectSessionFacts(db, sessionId) {
   return { session, userTurns, assistantTurns, toolCalls };
 }
 
-// ── Session-start origin & historical-prefix completeness (r5) ──────────────
+// ── Session-start origin & historical-prefix completeness (r5/r6) ───────────
 //
 // Two INDEPENDENT dimensions, deliberately not conflated:
 //
@@ -853,37 +853,93 @@ function collectSessionFacts(db, sessionId) {
 //    manual pain ingress (pain-signal-observability.ts) creates the session
 //    at the pain's time and leaves an immortal pain_events row there; the
 //    tool-evidence writer (production-pain-evidence.ts) creates it at the
-//    tool event's time; turn writers create it at the turn's time.
+//    tool event's time; turn writers create it at the turn's time — and the
+//    prompt hook (openclaw-plugin/src/hooks/prompt.ts:659) creates a BARE
+//    session via recordSession({sessionId}) on every prompt build, with no
+//    trajectory row at all.
 //
 // B. Is the surviving trajectory the COMPLETE history of the session?
-//    Neither started_at, nor the pain row's existence, nor turn_index
-//    continuity proves this. The only sound evidence:
-//      PROVEN_COMPLETE  — started_at equals the earliest surviving TRAJECTORY
-//                         row instant (turns ∪ tool_calls): the first writer
-//                         is a row that still exists, so nothing preceded it.
-//      PROVEN_INCOMPLETE — positive vanished-row evidence: a surviving
-//                         retention-immune row (user_turns /
-//                         signal_confirmations / correction_samples) references
-//                         a turn rowid that no longer exists (AUTOINCREMENT
-//                         rowids are never reused and references pointed at
-//                         rows that existed when written ⇒ the referenced row
-//                         was deleted), OR the start is UNEXPLAINED (the
-//                         first writer was a sweepable trajectory row and no
-//                         non-turn record accounts for it — the creator row
-//                         is gone).
-//      UNKNOWN          — everything else, notably the manual-pain-first
-//                         class: the pain row explains WHY the session starts
-//                         at T, but whether trajectory rows existed between T
-//                         and the earliest surviving turn (a complete
-//                         pain-first session vs swept early turns) is not
-//                         decidable from this snapshot. UNKNOWN is never
-//                         upgraded to PROVEN_COMPLETE.
-//    Retention writes NO persisted audit trail, and the producer persists no
-//    expected-origin field — the unresolvable class is disclosed in the
-//    report instead of being guessed in either direction.
+//    Sound evidence only (r6 audit):
+//      PROVEN_INCOMPLETE — positive vanished-row identity evidence: a
+//                         surviving retention-immune row (user_turns /
+//                         signal_confirmations / correction_samples)
+//                         references a turn rowid that no longer exists in
+//                         its session (AUTOINCREMENT rowids are never reused
+//                         and references pointed at rows that existed when
+//                         written ⇒ the referenced row was deleted).
+//      PROVEN_COMPLETE   — requires a persisted first-writer IDENTITY anchor
+//                         proving the first writer survives. The current
+//                         schema has none: created_at is a timestamp, not a
+//                         row identity — equal timestamps collide across
+//                         writers, a deleted first writer can share its
+//                         timestamp with survivors, and bare recordSession
+//                         creations are legal — so started_at equality (and
+//                         turn_index continuity, and record counts) prove
+//                         nothing. FIRST_WRITER_IDENTITY_PROVENANCE_AVAILABLE
+//                         is therefore false and PROVEN_COMPLETE is
+//                         unreachable until a producer-side provenance exists
+//                         (documented as an Owner decision, not implemented).
+//      UNKNOWN           — everything else. Every session without dangling-
+//                         reference evidence lands here, including internally
+//                         continuous windows and pain-explained starts.
+//                         UNKNOWN is never upgraded.
+//    Retention writes NO persisted audit trail. Evidence-source availability
+//    is checked per source (legacy snapshots may lack signal_confirmations /
+//    correction_samples or the migration-added references column): an
+//    unavailable source is disclosed and is NEVER interpreted as "zero
+//    dangling references"; positive evidence from any available source still
+//    yields PROVEN_INCOMPLETE.
+
+const FIRST_WRITER_IDENTITY_PROVENANCE_AVAILABLE = false;
 
 const START_EXPLANATIONS = ['EXPLAINED_BY_MANUAL_PAIN', 'EXPLAINED_BY_TOOL_EVIDENCE', 'EXPLAINED_BY_TURN_WRITER', 'UNEXPLAINED', 'NOT_APPLICABLE'];
 const PREFIX_STATES = ['PROVEN_COMPLETE', 'PROVEN_INCOMPLETE', 'UNKNOWN'];
+
+/**
+ * Reference-evidence sources (r6 P2): each is available only when its table
+ * AND its required columns exist in this snapshot — user_turns is a required
+ * table but its references column is migration-added and may be absent in
+ * legacy snapshots; signal_confirmations / correction_samples are optional
+ * tables. Availability is computed once per run and disclosed in the report;
+ * an unavailable source is never read as "zero dangling references".
+ */
+const REFERENCE_EVIDENCE_SOURCES = [
+  {
+    source: 'user_turns.references_assistant_turn_id',
+    table: 'user_turns',
+    columns: ['references_assistant_turn_id'],
+    sql: 'SELECT COUNT(*) AS n FROM user_turns ut WHERE ut.session_id = ? AND ut.references_assistant_turn_id IS NOT NULL'
+      + ' AND NOT EXISTS (SELECT 1 FROM assistant_turns at WHERE at.session_id = ut.session_id AND at.id = ut.references_assistant_turn_id)',
+  },
+  {
+    source: 'signal_confirmations.references_assistant_turn_id',
+    table: 'signal_confirmations',
+    columns: ['references_assistant_turn_id'],
+    sql: 'SELECT COUNT(*) AS n FROM signal_confirmations sc WHERE sc.session_id = ? AND sc.references_assistant_turn_id IS NOT NULL'
+      + ' AND NOT EXISTS (SELECT 1 FROM assistant_turns at WHERE at.session_id = sc.session_id AND at.id = sc.references_assistant_turn_id)',
+  },
+  {
+    source: 'signal_confirmations.user_turn_rowid',
+    table: 'signal_confirmations',
+    columns: ['user_turn_rowid'],
+    sql: 'SELECT COUNT(*) AS n FROM signal_confirmations sc WHERE sc.session_id = ?'
+      + ' AND NOT EXISTS (SELECT 1 FROM user_turns ut WHERE ut.session_id = sc.session_id AND ut.id = sc.user_turn_rowid)',
+  },
+  {
+    source: 'correction_samples.bad_assistant_turn_id',
+    table: 'correction_samples',
+    columns: ['bad_assistant_turn_id'],
+    sql: 'SELECT COUNT(*) AS n FROM correction_samples cs WHERE cs.session_id = ?'
+      + ' AND NOT EXISTS (SELECT 1 FROM assistant_turns at WHERE at.session_id = cs.session_id AND at.id = cs.bad_assistant_turn_id)',
+  },
+  {
+    source: 'correction_samples.user_correction_turn_id',
+    table: 'correction_samples',
+    columns: ['user_correction_turn_id'],
+    sql: 'SELECT COUNT(*) AS n FROM correction_samples cs WHERE cs.session_id = ?'
+      + ' AND NOT EXISTS (SELECT 1 FROM user_turns ut WHERE ut.session_id = cs.session_id AND ut.id = cs.user_correction_turn_id)',
+  },
+];
 
 /** Earliest surviving trajectory row instant for the session (turns ∪ tool
  * calls), or null when no parseable trajectory row exists. */
@@ -942,39 +998,41 @@ function collectStartOrigin(db, sessionId, startedAtMs, earliestTrajectoryRowMs)
  * references were written pointing at rows that existed — a missing target
  * therefore proves that row was deleted.
  */
-function collectMissingTurnReferences(db, sessionId) {
-  const checks = [
-    {
-      label: 'user_turns.references_assistant_turn_id',
-      sql: 'SELECT COUNT(*) AS n FROM user_turns ut WHERE ut.session_id = ? AND ut.references_assistant_turn_id IS NOT NULL'
-        + ' AND NOT EXISTS (SELECT 1 FROM assistant_turns at WHERE at.session_id = ut.session_id AND at.id = ut.references_assistant_turn_id)',
-    },
-    {
-      label: 'signal_confirmations.references_assistant_turn_id',
-      sql: 'SELECT COUNT(*) AS n FROM signal_confirmations sc WHERE sc.session_id = ? AND sc.references_assistant_turn_id IS NOT NULL'
-        + ' AND NOT EXISTS (SELECT 1 FROM assistant_turns at WHERE at.session_id = sc.session_id AND at.id = sc.references_assistant_turn_id)',
-    },
-    {
-      label: 'signal_confirmations.user_turn_rowid',
-      sql: 'SELECT COUNT(*) AS n FROM signal_confirmations sc WHERE sc.session_id = ?'
-        + ' AND NOT EXISTS (SELECT 1 FROM user_turns ut WHERE ut.session_id = sc.session_id AND ut.id = sc.user_turn_rowid)',
-    },
-    {
-      label: 'correction_samples.bad_assistant_turn_id',
-      sql: 'SELECT COUNT(*) AS n FROM correction_samples cs WHERE cs.session_id = ?'
-        + ' AND NOT EXISTS (SELECT 1 FROM assistant_turns at WHERE at.session_id = cs.session_id AND at.id = cs.bad_assistant_turn_id)',
-    },
-    {
-      label: 'correction_samples.user_correction_turn_id',
-      sql: 'SELECT COUNT(*) AS n FROM correction_samples cs WHERE cs.session_id = ?'
-        + ' AND NOT EXISTS (SELECT 1 FROM user_turns ut WHERE ut.session_id = cs.session_id AND ut.id = cs.user_correction_turn_id)',
-    },
-  ];
+/** Per-source availability once per run (r6 P2): table AND required columns
+ * must both exist for a reference source to be queryable in this snapshot. */
+function buildReferenceSourceCapabilities(db) {
+  return REFERENCE_EVIDENCE_SOURCES.map((src) => {
+    const tableRow = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(src.table);
+    let tableExists = tableRow !== undefined;
+    let columnsPresent = true;
+    if (tableExists) {
+      // src.table is a code constant from REFERENCE_EVIDENCE_SOURCES — PRAGMA
+      // cannot take bound parameters, so the (constant) name is interpolated.
+      const present = new Set(
+        db.pragma(`table_info(${src.table})`).map((c) => c.name),
+      );
+      for (const col of src.columns) {
+        if (!present.has(col)) {
+          columnsPresent = false;
+          break;
+        }
+      }
+    }
+    return { ...src, available: tableExists && columnsPresent, tableExists, columnsPresent };
+  });
+}
+
+/** N1 dangling-reference evidence, capability-aware: only AVAILABLE sources
+ * are queried; unavailable ones are recorded, never read as zero. */
+function collectMissingTurnReferences(db, sessionId, sourceCapabilities) {
   const missing = [];
-  for (const check of checks) {
-    const row = db.prepare(check.sql).get(sessionId);
+  for (const src of sourceCapabilities) {
+    if (!src.available) {
+      continue; // disclosed via the coverage map — never interpreted as zero
+    }
+    const row = db.prepare(src.sql).get(sessionId);
     if (row && Number(row.n) > 0) {
-      missing.push({ reference: check.label, count: Number(row.n) });
+      missing.push({ reference: src.source, count: Number(row.n) });
     }
   }
   return missing;
@@ -1189,7 +1247,7 @@ function analyzeSession(sample, facts, startExplanation, prefixCompleteness, pre
     );
   } else if (prefixCompleteness === 'UNKNOWN' || gapObserved !== null) {
     const prefixNote = prefixCompleteness === 'UNKNOWN'
-      ? 'Historical prefix completeness cannot be proven from this snapshot: the session start is not attributable to a surviving trajectory row, and neither a complete session nor a retention-swept one can be excluded from the observable fields (the producer persists no expected-origin record and retention writes no audit trail).'
+      ? 'Historical prefix completeness cannot be proven from this snapshot: created_at is a timestamp rather than a row identity (equal timestamps collide; a deleted first writer can share its timestamp with survivors), and bare recordSession creations are a legal production state (the prompt hook creates sessions with no trajectory rows), so neither a complete session, a bare-session boundary, nor a retention-swept one can be excluded from the observable fields. The producer persists no expected-origin record and retention writes no audit trail.'
       : null;
     const gapDetail = gapObserved !== null
       ? `Trajectory gap without positive retention evidence: ${gapObserved}.`
@@ -2172,6 +2230,11 @@ function main() {
 
     const perSample = [];
     const blobHashCache = new Map(); // ref -> safety-verified read outcome ({ok,sha256}|{ok:false,reason,detail})
+    // r6 P2: per-source evidence availability, computed once (the schema does
+    // not change mid-run) and disclosed in the report. An unavailable source
+    // is skipped during reference checks and is NEVER read as "zero missing".
+    const referenceSourceCapabilities = buildReferenceSourceCapabilities(db);
+    const prefixEvidenceCoverageComplete = referenceSourceCapabilities.every((src) => src.available);
   for (const sample of dataset.samples) {
     let facts;
     try {
@@ -2214,7 +2277,16 @@ function main() {
     }
 
     // Session-start origin (dimension A) + historical prefix completeness
-    // (dimension B), computed inside the same guarded query window (r5).
+    // (dimension B), computed inside the same guarded query window (r5/r6).
+    // Priority (r6 P1-a): positive dangling-reference evidence (N1) outranks
+    // every other signal — started_at equality with the earliest surviving
+    // trajectory row NEVER upgrades a session that carries dangling
+    // references. PROVEN_COMPLETE additionally requires a first-writer
+    // identity anchor, which the current schema does not persist (created_at
+    // is a timestamp, not identity; bare recordSession creations are legal —
+    // prompt.ts:659), so the equality branch and the UNEXPLAINED-diff branch
+    // both land in UNKNOWN: an unexplained diff may be a bare session
+    // creation, not a swept row.
     let startExplanation = 'NOT_APPLICABLE';
     let prefixCompleteness = 'UNKNOWN';
     let prefixMissingReferences = [];
@@ -2223,21 +2295,20 @@ function main() {
         const startedAtMs = isoTimeValue(facts.session.started_at);
         const earliestTrajectoryRowMs = earliestTrajectoryRowInstantMs(facts);
         startExplanation = collectStartOrigin(db, sample.sessionId, startedAtMs, earliestTrajectoryRowMs);
-        prefixMissingReferences = collectMissingTurnReferences(db, sample.sessionId);
-        // Dimension B (three-state, sound evidence only):
-        //   PROVEN_COMPLETE — started_at == earliest surviving trajectory row:
-        //     the first writer is a row that still exists ⇒ nothing preceded.
-        //   PROVEN_INCOMPLETE — dangling turn references (N1), or an
-        //     UNEXPLAINED start (the first writer was a sweepable trajectory
-        //     row and no non-turn record accounts for it ⇒ that row is gone).
-        //   UNKNOWN — everything else, notably the manual-pain-first class
-        //     (a complete session and a swept one are observationally
-        //     identical); never upgraded to complete.
-        if (earliestTrajectoryRowMs !== null && startedAtMs !== null && startedAtMs === earliestTrajectoryRowMs) {
-          prefixCompleteness = 'PROVEN_COMPLETE';
-        } else if (prefixMissingReferences.length > 0
-          || (startExplanation === 'UNEXPLAINED' && startedAtMs !== null && earliestTrajectoryRowMs !== null && startedAtMs < earliestTrajectoryRowMs)) {
+        prefixMissingReferences = collectMissingTurnReferences(db, sample.sessionId, referenceSourceCapabilities);
+        // Dimension B (three-state, sound evidence only — r6 priority):
+        //   PROVEN_INCOMPLETE — first priority: dangling turn references (N1).
+        //   PROVEN_COMPLETE — only with a first-writer identity anchor, which
+        //     the current schema does not persist → unreachable today.
+        //   UNKNOWN — everything else (unexplained diffs may be bare
+        //     recordSession creations; timestamp equality cannot identify the
+        //     first writer).
+        if (prefixMissingReferences.length > 0) {
           prefixCompleteness = 'PROVEN_INCOMPLETE';
+        } else if (FIRST_WRITER_IDENTITY_PROVENANCE_AVAILABLE
+          && earliestTrajectoryRowMs !== null && startedAtMs !== null && startedAtMs === earliestTrajectoryRowMs
+          && prefixEvidenceCoverageComplete) {
+          prefixCompleteness = 'PROVEN_COMPLETE';
         } else {
           prefixCompleteness = 'UNKNOWN';
         }
@@ -2454,6 +2525,10 @@ function main() {
         used: dbAccess.staged !== null,
         copiedWal: dbAccess.staged !== null ? dbAccess.staged.copyWal : null,
         cleanup: stagedCleanup,
+      },
+      prefixEvidence: {
+        sources: referenceSourceCapabilities.map((src) => ({ source: src.source, available: src.available, tableExists: src.tableExists, columnsPresent: src.columnsPresent })),
+        coverageComplete: prefixEvidenceCoverageComplete,
       },
     },
     inputs: {

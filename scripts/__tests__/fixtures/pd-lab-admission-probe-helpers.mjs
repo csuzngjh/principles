@@ -22,6 +22,34 @@ const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 const { applyTrajectorySchemaBase, runTrajectoryRetentionBatches, ensureTrajectoryRetentionIndexes } = require('@principles/core/runtime');
 
+/**
+ * r6 P1-a: run the REAL production sweeper with a DETERMINISTIC injectable
+ * clock. The scripted `nowValues` are returned by hooks.now() in call order
+ * (call 1 = run start; then one call per remaining-budget check / batch start
+ * / batch duration), which lets a test stop the sweep at an exact point —
+ * e.g. right after the assistant_turns batch commits, with the user_turns
+ * batch never started.
+ */
+export function runRealRetentionSweepWithHooks(snapshotDbPath, cutoffIso, nowValues) {
+  const db = new Database(snapshotDbPath);
+  try {
+    ensureTrajectoryRetentionIndexes(db);
+    let call = 0;
+    return runTrajectoryRetentionBatches(db, {
+      policy: { batchSize: 500, runBudgetMs: 1000 },
+      cutoff: cutoffIso,
+      hooks: {
+        now: () => {
+          call += 1;
+          return call <= nowValues.length ? nowValues[call - 1] : nowValues[nowValues.length - 1];
+        },
+      },
+    });
+  } finally {
+    db.close();
+  }
+}
+
 export const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '..', '..', '..');
 export const SCRIPT = path.join(REPO_ROOT, 'scripts', 'dev', 'pd-lab', 'admission-probe.mjs');

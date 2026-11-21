@@ -236,7 +236,19 @@ r5 复审核心发现：r4 把"pain 行解释了 started_at"直接当作"前缀�
 | **K** | 非零 turn_index+解释起点 | UNKNOWN→SOURCE_GAP；**不判 RETENTION**→✓ 实际一致 | — |
 | **L** | 解释起点+独立 N1 缺口（真清扫+引用悬空） | PROVEN_INCOMPLETE→RETENTION_EXPIRED（正确正向代码）→✓ 实际一致 | 解释不掩盖缺口；impact 含引用细节 |
 
-## 16. Complexity Delta
+## 16. r6 最终整改：证明强化（2026-11-21）
+
+r6 复审三项全部属实全部修复；测试 118 → **126**（125 执行 + 1 Windows FIFO 平台跳过）。
+
+| 发现 | 根因 | 修复 | 测试 |
+| --- | --- | --- | --- |
+| P1-a 优先级错误 | 三态判定先判 `started_at == 最早存活轨迹行`（PROVEN_COMPLETE）后查悬空引用——同时刻用户轮存活+引用悬空的会话被错误升级 COMPLETE | 优先级重排：**N1 悬空引用第一优先**（无论 started_at 关系如何）；PROVEN_COMPLETE 仅在 N1 为零且存在首写入者身份锚点且证据覆盖完整时可达 | 确定性 Hook 回归：脚本时钟让生产清扫器提交 assistant_turns 批次后耗尽预算（user_turns 批次未启动）——started_at 时刻用户轮存活+悬空引用 → PROVEN_INCOMPLETE + RETENTION_EXPIRED + BLOCKED；断言 `deletedByTable.assistant_turns=1`、清扫后行数、outcome |
+| P1-b 时间戳不是身份锚点 | created_at 是时间不是行身份：同毫秒碰撞、已删首写入者与存活者同时刻、**裸 recordSession 创建合法**（prompt.ts:659 每次 prompt 构建都会裸建会话）——等值分支与 N2（UNEXPLAINED 差值）均不成立 | 时间戳等值分支与 UNEXPLAINED 差值全部降级 UNKNOWN；`FIRST_WRITER_IDENTITY_PROVENANCE_AVAILABLE=false`（当前 schema 无首写入者身份锚点）→ PROVEN_COMPLETE 在生产者 provenance 落地前不可达（枚举保留+守卫显式）；PROVEN_INCOMPLETE 仅经 N1；recordSession 全调用方枚举入报告（prompt.ts:659/trajectory.ts:481,511,1687 内部） | 时间戳碰撞用例（首写入者经真清扫删除+存活者同时刻+无引用→UNKNOWN 不误判 RETENTION）；recordSession-only 用例（裸建会话合法→UNKNOWN）；Case I 预期按审计结论调整（PROVEN_COMPLETE→UNKNOWN，披露） |
+| P2 旧版快照缺可选证据表整批失败 | 引用查询无条件访问 signal_confirmations/correction_samples（不在 REQUIRED_TRAJECTORY_TABLES）；旧版 T1 快照缺表→查询阶段 SQLite 错误→probe 崩溃 | 逐源能力检查（表存在+必需列存在，PRAGMA table_info，常量表名）；不可用源跳过并披露（report.snapshot.prefixEvidence.sources+coverageComplete）；**缺失≠零缺失**——无其他正向证据时保持 UNKNOWN；任一可用源发现悬空引用仍判 PROVEN_INCOMPLETE | A/B/C（缺表）/D（表在但列缺失——legacy migration 形态）/E（部分覆盖+user_turns 源真实悬空引用→PROVEN_INCOMPLETE）五用例 |
+
+**Case I 预期调整披露**：turn-created 会话（started_at==首行）原判 PROVEN_COMPLETE——r6 审计证明该推论依赖"时间戳唯一标识首写入者"，生产不成立（碰撞+裸建会话）→ 降级 UNKNOWN+SOURCE_GAP+阻断，直至生产者 provenance 落地（Owner 决策项）。**系统性影响**：当前 schema 下无任何会话可达 PROVEN_COMPLETE——所有样本经 UNKNOWN→SOURCE_GAP 如实阻断，等待 provenance；N1 悬空引用路径（PROVEN_INCOMPLETE）不受影响。
+
+## 17. Complexity Delta
 
 ```text
 New durable source of truth: NO   （admission-report/source-groups/remediation-queue 均为可复算派生物）
