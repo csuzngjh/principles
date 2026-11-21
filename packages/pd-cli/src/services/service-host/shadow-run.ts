@@ -181,21 +181,24 @@ function buildDescriptor(entry: WorkspaceDiscoveryEntry): WorkspaceDescriptor {
   };
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** Read the PREVIOUS status file's carried-forward lastProgressAt per workspace. */
 function readPreviousProgress(pdHome: string): Map<string, string> {
   try {
     const raw: unknown = JSON.parse(fs.readFileSync(serviceRunStatusPath(pdHome), 'utf8'));
-    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return new Map();
-    const { shadow } = raw as Record<string, unknown>;
-    if (typeof shadow !== 'object' || shadow === null || Array.isArray(shadow)) return new Map();
-    const { executions } = shadow as Record<string, unknown>;
+    if (!isPlainRecord(raw)) return new Map();
+    const shadow: unknown = raw.shadow;
+    if (!isPlainRecord(shadow)) return new Map();
+    const executions: unknown = shadow.executions;
     if (!Array.isArray(executions)) return new Map();
     const result = new Map<string, string>();
     for (const item of executions) {
-      if (typeof item !== 'object' || item === null || Array.isArray(item)) continue;
-      const record = item as Record<string, unknown>;
-      const dir = record.canonicalDir;
-      const at = record.lastProgressAt;
+      if (!isPlainRecord(item)) continue;
+      const dir: unknown = item.canonicalDir;
+      const at: unknown = item.lastProgressAt;
       if (typeof dir !== 'string' || typeof at !== 'string') continue;
       const key = workspaceIdentity(dir);
       const existing = result.get(key);
