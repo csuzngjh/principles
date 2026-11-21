@@ -35,6 +35,7 @@ import {
   CONTRACT_PROBLEM_CODES,
   SCRIPT_SOURCE,
   T0,
+  T1,
   PAIN_AT,
   buildWorld,
   buildHealthyWorld,
@@ -77,24 +78,55 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
 
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
-    // r6 soundness: created_at is a timestamp, not a row identity — started_at
-    // equality with the earliest surviving row cannot identify the first
-    // writer (bare recordSession creations are legal, prompt.ts:659), so the
-    // prefix verdict is UNKNOWN and the sample is honestly blocked until
-    // producer-side provenance exists.
+    // r7: the prefix verdict is UNKNOWN (created_at is a timestamp, not a row
+    // identity; bare recordSession creations are legal, prompt.ts:659) — that
+    // downgrades the sample-level completeness but does NOT block the
+    // pipeline path, whose ACTUAL inputs (the session's whole turn lists the
+    // production fallback reads) are fully present and blob-intact.
     expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(sample.prefixCompletenessReason).toContain('no first-writer identity anchor');
     expect(sample.completeness).toBe('INCOMPLETE');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
-    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('READY');
     expect(sample.pathReadiness.BEHAVIOR_BRANCH).toBe('BLOCKED');
-    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual([]);
     expect(sample.executableForDeclaredPath).toEqual({
-      PIPELINE_REPLAY: false,
-      EXPECTATION_LABELING: false,
+      PIPELINE_REPLAY: true,
+      EXPECTATION_LABELING: true,
       BEHAVIOR_BRANCH: false,
     });
+  });
+
+  it('r7 Case P1-B: a REAL pipeline-input gap still blocks READY while the prefix stays UNKNOWN', () => {
+    // Same complete shape as r7 Case P1-A, minus one production-required
+    // input: the assistant side of the conversation (role coverage gap) — an
+    // OBSERVED input gap, not a prefix inference.
+    const world = buildWorld('r7-p1b', {
+      sessions: [
+        {
+          sessionId: 'sess-p1b',
+          startedAt: T0,
+          userTurns: [{ turnIndex: 2, createdAt: T0 }, { turnIndex: 3, createdAt: T1 }],
+          assistantTurns: [],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-p1b', createdAt: PAIN_AT }],
+    });
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(sample.prefixCompleteness).toBe('UNKNOWN'); // unchanged — the prefix is orthogonal
+    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP'); // REAL observed input gap
     const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_GAP');
-    expect(problem.impact).toContain('cannot be proven');
+    expect(problem.impact).toContain('no assistant turns');
+    expect(problem.nextAction).toBeTruthy();
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED'); // the actual input is missing
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual(['SOURCE_GAP']);
   });
 
   it('DT-02: session with no turn rows → SOURCE_GAP, INCOMPLETE, remediation entry (not a complete case)', () => {
@@ -195,13 +227,12 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     expect(run.status).toBe(0);
     let out = readOut(world.outDir);
     expect(codesOf(out, 'S01')).toContain('TOOL_RESULT_PREVIEW_ONLY');
-    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6)
-    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP'); // r7: prefix UNKNOWN disclosed, not blocking
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('READY'); // preview-only does NOT block replay
     expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED'); // EXPECTATION_UNRESOLVED present
 
-    // Resolved expectation NOT depending on tool output: the labeling path's
-    // own expectation blocker clears — its remaining blocker is the shared
-    // prefix UNKNOWN, not the preview.
+    // Resolved expectation NOT depending on tool output: labeling READY —
+    // the preview does not block it and the pipeline inputs are complete.
     const out2Dir = path.join(world.root, 'out-b');
     const exp2 = writeJson(world.root, 'exp2.json', {
       S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: false },
@@ -209,10 +240,10 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     const run2 = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', out2Dir, '--expectations', exp2, '--authorizations', auth]);
     expect(run2.status).toBe(0);
     out = readOut(out2Dir);
-    expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED'); // SOURCE_GAP only
+    expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('READY');
 
     // Expectation depends on tool output: preview-only blocks the labeling
-    // path in its own right (visible as the completeness downgrade too).
+    // path in its own right while replay stays READY.
     const out3Dir = path.join(world.root, 'out-c');
     const exp3 = writeJson(world.root, 'exp3.json', {
       S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: true },
@@ -221,7 +252,9 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     expect(run3.status).toBe(0);
     out = readOut(out3Dir);
     expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
-    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(out.report.perSample[0].pathBlockers.EXPECTATION_LABELING).toEqual(['TOOL_RESULT_PREVIEW_ONLY']);
+    expect(out.report.perSample[0].pathBlockers.PIPELINE_REPLAY).toEqual([]);
   });
 
   it('DT-03: blob missing from snapshot → TURN_BLOB_MISSING; blob hash mismatch → DIGEST_MISMATCH', () => {
@@ -256,7 +289,7 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     const codes = codesOf(readOut(world.outDir), 'S01');
     expect(codes).toContain('TURN_BLOB_MISSING');
     expect(codes).toContain('DIGEST_MISMATCH');
-    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor) // inline text absent but rows exist on both sides
+    expect(codes).not.toContain('SOURCE_GAP'); // r7: no REAL gap observed — prefix UNKNOWN is disclosed, not blocking // inline text absent but rows exist on both sides
   });
 
   it('PAIN_ANCHOR_MISSING: empty session_id on the pain event; case still gets a complete single-case group', () => {
@@ -281,7 +314,7 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     let out = readOut(world.outDir);
     expect(codesOf(out, 'S01')).toContain('EXPECTATION_UNRESOLVED');
     expect(out.report.perSample[0].pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
-    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED'); // prefix UNKNOWN (r6)
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('READY');
 
     const unresolvedDir = path.join(world.root, 'out-b');
     const expFile = writeJson(world.root, 'exp.json', { S01: { basis: 'EXPLICIT_AT_TIME', resolved: false } });
@@ -349,7 +382,7 @@ describe('pd-lab admission probe (PRI-1257 T7a-Data)', () => {
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
-    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
     expect(out.report.perSample[0].pathReadiness.BEHAVIOR_BRANCH).toBe('BLOCKED');
     expect(out.report.perSample[0].completeness).toBe('INCOMPLETE'); // prefix UNKNOWN is a completeness blocker (r6)
   });
@@ -410,7 +443,7 @@ describe('retention discrimination (DT-07)', () => {
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
-    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
+    expect(codes).not.toContain('SOURCE_GAP'); // r7: no REAL gap observed — prefix UNKNOWN is disclosed, not blocking
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 
@@ -457,7 +490,8 @@ describe('retention discrimination (DT-07)', () => {
     // r6 soundness: recordSession({sessionId}) is a legal bare creator
     // (prompt.ts:659), so an unexplained started_at diff does NOT prove a
     // sweepable trajectory row was deleted — the prefix verdict is UNKNOWN
-    // and the code is SOURCE_GAP, not SOURCE_RETENTION_EXPIRED.
+    // (disclosed). The SOURCE_GAP here is the OBSERVED gap (every surviving
+    // turn is after the pain trigger), never a retention claim.
     expect(codes).toContain('SOURCE_GAP');
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
     expect(out.report.perSample[0].prefixCompleteness).toBe('UNKNOWN');
@@ -487,7 +521,7 @@ describe('retention discrimination (DT-07)', () => {
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
-    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
+    expect(codes).not.toContain('SOURCE_GAP'); // r7: no REAL gap observed — prefix UNKNOWN is disclosed, not blocking
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 
@@ -704,27 +738,24 @@ describe('source groups', () => {
 // ---------------------------------------------------------------------------
 
 describe('path classification and counts', () => {
-  it('path readiness stays per-path independent: each path carries only its own blockers (r6: prefix UNKNOWN blocks both honestly)', () => {
+  it('path readiness stays per-path independent: PIPELINE_REPLAY READY does not leak into EXPECTATION_LABELING', () => {
     const world = buildHealthyWorld('indep');
     const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
-    // r6: without a first-writer identity anchor the prefix verdict is
-    // UNKNOWN for every session, so both paths carry the shared SOURCE_GAP
-    // blocker and neither reaches READY. The structural independence of
-    // executableForDeclaredPath (it mirrors pathReadiness per path) is still
-    // asserted — one path's verdict never derives from another's.
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    // r7: the pipeline inputs are complete → replay READY; the labeling path
+    // carries its OWN blocker (missing expectation) and stays BLOCKED — one
+    // path's verdict never derives from another's, and the per-path blocker
+    // lists make the reasons auditable.
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
     expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
-    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(false);
+    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(true);
     expect(sample.executableForDeclaredPath.EXPECTATION_LABELING).toBe(false);
-    // The labeling path carries its own additional blocker (missing
-    // expectation) while the replay path does not — independence in blocking
-    // reasons, verifiable from the problem lists.
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual([]);
+    expect(sample.pathBlockers.EXPECTATION_LABELING).toEqual(['EXPECTATION_UNRESOLVED']);
     expect(sample.problems.some((p: { code: string }) => p.code === 'EXPECTATION_UNRESOLVED')).toBe(true);
-    expect(sample.problems.some((p: { code: string }) => p.code === 'SOURCE_GAP')).toBe(true);
   });
 
   it('per-path counts are reported separately (READY/BLOCKED/NOT_EVALUATED)', () => {
@@ -748,10 +779,10 @@ describe('path classification and counts', () => {
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const counts = out.report.counts as { paths: Record<string, Record<string, number>> };
-    // r6: without a first-writer identity anchor no session reaches
-    // PROVEN_COMPLETE, so PIPELINE_REPLAY has no READY row — the counts stay
-    // per-path independent (S01/S02 blocked, S03 not evaluated).
-    expect(counts.paths.PIPELINE_REPLAY).toEqual({ total: 3, READY: 0, BLOCKED: 2, NOT_EVALUATED: 1 });
+    // r7: prefix UNKNOWN does not block path readiness — S01's actual inputs
+    // are complete (READY), S02 has an observed no-rows gap (BLOCKED), S03 is
+    // not evaluated — the counts stay per-path independent.
+    expect(counts.paths.PIPELINE_REPLAY).toEqual({ total: 3, READY: 1, BLOCKED: 1, NOT_EVALUATED: 1 });
     expect(counts.paths.BEHAVIOR_BRANCH).toEqual({ total: 3, READY: 0, BLOCKED: 2, NOT_EVALUATED: 1 });
     expect(counts.problemCodes).toBeDefined();
   });
@@ -1118,7 +1149,7 @@ describe('P1-1 pain anchor truth (real CLI subprocess)', () => {
     const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
-    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
   });
 
   it('malformed pain id (non-integer) → structural rejection before any DB work', () => {
@@ -1234,7 +1265,7 @@ describe('P1-2 authorization completeness (real CLI subprocess)', () => {
     });
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
-    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']); // full valid grant passes
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']); // full valid grant passes
 
     const run2 = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', path.join(world.root, 'out2'), '--expectations', expFile, '--authorizations', scopeOnly]);
     expect(run2.status).toBe(0);
@@ -1252,7 +1283,7 @@ describe('P1-2 authorization completeness (real CLI subprocess)', () => {
     const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile, '--study-purpose', 't7a-real-data-probe']);
     expect(run.status).toBe(0);
-    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
   });
 });
 
@@ -1628,7 +1659,7 @@ describe('P2-4 WAL production read-only discipline (real CLI subprocess)', () =>
     const out = readOut(world.outDir);
     const w01 = out.report.perSample.find((s: { caseId: string }) => s.caseId === 'W01');
     expect(w01).toBeDefined();
-    expect(codesOf(out, 'W01')).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6)
+    expect(codesOf(out, 'W01')).not.toContain('SOURCE_GAP'); // r7: prefix UNKNOWN disclosed, not blocking
 
     // The originals are untouched: no new files, main db and -wal byte-identical.
     const afterSet = new Set(fs.readdirSync(world.snapshotDir));
@@ -1668,7 +1699,7 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0); // no dataset_invalid_structure
     const out = readOut(world.outDir);
-    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
     expect(out.report.perSample[0].hostKind).toBe(''); // unknown attribution preserved, never fabricated as openclaw
   });
 
@@ -1761,7 +1792,7 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
-    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
+    expect(codes).not.toContain('SOURCE_GAP'); // r7: no REAL gap observed — prefix UNKNOWN is disclosed, not blocking
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 
@@ -1811,8 +1842,8 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const codes = codesOf(out, 'S01');
-    expect(codes).toContain('SOURCE_GAP');
-    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
+    expect(codes).toContain('SOURCE_GAP'); // OBSERVED gap: every surviving turn is after the pain trigger
+    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED'); // r6/r7: no positive evidence → never retention
     expect(out.report.perSample[0].sessionStartExplanation).toBe('UNEXPLAINED');
     expect(out.report.perSample[0].prefixCompleteness).toBe('UNKNOWN');
   });
@@ -1839,13 +1870,13 @@ describe('r2 second-round findings (production semantics + fail-closed gates)', 
     expect(run.status).toBe(0);
     const sample = readOut(world.outDir).report.perSample[0];
     expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
-    // r6: the replay path carries ONLY the shared prefix-UNKNOWN blocker —
-    // TOOL_RESULT_PREVIEW_ONLY is not in its blocking set (the production
-    // entry reads the same preview), so no preview-specific problem appears
-    // on the replay side.
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED'); // prefix UNKNOWN (r6), not the preview
+    // The preview does not block the replay path (the production entry reads
+    // the same preview) — its blocker list stays empty while the labeling
+    // path carries the preview-only blocker.
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual([]);
     expect(sample.problems.filter((p: { code: string }) => p.code === 'TOOL_RESULT_PREVIEW_ONLY').length).toBe(1);
-    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(false);
+    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(true);
     expect(sample.completeness).toBe('INCOMPLETE'); // expectation evidence is gapped AND prefix unproven
   });
 
@@ -1898,22 +1929,27 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
       ],
       samples: [{ caseId: 'S01', sessionId: 'sess-ret-a', createdAt: '2026-09-01T10:08:00.000Z' }],
     });
-    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
-    // No gapReason fires (contiguous turns, complete roles, earliest turn
-    // BEFORE the pain) — yet the prefix is UNKNOWN: an unexplained started_at
-    // diff does not prove a sweepable row was deleted (bare recordSession
-    // creators are legal, prompt.ts:659), so the honest verdict is SOURCE_GAP.
-    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    // The prefix is UNKNOWN (disclosed on the sample, not a blocking
+    // problem). No gapReason fires — the pain trigger is AFTER the surviving
+    // turns, the window is contiguous and role-complete — so the code list
+    // carries no SOURCE_GAP and the replay path is READY (r7 Case P1-A).
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP');
     expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
     expect(sample.sessionStartExplanation).toBe('UNEXPLAINED');
     expect(sample.prefixCompleteness).toBe('UNKNOWN');
+    expect(sample.prefixCompletenessReason).toContain('no first-writer identity anchor');
     expect(sample.completeness).toBe('INCOMPLETE');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
-    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_GAP');
-    expect(problem.impact).toContain('cannot be proven');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual([]);
+    // r7: the prefix verdict is carried on the per-sample record, not as a
+    // fabricated path problem.
+    expect(sample.problems.find((p: { code: string }) => p.code === 'SOURCE_GAP')).toBeUndefined();
   });
 
   it('Case B: started_at EQUAL to the earliest surviving turn is NOT positive evidence', () => {
@@ -1932,7 +1968,7 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
+    expect(codes).not.toContain('SOURCE_GAP'); // r7: no REAL gap observed — prefix UNKNOWN is disclosed, not blocking
   });
 
   it('Case C: unparseable started_at is never positive evidence; a real gap keeps SOURCE_GAP semantics', () => {
@@ -1972,7 +2008,7 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codes).toContain('SOURCE_GAP'); // prefix UNKNOWN (r6: no first-writer identity anchor)
+    expect(codes).not.toContain('SOURCE_GAP'); // r7: no REAL gap observed — prefix UNKNOWN is disclosed, not blocking
   });
 
   it('Case E (r5): /pd-pain before the first turn explains the START but cannot prove the PREFIX — SOURCE_GAP, blocked', () => {
@@ -2006,18 +2042,20 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
       samples: [{ caseId: 'S01', sessionId: 'sess-pain-first', createdAt: '2026-09-01T10:05:00.000Z' }],
       extraPainRows: [{ id: 900, sessionId: 'sess-pain-first', createdAt: '2026-09-01T10:00:00.000Z' }],
     });
-    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
     expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_MANUAL_PAIN');
     expect(sample.prefixCompleteness).toBe('UNKNOWN');
-    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(sample.prefixCompletenessReason).toContain('no first-writer identity anchor');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP'); // r7: prefix UNKNOWN disclosed, not blocking
     expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED'); // no positive sweep evidence — never claimed
-    expect(sample.completeness).toBe('INCOMPLETE');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
-    const problem = sample.problems.find((p: { code: string }) => p.code === 'SOURCE_GAP');
-    expect(problem.impact).toContain('cannot be proven');
+    expect(sample.completeness).toBe('INCOMPLETE'); // prefix drives completeness, not path readiness
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY'); // actual pipeline inputs are complete (r7 Case P1-A shape)
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual([]);
   });
 
   it('Case I (r6 revision): turn-created session with started_at == earliest surviving row — still UNKNOWN without an identity anchor', () => {
@@ -2047,9 +2085,10 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     const sample = out.report.perSample[0];
     expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_TURN_WRITER');
     expect(sample.prefixCompleteness).toBe('UNKNOWN'); // no identity anchor → never PROVEN_COMPLETE
-    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE', 'SOURCE_GAP']);
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
     expect(sample.completeness).toBe('INCOMPLETE');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY'); // r7: actual inputs complete
+    expect(sample.pathBlockers.PIPELINE_REPLAY).toEqual([]);
   });
 
   it('Case J (r5): only a pain explanation, no prefix proof → UNKNOWN → SOURCE_GAP + INCOMPLETE + BLOCKED', () => {
@@ -2065,15 +2104,18 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
       samples: [{ caseId: 'S01', sessionId: 'sess-j', createdAt: '2026-09-01T10:08:00.000Z' }],
       extraPainRows: [{ id: 900, sessionId: 'sess-j', createdAt: '2026-09-01T10:00:00.000Z' }],
     });
-    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
     expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_MANUAL_PAIN');
     expect(sample.prefixCompleteness).toBe('UNKNOWN');
-    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(sample.prefixCompletenessReason).toContain('no first-writer identity anchor');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP'); // r7: disclosed, not blocking
     expect(sample.completeness).toBe('INCOMPLETE');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
   });
 
   it('Case K (r5): non-zero turn_index alone is neither retention evidence nor completeness proof', () => {
@@ -2098,7 +2140,7 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     const sample = out.report.perSample[0];
     expect(sample.prefixCompleteness).toBe('UNKNOWN');
     expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP'); // r7: disclosed, not blocking
   });
 
   it('Case L (r5): an explained start does NOT mask an independent dangling-reference gap', () => {
@@ -2198,16 +2240,19 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
       ],
       samples: [{ caseId: 'S01', sessionId: 'sess-unexpl', createdAt: '2026-09-01T10:08:00.000Z' }],
     });
-    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
     expect(sample.sessionStartExplanation).toBe('UNEXPLAINED');
     expect(sample.prefixCompleteness).toBe('UNKNOWN');
-    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(sample.prefixCompletenessReason).toContain('no first-writer identity anchor');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP'); // r7: disclosed, not blocking
     expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
     expect(sample.completeness).toBe('INCOMPLETE');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
   });
 });
 
@@ -2411,7 +2456,9 @@ describe('r5 Case H: real retention sweep of early turns (real CLI subprocess)',
     const { world, earlyUser, earlyAssistant } = sweepWorld('r5-h2');
     ageAndSweep(world, earlyUser, earlyAssistant);
 
-    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const sample = out.report.perSample[0];
@@ -2422,9 +2469,9 @@ describe('r5 Case H: real retention sweep of early turns (real CLI subprocess)',
     expect(sample.sessionStartExplanation).toBe('EXPLAINED_BY_MANUAL_PAIN');
     expect(sample.prefixCompleteness).toBe('UNKNOWN');
     expect(codesOf(out, 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
-    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP'); // r7: swept-but-unprovable prefix is disclosed, not blocking
     expect(sample.completeness).toBe('INCOMPLETE');
-    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY'); // actual inputs (surviving rows + blobs) complete
   });
 });
 
@@ -2525,7 +2572,8 @@ describe('r6 P1-b: timestamp equality and recordSession-only states are honestly
     // row's original instant — timestamp equality cannot identify the first
     // writer, so the verdict stays UNKNOWN even though a row WAS deleted.
     expect(sample.prefixCompleteness).toBe('UNKNOWN');
-    expect(codesOf(readOut(world.outDir), 'S01')).toContain('SOURCE_GAP');
+    expect(sample.prefixCompletenessReason).toContain('no first-writer identity anchor');
+    expect(codesOf(readOut(world.outDir), 'S01')).not.toContain('SOURCE_GAP'); // r7: disclosed, not blocking
     expect(codesOf(readOut(world.outDir), 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 
@@ -2550,7 +2598,7 @@ describe('r6 P1-b: timestamp equality and recordSession-only states are honestly
     const sample = readOut(world.outDir).report.perSample[0];
     expect(sample.sessionStartExplanation).toBe('UNEXPLAINED');
     expect(sample.prefixCompleteness).toBe('UNKNOWN');
-    expect(codesOf(readOut(world.outDir), 'S01')).toContain('SOURCE_GAP');
+    expect(codesOf(readOut(world.outDir), 'S01')).not.toContain('SOURCE_GAP'); // r7: disclosed, not blocking
     expect(codesOf(readOut(world.outDir), 'S01')).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 });
@@ -2577,7 +2625,7 @@ describe('r6 P2: legacy snapshots missing optional evidence sources (real CLI su
     expect(scSource.available).toBe(false);
     expect(out.report.snapshot.prefixEvidence.coverageComplete).toBe(false);
     expect(out.report.perSample[0].prefixCompleteness).toBe('UNKNOWN'); // reduced coverage is never upgraded
-    expect(codesOf(out, 'S01')).toContain('SOURCE_GAP');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP'); // r7: coverage gap disclosed, not blocking
   });
 
   it('B. snapshot without correction_samples completes; the source is disclosed', () => {

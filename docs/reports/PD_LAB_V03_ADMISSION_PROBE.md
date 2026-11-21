@@ -248,7 +248,38 @@ r6 复审三项全部属实全部修复；测试 118 → **126**（125 执行 + 
 
 **Case I 预期调整披露**：turn-created 会话（started_at==首行）原判 PROVEN_COMPLETE——r6 审计证明该推论依赖"时间戳唯一标识首写入者"，生产不成立（碰撞+裸建会话）→ 降级 UNKNOWN+SOURCE_GAP+阻断，直至生产者 provenance 落地（Owner 决策项）。**系统性影响**：当前 schema 下无任何会话可达 PROVEN_COMPLETE——所有样本经 UNKNOWN→SOURCE_GAP 如实阻断，等待 provenance；N1 悬空引用路径（PROVEN_INCOMPLETE）不受影响。
 
-## 17. Complexity Delta
+## 17. r7 最终整改：Historical Completeness 与 Path Readiness 解耦（2026-11-21）
+
+r7 复审 P1：r6 的 prefix UNKNOWN 被无条件转成 SOURCE_GAP 并进入路径阻断集，混淆了"历史完整性"与"路径实际输入完整性"。已解耦，测试 126 → **127**（126 执行 + 1 Windows FIFO 平台跳过）。
+
+**生产读取链审计**（实现前完成，作为判定依据）：
+- 实验快照内生产诊断的会话上下文来自 PRI-350 fallback：`SqliteContextAssembler.readTrajectoryTurns` → `TrajectoryTurnReader.listUserTurnsForSession / listAssistantTurns`（`sqlite-context-assembler.ts:407-442`）。
+- 两个读取器**无界读取该会话全部轮次**（`trajectory.ts:883-888/1194-1199`，无 LIMIT），entries 用 raw_excerpt（user）/ sanitized_text（assistant）。
+- correction 证据（PRI-844）经 `restoreRawText` 恢复 blob 全文（`trajectory.ts` getLatestCorrectionTurn）→ blob 完整性属于管线输入。
+- tool_calls 不在该 fallback 读取范围内（fullTrace 走 state.db，实验内为 null）→ preview-only 不阻断 replay（既有语义保持）。
+- fullTrace 依赖 state.db runs/tasks（实验工作区为空库→历史 Pain 恒 null，r5/r6 已证）→ BEHAVIOR_BRANCH 保持 ENVIRONMENT_UNAVAILABLE。
+
+**新判定模型（三个独立维度）**：
+1. **Historical Prefix Completeness**：r6 三态冻结不变（N1 悬空引用=唯一正向删除证据；PROVEN_COMPLETE 需生产者身份锚点，当前不可达）。UNKNOWN **不再产生任何 problem**——以 `prefixCompleteness`/`prefixCompletenessReason` 字段逐样本披露，直接驱动样本级 completeness（非 PROVEN_COMPLETE 即 INCOMPLETE）。
+2. **Pipeline Input Completeness**：按上述审计的生产读取范围判定——会话绑定存在、user/assistant 轮次可读、blob 完整、授权有效、无观察到的输入缺口（角色/序列/顺序/空窗口/起点晚于触发）。全部满足即 READY，与前缀无关。
+3. **Expectation Evidence Completeness**：期望记录存在+resolved+basis+可见时点+依赖轮次可读+依赖 tool output 完整（dependsOnToolOutput 时 preview-only 阻断）。独立计算，不继承 replay 结果。
+
+**completeness 与 pathReadiness 解耦**：`completeness = INCOMPLETE` 当（prefix ≠ PROVEN_COMPLETE）或（COMPLETENESS_BLOCKING 码出现）；`pathReadiness` 仅由各路径自身阻断集决定（新增结构化 `pathBlockers[path]` 字段逐路径披露阻断码，不解析文本）。`SOURCE_GAP` 仅在观察到真实输入缺口时产生；`SOURCE_RETENTION_EXPIRED`（N1 正向证明）保留阻断全部轨迹依赖路径的契约语义。CONTRACT §2.4 已同步 r7 澄清段。
+
+**Case 矩阵（r7 指令 P1-A–F，全部真实 CLI）**：
+
+| Case | 输入 | 预期 | 实际 |
+| --- | --- | --- | --- |
+| **P1-A** | healthy（无锚点/无 N1/输入完整/blob 完整/授权有效） | prefix UNKNOWN + completeness INCOMPLETE + PIPELINE_REPLAY READY + executable true + BEHAVIOR BLOCKED | 一致（healthy 测试重写为本判定；`pathBlockers.PIPELINE_REPLAY=[]`） |
+| **P1-B** | P1-A 删一项生产必需输入（assistant 侧缺失=角色缺口） | 真实 SOURCE_GAP + BLOCKED + impact/nextAction 指明 | 一致（"no assistant turns"；`pathBlockers=['SOURCE_GAP']`） |
+| **P1-C** | 输入完整+期望依赖 tool output+preview-only | PIPELINE_REPLAY READY + EXPECTATION_LABELING BLOCKED | 一致（`pathBlockers.EXPECTATION_LABELING=['TOOL_RESULT_PREVIEW_ONLY']`，replay blockers=[]） |
+| **P1-D** | 完整期望记录+引用证据完整+前缀 UNKNOWN | EXPECTATION_LABELING 独立 READY | 一致（preview run2 / Case I 变体） |
+| **P1-E** | r6 真清扫回归（N1/碰撞/裸建/部分覆盖） | 保持 | 全部一致（H1/L RETENTION、H2/碰撞/裸建 UNKNOWN+READY、P2-E 部分覆盖仍捕获） |
+| **P1-F** | 报告保真 | prefixCompleteness/completeness/pathReadiness/pathBlockers/READY 计数并存 | 一致（healthy/preview/indep/counts 断言） |
+
+**系统性影响如实披露**：前缀 UNKNOWN 不再阻断路径 → 实际输入完整的样本（turn-created/完整 pain-first）可达 PIPELINE_REPLAY/EXPECTATION_LABELING READY，而样本级 completeness 仍为 INCOMPLETE（等待生产者身份 provenance）；READY 不等于历史完整性已证明。
+
+## 18. Complexity Delta
 
 ```text
 New durable source of truth: NO   （admission-report/source-groups/remediation-queue 均为可复算派生物）

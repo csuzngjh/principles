@@ -82,7 +82,9 @@ validatedBindings: {caseVersion, sourceDigests, validatorVersion}
 
 `SOURCE_GAP` 与 `SOURCE_RETENTION_EXPIRED` 的区分规则：不得仅凭“快照内该会话最早一行晚于 Pain 触发时间”断言保留期已删。判定 `SOURCE_RETENTION_EXPIRED` 需要保留证据支持——会话创建时间早于该最早行、`turn_index` 序列从大于 0 的值开始、或保留清扫日志等其他证据表明更早的行曾存在；否则记 `SOURCE_GAP`（真实缺失或正常会话边界），并在 `problems[].impact` 说明两种可能。正常会话中 Pain 之前只有少量轮次不是缺陷。
 
-第一版定义三条路径。`pathReadiness` 按路径分别给出，发布计数也按路径分别列出 READY 数，不合并成一个数：
+第一版定义三条路径。`pathReadiness` 按路径分别给出，发布计数也按路径分别列出 READY 数，不合并成一个数。
+
+**2026-11-21 r7 澄清（准入探测实现侧）**：历史前缀完整性（首写入者身份锚点缺失时为 UNKNOWN，见 PD-Lab T7a 准入报告 §15–§16）是样本级 `completeness` 的输入之一（非 PROVEN_COMPLETE 即 INCOMPLETE），但**不自动构成任何路径的阻断问题**。路径 `pathReadiness` 只由该路径实际所需的输入证据决定：生产诊断 fallback 无界读取会话全部 user/assistant 轮次与 correction-evidence blob（`TrajectoryTurnReader`，PRI-350），因此快照内全部相关行可读且 blob 完整时，即使前缀 UNKNOWN，`PIPELINE_REPLAY` 也可 READY。`SOURCE_GAP` 仅在观察到真实输入缺口（角色缺失、序列断档、顺序破坏、空窗口、起点晚于触发）时产生；未知前缀以 `prefixCompleteness`/`prefixCompletenessReason` 字段单独披露。`PROVEN_INCOMPLETE`（正向删除证明）仍然阻断全部轨迹依赖路径。
 
 | path | READY 的必要条件 | 首个宿主（OpenClaw 轨迹库）的已知情况 |
 | --- | --- | --- |

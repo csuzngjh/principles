@@ -1217,16 +1217,22 @@ function analyzeSession(sample, facts, startExplanation, prefixCompleteness, pre
   }
   const gapObserved = gapReasons.length > 0 ? gapReasons.join('; ') : null;
 
-  // Combination rules (r5): the two dimensions decide INDEPENDENTLY.
-  //   PROVEN_INCOMPLETE → SOURCE_RETENTION_EXPIRED (positive vanished-row
-  //     evidence: a dangling turn reference or an unexplained start whose
-  //     creator row is gone) — whether or not any other gap check fired.
-  //   UNKNOWN → SOURCE_GAP even when every internal continuity check passes:
-  //     the snapshot cannot prove whether trajectory rows existed between the
-  //     session start and the earliest surviving row (notably the
-  //     manual-pain-first class, where a complete session and a swept session
-  //     are observationally identical). UNKNOWN is never upgraded.
-  //   PROVEN_COMPLETE → only the ordinary gapReasons apply (DT-07 unchanged).
+  // Combination rules (r5, revised r7): the three dimensions decide
+  // INDEPENDENTLY.
+  //   PROVEN_INCOMPLETE (N1 positive vanished-row evidence) →
+  //     SOURCE_RETENTION_EXPIRED — the deleted rows are proven missing and
+  //     the production diagnostic reads the WHOLE session (unbounded
+  //     listUserTurnsForSession/listAssistantTurns), so the loss genuinely
+  //     blocks every trajectory-dependent path. Whether or not other gap
+  //     checks also fired.
+  //   UNKNOWN prefix (r6 soundness: created_at is not a row identity; bare
+  //     recordSession creations are legal) is NOT a path-blocking gap — it is
+  //     disclosed on the per-sample record (prefixCompleteness /
+  //     prefixCompletenessReason) and drives the sample-level completeness
+  //     downgrade, but the production entry reads the rows that exist in this
+  //     snapshot, so PATH readiness is judged on the ACTUAL observed inputs
+  //     (gapReasons below), never on the unprovable prefix.
+  //   Real observed gaps (gapReasons) → SOURCE_GAP (DT-07 unchanged).
   if (prefixCompleteness === 'PROVEN_INCOMPLETE') {
     const referenceDetail = prefixMissingReferences.length > 0
       ? prefixMissingReferences.map((m) => `${m.reference} ×${m.count}`).join(', ')
@@ -1241,24 +1247,18 @@ function analyzeSession(sample, facts, startExplanation, prefixCompleteness, pre
         evidence,
         gapObserved !== null
           ? `Source rows for this session were removed by retention: ${gapObserved}. Positive vanished-row evidence: ${evidenceLine} Earlier rows are no longer recoverable from this snapshot.`
-          : `Earlier trajectory rows for this session existed and are no longer in this snapshot, even though the surviving window passes all internal continuity checks. Positive vanished-row evidence: ${evidenceLine} The surviving rows alone do not represent the full conversation the session actually had.`,
+          : `Earlier trajectory rows for this session existed and are no longer in this snapshot, even though the surviving window passes all internal continuity checks. Positive vanished-row evidence: ${evidenceLine} The production diagnostic reads the WHOLE session history, so the surviving rows alone do not represent the input it would construct.`,
         'Recover the full-fidelity turns from the host-native session storage if authorized, or re-snapshot before retention removes rows; do not reconstruct missing rows by inference.',
       ),
     );
-  } else if (prefixCompleteness === 'UNKNOWN' || gapObserved !== null) {
-    const prefixNote = prefixCompleteness === 'UNKNOWN'
-      ? 'Historical prefix completeness cannot be proven from this snapshot: created_at is a timestamp rather than a row identity (equal timestamps collide; a deleted first writer can share its timestamp with survivors), and bare recordSession creations are a legal production state (the prompt hook creates sessions with no trajectory rows), so neither a complete session, a bare-session boundary, nor a retention-swept one can be excluded from the observable fields. The producer persists no expected-origin record and retention writes no audit trail.'
-      : null;
-    const gapDetail = gapObserved !== null
-      ? `Trajectory gap without positive retention evidence: ${gapObserved}.`
-      : 'No internal continuity gap was observed in the surviving window.';
+  } else if (gapObserved !== null) {
     problems.push(
       makeProblem(
         'SOURCE_GAP',
         `session:${sessionId}`,
         evidence,
-        `${gapDetail} ${prefixNote} Both readings are possible — the rows never existed (normal session boundary, DT-07) or they were removed and no evidence survives to prove it. This probe does NOT claim retention expiry without positive evidence and does NOT treat the prefix as complete without positive evidence either.`,
-        'If the pre-pain turns matter for the study, cross-check the host-native session file under an authorized full-fidelity scope before treating the boundary as normal, or supply producer-side origin provenance; until the prefix is proven the sample stays out of full-history-dependent paths.',
+        `Trajectory gap without positive retention evidence: ${gapObserved}. Both readings are possible — the rows never existed (normal session boundary, DT-07) or they were removed and no evidence survives to prove it. This probe does NOT claim retention expiry without positive evidence.`,
+        'If the pre-pain turns matter for the study, cross-check the host-native session file under an authorized full-fidelity scope before treating the boundary as normal.',
       ),
     );
   }
@@ -1632,25 +1632,27 @@ function analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir, blobHash
 // Path readiness (CONTRACT §2.4 table) and completeness (SPEC §5.2)
 // ---------------------------------------------------------------------------
 
-function classifySample(sample, problems, analysis, datasetRedacted) {
+function classifySample(sample, problems, analysis, datasetRedacted, prefixCompleteness) {
   const codes = new Set(problems.map((p) => p.code));
   const hostKind = sample.hostKind;
   const unsupportedHost = hostKind.length > 0 && hostKind !== 'openclaw';
 
-  // Completeness is derived from problems regardless of path evaluation:
-  // even in structural-audit-only mode the completeness verdict stays
-  // meaningful (SPEC §5.2), while path readiness is what goes NOT_EVALUATED.
-  // When the expectation DEPENDS on tool output and that output exists only
-  // as a 500-char preview, the expectation evidence itself is gapped — the
-  // sample is not a complete analysis case (r2 review R889), while
-  // PIPELINE_REPLAY keeps its independent READY semantics (the production
-  // entry reads the same preview).
+  // Completeness (r7: DECOUPLED from path readiness) is the sample-level
+  // evidence verdict: the historical prefix dimension contributes directly —
+  // PROVEN_COMPLETE is currently unreachable (no first-writer identity
+  // anchor), so every sample is honestly INCOMPLETE until producer-side
+  // provenance exists — while path readiness is judged per path on that
+  // path's ACTUAL input evidence. A path can be READY while the sample is
+  // INCOMPLETE; neither verdict is derived from the other.
   const expectationEvidenceGapped = analysis.dependsOnToolOutput === true && codes.has('TOOL_RESULT_PREVIEW_ONLY');
-  const completeness = ([...COMPLETENESS_BLOCKING_CODES].some((code) => codes.has(code)) || expectationEvidenceGapped)
+  const completeness = (prefixCompleteness !== 'PROVEN_COMPLETE'
+    || [...COMPLETENESS_BLOCKING_CODES].some((code) => codes.has(code))
+    || expectationEvidenceGapped)
     ? 'INCOMPLETE'
     : 'COMPLETE_FOR_ANALYSIS';
 
   const pathReadiness = {};
+  const pathBlockers = {};
   const executable = {};
   if (datasetRedacted || unsupportedHost) {
     // NOT_EVALUATED is never READY (CONTRACT §2.4). Redacted public copies
@@ -1661,46 +1663,51 @@ function classifySample(sample, problems, analysis, datasetRedacted) {
       : `unsupported_host_kind:${hostKind}`;
     for (const p of PATHS) {
       pathReadiness[p] = 'NOT_EVALUATED';
+      pathBlockers[p] = [];
       executable[p] = false;
     }
-    return { pathReadiness, executable, completeness, notEvaluatedReason: reason };
+    return { pathReadiness, pathBlockers, executable, completeness, notEvaluatedReason: reason };
   }
 
-  const blockedBy = (blocking) => blocking.some((code) => codes.has(code));
+  const blockersFor = (blocking) => blocking.filter((code) => codes.has(code));
 
-  // PIPELINE_REPLAY: snapshot must contain everything the production entry
-  // would read. SOURCE_GAP / SOURCE_RETENTION_EXPIRED / TURN_BLOB_MISSING
-  // block; TOOL_RESULT_PREVIEW_ONLY does NOT (the production entry reads the
-  // same preview) but stays recorded (TECH §5.2).
+  // PIPELINE_REPLAY: the snapshot must contain everything the production
+  // entry would read — the UNBOUNDED session turn lists
+  // (listUserTurnsForSession / listAssistantTurns) plus any correction-
+  // evidence blobs they reference. SOURCE_GAP here means an OBSERVED input
+  // gap (role gap, hole, order break, empty window, post-trigger start) —
+  // the historical prefix UNKNOWN does NOT emit it (r7). TOOL_RESULT_PREVIEW
+  // _ONLY does NOT block (the production entry reads the same preview).
   const pipelineBlocking = [...BASE_BLOCKING_CODES];
-  pathReadiness.PIPELINE_REPLAY = blockedBy(pipelineBlocking) ? 'BLOCKED' : 'READY';
+  pathReadiness.PIPELINE_REPLAY = blockersFor(pipelineBlocking).length > 0 ? 'BLOCKED' : 'READY';
+  pathBlockers.PIPELINE_REPLAY = blockersFor(pipelineBlocking);
 
   // EXPECTATION_LABELING: expectation-related turns and tool outputs must be
   // fully readable; a preview-only tool result blocks when the expectation
-  // evidence depends on tool output (CONTRACT §2.4).
+  // evidence depends on tool output (CONTRACT §2.4). Judged independently of
+  // PIPELINE_REPLAY's verdict.
   const expectationBlocking = [...EXPECTATION_BLOCKING_CODES];
   if (analysis.dependsOnToolOutput && codes.has('TOOL_RESULT_PREVIEW_ONLY')) {
     expectationBlocking.push('TOOL_RESULT_PREVIEW_ONLY');
   }
-  pathReadiness.EXPECTATION_LABELING = blockedBy(expectationBlocking) ? 'BLOCKED' : 'READY';
+  pathReadiness.EXPECTATION_LABELING = blockersFor(expectationBlocking).length > 0 ? 'BLOCKED' : 'READY';
+  pathBlockers.EXPECTATION_LABELING = blockersFor(expectationBlocking);
 
   // BEHAVIOR_BRANCH: the decision point's repository and environment must be
   // recoverable. Historical cases carry no environment snapshot — always
   // ENVIRONMENT_UNAVAILABLE for this snapshot form (CONTRACT §2.4 known case).
   const behaviorBlocking = [...BASE_BLOCKING_CODES, 'ENVIRONMENT_UNAVAILABLE'];
-  pathReadiness.BEHAVIOR_BRANCH = blockedBy(behaviorBlocking) ? 'BLOCKED' : 'READY';
+  pathReadiness.BEHAVIOR_BRANCH = blockersFor(behaviorBlocking).length > 0 ? 'BLOCKED' : 'READY';
+  pathBlockers.BEHAVIOR_BRANCH = blockersFor(behaviorBlocking);
 
   // SPEC §5.2 separates the capability labels: EXECUTABLE_FOR_DECLARED_PATH
-  // means everything THAT path needs (snapshot, inputs, authorization — the
-  // definition of pathReadiness READY) is in place. Completeness stays an
-  // independent sample-level evidence verdict, so a case can be INCOMPLETE
-  // (e.g. expectation record missing) while still being executable for
-  // pipeline replay, which needs no expectation; reporting one never
-  // substitutes for the other.
+  // means everything THAT path needs is in place; completeness stays the
+  // independent sample-level evidence verdict (which includes the unproven
+  // historical prefix). Reporting one never substitutes for the other.
   for (const p of PATHS) {
     executable[p] = pathReadiness[p] === 'READY';
   }
-  return { pathReadiness, executable, completeness };
+  return { pathReadiness, pathBlockers, executable, completeness };
 }
 
 // ---------------------------------------------------------------------------
@@ -2411,7 +2418,7 @@ function main() {
       problems.push(...analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir, blobHashCache));
     }
 
-    const classification = classifySample(sample, problems, { dependsOnToolOutput: expectationAnalysis.dependsOnToolOutput }, redaction.redacted);
+    const classification = classifySample(sample, problems, { dependsOnToolOutput: expectationAnalysis.dependsOnToolOutput }, redaction.redacted, facts !== null ? prefixCompleteness : 'UNKNOWN');
 
     perSample.push({
       caseId: sample.caseId,
@@ -2419,11 +2426,15 @@ function main() {
       sessionId: sample.sessionId,
       completeness: classification.completeness ?? 'INCOMPLETE',
       pathReadiness: classification.pathReadiness,
+      pathBlockers: classification.pathBlockers,
       executableForDeclaredPath: classification.executable,
       notEvaluatedReason: classification.notEvaluatedReason ?? null,
       authorizationStatus: authorizationAnalysis.status,
       sessionStartExplanation: facts !== null ? startExplanation : 'NOT_APPLICABLE',
       prefixCompleteness: facts !== null ? prefixCompleteness : 'UNKNOWN',
+      prefixCompletenessReason: facts !== null && prefixCompleteness !== 'PROVEN_COMPLETE'
+        ? 'no first-writer identity anchor is persisted in the current schema (created_at is a timestamp, not a row identity; bare recordSession creations are legal) and no positive vanished-row evidence was found'
+        : null,
       prefixMissingReferenceCount: facts !== null ? prefixMissingReferences.reduce((sum, m) => sum + m.count, 0) : 0,
       expectationBasis: expectationAnalysis.basis,
       expectationDependsOnToolOutput: expectationAnalysis.dependsOnToolOutput,
