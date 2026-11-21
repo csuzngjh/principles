@@ -142,19 +142,44 @@ interface PowerShellErrorBody {
   readonly message: string;
 }
 
-type PowerShellOutput = PowerShellQueryBody | PowerShellErrorBody;
-
 /** Runtime guard for the error envelope (untrusted parsed JSON, rc-1/rc-3). */
-function isPowerShellError(body: PowerShellOutput): body is PowerShellErrorBody {
+function isPowerShellError(body: unknown): body is PowerShellErrorBody {
+  if (typeof body !== 'object' || body === null) return false;
   // `=== false` is own-property safe: an inherited `ok` reads undefined.
   return (body as Partial<PowerShellErrorBody>).ok === false;
 }
 
-function parsePowerShellJson(stdout: string): { ok: true; body: PowerShellOutput } | { ok: false; reason: string } {
+function isPowerShellQueryBody(value: unknown): value is PowerShellQueryBody {
+  if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'found')) return false;
+  return typeof (value as { found?: unknown }).found === 'boolean';
+}
+
+function isPowerShellErrorBodyValue(value: unknown): value is PowerShellErrorBody {
+  if (typeof value !== 'object' || value === null) return false;
+  return (value as Partial<PowerShellErrorBody>).ok === false && typeof (value as { errorId?: unknown }).errorId === 'string';
+}
+
+/** The mutation scripts' success ack. */
+interface PowerShellMutationAck {
+  readonly done: boolean;
+}
+
+function isPowerShellMutationAck(value: unknown): value is PowerShellMutationAck {
+  if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'done')) return false;
+  return typeof (value as { done?: unknown }).done === 'boolean';
+}
+
+type PowerShellJsonBody = PowerShellQueryBody | PowerShellErrorBody | PowerShellMutationAck;
+
+function parsePowerShellJson(stdout: string): { ok: true; body: PowerShellJsonBody } | { ok: false; reason: string } {
   const cleaned = stdout.replace(/^\uFEFF/, '').trim();
   if (cleaned === '') return { ok: false, reason: 'powershell_empty_output' };
   try {
-    return { ok: true, body: JSON.parse(cleaned) as PowerShellOutput };
+    const parsed: unknown = JSON.parse(cleaned);
+    if (isPowerShellQueryBody(parsed) || isPowerShellErrorBodyValue(parsed) || isPowerShellMutationAck(parsed)) {
+      return { ok: true, body: parsed };
+    }
+    return { ok: false, reason: 'powershell_unexpected_output_shape' };
   } catch (error) {
     return { ok: false, reason: `powershell_unparsable_output:${error instanceof Error ? error.message.slice(0, 80) : 'unknown'}` };
   }
@@ -274,6 +299,9 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
         reason: `scheduler_query_failed:${errorId}`,
         nextAction: `The Task Scheduler query failed (${errorId}: ${parsed.body.message ?? ''}). If this is an access-denied error, the task exists but this process may not read it — do not treat the install as unregistered.`,
       };
+    }
+    if (!isPowerShellQueryBody(parsed.body)) {
+      return { ok: false, kind: 'command_failed', reason: 'powershell_unexpected_output_shape', nextAction: 'The Task Scheduler query returned an unexpected document shape; re-run pd service status to see whether it is transient.' };
     }
     return { ok: true, body: parsed.body };
   }
