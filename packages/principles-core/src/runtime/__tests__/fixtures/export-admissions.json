@@ -344,6 +344,90 @@
       ],
       "whyNotInternal": "Same boundary as HostSessionClaim: the verification verdict shape flows from the pd-mcp-server verifier (host-runtime store read) into the core capability which stays I/O-free; both packages must share one contract.",
       "alternativeConsidered": "Inlining the union in submit-assembly was rejected: the capability receipt field would then be typed by a foreign duplicate that can drift."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "resolveHostSubmissionContext",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/pd-mcp-server/src/submit-assembly.ts"
+      ],
+      "whyNotInternal": "The pd-mcp-server per-request identity resolution normalizes host-injected tools/call _meta through this pure normalizer before the original Pain/Task write; the server is a separate package and cannot reach core-internal module paths.",
+      "alternativeConsidered": "A narrow ./runtime/host-submission subpath was rejected: the symbol set is three values plus types all consumed by the same server, and a fourth entry widens the surface the gate must freeze for one caller."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "hostSessionClaimConflictsWithContext",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/pd-mcp-server/src/submit-assembly.ts"
+      ],
+      "whyNotInternal": "The fail-closed conflict check between the model-supplied hostSession claim and the trusted _meta context runs inside the MCP server's per-request resolution; keeping it beside the normalizer it guards prevents two packages re-implementing the trust rule.",
+      "alternativeConsidered": "Folding the check into resolveHostSubmissionContext was rejected: the claim is model-visible input the normalizer never sees; separating them keeps one input source per function."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "validatePainSubmitReceipt",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/ingestion/pain-receipt-fallback.ts"
+      ],
+      "whyNotInternal": "The Codex PostToolUse fallback (separate package) strictly validates the structured receipt document before any recovery write; the strict allowed-key/schema surface must be the same validator the producer contract specifies, not a copy.",
+      "alternativeConsidered": "Re-declaring the validation in codex-adapter was rejected: two validators over one receipt schema is exactly the drift class that lets a degraded transport form slip through on one side."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "recoverTaskIdentityFromReceipt",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/ingestion/pain-receipt-fallback.ts"
+      ],
+      "whyNotInternal": "The receipt-driven identity recovery on the original task (CAS with full status/lease preconditions) is invoked from the Codex hook process; the recovery policy must stay in core beside the task store it mutates.",
+      "alternativeConsidered": "Moving the recovery into codex-adapter was rejected: it would put the tasks-table mutation contract outside the package that owns RuntimeStateManager and its CAS preconditions."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "PainReceiptRecoveryOutcome",
+      "kind": "type",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/ingestion/pain-receipt-fallback.ts"
+      ],
+      "whyNotInternal": "The fallback result type wraps the recovery outcome for the hook's bounded stderr diagnostic; the adapter names it explicitly in its own result surface, so a structural duplicate would drift from the outcome vocabulary (recovered/already_bound/rejected).",
+      "alternativeConsidered": "Type-only inference from the function return was rejected: the adapter's PainReceiptFallbackResult is part of its own exported surface and needs the named type."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "reconcileWaitingTargetEvidenceTasks",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/worker/workspace-worker.ts"
+      ],
+      "whyNotInternal": "The workspace worker cycle (separate package) flips waiting_for_target_evidence dispositions through the same task-store CAS the recovery uses; the state machine for the disposition vocabulary the picker's SQL gates on belongs to core.",
+      "alternativeConsidered": "Implementing the flip inside the worker was rejected: the SQL gate and the flip are two halves of one admission state machine; splitting them across packages lets the waiting state vocabulary drift."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "TargetEvidenceReconcileReport",
+      "kind": "type",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/worker/workspace-worker.ts"
+      ],
+      "whyNotInternal": "The reconcile report (checked/flipped/stillWaiting/errors) is a field of the worker cycle's exported report type, so the adapter must name the type; core owns the vocabulary the report counts.",
+      "alternativeConsidered": "Re-declaring the report shape in the adapter was rejected: the worker JSON report and the core reconcile would then describe one run with two drifting shapes."
     }
   ],
   "removals": [

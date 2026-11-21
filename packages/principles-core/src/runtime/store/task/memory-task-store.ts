@@ -4,6 +4,27 @@
 import type { TaskRecord } from '../../task-status.js';
 import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-store.js';
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** PRI-1274 (B1 / P1-3): the admission-disposition state from the task's
+ * `diagnostic_json.recovery.state`, or null when absent/unparseable — the
+ * memory-store twin of SQLite's `json_extract(... , '$.recovery.state')`. */
+function readRecoveryStateFromDiagnosticJson(diagnosticJson: string | null | undefined): string | null {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(diagnosticJson);
+    if (!isPlainObject(parsed)) return null;
+    const { recovery } = parsed;
+    if (!isPlainObject(recovery)) return null;
+    const { state } = recovery;
+    return typeof state === 'string' ? state : null;
+  } catch {
+    return null;
+  }
+}
+
 export class MemoryTaskStore implements TaskStore {
   private readonly tasks = new Map<string, TaskRecord>();
 
@@ -66,6 +87,16 @@ export class MemoryTaskStore implements TaskStore {
     let results = [...this.tasks.values()];
     if (filter?.status) results = results.filter((t) => t.status === filter.status);
     if (filter?.taskKind) results = results.filter((t) => t.taskKind === filter.taskKind);
+    // PRI-1274 (B1 / P1-3): parity with SqliteTaskStore's admission-disposition
+    // gating — applied BEFORE the sort/limit cut, exactly like the SQL WHERE
+    // clause sits before ORDER BY/LIMIT. Unparseable JSON means "no state".
+    if (filter?.recoveryState !== undefined) {
+      results = results.filter((t) => readRecoveryStateFromDiagnosticJson(t.diagnosticJson) === filter.recoveryState);
+    }
+    if (filter?.excludeRecoveryStates !== undefined && filter.excludeRecoveryStates.length > 0) {
+      const excluded = new Set<string>(filter.excludeRecoveryStates);
+      results = results.filter((t) => !excluded.has(readRecoveryStateFromDiagnosticJson(t.diagnosticJson) ?? ''));
+    }
     // Parity with SqliteTaskStore (A-liveness): silently ignoring
     // orderBy/afterCursor here would make cursor-based scans return wrong
     // pages under the memory store — a rc-9 silent degradation.

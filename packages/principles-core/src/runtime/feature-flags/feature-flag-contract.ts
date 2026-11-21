@@ -434,6 +434,20 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // runtime READS the real consent ledger instead of hard-coding 'granted'.
   // Default off; flag-off = zero transcript reads at hook/worker boundary.
   { id: 'workbuddy_conversation_ingestion', category: 'quiet', enabled: false, since: '2026-11-11', description: 'PRI-1171 unified trajectory ingestion — bounded WorkBuddy transcript ingestion through the shared seam (visible Owner utterances, assistant turns, reasoning, tool facts) into governance_observations in trajectory.db. Default off; flag-off = zero transcript reads, no observation writes, and existing WorkBuddy hook/worker behavior is unchanged. Requires a granted conversation-ingestion consent record for hostKind=workbuddy.' },
+  // PRI-1274 (B1): the one-time Workspace-level minimal identity-metadata
+  // disclosure/authorization — SEPARATE from full conversation ingestion
+  // (codex_conversation_ingestion) and from automatic Pain submission
+  // (automatic_pain_submission). When granted, host-generated MCP request
+  // `_meta` may pre-bind the submission session at the ORIGINAL Pain/Task
+  // write, and the PostToolUse structured-receipt fallback may restore the
+  // same task's identity — persisting ONLY sessionId/submissionTurnId/
+  // toolCallId/receipt identity fields (never prompt, reason, anchor text,
+  // tool input/output or transcript). Default off; flag-off = submissions
+  // stay legal unbound with reason blocked_by_consent and no identity is
+  // persisted from either path. A single Pain submission consent NEVER
+  // implies this authorization, and this flag never implies conversation
+  // ingestion.
+  { id: 'host_identity_minimal_metadata', category: 'quiet', enabled: false, since: '2026-11-21', description: 'PRI-1274 B1 minimal identity-metadata authorization — allows persisting host session/turn/tool-call identity metadata (ids only, no content) from trusted MCP request _meta prebinding and the PostToolUse structured-receipt fallback. Default off; flag-off = Pain submissions stay legally unbound (blocked_by_consent), zero identity metadata persisted, no transcript reads.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },

@@ -22,6 +22,7 @@ import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { readLedgerFileState } from '../principle-tree-ledger.js';
 import {
   createDiagnosticianTaskId,
+  type PainDetectedData,
   type PainEvidenceEntry,
 } from './pain-signal-bridge.js';
 import { evaluatePainIngress } from './pain-ingress.js';
@@ -31,6 +32,9 @@ import {
   type PainDeviationAnchor,
 } from './pain-ingress-payload.js';
 import { deriveProvenanceFromIngressFacts } from './pain-ingress-payload.js';
+// PRI-1274: leaf import — the disposition schema version lives beside its
+// types, with no cycle back into this module.
+import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION } from './pain-admission-disposition.js';
 import type { GovernanceHostKind } from './pain-signal-bridge.js';
 import type { PainAnchor, PainAnchorType } from './context-payload.js';
 
@@ -489,6 +493,29 @@ export async function submitPainCapability(
     }
     : verification ?? { status: 'absent' };
 
+  // PRI-1274 (B1 / P1-3): a session-bound submission that NAMED a target
+  // turn whose text is not yet collectable waits for that exact turn — the
+  // diagnosis must never substitute other turns of the session. An explicit
+  // Owner statement (the `owner_expectation` anchor) is independently
+  // admissible evidence: existing admission policy continues, no waiting.
+  // Every other submission (unbound, or no known target) is unaffected.
+  const submittedTurnEvidenceCount = verification?.status === 'verified' && verification.inputEvidence !== undefined
+    ? verification.inputEvidence.length
+    : 0;
+  const waitingForTargetEvidence = sessionAssociation.status === 'verified'
+    && sessionAssociation.targetTurnId !== undefined
+    && submittedTurnEvidenceCount === 0
+    && input.anchorType !== 'owner_expectation';
+  const admissionDisposition: PainDetectedData['admissionDisposition'] = waitingForTargetEvidence
+    ? {
+      schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
+      state: 'waiting_for_target_evidence',
+      reasonCode: 'target_turn_text_pending',
+      attemptCount: 1,
+      lastCheckedAt: new Date().toISOString(),
+    }
+    : undefined;
+
   const anchorCheck = validateSubmissionAnchor({
     stateDir,
     anchorType: input.anchorType,
@@ -597,6 +624,9 @@ export async function submitPainCapability(
       ...(verification?.status === 'verified' && verification.inputEvidence !== undefined && verification.inputEvidence.length > 0
         ? { evidence: verification.inputEvidence }
         : {}),
+      // PRI-1274 (B1 / P1-3): the waiting marker rides the SAME write that
+      // creates the task — no second write, no post-creation patch.
+      ...(admissionDisposition !== undefined ? { admissionDisposition } : {}),
     });
     if (result.status === 'failed') {
       // §5.7 / T06: a duplicate is an idempotency outcome the Owner can
@@ -648,6 +678,11 @@ export async function submitPainCapability(
       // The submission stays legal (unbound) — the warning names the SPECIFIC
       // cause so "registered without association" is never silent (rc-9).
       warnings.push(`host_session_unverified:${sessionAssociation.detail}`);
+    }
+    if (waitingForTargetEvidence) {
+      // rc-9: the wait is disclosed on the receipt, never silent — the task
+      // is admitted only after its exact target turn text becomes available.
+      warnings.push(`target_evidence_pending:${sessionAssociation.status === 'verified' ? sessionAssociation.targetTurnId : ''}`);
     }
     return {
       schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,

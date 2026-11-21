@@ -270,6 +270,21 @@ export class SqliteTaskStore implements TaskStore {
       }
       values.push(filter.afterCursor.updatedAt, filter.afterCursor.updatedAt, filter.afterCursor.taskId);
     }
+    // PRI-1274 (B1 / P1-3): admission-disposition gating INSIDE the WHERE
+    // clause, parameter-bound — deliberately before the ORDER BY/LIMIT so a
+    // waiting task can never displace an admissible one inside a bounded
+    // candidate window. `json_extract` returns NULL when the JSON has no
+    // such key (or is not valid JSON), which COALESCEs to the empty string
+    // and therefore never matches a named state.
+    if (filter?.recoveryState !== undefined) {
+      conditions.push("COALESCE(json_extract(diagnostic_json, '$.recovery.state'), '') = ?");
+      values.push(filter.recoveryState);
+    }
+    if (filter?.excludeRecoveryStates !== undefined && filter.excludeRecoveryStates.length > 0) {
+      const placeholders = filter.excludeRecoveryStates.map(() => '?').join(', ');
+      conditions.push(`COALESCE(json_extract(diagnostic_json, '$.recovery.state'), '') NOT IN (${placeholders})`);
+      values.push(...filter.excludeRecoveryStates);
+    }
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
     if (filter?.orderBy === 'updated_at_asc') { sql += ' ORDER BY updated_at ASC, task_id ASC'; }
     else if (filter?.orderBy === 'updated_at_desc') { sql += ' ORDER BY updated_at DESC, task_id DESC'; }

@@ -23,7 +23,7 @@ import type {
   TrajectoryTurnReader,
   TrajectoryUserTurn,
 } from '@principles/core/runtime';
-import { listGovernanceTurnTexts, type GovernanceTurnTextRow } from './governance-observation-store.js';
+import { listGovernanceObservations, listGovernanceTurnTexts, type GovernanceTurnTextRow } from './governance-observation-store.js';
 
 /** Bound on turns per list call — the assembler bounds the window again. */
 const MAX_TURNS_PER_SESSION = 200;
@@ -73,6 +73,64 @@ export function createGovernanceTrajectoryTurnReader(args: { readonly workspaceD
         sanitizedText: row.visibleText,
         createdAt: row.observedAt,
       }));
+    },
+    /**
+     * PRI-1274 (B1 / P1-3): exact (host, session, host turn id) read over the
+     * same authorized governance store. `hostKind` keeps another host's
+     * identically-named session+turn out of the window (the cross-host
+     * isolation class PRI-1247 closes); retained-text filtering mirrors the
+     * session-level reads (expired/quarantined rows carry NULL text).
+     * Unreadable store ⇒ empty result — the assembler turns that into an
+     * ambiguity note, never a session-wide substitution.
+     */
+    listTurnTextsForHostTurnId(
+      sessionId: string,
+      hostTurnId: string,
+      hostKind?: 'openclaw' | 'codex' | 'workbuddy',
+    ): { readonly userTurns: readonly TrajectoryUserTurn[]; readonly assistantTurns: readonly TrajectoryAssistantTurn[] } {
+      if (sessionId.trim().length === 0 || hostTurnId.trim().length === 0) {
+        return { userTurns: [], assistantTurns: [] };
+      }
+      const result = listGovernanceObservations({
+        workspaceDir: args.workspaceDir,
+        rolloutIdentity: sessionId,
+        hostTurnId,
+        ...(hostKind === undefined ? {} : { hostKind }),
+        limit: 64,
+      });
+      if (!result.ok) return { userTurns: [], assistantTurns: [] };
+      const retainedText = (row: (typeof result.observations)[number]): string | null =>
+        (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
+        && typeof row.visibleText === 'string'
+        && row.visibleText.trim() !== ''
+          ? row.visibleText
+          : null;
+      const userRows = result.observations.filter((row) => row.kind === 'user_turn');
+      return {
+        userTurns: userRows.flatMap((row, index) => {
+          const text = retainedText(row);
+          return text === null ? [] : [{
+            id: row.id,
+            turnIndex: row.sourceOrdinal !== null && row.sourceOrdinal >= 0 ? row.sourceOrdinal : index,
+            rawExcerpt: text,
+            correctionDetected: false,
+            correctionCue: null,
+            createdAt: row.observedAt,
+          }];
+        }),
+        assistantTurns: result.observations.filter((row) => row.kind === 'assistant_turn').flatMap((row) => {
+          const text = retainedText(row);
+          return text === null ? [] : [{
+            id: row.id,
+            sessionId,
+            runId: '',
+            provider: '',
+            model: '',
+            sanitizedText: text,
+            createdAt: row.observedAt,
+          }];
+        }),
+      };
     },
   };
 }

@@ -112,3 +112,49 @@ export function decodeCodexInput(raw: unknown): HostEvent {
   const source = `codex:${eventName.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()}`;
   return { kind, context, rawPayload, source };
 }
+
+// ── PRI-1274 (B1 / P1-1): MCP tool-name namespace on PostToolUse ─────────────
+//
+// Codex reports MCP tool calls under the server-namespaced form
+// `mcp__<serverId>__<toolId>`. Evidence for the installed codex-cli 0.171.0:
+// the binary's own format template `mcp__{}__{}`, its server-name charset
+// check `^[a-zA-Z0-9_-]+$` with a reserved `mcp__` namespace, and its
+// desktop-context string "MCP tools keep standard MCP identifiers such as
+// `mcp__server__tool`". Runtime capture (Gate 2, 2026-10-31): the server
+// configured as `pd-recall` (plugins/principles-disciple/.mcp.json) surfaced
+// as `mcp__pd_recall__pd_recall_principle_pains` — non-identifier characters
+// in the server id are sanitized to `_`, so BOTH spellings must be accepted.
+//
+// Parsing splits at the FIRST `__` after the `mcp__` prefix: a server id
+// containing `__` would mis-parse, but such a name can never equal the
+// accepted ids below, so foreign servers stay isolated regardless.
+
+/** The MCP server ids whose `pd_submit_pain` the receipt fallback serves:
+ * the configured id (`pd-recall`) and its identifier-sanitized spelling. */
+export const PAIN_SUBMIT_MCP_SERVER_IDS: ReadonlySet<string> = new Set(['pd-recall', 'pd_recall']);
+
+export interface ParsedMcpToolName {
+  readonly serverId: string;
+  readonly toolId: string;
+}
+
+/** Decompose a Codex MCP tool name into (serverId, toolId); null when the
+ * name is not a namespaced MCP tool name. No substring semantics. */
+export function parseCodexMcpToolName(toolName: string): ParsedMcpToolName | null {
+  if (!toolName.startsWith('mcp__')) return null;
+  const rest = toolName.slice('mcp__'.length);
+  const separator = rest.indexOf('__');
+  if (separator <= 0 || separator + 2 >= rest.length) return null;
+  return { serverId: rest.slice(0, separator), toolId: rest.slice(separator + 2) };
+}
+
+/**
+ * Exact gate for the PostToolUse receipt fallback: the tool must be
+ * `pd_submit_pain` served by the PD MCP server (`pd-recall`). Every other
+ * tool — including an identically-named tool on a DIFFERENT MCP server —
+ * fails (equality on both parsed segments, never a substring match).
+ */
+export function isPainSubmitPostToolUseToolName(toolName: string): boolean {
+  const parsed = parseCodexMcpToolName(toolName);
+  return parsed !== null && PAIN_SUBMIT_MCP_SERVER_IDS.has(parsed.serverId) && parsed.toolId === 'pd_submit_pain';
+}

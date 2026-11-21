@@ -495,6 +495,11 @@ export function parsePainIngressV1Payload(value: unknown): PainIngressV1ParseRes
   if (invariantViolation !== null) return { ok: false, reasonCode: invariantViolation };
   // PRI-1260: optional verified association — absent on historical rows; a
   // PRESENT but malformed one fails closed like every other field (rc-3).
+  // PRI-1274 (B1): submissionTurnId and targetTurnId are validated
+  // INDEPENDENTLY — a trusted session may carry only the submission turn
+  // (target evidence is a separate, later concern) or only a target clue.
+  // Historical rows always carry both or neither, so this widening accepts
+  // strictly more of what the writer produces and nothing else.
   let verifiedHostSession: PainIngressV1Payload['verifiedHostSession'];
   if (value.verifiedHostSession !== undefined) {
     const candidate = value.verifiedHostSession;
@@ -503,14 +508,17 @@ export function parsePainIngressV1Payload(value: unknown): PainIngressV1ParseRes
       return { ok: false, reasonCode: 'ingress_verified_session_invalid' };
     }
     const { submissionTurnId, targetTurnId } = candidate;
-    if ((submissionTurnId !== undefined || targetTurnId !== undefined) &&
-      (typeof submissionTurnId !== 'string' || submissionTurnId.trim().length === 0 || submissionTurnId.length > 200
-        || typeof targetTurnId !== 'string' || targetTurnId.trim().length === 0 || targetTurnId.length > 200)) {
+    const submissionTurnValid = submissionTurnId === undefined
+      || (typeof submissionTurnId === 'string' && submissionTurnId.trim().length > 0 && submissionTurnId.length <= 200);
+    const targetTurnValid = targetTurnId === undefined
+      || (typeof targetTurnId === 'string' && targetTurnId.trim().length > 0 && targetTurnId.length <= 200);
+    if (!submissionTurnValid || !targetTurnValid) {
       return { ok: false, reasonCode: 'ingress_verified_session_invalid' };
     }
     verifiedHostSession = {
       status: 'verified', sessionId: candidate.sessionId,
-      ...(typeof submissionTurnId === 'string' && typeof targetTurnId === 'string' ? { submissionTurnId, targetTurnId } : {}),
+      ...(submissionTurnId === undefined ? {} : { submissionTurnId }),
+      ...(targetTurnId === undefined ? {} : { targetTurnId }),
     };
   }
   return { ok: true, payload: { version: PAIN_INGRESS_PAYLOAD_VERSION, origin, correlation: correlation.value, evidenceClass, ...(verifiedHostSession !== undefined ? { verifiedHostSession } : {}) } };
