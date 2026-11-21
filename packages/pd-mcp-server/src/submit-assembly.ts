@@ -73,21 +73,39 @@ function readHostId(value: unknown): string | undefined {
  * ONLY as an enrichment when the turn text happens to already exist. Its
  * absence never blocks session binding (the B1 decoupling); target-evidence
  * completion is the diagnosis pipeline's independent concern (PRI-1273).
+ *
+ * Review round 2: the host kind is the assembly's OWN validated startup
+ * host (never a fixed 'codex' — a non-Codex submission must never read, or
+ * collide with, Codex's observations), and an unreadable store degrades to
+ * an empty enrichment — the original Pain/Task write is never aborted by an
+ * optional read.
  */
-function readTargetTurnEvidence(workspaceDir: string, sessionId: string, targetTurnId: string): PainEvidenceEntry[] {
-  const result = listGovernanceObservations({
-    workspaceDir, hostKind: 'codex', rolloutIdentity: sessionId, hostTurnId: targetTurnId, limit: 64,
-  });
-  if (!result.ok) return [];
-  return result.observations.flatMap((row) =>
-    (row.kind === 'user_turn' || row.kind === 'assistant_turn')
-      && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
-      && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
-      ? [{ sourceRef: `governance_observation:${row.logicalKey}`, note: row.visibleText.slice(0, 2000) }]
-      : [],
-    // Rows come back in id (capture) order: slice(0, 12) keeps the EARLIEST
-    // texts and drops the turn's final answer on long turns — keep the last.
-  ).slice(-12);
+function readTargetTurnEvidence(input: {
+  readonly workspaceDir: string;
+  readonly host: PdMcpHost;
+  readonly sessionId: string;
+  readonly targetTurnId: string;
+}): PainEvidenceEntry[] {
+  try {
+    const result = listGovernanceObservations({
+      workspaceDir: input.workspaceDir, hostKind: input.host, rolloutIdentity: input.sessionId, hostTurnId: input.targetTurnId, limit: 64,
+    });
+    if (!result.ok) return [];
+    return result.observations.flatMap((row) =>
+      (row.kind === 'user_turn' || row.kind === 'assistant_turn')
+        && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
+        && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
+        ? [{ sourceRef: `governance_observation:${row.logicalKey}`, note: row.visibleText.slice(0, 2000) }]
+        : [],
+      // Rows come back in id (capture) order: slice(0, 12) keeps the EARLIEST
+      // texts and drops the turn's final answer on long turns — keep the last.
+    ).slice(-12);
+  } catch {
+    // Optional enrichment: a throwing store read must not abort the original
+    // submission write. The empty result keeps the submission legal and
+    // unbound-from-evidence; diagnosis-side reads surface their own notes.
+    return [];
+  }
 }
 
 /**
@@ -212,7 +230,7 @@ export function assembleSubmitCapability(
     const targetTurnId = requestedTurnId ?? context.submissionTurnId;
     const inputEvidence = targetTurnId === undefined
       ? []
-      : readTargetTurnEvidence(workspaceDir, context.sessionId, targetTurnId);
+      : readTargetTurnEvidence({ workspaceDir, host, sessionId: context.sessionId, targetTurnId });
 
     return {
       status: 'verified',

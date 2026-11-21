@@ -294,6 +294,48 @@ async function seedAdmittedPendingTask(ws: WorkerWorkspace): Promise<{ painId: s
 }
 
 describe('worker cycle — SPEC §13 flag ladder (matrix B)', () => {
+  it('T10 (P1-5 option B): a waiting receipt/task state never blocks the cycle, and cycle restarts never re-consume receipts', async () => {
+    const ws = makeWorkspace({ ingestion: true });
+    // A session-bound MCP submission whose named target turn has no text in
+    // the authorized store yet — the task is created WAITING (P1-3).
+    const { submitPainCapability } = await import('@principles/core/runtime/pain-submit-capability');
+    const receipt = await submitPainCapability(
+      {
+        workspaceDir: ws.root,
+        stateDir: path.join(ws.root, '.state'),
+        painId: 'mcp_1700000000051_7f000051',
+        taskId: 'diagnosis_mcp_1700000000051_7f000051',
+        hostKind: 'codex',
+        verifyHostSession: () => ({ status: 'verified', sessionId: 'rollout-t10', targetTurnId: 'turn-t10' }),
+      },
+      {
+        reason: 'Anchor: agent instruction. Observed: behavior. Deviation: mismatch.',
+        anchorType: 'agent_instruction',
+        anchorRef: 'AGENTS.md#safety',
+        painType: 'user_frustration',
+      },
+    );
+    expect(receipt.status).toBe('submitted');
+
+    const first = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    // The cycle is NOT degraded by the waiting task — it reports the bounded
+    // reconcile and simply has nothing admissible to run.
+    expect(first.mode).toBe('ready');
+    expect(first.report?.targetEvidenceReconcile).toMatchObject({ checked: 1, flipped: 0, stillWaiting: 1 });
+    expect(first.report?.diagnostician).toBeNull();
+    const waiting = diagnosticianTask(ws.root);
+    expect(waiting).toMatchObject({ status: 'pending', attempt_count: 0 });
+
+    // Restart the cycle: identical, idempotent outcome — there is NO receipt
+    // re-consumption mechanism (P1-5 option B: the next-cycle retry promise
+    // was removed rather than kept false), and no LLM boundary is reached.
+    const second = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    expect(second.mode).toBe('ready');
+    expect(second.report?.targetEvidenceReconcile).toMatchObject({ checked: 1, flipped: 0, stillWaiting: 1 });
+    expect(second.report?.diagnostician).toBeNull();
+    expect(diagnosticianTask(ws.root)).toMatchObject({ status: 'pending', attempt_count: 0 });
+  });
+
   it('host.codex=false → paused, no steps run', async () => {
     const ws = makeWorkspace({ hostCodex: false });
     const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });

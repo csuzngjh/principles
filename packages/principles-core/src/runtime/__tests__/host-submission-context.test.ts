@@ -69,7 +69,23 @@ describe('resolveHostSubmissionContext — Codex native fields', () => {
 
   it('identity keys present but unusable values are invalid (not "missing")', () => {
     const resolved = resolveHostSubmissionContext('codex', { sessionId: 123 });
-    expect(resolved).toEqual({ status: 'invalid', reasonCode: 'codex_host_metadata_missing_session' });
+    expect(resolved).toEqual({ status: 'invalid', reasonCode: 'codex_session_id_invalid' });
+  });
+
+  it('P2: a sentinel threadId never silently falls back to sessionId (T4)', () => {
+    const resolved = resolveHostSubmissionContext('codex', { threadId: 'cli', sessionId: 'sess-valid' });
+    expect(resolved).toEqual({ status: 'invalid', reasonCode: 'codex_thread_id_invalid' });
+    // Same for a present-but-empty / oversized threadId — a half-broken
+    // identity is invalid, not a session-only one.
+    expect(resolveHostSubmissionContext('codex', { threadId: '  ', sessionId: 'sess-valid' }).status).toBe('invalid');
+    expect(resolveHostSubmissionContext('codex', { threadId: 'x'.repeat(201), sessionId: 'sess-valid' }).status).toBe('invalid');
+  });
+
+  it('a malformed sessionId without a threadId is invalid with its own code', () => {
+    expect(resolveHostSubmissionContext('codex', { sessionId: 'unknown' })).toEqual({
+      status: 'invalid',
+      reasonCode: 'codex_session_id_invalid',
+    });
   });
 
   it('meta with only unrelated keys (progress tokens) is missing', () => {
@@ -162,6 +178,14 @@ describe('hostSessionClaimConflictsWithContext — fail-closed conflict rule (T3
   it('a model-forged disagreeing claim conflicts (fail closed)', () => {
     expect(hostSessionClaimConflictsWithContext({ threadId: 'forged-thread' }, context)).toBe(true);
     expect(hostSessionClaimConflictsWithContext({ sessionId: 'forged-session' }, context)).toBe(true);
+  });
+
+  it('P2: a MIXED claim with one agreeing and one foreign value still conflicts (T4)', () => {
+    // One matching value must never launder a second, foreign one.
+    expect(hostSessionClaimConflictsWithContext({ threadId: 'foreign-1', sessionId: 'trusted-1' }, context)).toBe(true);
+    expect(hostSessionClaimConflictsWithContext({ threadId: 'trusted-1', sessionId: 'foreign-1' }, context)).toBe(true);
+    // Fully-agreeing mixed claims stay clean.
+    expect(hostSessionClaimConflictsWithContext({ threadId: 'trusted-1', sessionId: 'trusted-1' }, context)).toBe(false);
   });
 
   it('sentinel-only or empty claims do not conflict (they are simply unusable)', () => {

@@ -459,7 +459,10 @@ describe('input contract (§5.3) — rejected before any write', () => {
       const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
       try {
         for (const [meta, detail] of [
-          [{ threadId: 'cli' }, 'host_context_invalid:codex_host_metadata_missing_session'],
+          // P2 review round: a present-but-sentinel threadId carries its OWN
+          // invalid code now — it never falls back to sessionId and never
+          // reads as "no metadata".
+          [{ threadId: 'cli' }, 'host_context_invalid:codex_thread_id_invalid'],
           [{ threadId: 'thread-s', 'x-codex-turn-metadata': 'garbage' }, 'host_context_invalid:codex_turn_metadata_invalid'],
         ] as const) {
           const result = parseReceipt(await h.client.callTool({

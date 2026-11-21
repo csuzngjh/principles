@@ -7,6 +7,11 @@
  * `recoverTaskIdentityFromReceipt` and asserts the SAME task row — identity
  * restored via CAS, idempotent replays folded, every protected state
  * (terminal / leased / foreign / conflicting identity) untouched.
+ *
+ * Review round 2: the receipt's `sessionAssociation` is the P1-2 security
+ * boundary — only `codex_host_metadata_missing` is recoverable; a
+ * host_context_conflict / blocked_by_consent / host_context_invalid /
+ * codex_target_turn_invalid receipt must NEVER bind through PostToolUse.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
@@ -30,6 +35,7 @@ function makeBridge(): PainSignalBridge {
   return new PainSignalBridge({
     stateManager,
     runner,
+    workspaceDir: tmpDir,
     intakeService: {} as never,
     ledgerAdapter: { register: () => undefined, existsForCandidate: () => undefined, getEntries: () => [] } as never,
   });
@@ -37,12 +43,14 @@ function makeBridge(): PainSignalBridge {
 
 /** The exact unbound MCP ingress shape `pd_submit_pain` persists when the
  * request carried no trusted `_meta` (see submitPainCapability). */
-function unboundMcpIngress() {
+function unboundMcpIngress(evidenceCount = 0) {
   return {
     version: 'v1',
     origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
     correlation: { status: 'unbound', reason: 'missing_host_session' },
-    evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    ...(evidenceCount > 0
+      ? { evidenceClass: { status: 'available', entryCount: evidenceCount } }
+      : { evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' } }),
   } as const;
 }
 
@@ -56,7 +64,7 @@ async function persistUnboundPain(painId: string, evidence: { sourceRef: string;
     provenance: 'agent_reported_owner_approved',
     hostKind: 'codex',
     evidence,
-    painIngress: unboundMcpIngress(),
+    painIngress: unboundMcpIngress(evidence.length),
   });
   return taskId;
 }
@@ -75,6 +83,10 @@ function receiptJson(painId: string, workspaceDir: string, overrides: Record<str
     warnings: [],
     error: null,
     nextAction: null,
+    // The realistic unbound cause for the Codex fallback territory — the
+    // receipt the MCP server actually returns when the request carried no
+    // trusted `_meta` (P1-2 gate input).
+    sessionAssociation: { status: 'unverified', detail: 'codex_host_metadata_missing' },
     ...overrides,
   };
 }
@@ -122,6 +134,26 @@ describe('validatePainSubmitReceipt — strict surface (T3 negatives)', () => {
     expect(validatePainSubmitReceipt(receiptJson('mcp_1_a', tmpDir, { status: 'failed' }), { workspaceDir: tmpDir }).ok).toBe(false);
   });
 
+  it('rejects a non-string / object status without throwing (fixed code, no raw text)', () => {
+    // A JSON object with a throwing toString must not escape the validator,
+    // and the raw value must not be stringified into the reason code.
+    const hostile = receiptJson('mcp_1_a', tmpDir);
+    hostile.status = { toString(): string { throw new Error('boom'); } };
+    const result = validatePainSubmitReceipt(hostile, { workspaceDir: tmpDir });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reasonCode).toBe('receipt_status_not_recoverable');
+  });
+
+  it('rejects a malformed sessionAssociation (P1-2 boundary is validated, not dropped)', () => {
+    const result = validatePainSubmitReceipt(receiptJson('mcp_1_a', tmpDir, { sessionAssociation: { status: 'weird' } }), { workspaceDir: tmpDir });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reasonCode).toBe('receipt_session_association_invalid');
+    const extra = validatePainSubmitReceipt(receiptJson('mcp_1_a', tmpDir, { sessionAssociation: { status: 'unverified', detail: 'x', extra: 1 } }), { workspaceDir: tmpDir });
+    expect(extra.ok).toBe(false);
+  });
+
   it('rejects a broken deterministic taskId↔painId mapping', () => {
     const result = validatePainSubmitReceipt(receiptJson('mcp_1_a', tmpDir, { taskId: 'diagnosis_something_else' }), { workspaceDir: tmpDir });
     expect(result.ok).toBe(false);
@@ -149,6 +181,54 @@ describe('validatePainSubmitReceipt — strict surface (T3 negatives)', () => {
   });
 });
 
+describe('recoverTaskIdentityFromReceipt — P1-2 sessionAssociation security gate (T3)', () => {
+  const NOT_RECOVERABLE = [
+    'host_context_conflict',
+    'host_context_invalid:host_context_v1_invalid_shape',
+    'blocked_by_consent',
+    'codex_target_turn_invalid',
+  ] as const;
+
+  for (const detail of NOT_RECOVERABLE) {
+    it(`a receipt whose main path refused for ${detail} is never bound by the fallback`, async () => {
+      const painId = 'mcp_1700000000020_1f000020';
+      const taskId = await persistUnboundPain(painId);
+      const validated = validatePainSubmitReceipt(
+        receiptJson(painId, tmpDir, { sessionAssociation: { status: 'unverified', detail } }),
+        { workspaceDir: tmpDir },
+      );
+      if (!validated.ok) throw new Error('fixture receipt invalid');
+
+      const outcome = await recoverTaskIdentityFromReceipt({
+        workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+        identity: identity(), authorization: authorize(true),
+      });
+      expect(outcome.status).toBe('rejected');
+      if (outcome.status !== 'rejected') return;
+      expect(outcome.reasonCode).toBe('session_association_not_recoverable');
+      expect(outcome.detail).toBe(detail);
+      // No store write happened at all: the task keeps its unbound shape.
+      const diagnostic = await readDiagnostic(taskId);
+      expect(diagnostic.sessionIdHint).toBeNull();
+      expect(Object.hasOwn(diagnostic, 'recovery')).toBe(false);
+    });
+  }
+
+  it('a receipt with NO sessionAssociation record fails closed (absent is not a designated cause)', async () => {
+    const painId = 'mcp_1700000000021_2e000021';
+    await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir, { sessionAssociation: undefined }), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+    });
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.reasonCode).toBe('session_association_not_recoverable');
+  });
+});
+
 describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () => {
   it('recovers the SAME original task and keeps re-entry consistency', async () => {
     const painId = 'mcp_1700000000001_aa000001';
@@ -168,8 +248,10 @@ describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () =>
     // 原 painId/taskId 不变（唯一业务锚点）。
     expect(outcome.painId).toBe(painId);
     expect(outcome.taskId).toBe(taskId);
+    // The event turn is the submission turn AND the target turn; with no
+    // target text available yet (P1-3), the disposition waits.
     expect(outcome.disposition.state).toBe('waiting_for_target_evidence');
-    expect(outcome.disposition.reasonCode).toBe('receipt_recovered');
+    expect(outcome.disposition.reasonCode).toBe('target_turn_text_pending');
     expect(outcome.disposition.receiptRef?.toolCallId).toBe('toolu_call_1');
 
     const task = await stateManager.getTask(taskId);
@@ -184,6 +266,7 @@ describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () =>
       status: 'verified',
       sessionId: 'codex-rollout-r1',
       submissionTurnId: 'turn-42',
+      targetTurnId: 'turn-42',
     });
 
     // CRITICAL: the recovered payload must still pass the reader-side
@@ -204,6 +287,23 @@ describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () =>
     expect(recovery.schemaVersion).toBe(1);
   });
 
+  it('a target turn whose text IS available resolves to ready_for_diagnosis (P1-3)', async () => {
+    const painId = 'mcp_1700000000016_0a000016';
+    await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+      targetTurnTextAvailable: () => true,
+    });
+    expect(outcome.status).toBe('recovered');
+    if (outcome.status !== 'recovered') return;
+    expect(outcome.disposition.state).toBe('ready_for_diagnosis');
+    expect(outcome.disposition.reasonCode).toBe('receipt_recovered');
+    expect(outcome.disposition.resolvedAt).toBeDefined();
+  });
+
   it('a task that already carries evidence resolves to ready_for_diagnosis', async () => {
     const painId = 'mcp_1700000000002_bb000002';
     const taskId = await persistUnboundPain(painId, [{ sourceRef: 'governance_observation:k1', note: 'turn text' }]);
@@ -219,13 +319,16 @@ describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () =>
     expect(outcome.disposition.state).toBe('ready_for_diagnosis');
     expect(outcome.disposition.resolvedAt).toBeDefined();
 
-    // Evidence untouched (identity recovery never fabricates evidence).
+    // Evidence untouched (identity recovery never fabricates evidence), and
+    // the fixture stays readable by the diagnosis re-entry gate.
     const diagnostic = await readDiagnostic(taskId);
     expect(Array.isArray(diagnostic.evidence)).toBe(true);
     expect((diagnostic.evidence as unknown[]).length).toBe(1);
+    const ingress = parsePainIngressV1Payload(diagnostic.painIngress);
+    expect(ingress.ok).toBe(true);
   });
 
-  it('submission turn absent from the event still recovers the session', async () => {
+  it('submission turn absent from the event still recovers the session (no target pinned)', async () => {
     const painId = 'mcp_1700000000003_cc000003';
     await persistUnboundPain(painId);
     const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
@@ -239,11 +342,14 @@ describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () =>
     const diagnostic = await readDiagnostic(createDiagnosticianTaskId(painId));
     const verified = diagnostic.painIngress as Record<string, unknown>;
     expect(verified.verifiedHostSession).toEqual({ status: 'verified', sessionId: 'codex-rollout-r1' });
+    const recovery = diagnostic.recovery as Record<string, unknown>;
+    // No target turn named ⇒ session-level policy, no artificial wait.
+    expect(recovery.state).toBe('ready_for_diagnosis');
   });
 });
 
-describe('recoverTaskIdentityFromReceipt — idempotence and ambiguity (T4)', () => {
-  it('same physical call replayed folds into already_bound with no second write', async () => {
+describe('recoverTaskIdentityFromReceipt — idempotence and ambiguity (T4/T7)', () => {
+  it('same physical call replayed folds into already_bound with no second write (T7)', async () => {
     const painId = 'mcp_1700000000004_dd000004';
     await persistUnboundPain(painId);
     const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
@@ -325,8 +431,72 @@ describe('recoverTaskIdentityFromReceipt — idempotence and ambiguity (T4)', ()
   });
 });
 
-describe('recoverTaskIdentityFromReceipt — protected states (T3/T4 negatives)', () => {
-  it('authorization revoked → blocked_by_consent with a persisted disposition, identity untouched', async () => {
+describe('recoverTaskIdentityFromReceipt — P1-4 read→write race (T5, real SQLite)', () => {
+  it('a lease acquired between read and write is defeated by the CAS preconditions', async () => {
+    const painId = 'mcp_1700000000017_3b000017';
+    const taskId = await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+
+    // Wrap the manager: the FIRST getTask lets a "worker" acquire the lease
+    // after the recovery has read the row but before its CAS — exactly the
+    // P1-4 window. The preconditioned UPDATE must lose, re-read, and then
+    // honor the now-active lease instead of writing identity under it.
+    let intercepted = false;
+    const racingManager = Object.create(stateManager) as RuntimeStateManager;
+    racingManager.getTask = async (id: string) => {
+      const task = await stateManager.getTask(id);
+      if (!intercepted && task !== null && id === taskId) {
+        intercepted = true;
+        await stateManager.acquireLease({ taskId, owner: 'racing-worker', runtimeKind: 'test-double', durationMs: 60_000 });
+      }
+      return task;
+    };
+
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+      managerFactory: async () => racingManager,
+    });
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.reasonCode).toBe('task_leased');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.sessionIdHint).toBeNull();
+  });
+
+  it('a terminal transition between read and write is defeated the same way', async () => {
+    const painId = 'mcp_1700000000018_4c000018';
+    const taskId = await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+
+    let intercepted = false;
+    const racingManager = Object.create(stateManager) as RuntimeStateManager;
+    racingManager.getTask = async (id: string) => {
+      const task = await stateManager.getTask(id);
+      if (!intercepted && task !== null && id === taskId) {
+        intercepted = true;
+        await stateManager.updateTask(taskId, { status: 'succeeded' });
+      }
+      return task;
+    };
+
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+      managerFactory: async () => racingManager,
+    });
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.reasonCode).toBe('task_terminal');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.sessionIdHint).toBeNull();
+  });
+});
+
+describe('recoverTaskIdentityFromReceipt — protected states (T3/T4/T8/T9 negatives)', () => {
+  it('authorization revoked → blocked_by_consent disposition, identity untouched', async () => {
     const painId = 'mcp_1700000000008_88000008';
     const taskId = await persistUnboundPain(painId);
     const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
@@ -346,6 +516,25 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4 negatives)'
     expect(recovery.reasonCode).toBe('minimal_identity_metadata_not_granted');
   });
 
+  it('T9: with the authorization OFF, ZERO identity metadata is persisted — no receiptRef, no toolCallId anywhere', async () => {
+    const painId = 'mcp_1700000000019_5d000019';
+    const taskId = await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(false),
+    });
+    const raw = (await stateManager.getTask(taskId))?.diagnosticJson ?? '';
+    const diagnostic = JSON.parse(raw) as Record<string, unknown>;
+    const recovery = diagnostic.recovery as Record<string, unknown> | undefined;
+    expect(recovery).toBeDefined();
+    expect(Object.hasOwn(recovery as object, 'receiptRef')).toBe(false);
+    expect(raw).not.toContain('toolu_call_1');
+    expect(raw).not.toContain('codex-rollout-r1');
+    expect(raw).not.toContain('turn-42');
+  });
+
   it('repeated blocked_by_consent checks increment attemptCount (bounded state, not a reset)', async () => {
     const painId = 'mcp_1700000000009_77000009';
     await persistUnboundPain(painId);
@@ -362,7 +551,7 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4 negatives)'
     expect(recovery.attemptCount).toBe(2);
   });
 
-  it('submit_unconfirmed requires the exact-ID read-back before recovering', async () => {
+  it('submit_unconfirmed requires the exact-ID read-back before recovering (T8)', async () => {
     const painId = 'mcp_1700000000010_66000010';
     const missing = validatePainSubmitReceipt(receiptJson(painId, tmpDir, { status: 'submit_unconfirmed' }), { workspaceDir: tmpDir });
     if (!missing.ok) throw new Error('fixture receipt invalid');
@@ -414,6 +603,65 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4 negatives)'
     expect(outcome.reasonCode).toBe('task_input_ref_mismatch');
   });
 
+  it('a non-Codex task (hostKind mismatch) is never bound by a Codex PostToolUse event (P1-2.6)', async () => {
+    const painId = 'mcp_1700000000024_6f000024';
+    const bridge = makeBridge();
+    const { taskId } = await bridge.submitPainSignal({
+      painId,
+      painType: 'principle_deviation',
+      source: 'mcp_agent_assisted',
+      reason: 'openclaw submission',
+      provenance: 'agent_reported_owner_approved',
+      hostKind: 'openclaw',
+      evidence: [],
+      painIngress: unboundMcpIngress(),
+    });
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+    });
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.reasonCode).toBe('task_host_kind_mismatch');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.sessionIdHint).toBeNull();
+  });
+
+  it('a task persisted for a DIFFERENT workspace is never bound (P1-2.6)', async () => {
+    const painId = 'mcp_1700000000025_7a000025';
+    // Same store, but the persisted diagnostic workspace names another dir.
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: { run: async () => ({ status: 'succeeded', taskId: 't', attemptCount: 1 }) },
+      workspaceDir: path.join(path.dirname(tmpDir), 'another-workspace'),
+      intakeService: {} as never,
+      ledgerAdapter: { register: () => undefined, existsForCandidate: () => undefined, getEntries: () => [] } as never,
+    });
+    const { taskId } = await bridge.submitPainSignal({
+      painId,
+      painType: 'principle_deviation',
+      source: 'mcp_agent_assisted',
+      reason: 'foreign workspace fixture',
+      provenance: 'agent_reported_owner_approved',
+      hostKind: 'codex',
+      evidence: [],
+      painIngress: unboundMcpIngress(),
+    });
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+    });
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.reasonCode).toBe('task_workspace_mismatch');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.sessionIdHint).toBeNull();
+  });
+
   it('terminal tasks are never mutated (no reopening of historical state)', async () => {
     const painId = 'mcp_1700000000013_33000013';
     const taskId = await persistUnboundPain(painId);
@@ -458,6 +706,7 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4 negatives)'
       source: 'manual',
       reason: 'legacy shape without ingress',
       provenance: 'owner_reported_no_host_trace',
+      hostKind: 'codex',
       evidence: [],
     });
     const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });

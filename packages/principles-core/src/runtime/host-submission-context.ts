@@ -94,10 +94,26 @@ function readOptionalContextIds(container: Record<string, unknown>): { submissio
  * object is `invalid`, not silently ignored.
  */
 function resolveCodexContext(meta: Readonly<Record<string, unknown>>): HostSubmissionContextResolution {
-  const sessionId = readHostId(meta.threadId) ?? readHostId(meta.sessionId);
+  // A PRESENT identity field is validated in place — present-but-unusable
+  // (sentinel spelling, oversized, empty, wrong type) is `invalid`, NEVER a
+  // silent fallback to the other field: `{threadId:'cli', sessionId:'ok'}`
+  // is a half-broken identity, not a session-only one (P2 review round).
+  let sessionId: string | undefined;
+  if (Object.hasOwn(meta, 'threadId')) {
+    sessionId = readHostId(meta.threadId);
+    if (sessionId === undefined) {
+      return { status: 'invalid', reasonCode: 'codex_thread_id_invalid' };
+    }
+  } else if (Object.hasOwn(meta, 'sessionId')) {
+    sessionId = readHostId(meta.sessionId);
+    if (sessionId === undefined) {
+      return { status: 'invalid', reasonCode: 'codex_session_id_invalid' };
+    }
+  }
   if (sessionId === undefined) {
-    // Metadata existed but carried no usable session — invalid, not missing:
-    // a half-present identity must never trigger the "no metadata" fallback.
+    // Metadata existed but carried no identity field value at all — invalid,
+    // not missing: a half-present identity must never trigger the "no
+    // metadata" fallback.
     return { status: 'invalid', reasonCode: 'codex_host_metadata_missing_session' };
   }
   let submissionTurnId: string | undefined;
@@ -193,5 +209,8 @@ export function hostSessionClaimConflictsWithContext(
   const candidates = [claim.threadId, claim.sessionId].filter((value): value is string =>
     typeof value === 'string' && value.trim().length > 0 && !isSentinelSessionId(value.trim()));
   if (candidates.length === 0) return false;
-  return !candidates.includes(context.sessionId);
+  // ANY usable claim candidate that disagrees with the trusted session is a
+  // conflict: one matching value must never launder a second, foreign one
+  // (`{threadId:'foreign', sessionId:'trusted'}` fails closed, P2 review).
+  return candidates.some((value) => value !== context.sessionId);
 }

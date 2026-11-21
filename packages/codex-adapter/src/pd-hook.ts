@@ -14,7 +14,8 @@ import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
 import { runGovernanceAdmission } from './ingestion/admission.js';
-import { attemptPainReceiptFallback, painReceiptFallbackDiagnostic, PAIN_SUBMIT_TOOL_NAME } from './ingestion/pain-receipt-fallback.js';
+import { attemptPainReceiptFallback, painReceiptFallbackDiagnostic } from './ingestion/pain-receipt-fallback.js';
+import { isPainSubmitPostToolUseToolName } from './codec/input-decoder.js';
 import { parseOwnerStatementPrefix, recordExplicitOwnerStatement } from './ingestion/explicit-owner-statement.js';
 import { writeCurrentTurnContext, clearCurrentTurnContext } from './ingestion/turn-context.js';
 import { recordCodexPromptDeliveryEvidence, recordCodexDenyEvidence } from './codex-evidence-recorder.js';
@@ -1032,13 +1033,17 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // pd_submit_pain MCP request carried no trusted host `_meta`, its
     // original Pain/Task was legally persisted unbound; the host completion
     // event's own structured receipt + host-authoritative identity now
-    // restores the SAME task via the Core CAS recovery. Independent of
-    // codex_conversation_ingestion (no transcript read; ids only), gated by
-    // the Workspace-level host_identity_minimal_metadata authorization.
-    // Fail-open: a fallback failure never changes the host decision.
+    // restores the SAME task via the Core CAS recovery. P1-1: the tool name
+    // arrives in Codex's MCP namespace (`mcp__pd_recall__pd_submit_pain`) and
+    // is gated by the exact codec parser — a bare or foreign-server name
+    // never enters. Independent of codex_conversation_ingestion (no
+    // transcript read; ids only), gated by the Workspace-level
+    // host_identity_minimal_metadata authorization. Fail-open: a fallback
+    // failure never changes the host decision.
     const receiptDiagnostics: string[] = [];
     if (event.kind === 'after_tool_call'
-      && event.context.toolName === PAIN_SUBMIT_TOOL_NAME
+      && event.context.toolName !== undefined
+      && isPainSubmitPostToolUseToolName(event.context.toolName)
       && event.context.toolCallId !== undefined) {
       try {
         const fallback = await attemptPainReceiptFallback({
@@ -1054,10 +1059,27 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         });
         const line = painReceiptFallbackDiagnostic(fallback);
         if (line !== null) {
-          receiptDiagnostics.push(diagnostic(line, 'The pain submission identity recovery outcome is recorded on the original task; no resubmission is needed.'));
+          // P1-5 (option B): the nextAction states EXACTLY what happened —
+          // only `recovered`/`already_bound` mean the task carries the
+          // identity; a refusal left the submission legally unbound and is
+          // NOT retried by any worker cycle.
+          const nextAction = fallback.status === 'not_applicable'
+            ? undefined
+            : fallback.outcome.status === 'recovered'
+              ? 'The submission identity was restored on the original task; no resubmission is needed.'
+              : fallback.outcome.status === 'already_bound'
+                ? 'The original task already carries this identity; nothing to do.'
+                : fallback.outcome.reasonCode === 'blocked_by_consent'
+                  ? 'The Workspace has not granted minimal identity-metadata collection; enable host_identity_minimal_metadata in .pd/config.yaml if binding is wanted.'
+                  : 'The recovery was refused and is not retried automatically; the submission stays legally unbound. Resubmit pd_submit_pain only if the binding is needed.';
+          receiptDiagnostics.push(nextAction === undefined
+            ? diagnostic(line, 'The receipt fallback outcome was recorded.')
+            : diagnostic(line, nextAction));
         }
       } catch (error: unknown) {
-        receiptDiagnostics.push(diagnostic(`pain_receipt_fallback_failed:${errorMessage(error)}`, 'The hook decision is unaffected; the workspace worker re-evaluates recovery on the next cycle.'));
+        // P1-5 (option B): no next-cycle retry exists for receipt recovery —
+        // the promise is removed rather than kept false.
+        receiptDiagnostics.push(diagnostic(`pain_receipt_fallback_failed:${errorMessage(error)}`, 'The hook decision is unaffected; identity recovery for this call did not complete and is not retried automatically — the submission stays legally unbound.'));
       }
     }
     const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics, ...adaptiveDiagnostics, ...toolSemanticsDiagnostics, ...backgroundDiagnostics, ...receiptDiagnostics];

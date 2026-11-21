@@ -47,7 +47,7 @@ async function persistUnboundPain(workspaceDir: string, painId: string): Promise
   return taskId;
 }
 
-function postToolUsePayload(root: string, toolResponse: unknown, toolName = 'pd_submit_pain'): string {
+function postToolUsePayload(root: string, toolResponse: unknown, toolName = 'mcp__pd_recall__pd_submit_pain'): string {
   return JSON.stringify({
     session_id: '0b21621e-0000-4000-8000-000000000041',
     turn_id: '0b21621e-0000-4000-8000-000000000042',
@@ -63,7 +63,7 @@ function postToolUsePayload(root: string, toolResponse: unknown, toolName = 'pd_
   });
 }
 
-function envelopeReceipt(painId: string, workspaceDir: string): unknown {
+function envelopeReceipt(painId: string, workspaceDir: string, overrides: Record<string, unknown> = {}): unknown {
   return {
     content: [{
       type: 'text',
@@ -80,6 +80,8 @@ function envelopeReceipt(painId: string, workspaceDir: string): unknown {
         warnings: ['host_session_unverified:codex_host_metadata_missing'],
         error: null,
         nextAction: null,
+        sessionAssociation: { status: 'unverified', detail: 'codex_host_metadata_missing' },
+        ...overrides,
       }),
     }],
   };
@@ -124,8 +126,10 @@ describe('pd-hook PostToolUse receipt fallback (B1/T2 through the real entry)', 
       status: 'verified',
       sessionId: '0b21621e-0000-4000-8000-000000000041',
       submissionTurnId: '0b21621e-0000-4000-8000-000000000042',
+      targetTurnId: '0b21621e-0000-4000-8000-000000000042',
     });
     expect(diagnostic.recovery.state).toBe('waiting_for_target_evidence');
+    expect(diagnostic.recovery.reasonCode).toBe('target_turn_text_pending');
   });
 
   it('runs with conversation ingestion OFF (independent authorization) and reads no transcript', async () => {
@@ -161,6 +165,54 @@ describe('pd-hook PostToolUse receipt fallback (B1/T2 through the real entry)', 
     );
     expect(result.exitCode).toBe(0);
     expect(result.stderr.some((line) => line.includes('pain_receipt'))).toBe(false);
+  });
+
+  it('P1-1: a BARE pd_submit_pain tool name never triggers the fallback (real names are namespaced)', async () => {
+    const { root, env } = workspace(true);
+    const painId = 'mcp_1700000000036_7c000036';
+    await persistUnboundPain(root, painId);
+    const result = await processHookInvocation(
+      postToolUsePayload(root, envelopeReceipt(painId, root), 'pd_submit_pain'),
+      env, root,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr.some((line) => line.includes('pain_receipt'))).toBe(false);
+    const after = await readTask(root, deriveSubmitTaskId(painId));
+    expect(JSON.parse(after?.diagnosticJson ?? '{}').sessionIdHint).toBeNull();
+  });
+
+  it('P1-1: a same-named tool on a FOREIGN MCP server never triggers the fallback', async () => {
+    const { root, env } = workspace(true);
+    const painId = 'mcp_1700000000037_6d000037';
+    await persistUnboundPain(root, painId);
+    const result = await processHookInvocation(
+      postToolUsePayload(root, envelopeReceipt(painId, root), 'mcp__evil_mirror__pd_submit_pain'),
+      env, root,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr.some((line) => line.includes('pain_receipt'))).toBe(false);
+    const after = await readTask(root, deriveSubmitTaskId(painId));
+    expect(JSON.parse(after?.diagnosticJson ?? '{}').sessionIdHint).toBeNull();
+  });
+
+  it('P1-5(B): a refusal states it is NOT retried automatically — no next-cycle promise', async () => {
+    const { root, env } = workspace(true);
+    const painId = 'mcp_1700000000038_5e000038';
+    await persistUnboundPain(root, painId);
+    const result = await processHookInvocation(
+      postToolUsePayload(root, envelopeReceipt(painId, root, { sessionAssociation: { status: 'unverified', detail: 'host_context_conflict' } })),
+      env, root,
+    );
+    expect(result.exitCode).toBe(0);
+    const refusal = result.stderr.find((line) => line.includes('pain_receipt_rejected:session_association_not_recoverable'));
+    expect(refusal).toBeDefined();
+    expect(refusal).toContain('not retried automatically');
+    // The stale promise wording is gone.
+    expect(result.stderr.some((line) => line.includes('re-evaluates recovery on the next cycle'))).toBe(false);
+    const after = await readTask(root, deriveSubmitTaskId(painId));
+    const diagnostic = JSON.parse(after?.diagnosticJson ?? '{}');
+    expect(diagnostic.sessionIdHint).toBeNull();
+    expect(Object.hasOwn(diagnostic, 'recovery')).toBe(false);
   });
 
   it('a corrupted envelope degrades to one bounded diagnostic and no task mutation', async () => {
