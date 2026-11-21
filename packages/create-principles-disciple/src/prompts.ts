@@ -33,6 +33,17 @@ export interface InstallOptions {
    * Set by the --stop-gateway CLI flag.
    */
   stopGateway: boolean;
+  /**
+   * PRI-1281 Phase 3: EXPLICIT operator consent (--register-service-host) to
+   * register the user-level OS scheduler after install — created DISABLED
+   * (installed_disabled). Never set implicitly; no flag = no registration.
+   */
+  registerServiceHost?: boolean;
+  /**
+   * PRI-1281 Phase 3: EXPLICIT operator consent (--enable-service-host) to
+   * register AND enable the scheduler (implies registerServiceHost).
+   */
+  enableServiceHost?: boolean;
 }
 
 // Fix-4 (P0-BUG-4): Supported pi-ai providers for the interactive prompt.
@@ -320,6 +331,10 @@ export async function runPrompts(
     host,
     runtimeProfile,
     stopGateway: cliOptions.stopGateway === true,
+    // PRI-1281 Phase 3: scheduler consent is flag-only (never prompted) —
+    // an interactive install without the flag registers nothing (task §6).
+    registerServiceHost: cliOptions.enableServiceHost === true || cliOptions.registerServiceHost === true,
+    enableServiceHost: cliOptions.enableServiceHost === true,
   };
 
   const confirmed = await promptConfirm(options);

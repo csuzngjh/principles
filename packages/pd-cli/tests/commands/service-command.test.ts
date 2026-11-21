@@ -79,10 +79,32 @@ describe('registration (cli-7: the shipped program object)', () => {
     expect(runOnce.options.find((o: Option) => o.long === '--host')).toBeDefined();
     expect(runOnce.options.find((o: Option) => o.long === '--timeout-ms')).toBeDefined();
   });
+
+  it('Phase 3: run-once gains --trigger and --pd-home; the five lifecycle subcommands are registered (cli-7)', () => {
+    const runOnce = findServiceRunOnce();
+    expect(runOnce.options.find((o: Option) => o.long === '--trigger')).toBeDefined();
+    expect(runOnce.options.find((o: Option) => o.long === '--pd-home')).toBeDefined();
+
+    const program = buildPdProgram();
+    const service = program.commands.find((c) => c.name() === 'service');
+    expect(service).toBeDefined();
+    const names = (service?.commands ?? []).map((c) => c.name());
+    for (const sub of ['install', 'enable', 'disable', 'uninstall', 'status']) {
+      expect(names, `service ${sub} must be registered`).toContain(sub);
+    }
+    const install = service?.commands.find((c) => c.name() === 'install');
+    expect(install?.options.find((o: Option) => o.long === '--interval-ms')).toBeDefined();
+    expect(install?.options.find((o: Option) => o.long === '--pd-home')).toBeDefined();
+    expect(install?.options.find((o: Option) => o.long === '--json')).toBeDefined();
+    const status = service?.commands.find((c) => c.name() === 'status');
+    expect(status?.options.find((o: Option) => o.long === '--json')).toBeDefined();
+  });
 });
 
 describe('handler behavior through the real action', () => {
-  it('without a mode flag the coordinator refuses with mode_required_phase2 (exit 1, one JSON doc)', async () => {
+  it('Phase 3: a bare run is the MANAGED execution — pinned home without an install refuses fail-closed (exit 1, one JSON doc)', async () => {
+    const home = tempHome();
+    pinnedHomedir = home;
     const runOnce = findServiceRunOnce();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await runOnce.parseAsync(['--json'], { from: 'user' });
@@ -91,9 +113,59 @@ describe('handler behavior through the real action', () => {
     expect(jsonLines).toHaveLength(1);
     const parsed = JSON.parse(jsonLines[0]?.[0] as string) as { outcome: string; reason: string; nextAction: string };
     expect(parsed.outcome).toBe('refused');
-    expect(parsed.reason).toBe('mode_required_phase2');
-    expect(parsed.nextAction).toContain('--dry-run');
-    expect(parsed.nextAction).toContain('--shadow');
+    // The trusted prefix refuses fail-closed: a missing install is never
+    // "zero workspaces" (task §4).
+    expect(parsed.reason).toMatch(/^install_manifest_missing|^active_release_missing/);
+    expect(parsed.nextAction.length).toBeGreaterThan(10);
+    expect(process.exitCode).toBe(1);
+    logSpy.mockRestore();
+    process.exitCode = 0;
+    pinnedHomedir = undefined;
+  });
+
+  it('Phase 3: a bare managed run over a legacy-only install is a LEGAL EMPTY completed run (exit 0, no worker)', async () => {
+    const home = tempHome();
+    const ws = path.join(home, 'legacy-ws');
+    mkdirSync(path.join(ws, '.pd'), { recursive: true });
+    const pdDir = path.join(home, '.pd');
+    mkdirSync(pdDir, { recursive: true });
+    writeFileSync(path.join(pdDir, 'install.json'), JSON.stringify({
+      layoutVersion: 1, mode: 'canonical', hosts: ['codex'],
+      workspaces: [ws],
+      backgroundExecutions: { [ws]: { state: 'legacy_owned', effectiveOwner: 'legacy', generation: 1, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-20T00:00:00.000Z' } },
+    }), 'utf8');
+    writeFileSync(path.join(pdDir, 'active.json'), JSON.stringify({
+      schemaVersion: 1, generation: 5, releaseId: 'bundled-9.9.9-cli', releaseMetadataDigest: 'a'.repeat(64),
+      previousReleaseId: null, transactionId: 'txn-1', productVersion: '9.9.9',
+    }), 'utf8');
+    pinnedHomedir = home;
+    const runOnce = findServiceRunOnce();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runOnce.parseAsync(['--json', '--trigger', 'scheduler'], { from: 'user' });
+    const jsonLines = logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'));
+    expect(jsonLines).toHaveLength(1);
+    const parsed = JSON.parse(jsonLines[0]?.[0] as string) as {
+      outcome: string; managed?: { emptyReason?: string; executions?: Array<{ admission: string; skipReason?: string }> };
+    };
+    expect(parsed.outcome).toBe('completed');
+    expect(parsed.managed?.emptyReason).toBe('no_service_host_owned_workspaces');
+    expect(parsed.managed?.executions?.[0]?.skipReason).toBe('legacy_owned_workspace');
+    // Legal empty execution — exit 0, no Worker started.
+    expect(process.exitCode).toBe(0);
+    logSpy.mockRestore();
+    process.exitCode = 0;
+    pinnedHomedir = undefined;
+  });
+
+  it('Phase 3: an invalid --trigger value is refused (fail-closed)', async () => {
+    const runOnce = findServiceRunOnce();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runOnce.parseAsync(['--json', '--trigger', 'login'], { from: 'user' });
+    const jsonLines = logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'));
+    expect(jsonLines).toHaveLength(1);
+    const parsed = JSON.parse(jsonLines[0]?.[0] as string) as { outcome: string; reason: string };
+    expect(parsed.outcome).toBe('refused');
+    expect(parsed.reason).toBe('invalid_trigger:login');
     expect(process.exitCode).toBe(1);
     logSpy.mockRestore();
     process.exitCode = 0;
