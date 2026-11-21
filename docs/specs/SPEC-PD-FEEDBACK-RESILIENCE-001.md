@@ -1,11 +1,12 @@
 # SPEC-PD-FEEDBACK-RESILIENCE-001 — 痛苦信号可靠接收与自动恢复
 
+- v0.7，调整为宿主请求身份前置绑定、结构化提交回执兜底、目标证据独立补齐；明确 Codex / WorkBuddy / OpenClaw 的 MCP 元数据传递边界，2026-11-21
 - v0.6，明确 Pain 孤儿任务自动恢复闭环：可信提交回执恢复身份、晚到证据补全、无界面后台续跑与非无限 Pending，2026-11-21
 - v0.5，对齐 Service Host 授权状态（ADR-0020 §11.6）并补齐三类上报行为的授权边界（§2），2026-11-20
 - v0.4，固化完整上下文行为偏差事件与相对评价语义，2026-11-19
 - 配套 [技术设计与接口契约](./SPEC-PD-FEEDBACK-RESILIENCE-001-TECHNICAL-DESIGN.md)。
 - 后台生命周期的独立所有权另见 [PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md)；架构已获 ADR-0020 §11.6 批准（Architecture Approved），Service Host 实施由 PRI-1278 跟踪且已进入 In Progress，Phase 5 生产交接完成前仍以现有 Companion / OpenClaw 生命周期为准。
-- 核对基线为 `origin/main@2e91fdfa7916bf04943f16325da4beb0c95cd934`（2026-11-21）。[#2699](https://github.com/csuzngjh/principles/pull/2699) 是 PD Home 与宿主工作区的路径权威。[#2701](https://github.com/csuzngjh/principles/pull/2701) 的原轮取证与 [#2702](https://github.com/csuzngjh/principles/pull/2702) 的 worker 可观测性均已合并。以下区分现有源码事实与待实现契约；安装物须另行验收。
+- 核对基线为 `origin/main@44eb2260606776dc28939a45d5375c2fb29b4a0c`（2026-11-21）。[#2699](https://github.com/csuzngjh/principles/pull/2699) 是 PD Home 与宿主工作区的路径权威。[#2701](https://github.com/csuzngjh/principles/pull/2701) 的原轮取证与 [#2702](https://github.com/csuzngjh/principles/pull/2702) 的 worker 可观测性均已合并。以下区分现有源码事实与待实现契约；安装物须另行验收。宿主元数据调用链审计见[配套报告](../reports/PD_HOST_IDENTITY_CONTEXT_AUDIT_20261121.md)。
 - **规范性语义**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。本 SPEC 不另造一套事件管道；Pain 入口、轨迹存储和任务管道继续复用现有实现。
 
 ## 1. 什么值得 PD 记下
@@ -32,11 +33,11 @@ Pain 是定位和触发信号，不是数据集样本本体。**数据集的基�
 
 ## 2. 用户在宿主里应得到什么
 
-用户在对话里说「记一下刚才漏验收的问题」。PD 给出真实保存回执。即使 MCP 创建 Pain 成功、但宿主没有把 `sessionId` 等关联信息传完整，PD 也不能让原任务无声地永久停在 `pending`。PD 必须通过独立恢复回路，先找回可信提交身份，再补齐目标证据，并继续原任务的诊断与准入。用户无需进入 Console、追 ID、重复贴原话、手动重试或重新创建 Pain；原 `painId` 与 `taskId` 必须保持不变。
+用户在对话里说「记一下刚才漏验收的问题」。PD 给出真实保存回执。**主路径**是在 `pd_submit_pain` 的 MCP `tools/call` 请求到达时，从宿主注入的 `_meta` 读取提交上下文，并在原 Pain/Task 写入前完成 Workspace、host 与 Session 身份校验和绑定。身份绑定不依赖目标轮正文已经采集。若宿主没有提供可验证上下文，PD 仍先合法保存原 Pain/Task 为 unbound，再由宿主正式工具完成事件中的结构化提交回执执行兜底恢复。两条路径都更新同一原 Task，不要求用户进入 Console、追 ID、重复贴原话、手动重试或重新创建 Pain；原 `painId` 与 `taskId` 必须保持不变。
 
-提交会话/提交轮与实际问题所在的目标轮是两个不同身份。回执只能证明哪一次 `pd_submit_pain` 调用创建了这条 Pain；它不能自动证明问题发生在哪一轮。目标轮必须来自明确线索并经过同一 Workspace、同一宿主的独立核验，不得用提交轮、最近一轮或文本相似度猜测。
+提交 Session 与提交 Turn（若宿主提供）只说明提交发生在哪个宿主上下文；目标 Turn 才说明痛苦信号指向哪一轮行为。前置 `_meta` 可以在提交时证明 Session 身份，但不证明目标轮正文已可读；兜底回执同样只恢复提交身份。目标轮必须来自明确线索并经过同一 Workspace、同一宿主、同一 Session 的独立核验，不得用提交轮、最近一轮或文本相似度猜测。只有现有明确的当轮语义才允许把提交轮作为目标轮。
 
-例如：MCP 已创建 `pain_001`，但 Task 的 `sessionIdHint` 为空。宿主的可信工具完成事件随后记录了 `pd_submit_pain` 的结构化成功回执及宿主提供的 Session/Turn 身份。PD 以回执中的 `painId/taskId` 精确匹配原任务，唯一匹配后恢复提交身份；如果目标正文尚未进入授权轨迹，则继续等待采集并自动补证。若没有可信回执、匹配不唯一或授权失效，PD 必须保留原记录并给出明确的 degraded/recovery 状态，不能猜测，也不能伪报恢复成功。
+例如：Codex 的 MCP 请求 `_meta` 携带 `threadId/sessionId`，并在可用时携带 `x-codex-turn-metadata.turn_id`。PD 在写入前绑定 Session；即使目标正文尚未进入授权轨迹，也保留身份并将目标证据状态标为 `waiting_for_target_evidence`。若请求没有可信 `_meta`，MCP 仍先创建原 `pain_001`，宿主 PostToolUse 随后捕获 `pd_submit_pain` 的结构化回执；PD 以 `painId/taskId` 精确匹配原任务，并通过 CAS 恢复同一 Task。若没有可信上下文或回执、匹配不唯一或授权失效，PD 必须保留原记录并给出明确的 degraded/recovery 状态，不能猜测，也不能伪报恢复成功。
 
 首版必须同时覆盖「缺失提交身份」和「已知目标正文晚到」两种故障；无界面后台运行是发布门槛，不是可延期的增强项。各宿主按真实能力逐一验收；未通过的宿主不得宣称支持完整自动恢复。整项产品交付须证明：Web、Console、Companion 均关闭时，原反馈仍可自动恢复并走到应有的治理节点。
 
@@ -66,10 +67,11 @@ Pain 是定位和触发信号，不是数据集样本本体。**数据集的基�
 
 ### G2 身份与证据自动恢复，失败不堵队列
 
-- **先恢复提交身份，再恢复目标证据。** MCP 创建成功但缺少 `sessionIdHint` 时，恢复器先从同一宿主的可信 `pd_submit_pain` 完成回执中找回提交 Session/Turn；只有身份核验成功后，才调用现有 `SourceTraceLocator` 定位目标轨迹。`SourceTraceLocator` 本身要求 `sessionIdHint`，不能把它当作缺失 Session 的恢复器。
-- **提交身份与目标身份分开。** 第 12 轮登记第 10 轮的问题时，提交回执定位第 12 轮；第 10 轮仍需由明确 `targetTurnId` 或同等可信线索定位。不能将第 12 轮、最近消息或相似文本替代第 10 轮。若目标未知，身份恢复成功也不等于证据已齐。
-- **使用最小化的可信回执材料。** 宿主适配器应在 `pd_submit_pain` 完成事件中捕获宿主权威的 session/turn/tool-call 身份及结构化回执中的 `painId/taskId/capability/schemaVersion/status`，只保存恢复所需元数据，不保存 prompt、reason、anchor 原文或完整 transcript。此能力必须有明确的一次性设置披露/授权；不得绕过 `codex_conversation_ingestion` 或既有 consent ledger，也不得读取宿主私有历史数据库。已有获授权轨迹中的结构化回执可作为兼容回退来源。
-- **严格唯一匹配。** 必须同时满足当前 Workspace、宿主类型、工具名 `pd_submit_pain`、受支持的回执 schema/capability、成功或已读回确认的提交状态、精确 `painId/taskId` 及唯一匹配。`submit_unconfirmed` 不能直接当作成功；须先按精确 ID 读回确认。零匹配、多匹配、跨宿主/跨 Workspace、伪造/损坏回执、来源撤回或过期均不得关联。
+
+- **优先前置绑定，缺失时回执兜底。** 宿主在 MCP `tools/call` `_meta` 提供可信 Session 上下文时，PD 在写入原 Task 前完成身份绑定；`hostKind` 与 Workspace 必须来自 MCP 进程启动绑定，不能由 `_meta` 或模型参数自报。此路径仅信任同一绑定 stdio client 生成的 host-generated `_meta`，不放宽 PRI-1260 对普通模型/用户 `hostSession` claim 的验证要求。只有元数据缺失时，才通过同一宿主正式完成事件中的结构化回执恢复原 Task 身份。`SourceTraceLocator` 只负责身份已绑定后的目标证据定位，不负责猜测或恢复 Session。
+- **提交身份与目标身份分开。** 提交 Session 与提交 Turn（若宿主提供）只证明提交发生在哪个宿主上下文；第 12 轮登记第 10 轮的问题时，第 10 轮仍需由明确 `targetTurnId` 或同等可信线索定位。宿主没有稳定提交 Turn 时，Session 身份仍可绑定，但目标轮必须保持未知/待核验。不能将提交轮、最近消息或相似文本替代第 10 轮。若目标未知，身份绑定成功也不等于证据已齐。
+- **最小身份元数据单独授权。** 前置 `_meta` 与回执兜底都只持久化恢复所需的 `sessionId/submissionTurnId/toolCallId/painId/taskId`、回执 schema/status 和时间等元数据，不保存 prompt、reason、anchor 原文、完整工具输入/输出或 transcript。必须有一次性 Workspace 级显式披露/授权；该授权与完整会话采集授权分离。完整 `codex_conversation_ingestion` 关闭时，不读取 transcript；若最小身份元数据授权已开启，仍可绑定提交身份。不得绕过现有 consent ledger，也不得读取宿主私有历史数据库。
+- **兜底回执严格唯一匹配。** 只有在 request `_meta` 缺失而进入回执兜底时，才要求同时满足当前 Workspace、宿主类型、工具名 `pd_submit_pain`、受支持的回执 schema/capability、成功或已读回确认的提交状态、精确 `painId/taskId` 及唯一匹配。`submit_unconfirmed` 不能直接当作成功；须先按精确 ID 读回确认。零匹配、多匹配、跨宿主/跨 Workspace、伪造/损坏回执、来源撤回或过期均不得关联。前置绑定则按宿主进程/Workspace 绑定、request `_meta` 来源与字段校验执行，不要求存在目标轮正文。
 - **目标证据晚到后自动补齐。** 复用 #2701 的精确取证、已有输入证据与宿主检查点补采。诊断和候选准入须通过真实读回消费同一份材料。授予读取权限不自动等于允许持久化新副本；正文读取、短摘录持久化与重用继续按现有 consent/retention 政策校验。
 - **恢复步骤必须在诊断领取之前执行。** 每个 Worker Cycle 在已有 catch-up/reconciliation 后、`pickDiagnosticianCandidate` 前执行有界 Pain Recovery Reconcile：先处理待恢复身份，再处理已知目标的待补证项；等待项在 SQL 排序和 `LIMIT` 前排除，其他正常任务继续推进。Service Host 负责唤醒周期，业务恢复逻辑仍复用现有 Worker Cycle。
 - **不得出现无原因、无下次检查的无限 Pending。** 在原任务 `diagnostic_json` 中持久化版本化 recovery disposition（状态、原因码、尝试次数、上次检查与下次检查时间）。按有界退避重试；超过策略上限后投影为 `recovery_exhausted/degraded`，保留原 Pain/Task，不删除、不伪造失败、不要求用户去 Console 点击重试。若之后收到新的可信回执/证据，可通过同一条件更新重新评估。没有可信来源时如实说明不可恢复原因。
@@ -90,8 +92,8 @@ Pain 是定位和触发信号，不是数据集样本本体。**数据集的基�
 | A2 目标正文晚到（PRI-1273，首版发布必过） | Session 与目标轮已可验证，目标正文尚未采集；正文晚到后自动补入同一原任务，真实诊断装配和候选准入消费同一证据。不得把该场景误当作缺失 Session 的恢复。 |
 | A3 隔离与正常任务推进 | 错会话、异宿主同 ID、授权撤回、源过期不误绑。构造多于领取上限的旧待补证任务，后面的正常任务仍能被领取。 |
 | A4 补采和重复恢复 | 超长完整行/未完成尾部不阻断合法后续记录；重复补采、两个并发执行者、崩溃后重跑不会重复补证或诊断。只有成功装配及准入的例子算闭环。 |
-| B1 缺失身份自动恢复（PRI-1274，首版发布必过） | 故意让真实 `pd_submit_pain` 请求缺少 Session 元数据，但保留宿主可信完成事件；原 Pain/Task 先成功落库并保持 unbound。PD 通过精确结构化回执唯一恢复提交 Session/Turn，更新原任务并继续后续证据定位。不得依赖宿主私有历史库、文本相似度或人工填 ID；历史终态任务重开不属于本首版。 |
-| B2 宿主适配器矩阵 | Codex、WorkBuddy、OpenClaw 分别证明工具完成回执与宿主 Session/Turn 的可信映射。只有通过该宿主真实验收，才能宣称该宿主支持自动恢复；未通过的宿主必须明确降级或关闭对应写入能力。 |
+| B1 缺失身份自动恢复（PRI-1274，首版发布必过） | 同时通过两条路径：主路径在真实 `pd_submit_pain` 请求携带可信 `_meta` 时，于写入前绑定宿主 Session；兜底路径故意移除元数据，原 Pain/Task 先成功落库为 unbound，再由宿主可信完成事件中的结构化回执唯一恢复同一 Task。目标正文是否到达单独验收。不得依赖宿主私有历史库、文本相似度或人工填 ID；历史终态任务重开不属于本首版。 |
+| B2 宿主适配器矩阵 | Codex 验证原生 MCP `_meta`；WorkBuddy/Pi 与 OpenClaw 分别补齐并验证 `_meta` 传递，且为元数据缺失保留 PostToolUse 回执兜底。每个宿主只声明实际提供并验证的 Session、提交 Turn、toolCallId 字段；未通过真实验收的宿主必须明确降级，不能把 `generation_id`、`sessionKey`、`runId` 或最近轮直接当作 Session/Turn。 |
 | B3 无界面运行（发布必过） | 从正式安装、登录后所有 UI 均未启动开始，提交一条故意缺失身份/证据但可恢复的真实 Pain。无需手动启动 worker 或点击重试，Service Host 周期完成身份恢复、晚到证据补齐、诊断与准入；中途终止后台进程后自行接续，原 ID 不变且无重复副作用。 |
 | R2 sourceRef 撤回安全门（PRI-1283，发布前置） | sourceRef 授权撤回后，诊断/重诊断/准入/Recall/Console/模型输入均检查最新 consent；已持久化摘录清退或不可恢复化；重授权不复活旧摘录。未通过不得宣称证据自动恢复达到生产发布条件。 |
 | B4 输入等价与自主创建（发布必过） | 同一具体偏差分别从手工 CLI、Skill 引导入口、MCP 和可信自动来源提交到隔离工作区。比较原任务读回与诊断实收输入；相同事实、不同来源如实保留。另验代理无授权、自动事件缺证后晚到、旧版原话及重复投递。 |
@@ -101,7 +103,7 @@ Pain 是定位和触发信号，不是数据集样本本体。**数据集的基�
 
 ## 5. 范围、复杂度与完成条件
 
-本修订不把历史终态任务重开、所有宿主同时改造或新建后台基础设施塞进一个实现票。首版聚焦新建 Pain 的身份恢复与目标证据补齐：复用原任务、现有 `diagnostic_json`、`sessionIdHint`、`verifiedHostSession`、`evidenceClass`、既有 sourceRef/consent/retention、Durable Lease 和 Worker Cycle。新增的仅是最小回执元数据捕获与版本化 recovery disposition；不新增 Pain 表、全局队列、第二套 Lease 或 Scheduler。Service Host 的生命周期实现归 `SPEC-PD-SERVICE-HOST-001` / PRI-1278。历史终态任务重开明确排除在首版之外。回退时保留原反馈及历史，已部署诊断不得读取未验证证据。
+本修订不把历史终态任务重开、所有宿主同时改造或新建后台基础设施塞进一个实现票。首版聚焦新建 Pain 的身份前置绑定、缺失身份回执兜底与目标证据补齐：复用原任务、现有 `diagnostic_json`、`sessionIdHint`、`verifiedHostSession`、`evidenceClass`、既有 sourceRef/consent/retention、Durable Lease 和 Worker Cycle。新增的仅是宿主 `_meta` 适配、最小回执捕获与版本化 recovery disposition；不新增 Pain 表、全局队列、第二套 Lease 或 Scheduler。Service Host 的生命周期实现归 `SPEC-PD-SERVICE-HOST-001` / PRI-1278。历史终态任务重开明确排除在首版之外。回退时保留原反馈及历史，已部署诊断不得读取未验证证据。
 
 首版闭环由可靠登记、B1 缺失身份自动恢复、A2 目标正文晚到补证、队列隔离/幂等和 B3 无界面后台推进共同构成；B1 与 B3 不得作为「首版之后再做」的独立增强项。B2 对所有声明支持的宿主逐一验收；未通过的宿主不得宣称完整支持。R2 Gate 仍是 sourceRef 证据使用的安全前置条件，由 PRI-1283 跟踪；未通过前不得发布完整证据自动恢复。B4/B5 仍是总产品的输入一致性与治理闭环门槛。A5/A6 是独立的数据集完整性、相对评价与时间隔离验收，不能由入口登记或补证成功替代。正式安装验证允许隔离模型返回确定性结果，须真实经过正常入口、后端进程、状态库和治理链。验收衡量数据能否流转，模型是否产出高价值原则另评。
 
