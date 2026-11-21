@@ -4,9 +4,11 @@
  *
  * Phase 1 public surface: the read-only run-once coordinator and its
  * building blocks. Phase 2 adds the unified Worker Adapter contract and the
- * explicit, bounded shadow coordinator (PRI-1280). No OS scheduler, no
- * owner-marker writes, no handover — later phases extend this package
- * within the same boundary (TD §11).
+ * explicit, bounded shadow coordinator (PRI-1280). Phase 3 adds the managed
+ * run (the OS scheduler entry), the Scheduler Adapter Contract with the
+ * three user-level platform adapters, and the unified read-only status
+ * contract (PRI-1281). No owner-marker writes, no handover — later phases
+ * extend this package within the same boundary (TD §11).
  */
 export {
   resolveCoordinatorInstallIdentity,
@@ -48,10 +50,15 @@ export {
 export {
   SERVICE_RUN_STATUS_SCHEMA_VERSION,
   readActiveReleaseFacts,
+  readServiceRunStatus,
   serviceRunStatusPath,
   writeServiceRunStatus,
   type ActiveReleaseFacts,
+  type ManagedExecutionRecord,
+  type ManagedRunStatusSection,
   type ServiceRunStatus,
+  type ServiceRunStatusRead,
+  type ServiceRunTriggerSource,
   type ShadowExecutionRecord,
   type ShadowRunStatusSection,
 } from './status/service-run-status.js';
@@ -103,3 +110,63 @@ export {
   type ShadowRunProbes,
   type ShadowRunResult,
 } from './shadow-run.js';
+// ── Phase 3 (PRI-1281): shared dispatch core + managed run + OS scheduler ──
+export {
+  carriedProgress,
+  dispatchWorkspaceAdapters,
+  workspaceStateFor,
+  type AdapterDispatchEntry,
+  type AdapterDispatchOutcome,
+  type DispatchWorkspaceAdaptersArgs,
+  type WorkspaceDispatchResult,
+} from './workspace-dispatch.js';
+export {
+  DEFAULT_MANAGED_WORKSPACE_TIMEOUT_MS,
+  runServiceManagedOnce,
+  type ManagedRunOptions,
+  type ManagedRunProbes,
+  type ManagedRunResult,
+} from './managed-run.js';
+export {
+  DEFAULT_SCHEDULER_INTERVAL_MS,
+  buildWindowsTaskXml,
+  buildMacosLaunchAgentPlist,
+  buildLinuxServiceUnit,
+  buildLinuxTimerUnit,
+  createLinuxSchedulerAdapter,
+  createMacosSchedulerAdapter,
+  createSpawnSchedulerRunner,
+  createWindowsSchedulerAdapter,
+  nodeSchedulerFileIo,
+  runSchedulerLifecycle,
+  schedulerIdentityFor,
+  schedulerInvocationArgs,
+  validateSchedulerIntervalMs,
+  parseWindowsIntervalMs,
+  parseMacosStartIntervalMs,
+  parseLinuxTimerIntervalMs,
+  type MacosSchedulerDeps,
+  type LinuxSchedulerDeps,
+  type SchedulerAdapter,
+  type SchedulerAdapterResolution,
+  type SchedulerCommandResult,
+  type SchedulerCommandRunner,
+  type SchedulerFileIo,
+  type SchedulerFacts,
+  type SchedulerIdentity,
+  type SchedulerLifecycleOperation,
+  type SchedulerLifecycleOptions,
+  type SchedulerLifecycleResult,
+  type SchedulerOperationResult,
+  type SchedulerPlatform,
+  type SchedulerRegistration,
+  type WindowsSchedulerDeps,
+} from './scheduler/index.js';
+export {
+  SERVICE_HOST_STATUS_SCHEMA_VERSION,
+  composeServiceHostStatus,
+  type ServiceHostStatusDocument,
+  type ServiceHostStatusOptions,
+  type ServiceHostStatusResult,
+  type ServiceHostStatusWorkspace,
+} from './scheduler/service-status.js';

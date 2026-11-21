@@ -27,6 +27,7 @@ import {
 import { handleFailedTasksRoute, disposeFailedTasksModels } from './routes/failed-tasks.js';
 import { handlePipelineHealthRoute, disposePipelineHealthModels } from './routes/pipeline-health.js';
 import { handleDiagnosticianRoute } from './routes/diagnostician.js';
+import { handleServiceHostRoute } from './routes/service-host.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
 import { handleHealthRoute, handleIngestionHealthRoute, disposeHealthModels } from './routes/health.js';
 import { handlePrinciplesRoute, handleCorePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
@@ -467,6 +468,16 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       if (routePath === '/api/diagnostician' || routePath.startsWith('/api/diagnostician/')) {
         const subPath = routePath.slice('/api/diagnostician'.length);
         asyncHandler(() => handleDiagnosticianRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
+        return;
+      }
+
+      // SPEC-PD-SERVICE-HOST-001 §7/§8.2 (PRI-1281 Phase 3): READ-ONLY
+      // Service Host status — the Console never owns scheduler lifecycle;
+      // the route spawns `pd service status --json` (the same single
+      // implementation the CLI uses).
+      if (routePath === '/api/service-host' || routePath.startsWith('/api/service-host/')) {
+        const subPath = routePath.slice('/api/service-host'.length);
+        asyncHandler(() => handleServiceHostRoute(req, res, { subPath }))(req, res);
         return;
       }
 

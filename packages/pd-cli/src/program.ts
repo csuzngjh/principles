@@ -864,17 +864,23 @@ workbuddyCmd
 // Phase 2 (PRI-1280): `--shadow` drives ONE explicit, bounded, REAL worker
 // cycle per selected `--workspace` through the unified Worker Adapter —
 // default-off, never scheduled, never touches the owner marker.
+// Phase 3 (PRI-1281): the user-level OS scheduler lifecycle (install /
+// enable / disable / status / uninstall) and the managed execution — a bare
+// `run-once` executes ONLY effectiveOwner=service_host workspaces (§8.4);
+// zero such workspaces is a legal empty run.
 const serviceCmd = program
   .command('service')
-  .description('PD Service Host operations (Phase 1: read-only dry-run; Phase 2: explicit shadow cycles)');
+  .description('PD Service Host operations (managed run-once, dry-run discovery, shadow cycles, OS scheduler lifecycle)');
 
 serviceCmd
   .command('run-once')
-  .description('Run one bounded Service Host coordinator execution: --dry-run (read-only discovery) or --shadow --workspace <dir> (one real bounded worker cycle per selected workspace)')
+  .description('Run one bounded Service Host coordinator execution: bare/managed (service_host_owned workspaces only — the OS scheduler entry), --dry-run (read-only discovery) or --shadow --workspace <dir>')
   .option('--dry-run', 'Phase 1 mode: execute the read-only discovery dry-run (no worker, no ownership change)', false)
   .option('--shadow', 'Phase 2 mode: run one explicit bounded REAL worker cycle per --workspace selection (business tasks may advance; not a dry-run)', false)
   .option('-w, --workspace <path>', 'Shadow target workspace (repeatable; at least one required with --shadow)', (value: string, previous: string[]) => [...previous, value], [] as string[])
   .option('--host <kind>', 'Restrict shadow to one host adapter: codex | workbuddy')
+  .option('--trigger <source>', 'Truthful trigger source for the status record: manual | scheduler (default manual; login vs periodic is not distinguishable)')
+  .option('--pd-home <dir>', 'Trusted PD home injection (used by the scheduler registration and the installer)')
   .option('--timeout-ms <ms>', 'Per-workspace bounded execution time in ms (default 2700000, minimum 1000)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
@@ -888,11 +894,74 @@ serviceCmd
             ? { host: opts.host as 'codex' | 'workbuddy' }
             : { invalidHost: opts.host })
         : {}),
+      ...(typeof opts.trigger === 'string'
+        ? (opts.trigger === 'manual' || opts.trigger === 'scheduler'
+            ? { trigger: opts.trigger as 'manual' | 'scheduler' }
+            : { invalidTrigger: opts.trigger })
+        : {}),
+      ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}),
       // F8: the RAW string reaches the handler for full-value validation —
       // a partial parse here used to silently mis-bound a real worker.
       ...(typeof opts.timeoutMs === 'string' ? { timeoutMsRaw: opts.timeoutMs } : {}),
       json: opts.json === true,
     });
+  });
+
+// ── Phase 3 (PRI-1281): OS scheduler lifecycle — all idempotent, user-level
+// only, no elevation; install defaults to installed_disabled. ──
+serviceCmd
+  .command('install')
+  .description('Register the user-level OS scheduler trigger for this PD install (default: created DISABLED — run enable to arm it)')
+  .option('--interval-ms <ms>', 'Trigger interval in ms (default 120000, matching the existing CLI worker cadence; minimum 60000 — the Windows Task Scheduler repetition floor)')
+  .option('--pd-home <dir>', 'Trusted PD home injection')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleServiceLifecycle } = await import('./commands/service-lifecycle.js');
+    await handleServiceLifecycle('install', {
+      json: opts.json === true,
+      ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}),
+      ...(typeof opts.intervalMs === 'string' ? { intervalMsRaw: opts.intervalMs } : {}),
+    });
+  });
+
+serviceCmd
+  .command('enable')
+  .description('Enable the registered OS scheduler trigger (idempotent; never creates a registration)')
+  .option('--pd-home <dir>', 'Trusted PD home injection')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleServiceLifecycle } = await import('./commands/service-lifecycle.js');
+    await handleServiceLifecycle('enable', { json: opts.json === true, ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}) });
+  });
+
+serviceCmd
+  .command('disable')
+  .description('Stop future automatic triggers; keep the registration and ALL data (idempotent)')
+  .option('--pd-home <dir>', 'Trusted PD home injection')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleServiceLifecycle } = await import('./commands/service-lifecycle.js');
+    await handleServiceLifecycle('disable', { json: opts.json === true, ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}) });
+  });
+
+serviceCmd
+  .command('uninstall')
+  .description('Remove this install\'s OS scheduler registration (never foreign ones); Workspace data, state.db, Ledger and Trajectory are untouched')
+  .option('--pd-home <dir>', 'Trusted PD home injection')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleServiceLifecycle } = await import('./commands/service-lifecycle.js');
+    await handleServiceLifecycle('uninstall', { json: opts.json === true, ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}) });
+  });
+
+serviceCmd
+  .command('status')
+  .description('Read the unified Service Host status: OS registration, enabled state, trigger configuration, last run, progress and workspace owner states')
+  .option('--pd-home <dir>', 'Trusted PD home injection')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleServiceStatus } = await import('./commands/service-lifecycle.js');
+    await handleServiceStatus({ json: opts.json === true, ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}) });
   });
 
 const internalizationCmd = runtimeCmd
