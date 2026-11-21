@@ -141,12 +141,16 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     if (stalled) {
       livenessReport.stallReason = driver === 'companion'
         ? 'resident_driver_stopped: the last cycle was companion-driven; worker cycles only run while the PD Companion worker driver is alive'
-        : driver === 'manual'
-          ? 'no_resident_driver: the last cycle was a manual invocation; no companion-driven cycle has completed for this workspace'
-          : 'no_recent_cycle_evidence';
+        : driver === 'service_host'
+          ? 'service_driver_not_resident: the last cycle was service-host-driven (shadow run-once); the Service Host coordinator is not a resident driver, so gaps between shadow runs are expected'
+          : driver === 'manual'
+            ? 'no_resident_driver: the last cycle was a manual invocation; no companion-driven cycle has completed for this workspace'
+            : 'no_recent_cycle_evidence';
       livenessReport.nextAction = driver === 'companion'
         ? 'Start (or restart) PD Companion and confirm its tray/process is alive — the next worker sync (≤60s) should spawn the workspace worker and produce a new cycle; verify with this command again.'
-        : 'Start PD Companion so a resident worker driver takes over this workspace, or run `pd codex worker --workspace <dir> --interval 120000` manually for continuous cycles.';
+        : driver === 'service_host'
+          ? 'This is expected between explicit shadow runs; run `pd service run-once --shadow --workspace <dir>` for another bounded cycle, or start PD Companion for resident cycles.'
+          : 'Start PD Companion so a resident worker driver takes over this workspace, or run `pd codex worker --workspace <dir> --interval 120000` manually for continuous cycles.';
     }
   }
 

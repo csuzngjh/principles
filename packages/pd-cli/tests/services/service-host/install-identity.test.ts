@@ -38,6 +38,7 @@ describe('stripExperimentRoot', () => {
       experimentRootStripped: false,
       ignoredIdentityEnvVars: ['HOME'],
       inheritedHostRootEnvVars: [],
+      ignoredHostRootEnvVars: [],
     });
     expect(result.env).toEqual(env);
     expect(result.env).not.toBe(env);
@@ -52,6 +53,7 @@ describe('stripExperimentRoot', () => {
       inheritedExperimentRootValue: 'D:/pd-labs/pri-872',
       ignoredIdentityEnvVars: ['HOME', 'USERPROFILE'],
       inheritedHostRootEnvVars: [],
+      ignoredHostRootEnvVars: [],
     });
     expect(result.env.PD_EXPERIMENT_ROOT).toBeUndefined();
     expect(result.env.HOME).toBe('/tmp/h');
@@ -171,6 +173,39 @@ describe('resolveCoordinatorInstallIdentity', () => {
     expect(result.identity.hostRoots.openclawHome).toBe(path.resolve(oc));
     expect(result.identity.hostRoots.codexHome).toBe(path.resolve(codex));
     expect(result.identity.hostRoots.workbuddyConfigDir).toBe(path.resolve(wb));
+  });
+
+  it('F1: canonicalHostRootsOnly resolves host roots from the trusted home and records the ignored overrides', () => {
+    const fakeCodex = tempDir('pd-sh-evil-codex-');
+    const fakeWb = tempDir('pd-sh-evil-wb-');
+    const result = resolveCoordinatorInstallIdentity(
+      { CODEX_HOME: fakeCodex, WORKBUDDY_CONFIG_DIR: fakeWb },
+      { trustedHomeDir: TRUSTED_HOME, canonicalHostRootsOnly: true },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const home = path.resolve(TRUSTED_HOME);
+    // The inherited overrides did NOT steer host roots.
+    expect(result.identity.hostRoots.codexHome).toBe(path.join(home, '.codex'));
+    expect(result.identity.hostRoots.workbuddyConfigDir).toBe(path.join(home, '.workbuddy'));
+    expect(result.identity.hostRoots.codexHome).not.toBe(path.resolve(fakeCodex));
+    expect(result.identity.hostRoots.workbuddyConfigDir).not.toBe(path.resolve(fakeWb));
+    // …and the ignored inputs are recorded (rc-9), never silently dropped.
+    expect(result.identity.environment.ignoredHostRootEnvVars).toEqual(['CODEX_HOME', 'WORKBUDDY_CONFIG_DIR']);
+    expect(result.identity.environment.inheritedHostRootEnvVars).toEqual(['CODEX_HOME', 'WORKBUDDY_CONFIG_DIR']);
+  });
+
+  it('F1: canonicalHostRootsOnly keeps the default mode untouched (no ignoredHostRootEnvVars entry)', () => {
+    const fakeCodex = tempDir('pd-sh-evil-codex2-');
+    const result = resolveCoordinatorInstallIdentity(
+      { CODEX_HOME: fakeCodex },
+      { trustedHomeDir: TRUSTED_HOME },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Dry-run mode still honors the override for discovery (P1-2).
+    expect(result.identity.hostRoots.codexHome).toBe(path.resolve(fakeCodex));
+    expect(result.identity.environment.ignoredHostRootEnvVars).toEqual([]);
   });
 
   it('derives default host roots from the SAME trusted home', () => {
