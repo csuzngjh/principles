@@ -1,7 +1,6 @@
 ---
 "@principles/pd-cli": minor
 "create-principles-disciple": minor
-"@principles/pd-console": minor
 ---
 
 PD Service Host Phase 3 (PRI-1281, SPEC-PD-SERVICE-HOST-001 §11 Phase 3 /
@@ -80,10 +79,12 @@ removed (a host-scoped uninstall keeps it while other hosts still use
 the runtime); a failed revocation is a warning with manual removal
 instructions.
 
-pd-console (minor): NEW read-only `GET /api/service-host/status` —
-spawns `pd service status --json` (the same single implementation);
-non-GET methods are refused by construction and no lifecycle surface
-exists in the Console (SPEC §7: UI never owns the scheduler lifecycle).
+pd-console (rides the create-principles-disciple release above — pd-console
+is a private, never-versioned package): NEW read-only `GET
+/api/service-host/status` — spawns `pd service status --json` (the same
+single implementation); non-GET methods are refused by construction and no
+lifecycle surface exists in the Console (SPEC §7: UI never owns the
+scheduler lifecycle).
 
 Real-platform verification (Windows): full lifecycle against the REAL
 Task Scheduler with an isolated install identity — install→disabled,
