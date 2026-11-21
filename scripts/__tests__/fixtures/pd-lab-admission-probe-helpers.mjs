@@ -331,14 +331,15 @@ export function buildWorld(label, options) {
       callIndex += 1;
       // resultPreview: null is a REAL producer state (no result → NULL preview,
       // after-tool-call-helpers.ts) and must be plantable — only an UNSET
-      // field defaults to the healthy short 'ok' preview.
+      // field defaults to the healthy short 'ok' preview. createdAt defaults
+      // to T0 (pre-trigger) and can be overridden per call.
       const preview = call.resultPreview === undefined ? 'ok' : call.resultPreview;
       if (preview !== null && preview.length > 20) {
         bodyMarkers.push(preview);
       }
       db.prepare(
         'INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, result_preview, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      ).run(session.sessionId, `tool-${callIndex}`, 'success', call.paramsJson ?? '{}', preview, T0);
+      ).run(session.sessionId, `tool-${callIndex}`, 'success', call.paramsJson ?? '{}', preview, call.createdAt ?? T0);
     }
   }
   if (options.journalMode === 'wal') {

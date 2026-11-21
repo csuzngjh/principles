@@ -2831,7 +2831,7 @@ describe('r8 P1-01: session-bound host matrix — ingress fail-closed', () => {
 });
 
 describe('r8 P1-02: tool-return evidence matrix — a call is not an output', () => {
-  function toolWorld(label: string, toolCalls: Array<{ paramsJson?: string; resultPreview?: string | null }>) {
+  function toolWorld(label: string, toolCalls: Array<{ paramsJson?: string; resultPreview?: string | null; createdAt?: string }>) {
     const world = buildWorld(label, {
       sessions: [{ sessionId: 'sess-tool', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }], toolCalls }],
       samples: [{ caseId: 'S01', sessionId: 'sess-tool' }],
@@ -2892,6 +2892,52 @@ describe('r8 P1-02: tool-return evidence matrix — a call is not an output', ()
     expect(codesOf(out, 'S01')).not.toContain('TOOL_RESULT_PREVIEW_ONLY');
     expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('READY');
     expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+  });
+
+  it('r8 review BUG_0001: a complete return that only exists AFTER the pain trigger is NOT evidence for the historical expectation', () => {
+    // Default pain trigger is PAIN_AT (10:05); the only call — with a complete
+    // short return — happens at 10:20, after the trigger.
+    const { world, expFile, authFile } = toolWorld('r8-tool-late', [{ paramsJson: '{}', resultPreview: 'ok', createdAt: '2026-09-01T10:20:00.000Z' }]);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('TOOL_RESULT_MISSING');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    const problem = sample.problems.find((p: { code: string }) => p.code === 'TOOL_RESULT_MISSING');
+    expect(problem.impact).toContain('AFTER the pain trigger');
+  });
+
+  it('r8 review BUG_0001: a post-trigger complete return cannot substitute for a pre-trigger preview-only return', () => {
+    const truncated = `${'z'.repeat(497)}...`;
+    const { world, expFile, authFile } = toolWorld('r8-tool-substitute', [
+      { paramsJson: '{}', resultPreview: truncated }, // pre-trigger, partial
+      { paramsJson: '{}', resultPreview: 'ok', createdAt: '2026-09-01T10:20:00.000Z' }, // post-trigger, complete
+    ]);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('TOOL_RESULT_PREVIEW_ONLY');
+    expect(codesOf(out, 'S01')).not.toContain('TOOL_RESULT_MISSING');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED'); // the late return does not unblock
+    expect(sample.pathBlockers.EXPECTATION_LABELING).toEqual(['TOOL_RESULT_PREVIEW_ONLY']);
+  });
+
+  it('r8 review BUG_0002: a short preview carrying the producer\'s "__truncated__" key-pruning marker is provably partial, not a complete return', () => {
+    // after-tool-call-helpers serializes objects with >10 keys with a
+    // "__truncated__": true marker — short, no '...' suffix, still lossy.
+    const pruned = '{"a":1,"__truncated__":true}';
+    const { world, expFile, authFile } = toolWorld('r8-tool-pruned', [{ paramsJson: '{}', resultPreview: pruned }]);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('TOOL_RESULT_PREVIEW_ONLY'); // detected as partial, never "complete"
+    expect(codesOf(out, 'S01')).not.toContain('TOOL_RESULT_MISSING');
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
+    expect(sample.pathBlockers.EXPECTATION_LABELING).toEqual(['TOOL_RESULT_PREVIEW_ONLY']);
   });
 
   it('an expectation NOT depending on tool output is never blocked by any of the above shapes', () => {

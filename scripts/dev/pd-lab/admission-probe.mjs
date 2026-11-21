@@ -1323,7 +1323,7 @@ function analyzeSession(sample, facts, startExplanation, prefixCompleteness, pre
   // preview cannot be the 500-unit truncation form in any encoding. The body
   // itself is still never fetched or emitted.
   const previewOnlyRows = toolCalls
-    .filter((call) => isTruncatedPreviewRow(call))
+    .filter((call) => isTruncatedPreviewRow(call) || isKeyPrunedPreviewRow(call))
     .map((call) => call.id);
 
   return { problems, blobRefs, previewOnlyRows, session, userTurns, assistantTurns, toolCalls };
@@ -1341,6 +1341,15 @@ function isTruncatedPreviewRow(call) {
     return false; // more than 501 code points ⇒ more than 500 UTF-16 units
   }
   return call.preview_window.length === 500 && call.preview_window.endsWith('...');
+}
+
+/** True when the row's preview carries the producer's object-path key-pruning
+ *  marker (`"__truncated__": true` — after-tool-call-helpers.ts serializes
+ *  objects with >10 keys lossily). The marker PROVES content was dropped even
+ *  though the preview is short and has no '...' suffix — such a row is
+ *  preview-only, never "a complete return" (r8 review BUG_0002). */
+function isKeyPrunedPreviewRow(call) {
+  return typeof call.preview_window === 'string' && call.preview_window.includes('"__truncated__"');
 }
 
 /** Numeric ISO comparison — string ordering breaks on timezone offsets. */
@@ -1434,27 +1443,40 @@ function analyzeExpectations(sample, expectations) {
 // ---------------------------------------------------------------------------
 // Tool-return evidence (r8 P1-02): an expectation that declares
 // dependsOnToolOutput must have a REAL, verifiable tool return to read. The
-// tool_calls row carries only result_preview — the producer writes the FULL
-// output there when it fits the 500-unit budget, the 497+'...' truncation
-// form when it does not, and NULL when the call produced no result
-// (after-tool-call-helpers.ts). So a non-empty preview that is NOT the
-// truncation form IS a complete return; the truncation form is a partial
-// return (TOOL_RESULT_PREVIEW_ONLY, emitted by analyzeSession); everything
-// else (NULL/empty previews, or no rows at all) is NO verifiable return. A
-// tool CALL is never treated as a tool OUTPUT, and params_json is the call
-// side, never the return side. This snapshot form has no CONTRACT-recognized
-// Blob recovery path for tool results (tool_calls has no blob_ref column;
-// turn blobs cover user/assistant turns only) — if one is ever recognized it
-// must be honored here before a return is claimed missing.
+// tool_calls row carries only result_preview — the producer writes a plain-
+// string result there in full when it fits the 500-unit budget, the 497+'...'
+// truncation form when it does not, NULL when the call produced no result,
+// and a lossily-serialized form for object results (text blocks only for
+// content arrays, keys pruned to 10 with a "__truncated__" marker —
+// after-tool-call-helpers.ts). Provably-partial forms (truncation suffix,
+// key-pruning marker) are preview-only; a non-empty preview without either
+// loss marker is the complete readable evidence this snapshot form carries
+// (the producer's silent text-only serialization of non-text content blocks
+// is NOT detectable from the row and stays a disclosed producer-side
+// limitation); NULL/empty or absent rows are NO verifiable return. A tool
+// CALL is never treated as a tool OUTPUT, and params_json is the call side,
+// never the return side. Only calls that existed at/before the pain trigger
+// count as evidence for a HISTORICAL expectation (r8 review BUG_0001): a
+// later complete return is future information for the labeling, exactly like
+// a late visibleAt. This snapshot form has no CONTRACT-recognized Blob
+// recovery path for tool results (tool_calls has no blob_ref column; turn
+// blobs cover user/assistant turns only) — if one is ever recognized it must
+// be honored here before a return is claimed missing.
 // ---------------------------------------------------------------------------
 function toolReturnEvidenceProblems(sample, toolCalls, previewOnlyRows, dependsOnToolOutput) {
   if (dependsOnToolOutput !== true) {
     return [];
   }
-  const hasCompleteReturn = toolCalls.some(
+  const triggerAt = isoTimeValue(sample.createdAt);
+  const contemporaneous = toolCalls.filter((call) => {
+    const at = isoTimeValue(call.created_at);
+    return at !== null && triggerAt !== null && at <= triggerAt; // unparsable timing never serves as evidence (fail-closed)
+  });
+  const hasCompleteReturn = contemporaneous.some(
     (call) => typeof call.preview_window === 'string'
       && call.preview_window.length > 0
-      && !isTruncatedPreviewRow(call),
+      && !isTruncatedPreviewRow(call)
+      && !isKeyPrunedPreviewRow(call),
   );
   if (hasCompleteReturn) {
     return [];
@@ -1466,6 +1488,7 @@ function toolReturnEvidenceProblems(sample, toolCalls, previewOnlyRows, dependsO
     return [];
   }
   const noCalls = toolCalls.length === 0;
+  const allLate = toolCalls.length > 0 && contemporaneous.length === 0;
   return [
     makeProblem(
       'TOOL_RESULT_MISSING',
@@ -1473,7 +1496,9 @@ function toolReturnEvidenceProblems(sample, toolCalls, previewOnlyRows, dependsO
       [`dataset:${sample.caseId}`, `expectations:${sample.caseId}.dependsOnToolOutput`, `session:${sample.sessionId}`],
       noCalls
         ? 'The expectation record declares dependsOnToolOutput, but the session carries no tool_calls rows at all — there is no tool output for the labeling to read.'
-        : `The expectation record declares dependsOnToolOutput, but none of the ${toolCalls.length} tool call(s) in this session carries a verifiable return (result_preview is NULL/empty on every row). A tool call is not a tool output, and params_json is the call side, never the return side.`,
+        : allLate
+          ? `The expectation record declares dependsOnToolOutput, but every one of the ${toolCalls.length} tool call(s) in this session was made AFTER the pain trigger — a later return is future information for a historical expectation, not the output it depended on.`
+          : `The expectation record declares dependsOnToolOutput, but none of the contemporaneous tool call(s) in this session carries a verifiable return (result_preview is NULL/empty on every pre-trigger row). A tool call is not a tool output, and params_json is the call side, never the return side.`,
       'Recover the actual tool return from the host-native session file under an authorized scope (CONTRACT §2.4), or re-mark the expectation as not tool-dependent.',
     ),
   ];
@@ -2525,7 +2550,7 @@ function main() {
           'TOOL_RESULT_PREVIEW_ONLY',
           `session:${sample.sessionId}`,
           sessionAnalysis.previewOnlyRows.slice(0, 10).map((id) => `tool_calls:${id}`),
-          `${sessionAnalysis.previewOnlyRows.length} tool call(s) in this session carry only the 500-character result preview (OpenClaw RESULT_PREVIEW_MAX_LENGTH). PIPELINE_REPLAY is NOT blocked — the production entry reads the same preview — but full tool outputs are unavailable to this snapshot.`,
+          `${sessionAnalysis.previewOnlyRows.length} tool call(s) in this session carry only a provably partial result preview (the 500-unit RESULT_PREVIEW_MAX_LENGTH truncation form and/or the "__truncated__" object key-pruning marker — OpenClaw after-tool-call-helpers). PIPELINE_REPLAY is NOT blocked — the production entry reads the same preview — but full tool outputs are unavailable to this snapshot.`,
           'For expectation labeling that depends on tool output, recover the full output from the host-native session file under an authorized scope (CONTRACT §2.4).',
         ),
       );

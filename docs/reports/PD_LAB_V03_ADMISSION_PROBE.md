@@ -281,11 +281,17 @@ r7 复审 P1：r6 的 prefix UNKNOWN 被无条件转成 SOURCE_GAP 并进入路�
 
 ## 17a. r8 最终收口：三项准入缺陷 + P2 报告缺陷（2026-11-21）
 
-r8 复审三项 P1 + 一项 P2，全部属实全部修复；冻结项（r6 三态模型、N1 优先级、UNKNOWN 语义、解耦设计、pathBlockers 结构化、三路径独立、T4 契约、ERR-146/178）零改动。测试 127 → **144**（143 执行 + 1 Windows FIFO 平台跳过；+17 新用例）。
+r8 复审三项 P1 + 一项 P2，全部属实全部修复；冻结项（r6 三态模型、N1 优先级、UNKNOWN 语义、解耦设计、pathBlockers 结构化、三路径独立、T4 契约、ERR-146/178）零改动。测试 127 → 144（+17 新用例）；追加修正后 → **147**（146 执行 + 1 Windows FIFO 平台跳过）。
 
 **P1-01 未知宿主放行重放（用户补充核查，属实）**：`classifySample` 原 `unsupportedHost = hostKind.length > 0 && hostKind !== 'openclaw'`——null/空宿主不触发 NOT_EVALUATED，绑定会话样本在其他检查通过时被判 PIPELINE_REPLAY READY；而生产 `decideHostArg`（ab-lib.mjs：trim+小写归一后 `hasSession && kind !== 'openclaw'` → `failClosed: true`）与 `ab-run.mjs`（`ingress_host_unresolvable`，任何 CLI 调用前拒绝）都会拒收该样本——探测器与生产入口语义相反。修复：新增闭集码 `INGRESS_HOST_UNRESOLVABLE`（结构化 problem：code/fieldOrRef/evidenceRefs/impact/nextAction），仅进入 PIPELINE_REPLAY 阻断集；绑定会话+宿主非 openclaw（null/空/未识别/明确其他）→ BLOCKED；原始归属保留（`hostKind` 字段原样输出，绝不转换成 openclaw）；EXPECTATION_LABELING/BEHAVIOR_BRANCH 不经 CLI 入口，按自身证据独立判定（NOT_EVALUATED 收窄到"无会话绑定的非 OpenClaw 宿主"——生产对无绑定样本 `failClosed: false`，不涉及入口归因）。5 用例矩阵：openclaw 健康/null BLOCKED/空串 BLOCKED/codex BLOCKED（非 NOT_EVALUATED）/负控零副作用（world 根指纹仅 --out 变化）。
 
 **P1-02 依赖工具输出的期望无返回证据（属实）**：会话分析只检查 params_json 合法性与截断预览形态——无 tool_calls 行、或有行但 result_preview 全 NULL（生产 after-tool-call-helpers 明确允许无结果时写 NULL）时，dependsOnToolOutput=true 的期望仍被放行。修复：新增闭集码 `TOOL_RESULT_MISSING`——dependsOnToolOutput 且无任何可验证完整返回时 EXPECTATION_LABELING BLOCKED；四场景判定基于生产行为语义：**工具调用≠工具输出**、params_json 是调用侧永不是返回侧、`result_preview` 承载完整输出当且仅当非空且非 497+'...' 截断形态（生产 ≤500 UTF-16 码元全量写入）；仅截断预览仍用 `TOOL_RESULT_PREVIEW_ONLY`（更精确的码胜出，两者互斥）；当前快照形态 `tool_calls` 无 blob_ref 列（turn blob 仅覆盖 user/assistant 轮次）→ 无契约认可的 Blob 恢复路径可误判缺失（若未来认可须先于缺失断言 honored）；不依赖工具输出的 PIPELINE_REPLAY/期望不受影响（非全局 SOURCE_GAP）。5 用例矩阵（指令表格逐行）：无调用/有调用无返回/仅截断预览/完整返回可读取/期望不依赖工具输出。
+
+**r8 追加修正（推送后 Devin 复审 r8 新代码的两条 🔴，均属实，最小修复）**：
+- **BUG_0001 时间范围**：`hasCompleteReturn` 原对全会话调用 `some()`——触发**后**的完整返回会为历史期望放行。修复：仅统计 `created_at <= 触发时刻` 的调用（不可解析时刻不作为证据，fail-closed）；全部晚于触发 → TOOL_RESULT_MISSING 且 impact 明示 "AFTER the pain trigger"；触发前 preview-only + 触发后 complete → 仍 PREVIEW_ONLY（晚返回不能替代）。+2 用例。
+- **BUG_0002 有损短预览**：`extractToolResultPreview` 对 content-array 只序列化 text 块、对 >10 键对象写入 `"__truncated__": true` 裁剪标记——短且无 '...' 的预览也可能是**有损**的，"非截断即完整"不健全。修复：`isKeyPrunedPreviewRow` 检测键裁剪标记 → 归入 TOOL_RESULT_PREVIEW_ONLY（会话级检测与 impact 文本同步覆盖两种可证明有损形态）；无任一有损标记的非空预览仍是本快照形态可承载的完整可读证据（content-array 的静默 text-only 序列化在行内不可检测——**已披露的生产者侧残留限制**，记为后续事项：生产者可为非文本内容丢失加显式标记）。+1 用例。
+
+测试 144 → **147**（146 执行 + 1 Windows FIFO 平台跳过）。
 
 **P1-03 EXPLICIT_AT_TIME 无可见性证明（属实）**：可见性分析仅对 LATER_CLARIFICATION 缺 visibleAt 阻断——EXPLICIT_AT_TIME 是"当时已可见"的**声明**，缺 visibleAt 时声明本身不是可与触发时刻比较的证据，原实现放行。修复：新增闭集码 `EXPECTATION_VISIBILITY_UNPROVEN`——EXPLICIT_AT_TIME 缺 visibleAt（且本记录形态无契约认可的等价来源位置证据）→ EXPECTATION_LABELING BLOCKED；visibleAt 晚于触发仍 `FUTURE_INFORMATION`（两码互斥、语义精确）；**不可解析 visibleAt 在加载层结构化拒绝**（exit 1 expectations_invalid_structure，记录根本不进入评估——比逐样本 BLOCKED 更强的 fail-closed，保留 r2 语义不降级）；早于/等于触发继续其余条件；RESEARCH_INFERENCE 不适用该规则、不自动升级；只影响 EXPECTATION_LABELING，不自动阻断 PIPELINE_REPLAY。5 用例矩阵：缺失/未来/无效/有效历史/RESEARCH_INFERENCE 不升级。
 

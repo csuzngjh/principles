@@ -95,7 +95,7 @@ validatedBindings: {caseVersion, sourceDigests, validatorVersion}
 **2026-11-21 r8 规则（准入探测实现侧）**：
 
 1. **宿主归因 fail-closed（`INGRESS_HOST_UNRESOLVABLE`）**：会话绑定样本的 `host_kind` 非 `openclaw`（null、空串、未识别或明确其他宿主；比较前做与生产一致的 trim+小写归一）时，`PIPELINE_REPLAY` 必须 BLOCKED 并给出结构化阻断原因；原始归属保留、不得转换为 openclaw、不得据此无条件阻断 `EXPECTATION_LABELING`（该路径不经 CLI 入口，按自身证据独立判定）。
-2. **工具返回证据（`TOOL_RESULT_MISSING`）**：`dependsOnToolOutput=true` 时必须存在真实可读的返回——工具调用不等于工具输出，`params_json` 是调用侧永不是返回侧。会话无任何 `tool_calls` 行，或所有行的 `result_preview` 为 NULL/空（且无截断预览形态、无契约认可的 Blob 等恢复路径——当前快照形态的 `tool_calls` 无 blob_ref 列，turn blob 仅覆盖 user/assistant 轮次）时，`EXPECTATION_LABELING` BLOCKED；仅截断预览仍用 `TOOL_RESULT_PREVIEW_ONLY`；生产把完整输出写入 `result_preview` 当且仅当其 ≤500 UTF-16 码元（非截断非空预览即完整返回），据此按真实完整证据判定、不因形态误判缺失。`PIPELINE_REPLAY` 不因该期望缺口自动阻断。
+2. **工具返回证据（`TOOL_RESULT_MISSING`）**：`dependsOnToolOutput=true` 时必须存在真实可读的返回——工具调用不等于工具输出，`params_json` 是调用侧永不是返回侧。**仅统计 Pain 触发时刻及之前的调用**：触发后的完整返回对历史期望是未来信息，不能替代触发前证据（与 `FUTURE_INFORMATION` 同理）。会话无任何 `tool_calls` 行、全部调用晚于触发、或触发前各行的 `result_preview` 均为 NULL/空（且无截断预览形态、无契约认可的 Blob 等恢复路径——当前快照形态的 `tool_calls` 无 blob_ref 列，turn blob 仅覆盖 user/assistant 轮次）时，`EXPECTATION_LABELING` BLOCKED。**可证明有损的预览形态**均按 `TOOL_RESULT_PREVIEW_ONLY` 处理：500 码元截断形态（497+'...'）与对象路径的 `"__truncated__"` 键裁剪标记；无任一有损标记的非空预览是本快照形态可承载的完整可读证据（生产对纯字符串结果 ≤500 码元全量写入；content-array 结果仅序列化 text 块——该静默丢弃在行内不可检测，属生产者侧已披露的残留限制）。`PIPELINE_REPLAY` 不因该期望缺口自动阻断。
 3. **历史可见性（`EXPECTATION_VISIBILITY_UNPROVEN`）**：`EXPLICIT_AT_TIME` 声明"当时已可见"，声明需可核验——优先 `visibleAt`；缺失且无等价证据即 BLOCKED；晚于触发为 `FUTURE_INFORMATION`；不可解析为结构化拒绝；早于/等于触发则继续其余条件评估。
 
 `PIPELINE_REPLAY` 为 READY 不等于该案例是 SPEC §5 意义上的完整偏差案例；后者还要求工具返回等证据无未解释缺口。两个数字分开报告。
