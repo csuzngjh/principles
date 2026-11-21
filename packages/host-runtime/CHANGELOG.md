@@ -1,5 +1,37 @@
 # @principles/host-runtime
 
+## 4.5.1
+
+### Patch Changes
+
+- 2e91fdf: B-class automatic Pain submission authorization + Service Host handover safety (Pain Ingress SPEC §9.6 / Service Host SPEC §8.4).
+  
+  - New quiet flag `automatic_pain_submission` (default off, per-Workspace `.pd/config.yaml` `features:`) is the independent Owner authorization for automatic_hook Pain submissions — deliberately distinct from `signal_collector` and `internalization_auto_consumer`.
+  - Gates: SignalCollectorHost suppresses STRONG routing, Stage-2 LLM enqueue/invocation and batch confirmation while unauthorized; `emitPainDetectedEvent` degrades unauthorized automatic submissions to observation-only; `runPendingDiagnosticianOnce` skips persisted `automatic_hook` candidates; `pd pain retry` refuses `automatic_hook` dead-letter replays.
+  - Companion Supervisor reads manifest `backgroundExecutions`: `handover_preparing`/`rollback_pending`/`service_host_owned` forbid legacy worker start/restart (running workers drain+stop; restarts cannot resurrect); stable `legacy_owned` re-allows.
+- 2e91fdf: P0: enforce `automatic_pain_submission` authorization BEFORE the Pain
+  submission chain — `PainSignalBridge.onPainDetected` refuses
+  `automatic_hook` right after provenance resolution (ahead of
+  capabilityDisabled ensure and every existing-task path), and
+  `PainToPrincipleService.recordPain` / `admitGovernanceSignals` apply the
+  same lazy probe so unauthorized signals never create, reset, re-execute
+  or mutate a diagnosis task (observation-only stays the only record).
+  The `authorizedEvidence` evidence-emptiness mechanism is removed.
+  
+  P1: fix the Companion restart-timer race — entering
+  `handover_preparing`/`rollback_pending`/`service_host_owned` now retires
+  entries without a live child (stopped + drain/restart handles cleared),
+  and `spawnFor` re-verifies stopped state, the ownershipBlocked set, and
+  registry entry identity at the final launch point so a stale crash
+  restart can never resurrect a legacy worker mid-transition.
+- Updated dependencies [2e91fdf]
+- Updated dependencies [2e91fdf]
+- Updated dependencies [2e91fdf]
+- Updated dependencies [2e91fdf]
+- Updated dependencies [5e30d93]
+  - @principles/core@8.0.1
+  - @principles/install-layout@0.9.1
+
 ## 4.5.0
 
 ### Minor Changes

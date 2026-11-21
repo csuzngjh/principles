@@ -1,5 +1,34 @@
 # @principles/workbuddy-adapter
 
+## 0.7.1
+
+### Patch Changes
+
+- 2e91fdf: P0: enforce `automatic_pain_submission` authorization BEFORE the Pain
+  submission chain — `PainSignalBridge.onPainDetected` refuses
+  `automatic_hook` right after provenance resolution (ahead of
+  capabilityDisabled ensure and every existing-task path), and
+  `PainToPrincipleService.recordPain` / `admitGovernanceSignals` apply the
+  same lazy probe so unauthorized signals never create, reset, re-execute
+  or mutate a diagnosis task (observation-only stays the only record).
+  The `authorizedEvidence` evidence-emptiness mechanism is removed.
+  
+  P1: fix the Companion restart-timer race — entering
+  `handover_preparing`/`rollback_pending`/`service_host_owned` now retires
+  entries without a live child (stopped + drain/restart handles cleared),
+  and `spawnFor` re-verifies stopped state, the ownershipBlocked set, and
+  registry entry identity at the final launch point so a stale crash
+  restart can never resurrect a legacy worker mid-transition.
+- 2e91fdf: Workspace 归属发现补齐 OpenClaw 自身持久化绑定：`collectHostWorkspaceClaims` 现在同样读取 `<openclawHome>/extensions/principles-disciple/mcp-binding.json`，且只有经 `validateMcpBinding` 全量校验（host/schemaVersion/workspaceDir/runtimeDir/canonical serverEntry）的 binding 才能形成 workspace claim；launcher.cjs 同步同一严格规则与新增 OpenClaw 绑定源。install manifest 新增可选 `backgroundExecution` 所有权记录（state/effectiveOwner/generation/operationId/previousOwner/targetOwner/updatedAt），解析 fail-closed，为 SPEC-PD-SERVICE-HOST-001 §8.4 CAS 所有权契约的 schema 支撑。
+- Updated dependencies [2e91fdf]
+- Updated dependencies [2e91fdf]
+- Updated dependencies [2e91fdf]
+- Updated dependencies [2e91fdf]
+- Updated dependencies [5e30d93]
+  - @principles/core@8.0.1
+  - @principles/host-runtime@4.5.1
+  - @principles/install-layout@0.9.1
+
 ## 0.7.0
 
 ### Minor Changes

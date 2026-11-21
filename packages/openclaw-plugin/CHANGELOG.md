@@ -1,5 +1,32 @@
 # principles-disciple
 
+## 4.2.1
+
+### Patch Changes
+
+- 2e91fdf: B-class automatic Pain submission authorization + Service Host handover safety (Pain Ingress SPEC §9.6 / Service Host SPEC §8.4).
+  
+  - New quiet flag `automatic_pain_submission` (default off, per-Workspace `.pd/config.yaml` `features:`) is the independent Owner authorization for automatic_hook Pain submissions — deliberately distinct from `signal_collector` and `internalization_auto_consumer`.
+  - Gates: SignalCollectorHost suppresses STRONG routing, Stage-2 LLM enqueue/invocation and batch confirmation while unauthorized; `emitPainDetectedEvent` degrades unauthorized automatic submissions to observation-only; `runPendingDiagnosticianOnce` skips persisted `automatic_hook` candidates; `pd pain retry` refuses `automatic_hook` dead-letter replays.
+  - Companion Supervisor reads manifest `backgroundExecutions`: `handover_preparing`/`rollback_pending`/`service_host_owned` forbid legacy worker start/restart (running workers drain+stop; restarts cannot resurrect); stable `legacy_owned` re-allows.
+- 2e91fdf: P0: enforce `automatic_pain_submission` authorization BEFORE the Pain
+  submission chain — `PainSignalBridge.onPainDetected` refuses
+  `automatic_hook` right after provenance resolution (ahead of
+  capabilityDisabled ensure and every existing-task path), and
+  `PainToPrincipleService.recordPain` / `admitGovernanceSignals` apply the
+  same lazy probe so unauthorized signals never create, reset, re-execute
+  or mutate a diagnosis task (observation-only stays the only record).
+  The `authorizedEvidence` evidence-emptiness mechanism is removed.
+  
+  P1: fix the Companion restart-timer race — entering
+  `handover_preparing`/`rollback_pending`/`service_host_owned` now retires
+  entries without a live child (stopped + drain/restart handles cleared),
+  and `spawnFor` re-verifies stopped state, the ownershipBlocked set, and
+  registry entry identity at the final launch point so a stale crash
+  restart can never resurrect a legacy worker mid-transition.
+- 2e91fdf: Workspace 归属发现补齐 OpenClaw 自身持久化绑定：`collectHostWorkspaceClaims` 现在同样读取 `<openclawHome>/extensions/principles-disciple/mcp-binding.json`，且只有经 `validateMcpBinding` 全量校验（host/schemaVersion/workspaceDir/runtimeDir/canonical serverEntry）的 binding 才能形成 workspace claim；launcher.cjs 同步同一严格规则与新增 OpenClaw 绑定源。install manifest 新增可选 `backgroundExecution` 所有权记录（state/effectiveOwner/generation/operationId/previousOwner/targetOwner/updatedAt），解析 fail-closed，为 SPEC-PD-SERVICE-HOST-001 §8.4 CAS 所有权契约的 schema 支撑。
+- 2e91fdf: Workspace 所有权记录升级为逐 Workspace 独立表达：`InstallManifest.backgroundExecutions` 为以 canonical workspaceDir 为 key 的 `BackgroundExecutionRecord` 映射（替换单数 `backgroundExecution`），含 per-state 语义校验（handover_preparing/rollback_pending 必须 operationId+正确的 previous/target、generation ≥ 1；legacy_owned/service_host_owned 禁止携带交接字段）；旧单记录仅在 `workspaces.length === 1` 时迁移，多 Workspace 歧义 fail-closed；新增 `setInstallManifestBackgroundExecution` 单键写入器。Pain Ingress 收紧 `automatic_hook` 信任边界：已绑定宿主报告的来源必须落在宿主来源词汇表（codex: `codex:*`；workbuddy: `workbuddy:*`；openclaw: `after_tool_call`），不可信来源降级 `observation_only`（`untrusted_automatic_source`），不再产生 LLM/Task。
+
 ## 4.2.0
 
 ### Minor Changes
