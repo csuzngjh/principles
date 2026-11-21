@@ -720,3 +720,19 @@ describe('round-6: error + release-failure propagation', () => {
     ).toThrow('synthetic mid-run failure');
   });
 });
+
+describe('round-6: release unwritable verdict propagation', () => {
+  it('a completed run whose release fails unwritable refuses with service_run_lock_release_failed:unwritable (§三.7)', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    const result = runServiceRunOnce({
+      env: {},
+      trustedHomeDir: home,
+      probes: { releaseLock: () => 'failed_unwritable' },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok || result.outcome !== 'refused') throw new Error(`expected refused, got ${JSON.stringify(result).slice(0, 300)}`);
+    expect(result.reason).toBe('service_run_lock_release_failed:unwritable');
+    expect(result.statusWrite?.ok).toBe(true);
+  });
+});
