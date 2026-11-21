@@ -13,6 +13,7 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createConsentLedgerSourceMaterialAuthorization } from '@principles/host-runtime';
 import {
   recallPains,
   PAIN_RECALL_DEFAULT_LIMIT,
@@ -148,6 +149,10 @@ export async function handlePainRecall(opts: PainRecallOptions): Promise<void> {
       ...(painId !== undefined ? { painId } : {}),
       ...(typeof opts.context === 'string' && opts.context.trim().length > 0 ? { context: opts.context } : {}),
       limit,
+    }, {
+      // PRI-1283 R2: recall withholds governance-sourced excerpts whose
+      // host consent is not granted (read-path gate on top of the R3 sweep).
+      sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

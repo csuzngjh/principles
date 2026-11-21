@@ -89,7 +89,9 @@ export type PainIngressEvidenceClassV1 =
         | 'evidence_read_failed'
         | 'evidence_invalid'
         /** Unbound Owner reports never consult a trajectory — no evidence is sought. */
-        | 'not_applicable_unbound';
+        | 'not_applicable_unbound'
+        /** PRI-1283 R3: evidence purged because its source's consent was revoked. */
+        | 'source_revoked';
     };
 
 export type PainEvidenceUnavailableReason =
@@ -99,7 +101,9 @@ export type PainEvidenceUnavailableReason =
   | 'evidence_read_failed'
   | 'evidence_invalid'
   /** Unbound Owner reports never consult a trajectory — no evidence is sought. */
-  | 'not_applicable_unbound';
+  | 'not_applicable_unbound'
+  /** PRI-1283 R3: evidence purged because its source's consent was revoked. */
+  | 'source_revoked';
 
 export interface IngressEvidenceEntry {
   kind: 'behavior_trace' | 'system_event';
@@ -235,6 +239,9 @@ const EVIDENCE_UNAVAILABLE_REASONS = [
   'evidence_read_failed',
   'evidence_invalid',
   'not_applicable_unbound',
+  // PRI-1283 R3: the evidence existed but its source's consent was revoked —
+  // the persisted excerpts were purged by the revocation sweep.
+  'source_revoked',
 ] as const;
 
 type EvidenceUnavailableReason = (typeof EVIDENCE_UNAVAILABLE_REASONS)[number];

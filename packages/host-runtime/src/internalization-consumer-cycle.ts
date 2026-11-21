@@ -77,6 +77,7 @@ import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from './pd-config.js';
 import { createEvaluatorRepairDeps, createRolloutGovernanceDeps, type ConsumerGovernanceLogger } from './internalization-consumer-governance.js';
 import { WorkspaceTelemetryEmitter } from './workspace-telemetry-emitter.js';
+import { createConsentLedgerSourceMaterialAuthorization } from './source-material-authorization.js';
 
 export const INTERNALIZATION_AUTO_CONSUMER_FLAG_ID = 'internalization_auto_consumer';
 
@@ -451,7 +452,8 @@ async function executeConsumerCycle(
     // bounded budget 不会执行, orphan 永远无法恢复。
     const {runtimeKind} = runtimeConfigResult;
     orchestrator = new InternalizationOrchestrator(
-      { stateManager },
+      // PRI-1283 R2: admission re-verification reads the latest consent.
+      { stateManager, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) },
       { owner, runtimeKind, dryRun: true },
     );
 

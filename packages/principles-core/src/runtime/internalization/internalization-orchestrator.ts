@@ -32,6 +32,7 @@ import { candidateIdFromDreamerSeed, candidateIdFromDreamerTaskId } from '../act
 import { currentEvaluation } from '../store/candidate/admission-document.js';
 import { evaluateCandidateAdmissionFromRecord } from '../admission-gate.js';
 import { evaluateAndPersistAdmissionFromStore } from '../pain-signal-bridge.js';
+import { denyAllSourceMaterialAuthorization, type SourceMaterialAuthorizationPort } from '../source-material-authorization.js';
 import {
   decideInternalizationTransition,
   transitionInputFromTask,
@@ -196,6 +197,12 @@ export interface InternalizationOrchestratorOptions {
 
 export interface InternalizationOrchestratorDeps {
   readonly stateManager: RuntimeStateManager;
+  /**
+   * PRI-1283 R2: latest-consent gate forwarded to the admission
+   * re-verification (evaluateAndPersistAdmissionFromStore). ABSENT =
+   * fail-closed for governance-sourced material.
+   */
+  readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
 }
 
 /** PRI-1047 Owner review R6 #3: source-correction 定点续接「读取→守卫→CAS」
@@ -210,11 +217,13 @@ export class InternalizationOrchestrator {
   private readonly dryRun: boolean;
   private readonly stateManager: RuntimeStateManager;
 
+  private readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
   constructor(deps: InternalizationOrchestratorDeps, options: InternalizationOrchestratorOptions) {
     if (!options.owner || !options.runtimeKind) {
       throw new PDRuntimeError('input_invalid', 'InternalizationOrchestrator requires non-empty owner and runtimeKind');
     }
     this.stateManager = deps.stateManager;
+    this.sourceMaterialAuthorization = deps.sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization;
     this.owner = options.owner;
     this.runtimeKind = options.runtimeKind;
     this.dryRun = options.dryRun ?? false;
@@ -468,7 +477,7 @@ export class InternalizationOrchestrator {
         ? null
         : { decision: partial.decision, reason: `no_admission_document:${partial.reason}`, nextAction: partial.nextAction };
     }
-    const revalidated = await evaluateAndPersistAdmissionFromStore(this.stateManager, [candidateId], { taskId: candidate.taskId });
+    const revalidated = await evaluateAndPersistAdmissionFromStore(this.stateManager, [candidateId], { taskId: candidate.taskId, sourceMaterialAuthorization: this.sourceMaterialAuthorization });
     if (!revalidated.ok) {
       return {
         decision: 'needs_evidence',

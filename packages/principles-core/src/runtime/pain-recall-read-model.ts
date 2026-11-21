@@ -64,6 +64,12 @@ import { readLedgerFileState } from '../principle-tree-ledger.js';
 import { openTrajectoryDbReadonly } from '../trajectory-store.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { painRecallSnapshotTestHooks, type SnapshotStatsLike } from './pain-recall-snapshot-hooks.js';
+import {
+  denyAllSourceMaterialAuthorization,
+  filterEvidenceByAuthorization,
+  type SourceMaterialAuthorizationPort,
+  type SourceMaterialHostKind,
+} from './source-material-authorization.js';
 import { resolveStateDbPath, resolveTrajectoryDbPath } from './store/storage-paths.js';
 
 export const PAIN_RECALL_SCHEMA_VERSION = 'pd.pain-recall.v1';
@@ -155,6 +161,18 @@ export interface PainRecallQuery {
   context?: string;
   /** Validated upstream: integer within [1, 10]. */
   limit: number;
+}
+
+/**
+ * PRI-1283 R2: recall options. `sourceMaterialAuthorization` gates the
+ * governance-sourced excerpts this read model returns (diagnoses evidence,
+ * correction evidence, and the pain text of governance-admitted rows).
+ * ABSENT = fail-closed (deny-all): returning consent-gated excerpts without
+ * an authorization check is the R2 gap. The gate only REDACTS the response —
+ * durable cleanup of the persisted copies is the R3 sweep's job.
+ */
+export interface PainRecallOptions {
+  readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
 }
 
 export interface UnresolvedAssociation {
@@ -510,7 +528,7 @@ function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]):
 
 // ── Main entry ───────────────────────────────────────────────────────────────
 
-export async function recallPains(workspaceDir: string, query: PainRecallQuery): Promise<PainRecallResult> {
+export async function recallPains(workspaceDir: string, query: PainRecallQuery, options?: PainRecallOptions): Promise<PainRecallResult> {
   // 1. Ledger — the identity authority. Missing/unreadable is a source-level
   //    failure, never a silent empty ledger.
   const ledgerState = readLedgerFileState(path.join(workspaceDir, '.state'));
@@ -759,18 +777,35 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
       }
 
       // 9. Per-pain enrichment (diagnoses + persisted correction evidence).
+      // PRI-1283 R2: governance-sourced excerpts are withheld from the
+      // response when their host's consent is not granted (defense in depth
+      // on top of the R3 sweep, which purges the persisted copies).
+      const authorization = options?.sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization;
+      const governedHostUnauthorized = (hostKind: string | null, channelText: string | null): boolean => {
+        let host: SourceMaterialHostKind | null = null;
+        if (channelText !== null && channelText.startsWith('codex')) host = 'codex';
+        else if (channelText !== null && channelText.startsWith('workbuddy')) host = 'workbuddy';
+        else if (hostKind === 'codex' || hostKind === 'workbuddy') host = hostKind;
+        if (host === null) return false;
+        return !authorization.isHostSourceMaterialAuthorized(host).authorized;
+      };
       const entries: PainRecallEntry[] = [];
       for (const [painId, edge] of merged) {
         const row = painRows.get(painId);
         if (!isRecord(row)) continue; // step 7 guaranteed presence; guard anyway (rc-1)
+        const painHost = ownString(row, 'host_kind') ?? 'unknown';
+        const painGovernanceBlocked = governedHostUnauthorized(painHost, null);
         const pain: PainEventView = {
           occurredAt: ownString(row, 'created_at'),
           source: ownString(row, 'source'),
-          host: ownString(row, 'host_kind') ?? 'unknown',
+          host: painHost,
           score: typeof row.score === 'number' ? row.score : null,
           severity: ownString(row, 'severity'),
-          reason: ownString(row, 'reason'),
-          text: ownString(row, 'text'),
+          // PRI-1283 R2: a governance-admitted pain row of a host whose
+          // consent is not granted must not re-serve its conversation-derived
+          // text/reason (withheld — IDs, timestamps and scores survive).
+          reason: painGovernanceBlocked ? null : ownString(row, 'reason'),
+          text: painGovernanceBlocked ? null : ownString(row, 'text'),
           rawStatement: null,
         };
 
@@ -792,7 +827,10 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
               taskId: record.taskId,
               category: record.category,
               rootCause: record.rootCause,
-              supportingEvidence: record.evidence.map((e) => ({ sourceRef: e.sourceRef, note: e.note })),
+              supportingEvidence: filterEvidenceByAuthorization(
+                record.evidence.map((e) => ({ sourceRef: e.sourceRef, note: e.note })),
+                authorization,
+              ).kept,
               confidence: record.confidence,
               isOriginalOwnerStatement: false as const,
             }));
@@ -806,7 +844,11 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
               ? safeParseRecord(diagnosisTask.diagnosticJson)
               : null;
             const persisted = payload !== null ? payload.correctionEvidence : undefined;
-            if (isRecord(persisted) && typeof persisted.text === 'string' && persisted.text.length > 0) {
+            const correctionChannel = isRecord(persisted) ? ownString(persisted, 'channel') : null;
+            const correctionBlocked = isRecord(persisted)
+              && typeof persisted.text === 'string' && persisted.text.length > 0
+              && governedHostUnauthorized(painHost, correctionChannel);
+            if (isRecord(persisted) && typeof persisted.text === 'string' && persisted.text.length > 0 && !correctionBlocked) {
               correction = {
                 text: persisted.text,
                 ...(ownString(persisted, 'classification') !== null ? { classification: ownString(persisted, 'classification') ?? undefined } : {}),

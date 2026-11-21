@@ -59,6 +59,8 @@ interface DiagnosisRow {
   diagnosisId: string;
   category?: string;
   rootCause?: string;
+  /** PRI-1283 fixture: custom evidence_json (defaults to '[]' as before). */
+  evidenceJson?: string;
 }
 
 interface PrincipleFixture {
@@ -171,7 +173,7 @@ async function writeStateDb(dir: string, spec: WorkspaceSpec): Promise<void> {
   }
   const insertDiagnosis = db.prepare(`INSERT INTO pain_diagnoses
       (id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, '[]', 0.8, NULL, '2026-10-01T09:05:00.000Z')`);
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0.8, NULL, '2026-10-01T09:05:00.000Z')`);
   for (const d of spec.diagnoses ?? []) {
     insertDiagnosis.run(
       `${d.taskId}::${d.diagnosisId}`,
@@ -180,6 +182,7 @@ async function writeStateDb(dir: string, spec: WorkspaceSpec): Promise<void> {
       d.diagnosisId,
       d.category ?? 'Tooling',
       d.rootCause ?? 'Tooling: fixture root cause',
+      d.evidenceJson ?? '[]',
     );
   }
   db.close();
@@ -443,5 +446,86 @@ describe('handlePainRecall: end-to-end on synthetic workspace', () => {
     const text = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(text).toContain(P1);
     expect(text).toContain(PAIN_REUSE);
+  });
+});
+
+// ── PRI-1283 R2: revoked-consent recall gating ──────────────────────────────
+
+describe('PRI-1283 R2 — pd pain recall withholds revoked-source excerpts', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('revoked codex consent: pain text/reason withheld, governance diagnosis evidence filtered, correction evidence dropped; owner evidence survives', async () => {
+    const ws = await makeWorkspace({
+      principles: [{ id: P1, derivedFromPainIds: [CAND_A] }],
+      pains: [
+        {
+          canonical: PAIN_LINEAGE,
+          source: 'user_correction',
+          reason: 'agent skipped verification',
+          text: 'codex-hosted correction excerpt',
+          host: 'codex',
+        },
+      ],
+      tasks: [
+        {
+          taskId: `diagnosis_${PAIN_LINEAGE}`,
+          diagnosticJson: JSON.stringify({
+            sourcePainId: PAIN_LINEAGE,
+            evidence: [],
+            correctionEvidence: { text: 'verbatim owner correction', classification: 'owner_statement', channel: 'codex_explicit_prefix' },
+          }),
+        },
+      ],
+      candidates: [{ candidateId: CAND_A, taskId: `diagnosis_${PAIN_LINEAGE}` }],
+      diagnoses: [
+        {
+          painId: PAIN_LINEAGE,
+          taskId: `diagnosis_${PAIN_LINEAGE}`,
+          diagnosisId: 'diag-gov',
+          evidenceJson: JSON.stringify([
+            { sourceRef: 'governance_observation:codex|r1|t1|user', note: 'governance excerpt' },
+            { sourceRef: 'owner_reported:cli', note: 'owner note' },
+          ]),
+        },
+      ],
+    });
+    // Record codex REVOKED consent in this workspace (the CLI wires the
+    // ledger-backed port — handlePainRecall is the real production entry).
+    const { recordConversationIngestionConsent } = await import('@principles/host-runtime');
+    const recorded = recordConversationIngestionConsent(ws, 'codex', {
+      decision: 'revoked',
+      decidedVia: 'pd_codex_setup',
+      decidedAt: '2026-11-21T11:00:00.000Z',
+      disclosureVersion: 'g2b-2026-11-12',
+    });
+    if (!recorded.ok) throw new Error(recorded.reason);
+
+    await handlePainRecall({ principleId: P1, workspace: ws, json: true });
+    const out = JSON.parse(logSpy.mock.calls.at(-1)![0] as string);
+    expect(out.status).toBe('ok');
+    const [entry] = out.results;
+    // Governance-admitted pain row: conversation-derived text/reason withheld.
+    expect(entry.pain.host).toBe('codex');
+    expect(entry.pain.text).toBeNull();
+    expect(entry.pain.reason).toBeNull();
+    // Diagnosis evidence: the revoked governance entry is filtered; the
+    // owner-reported entry survives.
+    const evidence = entry.diagnoses[0].supportingEvidence.map((e: { sourceRef: string }) => e.sourceRef);
+    expect(evidence).toEqual(['owner_reported:cli']);
+    // Channel-bound correction evidence (codex) is withheld.
+    expect(entry.correctionEvidence).toBeNull();
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 });

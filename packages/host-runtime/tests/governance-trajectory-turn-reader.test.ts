@@ -167,7 +167,14 @@ describe('createGovernanceTrajectoryTurnReader (PRI-1265 adapter shape)', () => 
   it('maps the store rows onto the TrajectoryTurnReader contract', () => {
     seedTurn({ logicalObservationKey: 'k1', kind: 'user_turn', visibleText: 'owner turn', observedAt: '2026-11-17T10:00:00.000Z' });
     seedTurn({ logicalObservationKey: 'k2', kind: 'assistant_turn', visibleText: 'assistant turn' });
-    const reader = createGovernanceTrajectoryTurnReader({ workspaceDir });
+    // PRI-1283 R2: the reader is authorization-gated — an unwired port denies
+    // governance material (fail-closed). This adapter-shape test grants all
+    // hosts to assert the row mapping; the gate matrix lives in
+    // source-revocation-safety.test.ts.
+    const reader = createGovernanceTrajectoryTurnReader({
+      workspaceDir,
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: true }) },
+    });
     const userTurns = reader.listUserTurnsForSession(ROLLOUT);
     expect(userTurns).toHaveLength(1);
     const [userTurn] = userTurns;

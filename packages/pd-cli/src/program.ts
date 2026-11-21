@@ -855,6 +855,26 @@ workbuddyCmd
     });
   });
 
+// ── pd consent — conversation-ingestion consent operations (PRI-1283) ───────
+const consentCmd = program
+  .command('consent')
+  .description('Conversation-ingestion consent operations (source-material revocation safety gate)');
+
+consentCmd
+  .command('sweep-revoked')
+  .description('Purge persisted conversation excerpts of hosts whose ingestion consent is not granted (idempotent; default is a dry run)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--apply', 'Execute the purge (without it, report what WOULD be purged)')
+  .option('--json', 'Output the machine-readable sweep report only')
+  .action(async (opts) => {
+    const { handleConsentSweepRevoked } = await import('./commands/consent-sweep-revoked.js');
+    await handleConsentSweepRevoked({
+      workspace: opts.workspace,
+      apply: opts.apply === true,
+      json: opts.json === true,
+    });
+  });
+
 // ── pd service — PD Service Host (SPEC-PD-SERVICE-HOST-001 / ADR-0020 §11.6) ──
 // Phase 1: the read-only run-once coordinator. Discovers manifest-authorized
 // and claim-validated Workspaces, projects each Workspace's read-only owner

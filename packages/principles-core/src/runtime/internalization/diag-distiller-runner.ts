@@ -44,6 +44,11 @@ import {
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
+import {
+  denyAllSourceMaterialAuthorization,
+  type SourceMaterialAuthorizationPort,
+} from '../source-material-authorization.js';
+import { assertArtifactEvidenceAuthorized } from './source-authorization-boundary.js';
 import type {
   PeerRunnerOptions,
   PeerRunnerDeps,
@@ -66,6 +71,13 @@ interface DiagDistillerContext {
 
 export interface DiagDistillerRunnerDeps extends PeerRunnerDeps {
   readonly validator: DiagDistillerValidator;
+  /**
+   * PRI-1283 R2: latest-consent gate re-checked at the MODEL-CALL boundary —
+   * the distiller prompt embeds the root-cause artifact's evidence notes, so a
+   * revocation landing after Stage A must block Stage B. ABSENT = fail-closed
+   * (deny-all).
+   */
+  readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
 }
 
 // ── Options ──────────────────────────────────────────────────────────────────
@@ -89,6 +101,7 @@ interface DiagDistillerRunnerOptions extends PeerRunnerOptions {
 export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, DiagDistillerOutputV1> {
   private readonly validator: DiagDistillerValidator;
   private readonly effectiveConfig?: EffectivePdConfig;
+  private readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
 
   constructor(deps: DiagDistillerRunnerDeps, options: DiagDistillerRunnerOptions) {
     super(deps, options, {
@@ -105,6 +118,7 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
     });
     this.validator = deps.validator;
     this.effectiveConfig = options.effectiveConfig;
+    this.sourceMaterialAuthorization = deps.sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization;
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
@@ -181,6 +195,16 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
   }
 
   async invokeRuntime(taskId: string, context: DiagDistillerContext): Promise<RunHandle> {
+    // PRI-1283 R2 — the LAST authorization check before the Stage B model
+    // call: the prompt embeds the root-cause artifact's evidence notes, so a
+    // post-Stage-A revocation of any contributing source blocks here.
+    assertArtifactEvidenceAuthorized({
+      stage: 'diag_distiller',
+      taskId,
+      evidenceSourceRefs: context.rootCauseOutput.evidence.map((entry) => entry.sourceRef),
+      port: this.sourceMaterialAuthorization,
+    });
+
     const builder = new DistillerPromptBuilder();
     const promptOptions = {
       outputLanguage: this.resolvedOptions.outputLanguage,

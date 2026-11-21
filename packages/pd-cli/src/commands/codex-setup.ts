@@ -45,6 +45,7 @@ import {
   type CodexIngestionConsentDecision,
   type CodexIngestionConsentState,
   type CodexIngestionDisclosureLanguage,
+  runSourceRevocationSweep,
 } from '@principles/host-runtime';
 import { computeEffectivePdConfig, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime';
 
@@ -400,6 +401,20 @@ export async function handleCodexSetup(options: CodexSetupOptions): Promise<void
     if (!revoked.ok) {
       refuse(revoked.reason, revoked.nextAction, consentStateBefore);
       return;
+    }
+    // PRI-1283 R3: revocation triggers the immediate excerpt sweep. The
+    // decline decision itself is already durable (flag off + revoked record);
+    // a sweep that cannot complete is surfaced loudly as a warning and stays
+    // retryable via `pd consent sweep-revoked --apply`.
+    try {
+      const sweep = await runSourceRevocationSweep({ workspaceDir: workspace, apply: true });
+      if (sweep.outcome === 'partial') {
+        warnings.push(`source-revocation sweep partial: ${sweep.hosts.map((h) => `${h.hostKind}:${h.failures.length} failures`).join('; ')} — rerun 'pd consent sweep-revoked --apply'`);
+      } else if (sweep.outcome === 'failed') {
+        warnings.push(`source-revocation sweep failed: ${sweep.reason} — rerun 'pd consent sweep-revoked --apply'`);
+      }
+    } catch (error) {
+      warnings.push(`source-revocation sweep error: ${error instanceof Error ? error.message.slice(0, 160) : String(error).slice(0, 160)} — rerun 'pd consent sweep-revoked --apply'`);
     }
     finish({
       generatedAt, host: 'codex', workspace, status: 'ok',
