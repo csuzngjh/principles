@@ -175,7 +175,17 @@ TECH §5.2 表之外的 CONTRACT §2.4 首批代码实现位置：
 | P1-02 POSIX FIFO 永久阻塞 | `open(O_RDONLY)` 对无写入者的 FIFO 会等待写入者——probe 可能被单条夹持的 blob 路径永久挂起 | 采用 `residue-delete.mjs` `readRegularFileNoFollow` 的同一旗标纪律：POSIX 追加 `O_NONBLOCK`（win32 显式 0）——O_NONBLOCK 只让 open 非阻塞，类型裁决仍完全来自 fstat；FIFO/目录/其他非普通文件一律拒绝，内容读取仍只经已验证 fd，不回退路径读取 | POSIX 真实 FIFO 用例（3s 超时边界：完成而非被杀、`not a regular file` 拒绝、无 DIGEST_MISMATCH 即零读取、无 READY、源文件集+sha+mtime 不变）；Windows 显式跳过，junction/symlink/dir 拒绝测试继续执行 |
 | P2-01 fstat 异常 fd 泄漏 | openSync 与 fstatSync 同一 try/catch：open 成功后 fstat 抛出会直接进入 catch 返回，fd 未关闭 | fd 生命周期重组：open 成功立即进入**单一 finally 托管区**——fstat/验证/身份绑定/哈希/异常返回全部在区内，任何成功、拒绝、异常路径都恰好关闭一次；close 异常不掩盖原始拒绝原因；错误分类不变（fstat 失败仍归 `unreadable`） | 故障注入（`NODE_OPTIONS=--require` CJS preload 在 ESM 图加载前打补丁，实证对 `import {fstatSync} from 'node:fs'` 可见）：首 fstat 确定性抛出→CLI 结构化拒绝（exit 0 + unreadable impact）、故障 fd 恰好一次 close（计数日志恰一行 `FAULT_FD_CLOSE=1`）、无内容消费 |
 
-## 14. Complexity Delta
+## 14. r4 最终整改（3 项，2026-11-21）
+
+最终复审 3 项发现全部核实为属实并修复；测试 108 → **112**（111 执行 + 1 Windows FIFO 平台跳过，Linux 全执行）。
+
+| 发现 | 根因 | 修复 | 测试 |
+| --- | --- | --- | --- |
+| R965 完整会话误判保留期清扫 | r3 的 started_at-only 保留证据忽略非轮次会话创建者：manual pain（`/pd-pain`，`pain-signal-observability.ts`）以 Pain 时刻建会话并留下 pain_events 行（pain_events **不在保留清扫表**），工具证据写入器（`production-pain-evidence.ts`）同理；`/pd-pain` 先于首轮对话时 started_at 早于最早存活轮，完整会话被判 RETENTION_EXPIRED 全路径阻断 | started_at 差值仅在**无保留免疫的非轮次记录解释**时才是积极保留证据：存在同时刻（时刻相等）的该会话 pain_events 行 → 起始来自该 immortal 记录 → 不构成保留证据（窗口完整则零 SOURCE_*，样本进入实验）；无解释 → 首写入者本身是可清扫轨迹行（轮次或工具调用）且已消失 → 保留证据成立（r3 语义保持）；解释查询入 main 守卫窗口（staged 清理覆盖） | Case E（评审原例：10:00 /pd-pain + 10:01–10:04 两对完整轮 + 10:05 数据集 Pain → 零 SOURCE_*、READY、COMPLETE）/Case F（解释存在但不掩盖独立连续性缺口→SOURCE_GAP 保留）/Case G（无解释→保留证据独立成立）/r3 Case A–D 全保持 |
+| NODE_OPTIONS 空格拆分 | Node 按空白拆分 NODE_OPTIONS，含空格的 preload 路径未加引号使 CLI 启动即败 | preload 改经**子进程 argv**（`node --require <path> probe.mjs …`），不经 NODE_OPTIONS；新增含空格目录的回归（复制 preload 到 `preload dir with spaces/` 后 --require 仍启动并完成） | 空格路径回归用例（argv 单元素传递，CLI 正常启动+故障注入照常生效） |
+| FIFO 对账盲区 | `fingerprintTree` 只记录普通文件——FIFO 被删/替换不会使前后对账失败 | FIFO 用例补 lstat 身份断言（前后 `isFIFO()` + dev/ino 相等，绝不打开管道） | 已并入 FIFO 用例（Linux CI 执行） |
+
+## 15. Complexity Delta
 
 ```text
 New durable source of truth: NO   （admission-report/source-groups/remediation-queue 均为可复算派生物）

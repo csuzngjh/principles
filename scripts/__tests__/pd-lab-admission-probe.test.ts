@@ -1919,6 +1919,93 @@ describe('r3 P1-01: started_at-only retention evidence stands alone (real CLI su
     expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
     expect(codes).not.toContain('SOURCE_GAP');
   });
+
+  it('Case E (r4, reviewer example): /pd-pain before the first turn explains started_at — a COMPLETE session enters experiments', () => {
+    // Owner submits /pd-pain at 10:00 (pain row written, session created at
+    // 10:00), then two complete contiguous turn pairs 10:01–10:04, then the
+    // dataset pain at 10:05. The snapshot retains EVERYTHING — the started_at
+    // diff is explained by the retention-immune pain row, so no SOURCE_* may
+    // fire and the sample must reach READY.
+    const world = buildWorld('r4-pdpain', {
+      sessions: [
+        {
+          sessionId: 'sess-pain-first',
+          startedAt: '2026-09-01T10:00:00.000Z',
+          userTurns: [
+            { turnIndex: 2, createdAt: '2026-09-01T10:01:00.000Z' },
+            { turnIndex: 3, createdAt: '2026-09-01T10:02:00.000Z' },
+            { turnIndex: 4, createdAt: '2026-09-01T10:03:00.000Z' },
+            { turnIndex: 5, createdAt: '2026-09-01T10:04:00.000Z' },
+          ],
+          assistantTurns: [
+            { createdAt: '2026-09-01T10:01:30.000Z' },
+            { createdAt: '2026-09-01T10:02:30.000Z' },
+            { createdAt: '2026-09-01T10:03:30.000Z' },
+            { createdAt: '2026-09-01T10:04:30.000Z' },
+          ],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-pain-first', createdAt: '2026-09-01T10:05:00.000Z' }],
+      extraPainRows: [{ id: 900, sessionId: 'sess-pain-first', createdAt: '2026-09-01T10:00:00.000Z' }],
+    });
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const sample = readOut(world.outDir).report.perSample[0];
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY');
+    expect(sample.completeness).toBe('COMPLETE_FOR_ANALYSIS');
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+  });
+
+  it('Case F (r4): an explained started_at diff does NOT mask an independent continuity gap', () => {
+    // The pain row explains the start, but the surviving turns still begin
+    // AFTER the pain trigger — the real gap stays SOURCE_GAP, never upgraded
+    // or downgraded by the explanation.
+    const world = buildWorld('r4-explained-gap', {
+      sessions: [
+        {
+          sessionId: 'sess-expl-gap',
+          startedAt: '2026-09-01T10:00:00.000Z',
+          userTurns: [{ turnIndex: 2, createdAt: '2026-09-01T10:06:00.000Z' }, { turnIndex: 3, createdAt: '2026-09-01T10:07:00.000Z' }],
+          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-expl-gap', createdAt: PAIN_AT }],
+      extraPainRows: [{ id: 900, sessionId: 'sess-expl-gap', createdAt: '2026-09-01T10:00:00.000Z' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const codes = codesOf(out, 'S01');
+    expect(codes).toContain('SOURCE_GAP');
+    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
+  });
+
+  it('Case G (r4): started_at diff with NO explaining pain row remains positive retention evidence (stand-alone)', () => {
+    // Same shape as the reviewer example but WITHOUT the 10:00 pain row:
+    // nothing in the snapshot explains the start, so the first writer was a
+    // sweepable trajectory row that is gone → SOURCE_RETENTION_EXPIRED.
+    const world = buildWorld('r4-unexplained', {
+      sessions: [
+        {
+          sessionId: 'sess-unexpl',
+          startedAt: '2026-09-01T10:00:00.000Z',
+          userTurns: [{ turnIndex: 2, createdAt: '2026-09-01T10:06:00.000Z' }, { turnIndex: 3, createdAt: '2026-09-01T10:07:00.000Z' }],
+          assistantTurns: [{ createdAt: '2026-09-01T10:06:00.000Z' }, { createdAt: '2026-09-01T10:07:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-unexpl', createdAt: '2026-09-01T10:08:00.000Z' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const sample = out.report.perSample[0];
+    expect(codesOf(out, 'S01')).toContain('SOURCE_RETENTION_EXPIRED');
+    expect(codesOf(out, 'S01')).not.toContain('SOURCE_GAP');
+    expect(sample.completeness).toBe('INCOMPLETE');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
 });
 
 describe('r3 P1-02: FIFO at a blob path is refused without blocking (real CLI subprocess, POSIX)', () => {
@@ -1944,6 +2031,11 @@ describe('r3 P1-02: FIFO at a blob path is refused without blocking (real CLI su
       return;
     }
     const before = fingerprintTree(world.root);
+    // lstat identity BEFORE the run — fingerprintTree only records regular
+    // files, so the reconciliation below cannot see a deleted/replaced pipe;
+    // lstat (never opening it) closes that blind spot (r4 review).
+    const fifoBefore = fs.lstatSync(fifoPath);
+    expect(fifoBefore.isFIFO()).toBe(true);
     // 3s bound: the pre-fix probe would block forever on open(O_RDONLY) of a
     // writer-less FIFO and be killed with signal SIGTERM (status null).
     const run = runProbeWithTimeout(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir], 3_000);
@@ -1955,6 +2047,11 @@ describe('r3 P1-02: FIFO at a blob path is refused without blocking (real CLI su
     expect(problem.impact).toContain('not a regular file'); // FIFO classified via fstat, never read
     expect(codesOf(out, 'S01')).not.toContain('DIGEST_MISMATCH'); // FIFO content was never consumed
     expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED'); // no READY from an unreadable blob
+    // The FIFO is still IN PLACE, still a FIFO, with unchanged file identity.
+    const fifoAfter = fs.lstatSync(fifoPath);
+    expect(fifoAfter.isFIFO()).toBe(true);
+    expect(fifoAfter.dev).toBe(fifoBefore.dev);
+    expect(fifoAfter.ino).toBe(fifoBefore.ino);
     // Nothing else touched, nothing new outside --out, temp state clean.
     const after = fingerprintTree(world.root);
     const stripOut = (tree: Map<string, { sha256: string; mtimeMs: number }>) =>
@@ -1981,13 +2078,16 @@ describe('r3 P2-01: fstat failure closes the opened fd exactly once (fault injec
   it('open-success → fstat-throw → structured refusal, and closeSync called exactly once for the faulted fd', () => {
     const world = fdWorld();
     const logPath = path.join(world.root, 'close-log.txt');
+    // The preload goes through CHILD ARGV (`--require <path>`), not
+    // NODE_OPTIONS: Node splits NODE_OPTIONS on whitespace, so a preload
+    // path containing a space would end the CLI before it starts (r4 review).
     const run = runProbeWithEnv(
       ['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir],
       {
         PRI1257_FAULT: 'fstat',
         PRI1257_FAULT_LOG: logPath,
-        NODE_OPTIONS: `--require ${PRELOAD}`,
       },
+      ['--require', PRELOAD],
     );
     expect(run.status).toBe(0); // structured refusal — not a crash, not a hang
     const out = readOut(world.outDir);
@@ -1996,6 +2096,30 @@ describe('r3 P2-01: fstat failure closes the opened fd exactly once (fault injec
     expect(problem.impact).toContain('could not be verified/read'); // unreadable classification preserved
     expect(codesOf(out, 'S01')).not.toContain('DIGEST_MISMATCH'); // no content was consumed
     // The faulted descriptor was closed EXACTLY once (no leak, no double close).
+    const log = fs.readFileSync(logPath, 'utf8').trim().split('\n');
+    expect(log).toEqual(['FAULT_FD_CLOSE=1']);
+  });
+
+  it('the preload path itself may contain spaces — the argv form keeps the CLI startable (regression)', () => {
+    // Reproduce the space-in-path condition: copy the preload and the probe
+    // dependencies under a directory WITH a space, point --require there,
+    // and verify the CLI still starts and completes (pre-fix: NODE_OPTIONS
+    // splitting would kill it before main()).
+    const world = fdWorld();
+    const logPath = path.join(world.root, 'close-log.txt');
+    const spacedDir = path.join(world.root, 'preload dir with spaces');
+    fs.mkdirSync(spacedDir);
+    const spacedPreload = path.join(spacedDir, 'pd-lab-probe-fault-inject.cjs');
+    fs.copyFileSync(PRELOAD, spacedPreload);
+    const run = runProbeWithEnv(
+      ['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir],
+      {
+        PRI1257_FAULT: 'fstat',
+        PRI1257_FAULT_LOG: logPath,
+      },
+      ['--require', spacedPreload], // path WITH spaces, single argv element
+    );
+    expect(run.status).toBe(0); // started and completed — space did not split the argv
     const log = fs.readFileSync(logPath, 'utf8').trim().split('\n');
     expect(log).toEqual(['FAULT_FD_CLOSE=1']);
   });

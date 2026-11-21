@@ -101,21 +101,20 @@ export function runNpmLabProbe(args) {
 }
 
 /**
- * r3 P2-01 fault-injection driver: runs the REAL CLI with a CJS preload
- * (NODE_OPTIONS=--require) that patches node:fs BEFORE the ESM graph loads —
- * a preload patch is visible to the CLI's `import { fstatSync } from
- * 'node:fs'` bindings (verified empirically). Extra env is additive.
+ * r3 P2-01 fault-injection driver: runs the REAL CLI with a CJS preload that
+ * patches node:fs BEFORE the ESM graph loads — a preload patch is visible to
+ * the CLI's `import { fstatSync } from 'node:fs'` bindings (verified
+ * empirically). The preload is passed as `--require <path>` CHILD ARGV, NOT
+ * through NODE_OPTIONS: Node splits NODE_OPTIONS on whitespace, so a preload
+ * path containing a space would end the CLI before it starts (r4 review).
+ * Extra env is additive.
  */
-export function runProbeWithEnv(args, extraEnv = {}) {
-  const env = { ...process.env, ...extraEnv };
-  if (typeof env.NODE_OPTIONS === 'string' && env.NODE_OPTIONS.includes('--require')) {
-    env.NODE_OPTIONS = env.NODE_OPTIONS.replace(/\\/g, '/');
-  }
-  return spawnSync(process.execPath, [SCRIPT, ...args], {
+export function runProbeWithEnv(args, extraEnv = {}, nodeArgvPrefix = []) {
+  return spawnSync(process.execPath, [...nodeArgvPrefix, SCRIPT, ...args], {
     encoding: 'utf8',
     timeout: 180_000,
     cwd: REPO_ROOT,
-    env,
+    env: { ...process.env, ...extraEnv },
   });
 }
 
@@ -159,6 +158,10 @@ export function buildWorld(label, options) {
   }
 
   const omittedSampleRows = new Set(options.omitSampleRows ?? []);
+  // Extra pain rows (r4: the /pd-pain-before-first-turn scenario needs an
+  // explaining pain event at the session start, alongside the sample's own
+  // pain row).
+  const extraPainRows = options.extraPainRows ?? [];
   options.samples.forEach((sample, sampleIndex) => {
     if (omittedSampleRows.has(sample.caseId)) {
       return; // the test inserts this sample's rows itself (active-WAL scenario)
@@ -173,6 +176,15 @@ export function buildWorld(label, options) {
         'user_frustration',
         80,
         painCreatedAt,
+      );
+    }
+    for (const extra of extraPainRows) {
+      db.prepare('INSERT INTO pain_events (id, session_id, source, score, created_at) VALUES (?, ?, ?, ?, ?)').run(
+        extra.id,
+        extra.sessionId,
+        extra.source ?? 'user_frustration',
+        extra.score ?? 80,
+        extra.createdAt,
       );
     }
     const sessionId = sample.sessionId;

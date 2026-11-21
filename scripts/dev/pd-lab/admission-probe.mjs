@@ -844,6 +844,27 @@ function collectSessionFacts(db, sessionId) {
 }
 
 /**
+ * Session-start origin explanation (r4 review): does a retention-immune
+ * non-turn record explain this session's started_at instant? Manual pain
+ * ingress creates the session at the pain's time and leaves a pain_events
+ * row (pain_events is NOT swept by trajectory retention), so a pain row at
+ * the started_at instant proves the start came from that record — the diff
+  * to the earliest surviving turn then proves nothing about vanished turns.
+ */
+function collectStartExplanation(db, sessionId, startedAtMs) {
+  if (startedAtMs === null) {
+    return false;
+  }
+  const sessionPainRows = db
+    .prepare('SELECT created_at FROM pain_events WHERE session_id = ?')
+    .all(sessionId);
+  return sessionPainRows.some((row) => {
+    const rowMs = typeof row.created_at === 'string' ? isoTimeValue(row.created_at) : null;
+    return rowMs !== null && rowMs === startedAtMs;
+  });
+}
+
+/**
  * Pain anchor verification (P1-1): the frozen dataset's pain id must resolve
  * to a REAL pain_events row whose session binding and trigger instant match
  * the sample. A non-empty session_id alone proves nothing — the anchor exists
@@ -913,7 +934,7 @@ function validatePainAnchor(db, sample) {
   return { ok: true, problem: null, row };
 }
 
-function analyzeSession(sample, facts) {
+function analyzeSession(sample, facts, startedAtExplainedByPainEvent) {
   const problems = [];
   const { session, userTurns, assistantTurns, toolCalls } = facts;
   const sessionId = sample.sessionId;
@@ -947,25 +968,33 @@ function analyzeSession(sample, facts) {
   const earliestTurnAt = earliestTurn !== null ? earliestTurn.at : null;
   const earliestTurnAtMs = earliestTurn !== null ? earliestTurn.ms : null;
 
-  // Retention evidence (CONTRACT §2.4): POSITIVE proof that earlier rows once
-  // existed — the session's preserved started_at strictly precedes the
-  // earliest surviving turn. This evidence is evaluated on its own and stands
-  // ALONE: a session whose surviving window passes every internal continuity
-  // check is still missing the history that existed before the earliest
-  // surviving row (r3 P1-01 — the evidence must not be gated on other gap
-  // findings). PRODUCTION SEMANTICS (r2 review R600): nextUserTurnIndex
-  // (openclaw-plugin/src/hooks/prompt.ts) numbers the first recorded user
-  // turn as host-user-message-count + 1, so a NORMAL OpenClaw session's
-  // turn_index starts ABOVE 0 — a non-zero start is NOT a deletion signal
-  // (CONTRACT §2.4's turn_index example assumes 0-based numbering, which this
-  // producer does not use; the deviation is documented in the report).
-  // started_at that is unparseable or merely EQUAL to the earliest surviving
-  // turn is never positive evidence; an unparseable started_at also never
-  // becomes a gap on its own.
+  // Retention evidence (CONTRACT §2.4) — POSITIVE proof that earlier TRAJECTORY
+  // rows once existed. PRODUCTION SEMANTICS (r2 R600 + r4 review): a non-zero
+  // turn_index start is normal numbering (host-user-message-count + 1), and a
+  // started_at earlier than the earliest surviving turn is NOT by itself a
+  // deletion signal, because NON-TURN session creators exist:
+  //   - manual pain ingress (pain-signal-observability.ts) creates the session
+  //     at the PAIN's time and leaves a pain_events row at that same instant —
+  //     and pain_events is NOT swept by trajectory retention;
+  //   - the tool-evidence writer (production-pain-evidence.ts) creates the
+  //     session at the tool event's time;
+  //   - turn writers create it at the turn's time; later writes only update
+  //     updated_at (trajectory.ts upsert), so started_at is the FIRST writer's
+  //     instant.
+  // Therefore a started_at diff is positive retention evidence ONLY when NO
+  // retention-immune non-turn record explains it: if a pain_events row exists
+  // for this session at the started_at instant, the start came from that
+  // immortal record and proves nothing about vanished turns; if none does,
+  // the first writer was itself a sweepable trajectory row (turn or tool
+  // call) that no longer exists — positive proof of vanished rows. The
+  // evidence still stands ALONE (r3 P1-01): it does not wait for other gap
+  // findings. Unparseable or merely-equal started_at is never positive.
   let positiveRetention = false;
   const startedAtMs = session && typeof session.started_at === 'string' ? isoTimeValue(session.started_at) : null;
   if (earliestTurnAtMs !== null && startedAtMs !== null && startedAtMs < earliestTurnAtMs) {
-    positiveRetention = true;
+    // startedAtExplainedByPainEvent is computed by the caller (main) inside
+    // its guarded query window — see collectStartExplanation.
+    positiveRetention = !startedAtExplainedByPainEvent;
   }
 
   const painAtMs = isoTimeValue(sample.createdAt);
@@ -2054,8 +2083,28 @@ function main() {
       problems.push(painAnchor.problem);
     }
 
+    // Session-start origin explanation (r4): is the session's started_at
+    // explained by a retention-immune non-turn record (a pain_events row at
+    // the same instant)? Computed inside the same guarded query window.
+    let startedAtExplainedByPainEvent = false;
+    if (facts !== null && facts.session !== null && typeof facts.session.started_at === 'string') {
+      try {
+        startedAtExplainedByPainEvent = collectStartExplanation(db, sample.sessionId, isoTimeValue(facts.session.started_at));
+      } catch (error) {
+        db.close();
+        if (dbAccess.staged !== null) {
+          removeStagingRoot(dbAccess.staged.root);
+        }
+        structuralFailure('trajectory_query_failed', 'the session-start explanation query failed; the snapshot database has an unexpected shape', {
+          sessionId: sample.sessionId,
+          caseId: sample.caseId,
+          cause: String(error?.message ?? error),
+        });
+      }
+    }
+
     const sessionAnalysis = facts !== null
-      ? analyzeSession(sample, facts)
+      ? analyzeSession(sample, facts, startedAtExplainedByPainEvent)
       : { problems: [], blobRefs: [], previewOnlyRows: [], session: null, userTurns: [], assistantTurns: [], toolCalls: [] };
 
     // TURN_BLOB_MISSING / DIGEST_MISMATCH against the snapshot's manifest,
