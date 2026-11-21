@@ -69,14 +69,14 @@ function isTaskRow(value: unknown): value is TaskRow {
 }
 
 /** Open the existing store for reading without creating or logically writing it. */
-function openReadonly(dbPath: string): Database.Database {
+function openReadonly(dbPath: string, busyTimeoutMs: number): Database.Database {
   try {
-    return new Database(dbPath, { readonly: true, fileMustExist: true, timeout: 5_000 });
+    return new Database(dbPath, { readonly: true, fileMustExist: true, timeout: busyTimeoutMs });
   } catch {
     // WAL corner states (checkpointed clean, no -shm) can defeat a pure
     // readonly open; a write-CAPABLE open performs the WAL/shm recovery with
     // `query_only` pinning the logical database against any write.
-    const db = new Database(dbPath, { fileMustExist: true, timeout: 5_000 });
+    const db = new Database(dbPath, { fileMustExist: true, timeout: busyTimeoutMs });
     db.pragma('query_only = ON');
     return db;
   }
@@ -93,7 +93,12 @@ function emptySnapshot(): TaskProgressRead {
   };
 }
 
-export function readTaskProgressSnapshot(workspaceDir: string): TaskProgressRead {
+export function readTaskProgressSnapshot(workspaceDir: string, options?: { busyTimeoutMs?: number }): TaskProgressRead {
+  // P1-02 (final closure): the SQLite busy timeout is the CALLER's bounded
+  // budget — for the shadow adapter that is the remaining workspace
+  // deadline, never an independent fixed wait. A locked store then fails
+  // inside the deadline instead of the read silently overrunning it.
+  const busyTimeoutMs = Math.max(0, Math.floor(options?.busyTimeoutMs ?? 5_000));
   const dbPath = path.join(path.resolve(workspaceDir), '.pd', 'state.db');
   // P2-03 (final-remediation review): stat errors are CLASSIFIED — only a
   // genuine ENOENT is the empty-task-set case; every other failure
@@ -112,7 +117,7 @@ export function readTaskProgressSnapshot(workspaceDir: string): TaskProgressRead
   }
   let db: Database.Database;
   try {
-    db = openReadonly(dbPath);
+    db = openReadonly(dbPath, busyTimeoutMs);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, reason: `progress_snapshot_open_failed:${message.slice(0, 160)}` };

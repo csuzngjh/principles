@@ -14,6 +14,7 @@ import { createRuntimeStateHandle, getDefaultPdConfig } from '@principles/core/r
 import { createCodexWorkerAdapter } from '../../../src/services/service-host/worker-adapter-codex.js';
 import { createWorkbuddyWorkerAdapter } from '../../../src/services/service-host/worker-adapter-workbuddy.js';
 import { WORKER_ADAPTER_CONTRACT_VERSION, resolveActiveReleaseCliEntry } from '../../../src/services/service-host/worker-adapter.js';
+import { readTaskProgressSnapshot } from '../../../src/services/service-host/progress-evidence.js';
 import type { WorkerProcessOptions, WorkerProcessResult } from '../../../src/services/service-host/worker-process.js';
 import { resolveCoordinatorInstallIdentity } from '../../../src/services/service-host/install-identity.js';
 import type { WorkspaceDescriptor } from '../../../src/services/service-host/worker-adapter.js';
@@ -865,7 +866,7 @@ describe('final-remediation review — monotonic workspace deadline (P1-01)', ()
     expect(result.cycleOutcome).not.toBe('timeout');
   });
 
-  it('a run that consumes the budget reports the post-cycle snapshot as evidence-unavailable inside the SAME budget', async () => {
+  it('a deadline crossed before the post-cycle snapshot is a TIMEOUT (P1-02), never a normal completion or disguised evidence gap', async () => {
     const workspace = await workspaceWithStore();
     const adapter = createCodexWorkerAdapter();
     const result = await adapter.executeOnce({
@@ -883,8 +884,76 @@ describe('final-remediation review — monotonic workspace deadline (P1-01)', ()
         },
       },
     });
-    expect(result.cycleOutcome).toBe('degraded');
-    expect(result.reason).toBe('progress_evidence_unavailable:workspace_timeout_budget_exhausted');
+    expect(result.cycleOutcome).toBe('timeout');
+    expect(result.reason).toBe('workspace_timeout_budget_exhausted');
+    expect(result.lastProgressAt).toBeNull();
+    // The REAL worker evidence (it ran and exited 0) still rides the record.
+    expect(result.worker.exitCode).toBe(0);
+    expect(result.worker.timedOut).toBe(false);
+  });
+});
+
+describe('final-closure review — post-cycle snapshot deadline (P1-02)', () => {
+  it('the post-cycle snapshot read receives the REMAINING workspace budget as its SQLite busy timeout — never a fixed independent wait', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const busyTimeouts: number[] = [];
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-busy-budget',
+      timeoutMs: 60_000,
+      deadlineAtMs: performance.now() + 30_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        readTaskProgressSnapshot: (_dir, options) => {
+          busyTimeouts.push(options?.busyTimeoutMs ?? -1);
+          return readTaskProgressSnapshot(_dir, options);
+        },
+        spawnWorkerProcess: async () => {
+          await new Promise((r) => setTimeout(r, 200));
+          return procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }) });
+        },
+      },
+    });
+    expect(busyTimeouts.length).toBe(2);
+    // Both reads are bounded by the SAME workspace budget: the second read's
+    // allowance is strictly smaller than the first's (the worker consumed
+    // part of it) — no stage gets a fresh independent wait.
+    expect(busyTimeouts[1]!).toBeLessThan(busyTimeouts[0]!);
+    expect(busyTimeouts[1]!).toBeGreaterThan(0);
+    expect(result.cycleOutcome).not.toBe('timeout');
+  });
+
+  it('a snapshot that starts inside the deadline but returns past it is still a TIMEOUT (P1-02)', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    let reads = 0;
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-snapshot-overrun',
+      timeoutMs: 60_000,
+      deadlineAtMs: performance.now() + 120,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        readTaskProgressSnapshot: (dir, options) => {
+          reads += 1;
+          if (reads === 2) {
+            // The post-cycle read blocks past the deadline (slow disk I/O).
+            const waitUntil = performance.now() + 200;
+            while (performance.now() < waitUntil) { /* synchronous stall */ }
+          }
+          return readTaskProgressSnapshot(dir, options);
+        },
+        spawnWorkerProcess: async () => procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }) }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('timeout');
+    expect(result.reason).toBe('workspace_timeout_budget_exhausted');
+    expect(result.worker.exitCode).toBe(0);
   });
 });
 
@@ -952,6 +1021,154 @@ describe('final-remediation review — progress decoupled from outcome (P2-02)',
       },
     });
     expect(result.cycleOutcome).toBe('degraded');
+    expect(result.lastProgressAt).not.toBeNull();
+  });
+});
+
+describe('final-closure review — liveness ownership of progress time (P2-02)', () => {
+  const STALE_COMPLETED_AT = '2000-01-01T00:00:00.000Z';
+
+  function writeLiveness(workspace: string, fields: { lastInvocationId?: string | null; lastCycleCompletedAt?: string | null }): void {
+    mkdirSync(path.join(workspace, '.state'), { recursive: true });
+    writeFileSync(
+      path.join(workspace, '.state', 'codex-worker-liveness.json'),
+      JSON.stringify({
+        lastCycleDriver: 'service_host',
+        lastCycleMode: 'ready',
+        runningStage: null,
+        lastInvocationId: fields.lastInvocationId ?? null,
+        lastCycleCompletedAt: fields.lastCycleCompletedAt ?? null,
+      }),
+      'utf8',
+    );
+  }
+
+  const corroboratingReport = (workspace: string) => ({
+    workspaceDir: workspace,
+    mode: 'degraded',
+    report: { diagnostician: { status: 'succeeded' } },
+  });
+
+  it('a liveness record matching THIS invocation supplies the progress timestamp', async () => {
+    const workspace = await workspaceWithStore();
+    writeLiveness(workspace, { lastInvocationId: 'inv-match', lastCycleCompletedAt: '2026-11-21T10:00:00.000Z' });
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-match',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({ stdout: JSON.stringify(corroboratingReport(workspace)) }),
+      },
+    });
+    expect(result.lastProgressAt).toBe('2026-11-21T10:00:00.000Z');
+  });
+
+  it('a STALE liveness record (different invocation id) never pollutes this cycle — the adapter completedAt is the fallback', async () => {
+    const workspace = await workspaceWithStore();
+    writeLiveness(workspace, { lastInvocationId: 'inv-OLD-worker', lastCycleCompletedAt: STALE_COMPLETED_AT });
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-new',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({ stdout: JSON.stringify(corroboratingReport(workspace)) }),
+      },
+    });
+    expect(result.lastProgressAt).not.toBe(STALE_COMPLETED_AT);
+    expect(result.lastProgressAt).toBe(result.completedAt);
+  });
+
+  it('a liveness record from a pre-invocation-id worker (null id) is foreign history, not this cycle', async () => {
+    const workspace = await workspaceWithStore();
+    writeLiveness(workspace, { lastInvocationId: null, lastCycleCompletedAt: STALE_COMPLETED_AT });
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-new2',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({ stdout: JSON.stringify(corroboratingReport(workspace)) }),
+      },
+    });
+    expect(result.lastProgressAt).toBe(result.completedAt);
+    expect(result.lastProgressAt).not.toBe(STALE_COMPLETED_AT);
+  });
+
+  it('an invalid liveness timestamp is rejected even when the invocation id matches', async () => {
+    const workspace = await workspaceWithStore();
+    writeLiveness(workspace, { lastInvocationId: 'inv-badtime', lastCycleCompletedAt: 'not-a-timestamp' });
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-badtime',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({ stdout: JSON.stringify(corroboratingReport(workspace)) }),
+      },
+    });
+    expect(result.lastProgressAt).toBe(result.completedAt);
+    expect(result.lastProgressAt).not.toBe('not-a-timestamp');
+  });
+
+  it('stale liveness + NO business progress → null (history never fabricates progress)', async () => {
+    const workspace = await workspaceWithStore();
+    writeLiveness(workspace, { lastInvocationId: 'inv-OLD-worker', lastCycleCompletedAt: STALE_COMPLETED_AT });
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-new3',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'paused' }) }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('paused');
+    expect(result.lastProgressAt).toBeNull();
+  });
+
+  it('the trusted task-diff changedAt still outranks a matching liveness record', async () => {
+    const workspace = await workspaceWithStore();
+    writeLiveness(workspace, { lastInvocationId: 'inv-priority', lastCycleCompletedAt: '2026-11-21T10:00:00.000Z' });
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-priority',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => {
+          const handle = await createRuntimeStateHandle({ workspaceDir: workspace, readonly: false, bootstrapIfMissing: true });
+          try {
+            await handle.stateManager.createTask({ taskId: 'priority-evidence', taskKind: 'diagnostician', status: 'pending', attemptCount: 0, maxAttempts: 3 });
+          } finally {
+            await handle.close().catch(() => undefined);
+          }
+          return procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }) });
+        },
+      },
+    });
+    expect(result.businessProgress.taskStateChanged).toBe(true);
+    // changedAt is the task row's updated_at — not the liveness timestamp.
+    expect(result.lastProgressAt).not.toBe('2026-11-21T10:00:00.000Z');
     expect(result.lastProgressAt).not.toBeNull();
   });
 });

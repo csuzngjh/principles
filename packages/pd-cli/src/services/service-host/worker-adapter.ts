@@ -154,6 +154,11 @@ export interface WorkerAdapterProbes {
    */
   readonly resolveCliEntry?: typeof resolveActiveReleaseCliEntry;
   readonly now?: () => Date;
+  /**
+   * Task-progress snapshot read injection (P1-02 deadline/I-O boundary
+   * tests). Production ALWAYS uses the real store reader.
+   */
+  readonly readTaskProgressSnapshot?: typeof readTaskProgressSnapshot;
 }
 
 export interface WorkerAdapter {
@@ -457,12 +462,19 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         invocationId: input.invocationId,
       });
 
-      // ── Pre-cycle task snapshot (progress evidence, task §6) ──
-      const before = readTaskProgressSnapshot(workspaceDir);
+      // ── Hard deadline check BEFORE any store read or spawn (P1-01 §C /
+      // P1-02): entry/config/env work may have consumed the whole budget —
+      // no new read or Worker may start past it, and the refusal is a
+      // timeout, not a Worker failure. ──
+      if (remainingBudgetMs() <= 0) {
+        return finish('timeout', { reason: 'workspace_timeout_budget_exhausted', nextAction: budgetExhaustedNextAction, worker: { cliEntry: entry.entry, cliEntrySource: entry.source } });
+      }
 
-      // ── Hard deadline check BEFORE spawn (P1-01 §C): config/env/snapshot
-      // work may have consumed the whole budget — a Worker must never start
-      // past it, and the refusal is a timeout, not a Worker failure. ──
+      // ── Pre-cycle task snapshot (progress evidence, task §6): the SQLite
+      // busy wait is capped by the same remaining workspace budget. ──
+      const readSnapshot = input.probes?.readTaskProgressSnapshot ?? readTaskProgressSnapshot;
+      const before = readSnapshot(workspaceDir, { busyTimeoutMs: remainingBudgetMs() });
+
       if (remainingBudgetMs() <= 0) {
         return finish('timeout', { reason: 'workspace_timeout_budget_exhausted', nextAction: budgetExhaustedNextAction, worker: { cliEntry: entry.entry, cliEntrySource: entry.source } });
       }
@@ -490,12 +502,21 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         environmentReport,
       };
 
-      // ── Post-cycle snapshot is INSIDE the same budget (P1-01 §B): if the
-      // Worker consumed the deadline entirely, the snapshot is reported as
-      // evidence-unavailable rather than read past the deadline or faked. ──
-      const after = remainingBudgetMs() > 0
-        ? readTaskProgressSnapshot(workspaceDir)
-        : { ok: false as const, reason: 'workspace_timeout_budget_exhausted' };
+      // ── Post-cycle snapshot is INSIDE the same budget (P1-02): a deadline
+      // crossed before OR DURING the read is a timeout — never a normal
+      // completion and never disguised as evidence-unavailable; the real
+      // worker evidence (exit/termination/stdout) still rides the record.
+      // The SQLite busy wait is capped by the remaining budget, which
+      // bounds lock contention; an uninterruptible OS-level I/O stall can
+      // still overrun, so the post-read deadline check is the second line
+      // of defence. ──
+      if (remainingBudgetMs() <= 0) {
+        return finish('timeout', { reason: 'workspace_timeout_budget_exhausted', nextAction: budgetExhaustedNextAction, worker });
+      }
+      const after = readSnapshot(workspaceDir, { busyTimeoutMs: remainingBudgetMs() });
+      if (remainingBudgetMs() <= 0) {
+        return finish('timeout', { reason: 'workspace_timeout_budget_exhausted', nextAction: budgetExhaustedNextAction, worker });
+      }
       let taskProgress: TaskProgressEvidence | null = null;
       let evidenceReason: string | undefined;
       if (!before.ok) evidenceReason = sanitizeWorkerText(before.reason);
@@ -614,20 +635,31 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         ...(evidenceReason !== undefined ? { evidenceReason } : {}),
       };
 
-      // P2-02 (final-remediation review): cycle OUTCOME and business
-      // PROGRESS are independent facts — a paused/degraded cycle can still
-      // have recorded real progress, and `lastProgressAt` must then carry
-      // the evidenced timestamp. Precedence: the trusted task-diff changedAt,
-      // then the worker's own persisted liveness completion time (a
-      // persisted fact, not the coordinator's clock) for corroborating-only
-      // evidence; no evidence → null, never a fabricated timestamp.
+      // P2-02 (final-remediation + final-closure review): cycle OUTCOME and
+      // business PROGRESS are independent facts — a paused/degraded cycle
+      // can still record real progress, and `lastProgressAt` then carries
+      // the evidenced timestamp. Strict precedence:
+      //   1. the trusted task-diff `changedAt` (real task state change);
+      //   2. the worker's persisted liveness completion time — ONLY when it
+      //      belongs to THIS invocation (`lastInvocationId` match, present
+      //      and parseable): a stale record from an older/foreign worker can
+      //      never smuggle a historical timestamp into this cycle;
+      //   3. the adapter's own `completedAt` — the SPEC-sanctioned fallback
+      //      for corroborating report evidence without usable liveness;
+      //   no evidence → null, never a fabricated timestamp.
+      const corroboratingEvidence = reportEvidence.diagnosticianSucceeded
+        || reportEvidence.downstreamRan
+        || reportEvidence.postProcessingResumed > 0
+        || reportEvidence.catchUpProcessed > 0;
+      const currentInvocationLivenessAt = health.lastInvocationId === input.invocationId
+        && health.lastCycleCompletedAt !== null
+        && Number.isFinite(Date.parse(health.lastCycleCompletedAt))
+        ? health.lastCycleCompletedAt
+        : null;
       const progressAt = taskProgress?.taskStateChanged === true
         ? taskProgress.changedAt
-        : (reportEvidence.diagnosticianSucceeded
-            || reportEvidence.downstreamRan
-            || reportEvidence.postProcessingResumed > 0
-            || reportEvidence.catchUpProcessed > 0)
-          ? (health.lastCycleCompletedAt ?? completedDate.toISOString())
+        : corroboratingEvidence
+          ? (currentInvocationLivenessAt ?? completedDate.toISOString())
           : null;
 
       if (mode === 'paused') {

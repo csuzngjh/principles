@@ -125,6 +125,32 @@ function printHumanCompleted(result: Extract<RunOnceResult, { outcome: 'complete
   console.log(`  next:          ${result.status.nextAction}`);
 }
 
+/**
+ * Wire the terminal's OS signals into ONE AbortController (F11 + P1-01
+ * final-closure review): SIGINT, SIGTERM and — on POSIX — SIGHUP all drive
+ * the same cancellation path the in-flight worker child already honours
+ * (process-group SIGTERM → bounded grace → SIGKILL → bounded stdio drain).
+ * A dropped SSH/terminal session must terminate the detached worker group
+ * through the coordinator's normal cleanup instead of leaving an
+ * uncontrolled worker — and a released lock — behind. Windows keeps its
+ * existing semantics: SIGHUP is never registered there.
+ *
+ * Returns the teardown that removes every listener it installed; callers
+ * invoke it exactly once when the coordinated work settles.
+ */
+export function wireTerminalAbortSignals(controller: AbortController): () => void {
+  const onOsSignal = (): void => controller.abort();
+  process.on('SIGINT', onOsSignal);
+  process.on('SIGTERM', onOsSignal);
+  const posixHangup = process.platform !== 'win32';
+  if (posixHangup) process.on('SIGHUP', onOsSignal);
+  return () => {
+    process.removeListener('SIGINT', onOsSignal);
+    process.removeListener('SIGTERM', onOsSignal);
+    if (posixHangup) process.removeListener('SIGHUP', onOsSignal);
+  };
+}
+
 /** Render one refusal for humans. */
 function printHumanRefusal(reason: string, nextAction: string): void {
   console.error(`pd service run-once refused: ${reason}`);
@@ -225,16 +251,15 @@ export async function handleServiceRunOnce(args: ServiceRunOnceArgs): Promise<vo
 
     // F11: cancellation reaches the coordinator and the in-flight worker
     // child through ONE AbortSignal — injected by tests, or wired here to
-    // terminal SIGINT/SIGTERM so an operator interrupt behaves identically.
-    let onOsSignal: (() => void) | undefined;
+    // terminal SIGINT/SIGTERM/SIGHUP so an operator interrupt (or a dropped
+    // terminal) behaves identically.
+    let unwireOsSignals: (() => void) | undefined;
     const { signal: injectedSignal } = args;
     let signal = injectedSignal;
     if (signal === undefined) {
       const controller = new AbortController();
       ({ signal } = controller);
-      onOsSignal = () => controller.abort();
-      process.on('SIGINT', onOsSignal);
-      process.on('SIGTERM', onOsSignal);
+      unwireOsSignals = wireTerminalAbortSignals(controller);
     }
 
     let result: ShadowRunResult;
@@ -246,10 +271,7 @@ export async function handleServiceRunOnce(args: ServiceRunOnceArgs): Promise<vo
         ...(signal !== undefined ? { signal } : {}),
       });
     } finally {
-      if (onOsSignal !== undefined) {
-        process.removeListener('SIGINT', onOsSignal);
-        process.removeListener('SIGTERM', onOsSignal);
-      }
+      unwireOsSignals?.();
     }
 
     if (result.outcome === 'refused') {

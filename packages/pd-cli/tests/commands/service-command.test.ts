@@ -377,3 +377,55 @@ describe('P2-04 final-remediation — human output for records without a Worker 
     logSpy.mockRestore();
   });
 });
+
+describe('P1-01 final-closure — SIGHUP joins the terminal abort path', () => {
+  it('a real SIGHUP aborts the coordinator signal and the in-flight worker process GROUP is terminated (POSIX)', async () => {
+    if (process.platform === 'win32') return;
+    const { wireTerminalAbortSignals } = await import('../../src/commands/service-run-once.js');
+    const { runWorkerProcess } = await import('../../src/services/service-host/worker-process.js');
+    const fixtures = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'services', 'service-host', 'fixtures');
+    const controller = new AbortController();
+    const unwire = wireTerminalAbortSignals(controller);
+    try {
+      const run = runWorkerProcess({
+        cliEntry: path.join(fixtures, 'hang-with-descendant.mjs'),
+        args: [],
+        env: {},
+        timeoutMs: 30_000,
+        signal: controller.signal,
+      });
+      // A real OS signal to the coordinator process — the SAME path an SSH
+      // terminal drop takes. The in-flight worker (detached group leader
+      // with a same-group descendant) must die through the shared
+      // SIGTERM→grace→SIGKILL→drain chain.
+      process.kill(process.pid, 'SIGHUP');
+      const result = await run;
+      expect(controller.signal.aborted).toBe(true);
+      expect(result.cancelled).toBe(true);
+      // The descendant held the pipes: 'close' only settles once the whole
+      // group is dead — proven here, not merely reported.
+      expect(result.closeObserved).toBe(true);
+      expect(result.terminationConfirmed).toBe(true);
+    } finally {
+      unwire();
+    }
+  });
+
+  it('the teardown removes every listener it installed', async () => {
+    const { wireTerminalAbortSignals } = await import('../../src/commands/service-run-once.js');
+    const before = {
+      sigint: process.listenerCount('SIGINT'),
+      sigterm: process.listenerCount('SIGTERM'),
+      sighup: process.listenerCount('SIGHUP'),
+    };
+    const controller = new AbortController();
+    const unwire = wireTerminalAbortSignals(controller);
+    expect(process.listenerCount('SIGINT')).toBe(before.sigint + 1);
+    expect(process.listenerCount('SIGTERM')).toBe(before.sigterm + 1);
+    if (process.platform !== 'win32') expect(process.listenerCount('SIGHUP')).toBe(before.sighup + 1);
+    unwire();
+    expect(process.listenerCount('SIGINT')).toBe(before.sigint);
+    expect(process.listenerCount('SIGTERM')).toBe(before.sigterm);
+    expect(process.listenerCount('SIGHUP')).toBe(before.sighup);
+  });
+});
