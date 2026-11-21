@@ -8,7 +8,7 @@
 
 **Before**：perAssignment 行为与 T4 偏离；探索性可 promote；P1-1..P1-6、P2-1..P2-4 缺陷存在（见 §2）。
 
-**After**：校验器逐比较归并（perAssignment 忠实复现 T4 `mergeJudgments`），bundle 级重复仲裁/案例版本冲突/未声明键歧义均 fail；探索性必须 prereg `exploratory===true` + 绑定 D2 exploratory 批准且永不 PROMOTE；源组 digest 经 `sourceGroupsDigestOf` 字节级诚算；协议冻结字段逐项比对；无效输入先 fail 后建 `--out`。
+**After**：校验器逐比较归并（perAssignment 忠实复现 T4 `mergeJudgments`），bundle 级重复仲裁/案例版本冲突/未声明键歧义均 fail；探索性必须 prereg `exploratory===true` + 绑定 D2 exploratory 批准且永不 PROMOTE；源组 digest 经 `sourceGroupsDigestOf` 字节级诚算；协议冻结字段逐项比对；顶层输入/用法错误（exit 2）先于 `--out` 创建、不留目录；问题级非法记录仍写诊断报告后以 1 退出。
 
 **Existing mechanism reused**：T4 `mergeJudgments`/`twoSidedThreshold`、admission-probe `sourceGroupsDigestOf` 与 write-once `--out` 先例、owner-decision 结构；零新抽象。
 
@@ -38,7 +38,7 @@
 | P2-1 | null ≠ absent 全层一致 | 同上 |
 | P2-2 | alpha null → BLOCKED，绝不进 `Math.max` | `t6-qualification.mjs` |
 | P2-3 | artifactRef 形状先于 path.resolve | `t6-qualify.mjs` |
-| P2-4 | 无效输入在 outDir mkdir 前 fail | `judge-protocol-validate.mjs`、`t6-qualify.mjs` |
+| P2-4 | 顶层输入/用法错误（exit 2）在 outDir mkdir 前 fail、不留目录；问题级记录照常写诊断报告 | `judge-protocol-validate.mjs`、`t6-qualify.mjs` |
 
 **Devin Review 三轮加固**（`9faad0de7`→`dffac62f` + 本轮）：校准只计 SUCCEEDED 调用；批准 scope 绑定槽位；预注册必备；precisionTarget 锚定；data-path `RAN_WITH_D6` 闭集；source-groups 双层绑定；swapOf 全局登记 + 同 assignmentKey 配对；per-comparison 席数；入口对象绑定（id/pk 碰撞免疫）；结构化 `bundle.assignments`（separator-bearing key）；仲裁结构门 `INVALID_ARBITRATION_RECORD`；截断事实不变式（`truncatedAt === context.length` 且 `originalChars > truncatedAt`）；bundle 级 `DUPLICATE_ARBITRATION` 与 `CASE_VERSION_CONFLICT`（覆盖未收到判决的声明计划行）；`bundle.assignments` 类型检查先于 `--out` 创建（exit-2 不留目录）。
 
