@@ -3249,3 +3249,145 @@ describe('problem-code closed set (CONTRACT §2.4 / ERR-146 round-trip)', () => 
     expect(codesOf(out, 'C07')).toContain('TOOL_RESULT_MISSING'); // call present, return absent
   });
 });
+
+// ---------------------------------------------------------------------------
+// P1-6: the D6 positive real-data probe path. RAN_WITH_D6 is reachable ONLY
+// through --d6-decision with a bound, approved, dataset-matching D6 record;
+// every other outcome fails closed or stays NOT_RUN_WITHOUT_D6. All runs
+// stay on synthetic fixture snapshots — no real production data is touched.
+// ---------------------------------------------------------------------------
+
+describe('D6 positive data-probe path (P1-6)', () => {
+  const d6DecisionOf = (datasetSha256: string, overrides: Record<string, unknown> = {}) => ({
+    kind: 'owner-decision',
+    approved: true,
+    decidedBy: 'O1',
+    decidedAt: '2026-11-22T00:00:00Z',
+    scope: 'd6',
+    parameters: {
+      datasetSha256,
+      sampleRange: 'synthetic-fixture-16',
+      storageScope: 'artifacts/pd-lab',
+      dataSource: 't1-synthetic-snapshot',
+      retentionDays: 90,
+      ...overrides,
+    },
+  });
+
+  it('without --d6-decision the report stays NOT_RUN_WITHOUT_D6', () => {
+    const world = buildHealthyWorld('d6-absent');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const report = readOut(world.outDir).report;
+    expect(report.realDataProbe.status).toBe('NOT_RUN_WITHOUT_D6');
+    expect(report.realDataProbe.d6Decision).toBeUndefined();
+  });
+
+  it('a D6 decision with the wrong scope fails closed (exit 1)', () => {
+    const world = buildHealthyWorld('d6-wrong-scope');
+    const datasetSha = sha256File(world.datasetPath);
+    const decision = d6DecisionOf(datasetSha);
+    decision.scope = 'd5'; // a blind-review decision cannot authorize data access
+    const file = writeJson(world.root, 'd5-as-d6.json', decision);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run)?.reason ?? stderrReason(run)).toBe('d6_decision_invalid');
+  });
+
+  it('a rejected (approved: false) D6 decision fails closed', () => {
+    const world = buildHealthyWorld('d6-rejected');
+    const datasetSha = sha256File(world.datasetPath);
+    const decision = d6DecisionOf(datasetSha);
+    decision.approved = false;
+    const file = writeJson(world.root, 'd6-rejected.json', decision);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run)?.reason ?? stderrReason(run)).toBe('d6_decision_invalid');
+  });
+
+  it('a D6 decision whose datasetSha256 does not match THIS dataset fails closed', () => {
+    const world = buildHealthyWorld('d6-digest-mismatch');
+    const decision = d6DecisionOf('f'.repeat(64)); // a different frozen dataset
+    const file = writeJson(world.root, 'd6-other-dataset.json', decision);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run)?.reason ?? stderrReason(run)).toBe('d6_decision_invalid');
+  });
+
+  it('a granted D6 decision missing its parameter block fails closed', () => {
+    const world = buildHealthyWorld('d6-no-params');
+    const decision = { kind: 'owner-decision', approved: true, decidedBy: 'O1', decidedAt: '2026-11-22T00:00:00Z', scope: 'd6' };
+    const file = writeJson(world.root, 'd6-bare.json', decision);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run)?.reason ?? stderrReason(run)).toBe('d6_decision_invalid');
+  });
+
+  it('a VALID D6 decision flips the probe to RAN_WITH_D6 with the full decision binding echoed', () => {
+    const world = buildHealthyWorld('d6-valid');
+    const datasetSha = sha256File(world.datasetPath);
+    const file = writeJson(world.root, 'd6.json', d6DecisionOf(datasetSha));
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(0);
+    const report = readOut(world.outDir).report;
+    expect(report.realDataProbe.status).toBe('RAN_WITH_D6');
+    expect(report.realDataProbe.d6Decision.datasetSha256).toBe(datasetSha);
+    expect(report.realDataProbe.d6Decision.decidedBy).toBe('O1');
+    expect(report.realDataProbe.d6Decision.sha256).toBe(sha256File(file));
+    expect(report.realDataProbe.probeScope.datasetSha256).toBe(datasetSha);
+    expect(report.realDataProbe.probeScope.sampleRange).toBe('synthetic-fixture-16');
+    expect(report.realDataProbe.probeScope.retentionDays).toBe(90);
+  });
+
+  it('after the dataset CHANGES, reusing the old D6 decision fails closed (stale authorization)', () => {
+    const world = buildHealthyWorld('d6-stale');
+    const datasetSha = sha256File(world.datasetPath);
+    const file = writeJson(world.root, 'd6.json', d6DecisionOf(datasetSha));
+    // The frozen dataset is edited (a note field) — the old decision no
+    // longer covers the new bytes.
+    const raw = JSON.parse(fs.readFileSync(world.datasetPath, 'utf8'));
+    (raw.samples[0] as Record<string, unknown>).note = 'edited after the decision was frozen';
+    fs.writeFileSync(world.datasetPath, JSON.stringify(raw, null, 2));
+    expect(sha256File(world.datasetPath)).not.toBe(datasetSha);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run)?.reason ?? stderrReason(run)).toBe('d6_decision_invalid');
+  });
+
+  it('DV8: a snapshot-pinned D6 decision rejects a probe over a DIFFERENT trajectory.db', () => {
+    const world = buildHealthyWorld('d6-snapshot-pin');
+    const datasetSha = sha256File(world.datasetPath);
+    // Pin a digest that is provably not this snapshot's trajectory.db.
+    const file = writeJson(
+      world.root,
+      'd6-pinned.json',
+      d6DecisionOf(datasetSha, { trajectoryDbSha256: 'e'.repeat(64) }),
+    );
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(1);
+    const failure = stderrReason(run);
+    expect(failure?.reason ?? failure).toBe('d6_decision_invalid');
+    expect(failure.details.authorized).toBe('e'.repeat(64));
+    expect(typeof failure.details.actual).toBe('string');
+  });
+
+  it('DV8: a snapshot-pinned D6 decision matching the actual trajectory.db reports the binding', () => {
+    const world = buildHealthyWorld('d6-snapshot-ok');
+    const datasetSha = sha256File(world.datasetPath);
+    const trajectorySha = sha256File(path.join(world.snapshotDir, 'trajectory.db'));
+    const file = writeJson(
+      world.root,
+      'd6-pinned-ok.json',
+      d6DecisionOf(datasetSha, { trajectoryDbSha256: trajectorySha }),
+    );
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--d6-decision', file]);
+    expect(run.status).toBe(0);
+    const report = readOut(world.outDir).report;
+    expect(report.realDataProbe.status).toBe('RAN_WITH_D6');
+    expect(report.realDataProbe.probeScope.snapshotTrajectorySha256).toBe(trajectorySha);
+    expect(report.realDataProbe.snapshotBinding).toEqual({
+      authorizedTrajectoryDbSha256: trajectorySha,
+      matches: true,
+    });
+  });
+});
