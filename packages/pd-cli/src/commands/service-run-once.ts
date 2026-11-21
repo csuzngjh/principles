@@ -30,9 +30,54 @@ export interface ServiceRunOnceArgs {
   readonly host?: WorkerHostKind;
   /** Set when --host was given a value outside codex|workbuddy (fail-closed). */
   readonly invalidHost?: string;
-  /** Per-workspace bounded execution time (default 45 min, minimum 1000 ms). */
-  readonly timeoutMs?: number;
+  /**
+   * The RAW --timeout-ms argument string (F8 review fix): validated in full
+   * here — a partial parse like `5m` → 5 used to start a REAL cycle with a
+   * 1-second deadline, and an unparseable value silently fell back to the
+   * 45-minute default. Both paths now refuse before any execution.
+   */
+  readonly timeoutMsRaw?: string;
+  /**
+   * Caller-provided cancellation (F11 review fix). When absent, the CLI
+   * wires terminal SIGINT/SIGTERM to an internal controller so a terminal
+   * interrupt aborts the in-flight worker child through the SAME signal
+   * path. Tests inject a signal directly.
+   */
+  readonly signal?: AbortSignal;
   readonly json: boolean;
+}
+
+/** Node timers support 2^31-1 ms; above that setTimeout overflows to ~1ms. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+const MIN_TIMEOUT_MS = 1_000;
+const DEFAULT_TIMEOUT_FALLBACK_MS = 45 * 60_000;
+
+/**
+ * F8: validate the full --timeout-ms value BEFORE any real execution. The
+ * whole string must be a decimal integer inside the supported range —
+ * partial parses (`5m` → 5) and silent defaults (`five` → 45min) are
+ * refused with a structured reason instead of starting a mis-bounded
+ * worker.
+ */
+export function parseShadowTimeoutMs(raw: string | undefined): { ok: true; timeoutMs: number } | { ok: false; reason: string; nextAction: string } {
+  if (raw === undefined || raw.trim() === '') return { ok: true, timeoutMs: DEFAULT_TIMEOUT_FALLBACK_MS };
+  const value = raw.trim();
+  if (!/^\d+$/.test(value)) {
+    return {
+      ok: false,
+      reason: `invalid_timeout_ms:${value.slice(0, 40)}`,
+      nextAction: '--timeout-ms must be a plain millisecond integer (e.g. 2700000). Values like "5m" are not accepted; omit the flag for the 45-minute default.',
+    };
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < MIN_TIMEOUT_MS || parsed > MAX_TIMEOUT_MS) {
+    return {
+      ok: false,
+      reason: `timeout_ms_out_of_range:${value.slice(0, 40)}`,
+      nextAction: `--timeout-ms must be between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS} milliseconds (a per-workspace bound of at least one second, at most the Node timer ceiling).`,
+    };
+  }
+  return { ok: true, timeoutMs: parsed };
 }
 
 interface JsonOutput {
@@ -160,11 +205,48 @@ export async function handleServiceRunOnce(args: ServiceRunOnceArgs): Promise<vo
   }
 
   if (args.shadow) {
-    const result = await runServiceShadowOnce({
-      workspaces: args.workspaces,
-      ...(args.host !== undefined ? { hostFilter: args.host } : {}),
-      ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}),
-    });
+    // F8: full-value validation BEFORE the coordinator acquires the lock or
+    // spawns any real cycle.
+    const timeout = parseShadowTimeoutMs(args.timeoutMsRaw);
+    if (!timeout.ok) {
+      if (args.json) {
+        const output: JsonOutput = { schemaVersion: 'pd.service-run-status.v1', outcome: 'refused', dryRun: false, runId: 'n/a', reason: timeout.reason, nextAction: timeout.nextAction };
+        console.log(JSON.stringify(output));
+      } else {
+        printHumanRefusal(timeout.reason, timeout.nextAction);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
+    // F11: cancellation reaches the coordinator and the in-flight worker
+    // child through ONE AbortSignal — injected by tests, or wired here to
+    // terminal SIGINT/SIGTERM so an operator interrupt behaves identically.
+    let onOsSignal: (() => void) | undefined;
+    const { signal: injectedSignal } = args;
+    let signal = injectedSignal;
+    if (signal === undefined) {
+      const controller = new AbortController();
+      ({ signal } = controller);
+      onOsSignal = () => controller.abort();
+      process.on('SIGINT', onOsSignal);
+      process.on('SIGTERM', onOsSignal);
+    }
+
+    let result: ShadowRunResult;
+    try {
+      result = await runServiceShadowOnce({
+        workspaces: args.workspaces,
+        ...(args.host !== undefined ? { hostFilter: args.host } : {}),
+        timeoutMs: timeout.timeoutMs,
+        ...(signal !== undefined ? { signal } : {}),
+      });
+    } finally {
+      if (onOsSignal !== undefined) {
+        process.removeListener('SIGINT', onOsSignal);
+        process.removeListener('SIGTERM', onOsSignal);
+      }
+    }
 
     if (result.outcome === 'refused') {
       if (args.json) {

@@ -29,6 +29,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { collectHostWorkspaceClaims, type BindingReadDiagnostic, type HostClaimReaders } from '@principles/install-layout';
+import { loadHostToolDeclarations } from '@principles/host-runtime';
 import {
   resolveCoordinatorInstallIdentity,
   type InstallIdentity,
@@ -45,6 +46,12 @@ import {
   readManifest,
 } from './coordinator-common.js';
 import {
+  mergeShadowProgress,
+  readShadowProgress,
+  type ShadowProgressEntry,
+  type ShadowProgressVerdict,
+} from './shadow-progress-store.js';
+import {
   acquireServiceRunLock,
   holdsServiceRunLock,
   releaseServiceRunLock,
@@ -55,7 +62,6 @@ import {
 } from './locking/service-run-lock.js';
 import {
   readActiveReleaseFacts,
-  serviceRunStatusPath,
   writeServiceRunStatus,
   type ActiveReleaseFacts,
   type HostRootReport,
@@ -158,15 +164,20 @@ function workspaceIdentity(dir: string): string {
   return process.platform === 'win32' ? form.toLowerCase() : form;
 }
 
-/** Probe persisted host-tool declarations (binding evidence, TD §5.1). */
+/** Probe persisted host-tool declarations with the EXISTING validation authority (F2 review fix). */
 function declaredHostKinds(canonicalDir: string): WorkerHostKind[] {
+  // `loadHostToolDeclarations` is the host-runtime authority: content is
+  // untrusted input, structurally validated (version/hostKind/mappings) —
+  // a same-named file that does not parse as a valid declaration is NOT
+  // binding evidence (CWE-345 fix). A workspace whose declaration store is
+  // invalid keeps its claim-based evidence path; the declaration adds
+  // nothing here.
+  const loaded = loadHostToolDeclarations(canonicalDir);
+  if (!loaded.ok) return [];
   const declared: WorkerHostKind[] = [];
-  for (const host of WORKER_HOST_KINDS) {
-    const file = path.join(canonicalDir, '.pd', 'host-tool-semantics', `${host}.json`);
-    try {
-      if (fs.statSync(file).isFile()) declared.push(host);
-    } catch {
-      // No declaration for this host — not binding evidence.
+  for (const declaration of loaded.declarations) {
+    if (WORKER_HOST_KINDS.includes(declaration.hostKind as WorkerHostKind)) {
+      declared.push(declaration.hostKind as WorkerHostKind);
     }
   }
   return declared;
@@ -181,33 +192,24 @@ function buildDescriptor(entry: WorkspaceDiscoveryEntry): WorkspaceDescriptor {
   };
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Read the PREVIOUS status file's carried-forward lastProgressAt per workspace. */
-function readPreviousProgress(pdHome: string): Map<string, string> {
-  try {
-    const raw: unknown = JSON.parse(fs.readFileSync(serviceRunStatusPath(pdHome), 'utf8'));
-    if (!isPlainRecord(raw)) return new Map();
-    const shadow: unknown = raw.shadow;
-    if (!isPlainRecord(shadow)) return new Map();
-    const executions: unknown = shadow.executions;
-    if (!Array.isArray(executions)) return new Map();
-    const result = new Map<string, string>();
-    for (const item of executions) {
-      if (!isPlainRecord(item)) continue;
-      const dir: unknown = item.canonicalDir;
-      const at: unknown = item.lastProgressAt;
-      if (typeof dir !== 'string' || typeof at !== 'string') continue;
-      const key = workspaceIdentity(dir);
-      const existing = result.get(key);
-      if (existing === undefined || at > existing) result.set(key, at);
-    }
-    return result;
-  } catch {
-    return new Map();
+/**
+ * Read the carried-forward progress projection (F6 review fix): a small
+ * per-install store keyed by canonical workspace identity, MERGED across
+ * runs — not the latest-run status file's execution list (which loses
+ * A→B→A sequences and is replaced wholesale by dry-runs). A corrupt or
+ * unreadable store degrades to "no previous progress" and is reported in
+ * the persisted status (`progressCarryVerdict`), never silently.
+ */
+function readPreviousProgress(pdHome: string): { at: Map<string, string>; verdict: ShadowProgressVerdict } {
+  const read = readShadowProgress(pdHome);
+  if (!read.ok) {
+    return { at: new Map(), verdict: read.verdict };
   }
+  const at = new Map<string, string>();
+  for (const [key, entry] of read.entries) {
+    at.set(key, entry.lastProgressAt);
+  }
+  return { at, verdict: read.verdict };
 }
 
 function workspaceStateFor(outcome: AdapterCycleResult['cycleOutcome']): ShadowExecutionRecord['workspaceState'] {
@@ -228,13 +230,23 @@ function workspaceStateFor(outcome: AdapterCycleResult['cycleOutcome']): ShadowE
   }
 }
 
-/** Carry-forward rule (task §6): no new progress keeps the previous value. */
+/**
+ * Carry-forward rule (task §6 + F7 review fix): EVIDENCED task progress
+ * wins for ANY outcome (a degraded cycle whose task diff shows a real
+ * state change did make persisted progress — the degraded reason and the
+ * progress timestamp are independent facts); otherwise a cycle_completed
+ * run's cycle-evidence timestamp applies; otherwise the previous value is
+ * preserved. Never the completion time of an empty/failed cycle.
+ */
 function carriedProgress(result: AdapterCycleResult, previous: string | undefined): Pick<ShadowExecutionRecord, 'lastProgressAt' | 'lastProgressSource'> {
+  if (result.businessProgress.taskStateChanged && result.lastProgressAt !== null) {
+    return { lastProgressAt: result.lastProgressAt, lastProgressSource: 'task_state_change' };
+  }
   if (result.cycleOutcome === 'cycle_completed') {
-    if (result.businessProgress.taskStateChanged && result.lastProgressAt !== null) {
-      return { lastProgressAt: result.lastProgressAt, lastProgressSource: 'task_state_change' };
-    }
-    return { lastProgressAt: result.lastProgressAt ?? previous ?? null, lastProgressSource: result.lastProgressAt !== null ? 'cycle_evidence' : previous !== undefined ? 'previous_run' : null };
+    return {
+      lastProgressAt: result.lastProgressAt ?? previous ?? null,
+      lastProgressSource: result.lastProgressAt !== null ? 'cycle_evidence' : previous !== undefined ? 'previous_run' : null,
+    };
   }
   // No business progress this cycle (empty cycle, pause, failure, kill):
   // keep the last known truthful value — never the cycle completion time.
@@ -256,6 +268,7 @@ function buildShadowStatus(args: {
   hostFilter?: WorkerHostKind;
   timeoutMs: number;
   executions: readonly ShadowExecutionRecord[];
+  progressCarryVerdict: ShadowProgressVerdict;
   nextAction: string;
 }): ServiceRunStatus {
   return {
@@ -278,6 +291,9 @@ function buildShadowStatus(args: {
       pdExperimentRootStripped: args.identity.environment.experimentRootStripped,
       ignoredIdentityEnvVars: args.identity.environment.ignoredIdentityEnvVars,
       inheritedHostRootEnvVars: args.identity.environment.inheritedHostRootEnvVars,
+      ...(args.identity.environment.ignoredHostRootEnvVars.length > 0
+        ? { ignoredHostRootEnvVars: args.identity.environment.ignoredHostRootEnvVars }
+        : {}),
     },
     manifest: args.manifest,
     discovery: {
@@ -292,6 +308,7 @@ function buildShadowStatus(args: {
       requestedWorkspaces: args.requested,
       ...(args.hostFilter !== undefined ? { hostFilter: args.hostFilter } : {}),
       perWorkspaceTimeoutMs: args.timeoutMs,
+      progressCarryVerdict: args.progressCarryVerdict,
       executions: args.executions,
     },
     nextAction: args.nextAction,
@@ -325,7 +342,7 @@ async function completeShadowRun(identity: InstallIdentity, context: {
 }): Promise<ShadowRunResult> {
   const { options } = context;
   const timeoutMs = Math.max(MIN_SHADOW_WORKSPACE_TIMEOUT_MS, options.timeoutMs ?? DEFAULT_SHADOW_WORKSPACE_TIMEOUT_MS);
-  const hostRoots = hostRootReports(identity, context.env, context.listDir);
+  const hostRoots = hostRootReports(identity, context.listDir);
 
   const lockLost = (): ShadowRunResult => ({
     ok: false,
@@ -359,6 +376,7 @@ async function completeShadowRun(identity: InstallIdentity, context: {
       ...(options.hostFilter !== undefined ? { hostFilter: options.hostFilter } : {}),
       timeoutMs,
       executions: [],
+      progressCarryVerdict: 'missing',
       nextAction: args.nextAction,
     });
     return {
@@ -424,8 +442,8 @@ async function completeShadowRun(identity: InstallIdentity, context: {
         refusalReason: reason,
         refusalNextAction,
         workspaceState: 'unavailable',
-        lastProgressAt: previousProgress.get(requestedIdentity) ?? null,
-        lastProgressSource: previousProgress.has(requestedIdentity) ? 'previous_run' : null,
+        lastProgressAt: previousProgress.at.get(requestedIdentity) ?? null,
+        lastProgressSource: previousProgress.at.has(requestedIdentity) ? 'previous_run' : null,
       });
     };
 
@@ -495,13 +513,13 @@ async function completeShadowRun(identity: InstallIdentity, context: {
           hostKind,
           admission: 'admitted',
           workspaceState: 'failed',
-          lastProgressAt: previousProgress.get(requestedIdentity) ?? null,
-          lastProgressSource: previousProgress.has(requestedIdentity) ? 'previous_run' : null,
+          lastProgressAt: previousProgress.at.get(requestedIdentity) ?? null,
+          lastProgressSource: previousProgress.at.has(requestedIdentity) ? 'previous_run' : null,
           refusalReason: `adapter_threw:${message.slice(0, 160)}`,
         });
         continue;
       }
-      const carried = carriedProgress(result, previousProgress.get(requestedIdentity));
+      const carried = carriedProgress(result, previousProgress.at.get(requestedIdentity));
       executions.push({
         requestedDir: requested,
         canonicalDir: entry.canonicalDir,
@@ -522,6 +540,34 @@ async function completeShadowRun(identity: InstallIdentity, context: {
   }
 
   if (!context.holdsLock(context.handle)) return lockLost();
+
+  // ── Progress projection merge (F6): this run's evidenced values overwrite
+  // by key; every other workspace's entry survives (A→B→A / dry-run-in-between
+  // keep their recorded progress). The merge runs while the install lock is
+  // held; a write failure is surfaced in nextAction but does NOT fabricate
+  // per-workspace values (rc-9).
+  const progressUpdates = new Map<string, ShadowProgressEntry>();
+  const nowIso = new Date().toISOString();
+  for (const record of executions) {
+    if (record.admission === 'admitted' && record.canonicalDir !== null
+      && record.lastProgressAt !== null
+      && (record.lastProgressSource === 'task_state_change' || record.lastProgressSource === 'cycle_evidence')) {
+      progressUpdates.set(workspaceIdentity(record.canonicalDir), {
+        lastProgressAt: record.lastProgressAt,
+        source: record.lastProgressSource,
+        updatedAt: nowIso,
+      });
+    }
+  }
+  const progressCarryVerdict: ShadowProgressVerdict = previousProgress.verdict;
+  let progressWriteNote = '';
+  if (progressUpdates.size > 0) {
+    const merged = mergeShadowProgress(identity.pdHome, progressUpdates);
+    if (!merged.ok) {
+      progressWriteNote = ` Additionally, the cross-run progress projection could not be updated (${merged.reason}); the status below is still truthful for this run.`;
+    }
+  }
+
   const status = buildShadowStatus({
     identity,
     runId: context.runId,
@@ -536,7 +582,8 @@ async function completeShadowRun(identity: InstallIdentity, context: {
     ...(options.hostFilter !== undefined ? { hostFilter: options.hostFilter } : {}),
     timeoutMs,
     executions,
-    nextAction: shadowNextAction(executions),
+    progressCarryVerdict,
+    nextAction: `${shadowNextAction(executions)}${progressWriteNote}`,
   });
   const statusWrite = writeServiceRunStatus(identity.pdHome, status);
   return {
@@ -575,8 +622,14 @@ export async function runServiceShadowOnce(options: ShadowRunOptions): Promise<S
     };
   }
 
+  // F1 review fix: shadow resolves host roots from the TRUSTED HOME only —
+  // inherited OPENCLAW_STATE_DIR / CODEX_HOME / WORKBUDDY_CONFIG_DIR overrides
+  // can never steer discovery NOR the child env pins toward an experiment or
+  // foreign root (TD §5.2). The dry-run keeps the shared production
+  // precedence; the ignored overrides are recorded in the env view.
   const identityResult = resolveCoordinatorInstallIdentity(env, {
     ...(options.trustedHomeDir !== undefined ? { trustedHomeDir: options.trustedHomeDir } : {}),
+    canonicalHostRootsOnly: true,
   });
   if (!identityResult.ok) {
     return { ok: false, outcome: 'refused', runId, reason: identityResult.reason, nextAction: identityResult.nextAction };

@@ -103,8 +103,14 @@ export interface ServiceRunStatus {
     readonly pdExperimentRootStripped: boolean;
     /** HOME/USERPROFILE present in the inherited env but ignored for identity. */
     readonly ignoredIdentityEnvVars: readonly string[];
-    /** Host-root overrides that steered discovery (never pdHome). */
+    /** Host-root overrides present in the inherited env (steered discovery when honored). */
     readonly inheritedHostRootEnvVars: readonly string[];
+    /**
+     * Host-root overrides present in the inherited env but NOT honored
+     * (shadow runs resolve host roots from the trusted home only — F1
+     * review fix). Empty in dry-run mode, where overrides are honored.
+     */
+    readonly ignoredHostRootEnvVars?: readonly string[];
   };
   readonly manifest: {
     /** ok | missing | read_failed | unparsable | invalid | version_mismatch */
@@ -163,6 +169,12 @@ export interface ShadowRunStatusSection {
   readonly requestedWorkspaces: readonly string[];
   readonly hostFilter?: 'codex' | 'workbuddy';
   readonly perWorkspaceTimeoutMs: number;
+  /**
+   * Health of the cross-run progress projection read at run start (F6):
+   * `missing` = no store yet; `corrupt`/`unreadable` degrade to "no previous
+   * progress" observably instead of silently.
+   */
+  readonly progressCarryVerdict: 'ok' | 'missing' | 'corrupt' | 'unreadable';
   readonly executions: readonly ShadowExecutionRecord[];
 }
 

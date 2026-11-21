@@ -231,7 +231,7 @@ function completeRun(
     claimReaders?: HostClaimReaders;
   },
 ): RunOnceResult {
-  const hostRoots = hostRootReports(identity, context.env, context.listDir);
+  const hostRoots = hostRootReports(identity, context.listDir);
 
   /**
    * Mid-run ownership check (P1-4): before EVERY protected status write the

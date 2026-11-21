@@ -126,6 +126,64 @@ describe('handler behavior through the real action', () => {
     process.exitCode = 0;
   });
 
+  it('F8: a partially-parseable --timeout-ms ("5m") is refused BEFORE any real cycle, not clamped to 1s', async () => {
+    const home = tempHome();
+    mkdirSync(path.join(home, '.pd'), { recursive: true });
+    writeFileSync(path.join(home, '.pd', 'install.json'), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['codex'] }), 'utf8');
+    writeFileSync(
+      path.join(home, '.pd', 'active.json'),
+      JSON.stringify({ schemaVersion: 1, generation: 1, releaseId: 'r', releaseMetadataDigest: 'b'.repeat(64), previousReleaseId: null, transactionId: 't', productVersion: '1.0.0' }),
+      'utf8',
+    );
+    pinnedHomedir = home;
+    try {
+      const runOnce = findServiceRunOnce();
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await runOnce.parseAsync(['--shadow', '--workspace', path.join(home, 'ws'), '--timeout-ms', '5m', '--json'], { from: 'user' });
+      const jsonLines = logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'));
+      expect(jsonLines).toHaveLength(1);
+      const parsed = JSON.parse(jsonLines[0]?.[0] as string) as { outcome: string; reason: string };
+      expect(parsed.outcome).toBe('refused');
+      expect(parsed.reason).toBe('invalid_timeout_ms:5m');
+      expect(process.exitCode).toBe(1);
+      logSpy.mockRestore();
+    } finally {
+      pinnedHomedir = undefined;
+      process.exitCode = 0;
+    }
+  });
+
+  it('F8: an unparseable --timeout-ms ("five") is refused instead of silently using the 45-minute default', async () => {
+    const runOnce = findServiceRunOnce();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runOnce.parseAsync(['--shadow', '--workspace', 'X', '--timeout-ms', 'five', '--json'], { from: 'user' });
+    const jsonLines = logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'));
+    const parsed = JSON.parse(jsonLines[0]?.[0] as string) as { outcome: string; reason: string };
+    expect(parsed.outcome).toBe('refused');
+    expect(parsed.reason).toBe('invalid_timeout_ms:five');
+    expect(process.exitCode).toBe(1);
+    logSpy.mockRestore();
+    process.exitCode = 0;
+  });
+
+  it('F8: an out-of-range --timeout-ms is refused (below 1s and above the Node timer ceiling)', async () => {
+    const runOnce = findServiceRunOnce();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runOnce.parseAsync(['--shadow', '--workspace', 'X', '--timeout-ms', '999', '--json'], { from: 'user' });
+    let parsed = JSON.parse(logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'))[0]?.[0] as string) as { outcome: string; reason: string };
+    expect(parsed.reason).toBe('timeout_ms_out_of_range:999');
+    expect(process.exitCode).toBe(1);
+    logSpy.mockRestore();
+    process.exitCode = 0;
+    const logSpy2 = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runOnce.parseAsync(['--shadow', '--workspace', 'X', '--timeout-ms', '99999999999', '--json'], { from: 'user' });
+    parsed = JSON.parse(logSpy2.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'))[0]?.[0] as string) as { outcome: string; reason: string };
+    expect(parsed.reason).toBe('timeout_ms_out_of_range:99999999999');
+    expect(process.exitCode).toBe(1);
+    logSpy2.mockRestore();
+    process.exitCode = 0;
+  });
+
   it('--shadow without --workspace is refused by the coordinator (explicit selection required)', async () => {
     pinnedHomedir = tempHome();
     try {

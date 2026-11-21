@@ -98,6 +98,8 @@ export interface WorkerEnvironmentReport {
   readonly passedThrough: readonly string[];
   /** Always 'service_host' — the Phase 2 driver identity. */
   readonly invocationSource: 'service_host';
+  /** The coordinator-scoped invocation id passed as PD_INVOCATION_ID (F13). */
+  readonly invocationId?: string;
 }
 
 export interface WorkerEnvironment {
@@ -110,6 +112,15 @@ function isSet(value: string | undefined): boolean {
 }
 
 /**
+ * A credential variable name from the workspace's OWN effective runtime
+ * config (`apiKeyEnv`, F4 review fix). Names are validated defensively:
+ * env-var-shaped, bounded — and never mistaken for a pointer variable.
+ */
+function isCredentialName(name: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name);
+}
+
+/**
  * Build the Worker child environment from the allowlist. Pure: same inputs →
  * same outputs; the only trusted inputs are `identity` (resolved by the
  * coordinator's own identity authority) and the explicit `hostKind`.
@@ -119,6 +130,17 @@ export function buildWorkerEnvironment(args: {
   hostKind: WorkerHostKind;
   inheritedEnv: Readonly<Record<string, string | undefined>>;
   platform?: string;
+  /**
+   * Credential variable NAMES the target workspace's effective runtime
+   * config actually uses (`apiKeyEnv` values, F4 review fix). A name that
+   * does not match the generic credential PATTERN still passes through so
+   * custom-named env credentials keep working (the worker's
+   * `resolveProviderApiKey` chain reads them by that exact name). Pointer
+   * variables are rejected FIRST — the allowlist can never re-admit one.
+   */
+  credentialEnvAllowlist?: readonly string[];
+  /** Coordinator-scoped invocation id, passed to the child (F13, TD §5.2). */
+  invocationId?: string;
 }): WorkerEnvironment {
   const platform = args.platform ?? process.platform;
   const caseInsensitive = platform === 'win32';
@@ -130,10 +152,16 @@ export function buildWorkerEnvironment(args: {
   ];
   const allowSet = new Set<string>(systemNames.map((name) => (caseInsensitive ? name.toUpperCase() : name)));
 
+  const configCredentialSet = new Set<string>(
+    (args.credentialEnvAllowlist ?? []).filter((name) => isCredentialName(name) && !pointerSet.has(caseInsensitive ? name.toUpperCase() : name))
+      .map((name) => (caseInsensitive ? name.toUpperCase() : name)),
+  );
+
   const isAllowed = (name: string): boolean => {
     const key = caseInsensitive ? name.toUpperCase() : name;
     if (pointerSet.has(key)) return false;
     if (allowSet.has(key)) return true;
+    if (configCredentialSet.has(key)) return true;
     return CREDENTIAL_NAME_RE.test(key);
   };
 
@@ -165,15 +193,19 @@ export function buildWorkerEnvironment(args: {
   } else {
     env.WORKBUDDY_CONFIG_DIR = args.identity.hostRoots.workbuddyConfigDir;
   }
-
   const pinned = ['PD_INVOCATION_SOURCE', 'HOME', 'USERPROFILE', args.hostKind === 'codex' ? 'CODEX_HOME' : 'WORKBUDDY_CONFIG_DIR'];
-  return {
-    env,
-    report: {
-      stripped: [...new Set(stripped)].sort(),
-      pinnedFromTrustedIdentity: pinned,
-      passedThrough: [...new Set(passedThrough)].sort(),
-      invocationSource: 'service_host',
-    },
+  // F13: the invocation id is coordinator-scoped run metadata, not identity —
+  // pinned explicitly so the worker's liveness record can be correlated back
+  // to THIS invocation (TD §5.2 显式传入 invocationId).
+  let report: WorkerEnvironmentReport = {
+    stripped: [...new Set(stripped)].sort(),
+    pinnedFromTrustedIdentity: pinned,
+    passedThrough: [...new Set(passedThrough)].sort(),
+    invocationSource: 'service_host',
   };
+  if (args.invocationId !== undefined && args.invocationId.length > 0) {
+    env.PD_INVOCATION_ID = args.invocationId;
+    report = { ...report, invocationId: args.invocationId };
+  }
+  return { env, report };
 }

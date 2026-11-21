@@ -6,11 +6,11 @@
  * timeout / cancellation / spawn-failure outcomes, allowlist environment
  * reaching the spawn boundary, and liveness health projection.
  */
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createRuntimeStateHandle } from '@principles/core/runtime';
+import { createRuntimeStateHandle, getDefaultPdConfig } from '@principles/core/runtime';
 import { createCodexWorkerAdapter } from '../../../src/services/service-host/worker-adapter-codex.js';
 import { createWorkbuddyWorkerAdapter } from '../../../src/services/service-host/worker-adapter-workbuddy.js';
 import { WORKER_ADAPTER_CONTRACT_VERSION, resolveActiveReleaseCliEntry } from '../../../src/services/service-host/worker-adapter.js';
@@ -388,5 +388,266 @@ describe('environment + liveness projection', () => {
     expect(result.health.lastCycleDriver).toBe('service_host');
     expect(result.health.lastCycleCompletedAt).toBe('2026-11-21T09:30:00Z');
     void workspace;
+  });
+
+  it('F13: the invocation id reaches the child env and the liveness correlation closes', async () => {
+    const workspace = await workspaceWithStore();
+    const captured: WorkerProcessOptions[] = [];
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-corr-777',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async (options) => {
+          captured.push(options);
+          mkdirSync(path.join(workspace, '.state'), { recursive: true });
+          // The (service_host-driven) worker records the id it received.
+          writeFileSync(
+            path.join(workspace, '.state', 'codex-worker-liveness.json'),
+            JSON.stringify({ lastCycleDriver: 'service_host', lastInvocationId: 'inv-corr-777', lastCycleCompletedAt: '2026-11-21T10:00:00Z', lastCycleMode: 'ready', runningStage: null }),
+            'utf8',
+          );
+          return procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }) });
+        },
+      },
+    });
+    expect(captured[0]?.env.PD_INVOCATION_ID).toBe('inv-corr-777');
+    expect(result.health.lastInvocationId).toBe('inv-corr-777');
+    expect(result.invocationId).toBe('inv-corr-777');
+  });
+
+  it('F3: worker stderr and reason strings are sanitized (paths redacted) before persistence', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-sanitize',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({
+            workspaceDir: workspace,
+            mode: 'degraded',
+            reason: `pd_config_invalid:cannot parse C:\\Users\\op\\.pd\\config.yaml near line 3`,
+            nextAction: `Repair /home/op/workspace/.pd/config.yaml`,
+          }),
+          stderrTail: `Error: ENOENT at D:\\secret\\projects\\app\\node_modules\\x.js\n\x07bell\r\nsome tail`,
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('degraded');
+    // Absolute paths are redacted to <path> — the status never carries them.
+    expect(result.reason).toContain('<path>');
+    expect(result.reason).not.toContain('C:\\Users');
+    expect(result.nextAction).toContain('<path>');
+    expect(result.nextAction).not.toContain('/home/op');
+    expect(result.worker.stderrTail).toContain('<path>');
+    expect(result.worker.stderrTail).not.toContain('D:\\secret');
+    // Control characters are stripped.
+    expect(result.worker.stderrTail).not.toMatch(/[\x07\r]/);
+    expect(result.worker.stderrTail).not.toContain('\n');
+  });
+
+  it('F5: a downstream ATTEMPT (ran without succeeded runStatus) is not progress evidence', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-downstream-attempt',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({
+            workspaceDir: workspace,
+            mode: 'ready',
+            report: { downstream: { ran: true, runStatus: 'retried' } },
+          }),
+        }),
+      },
+    });
+    // No task diff, no persisted-outcome evidence → the empty-cycle rule.
+    expect(result.cycleOutcome).toBe('cycle_completed_without_business_progress');
+    expect(result.lastProgressAt).toBeNull();
+  });
+
+  it('F5: a succeeded downstream run still counts as persisted evidence', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-downstream-ok',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({
+            workspaceDir: workspace,
+            mode: 'ready',
+            report: { downstream: { ran: true, runStatus: 'succeeded' } },
+          }),
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('cycle_completed');
+    expect(result.lastProgressAt).not.toBeNull();
+    expect(result.businessProgress.downstreamRan).toBe(true);
+  });
+
+  it('F5: Codex catch-up counts only rollouts that persisted rows (inserted > 0), not re-checked sessions', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-replay',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({
+            workspaceDir: workspace,
+            mode: 'ready',
+            report: {
+              catchUp: {
+                status: 'ok',
+                rollouts: [
+                  // Re-examined, already-synced session: an entry WITHOUT writes.
+                  { rolloutIdentity: 'r1', outcome: { status: 'ok', inserted: 0 } },
+                  // Degraded rollout: no persisted rows either.
+                  { rolloutIdentity: 'r2', outcome: { status: 'degraded', reason: 'x' } },
+                ],
+                remainingLagRollouts: [],
+              },
+            },
+          }),
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('cycle_completed_without_business_progress');
+    expect(result.businessProgress.catchUpProcessed).toBe(0);
+    expect(result.lastProgressAt).toBeNull();
+  });
+
+  it('F5: Codex catch-up rollouts with inserted > 0 ARE evidence (with the real timestamp)', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-ingest',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async () => procResult({
+          stdout: JSON.stringify({
+            workspaceDir: workspace,
+            mode: 'ready',
+            report: {
+              catchUp: {
+                status: 'ok',
+                rollouts: [{ rolloutIdentity: 'r1', outcome: { status: 'ok', inserted: 3 } }],
+                remainingLagRollouts: [],
+              },
+            },
+          }),
+        }),
+      },
+    });
+    expect(result.cycleOutcome).toBe('cycle_completed');
+    expect(result.businessProgress.catchUpProcessed).toBe(3);
+    expect(result.lastProgressAt).not.toBeNull();
+  });
+
+  it('F7: a degraded cycle with a REAL task change records the evidenced progress timestamp', async () => {
+    const workspace = await workspaceWithStore();
+    const adapter = createCodexWorkerAdapter();
+    const spawnWorkerProcess = async (): Promise<WorkerProcessResult> => {
+      // The worker degraded at a later step, but the diagnosis DID complete:
+      // the task moved pending → succeeded between the snapshots.
+      const handle = await createRuntimeStateHandle({ workspaceDir: workspace, readonly: false, bootstrapIfMissing: true });
+      try {
+        await handle.stateManager.createTask({
+          taskId: 'degraded-progress-1',
+          taskKind: 'diagnostician',
+          status: 'pending',
+          attemptCount: 0,
+          maxAttempts: 3,
+        });
+      } finally {
+        await handle.close().catch(() => undefined);
+      }
+      return procResult({
+        stdout: JSON.stringify({
+          workspaceDir: workspace,
+          mode: 'degraded',
+          reason: 'catch_up:lag',
+        }),
+      });
+    };
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-degraded-progress',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      probes: { ...FIXTURE_ENTRY_PROBE, spawnWorkerProcess },
+    });
+    // The outcome stays truthfully degraded; the progress timestamp is real.
+    expect(result.cycleOutcome).toBe('degraded');
+    expect(result.reason).toBe('catch_up:lag');
+    expect(result.businessProgress.taskStateChanged).toBe(true);
+    expect(result.lastProgressAt).not.toBeNull();
+  });
+
+  it('F4: the child env carries the workspace config apiKeyEnv names even when they are not credential-pattern-shaped', async () => {
+    const workspace = tempDir();
+    mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    const handle = await createRuntimeStateHandle({ workspaceDir: workspace, readonly: false, bootstrapIfMissing: true });
+    await handle.close().catch(() => undefined);
+    // A valid config whose runtime profile names a custom credential var.
+    const config = getDefaultPdConfig();
+    (config.runtimeProfiles as Record<string, unknown>)['custom-cred-profile'] = {
+      type: 'pi-ai', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'TEAM_LLM_AUTH',
+    };
+    const configFile = path.join(workspace, '.pd', 'config.yaml');
+    writeFileSync(configFile, JSON.stringify(config), 'utf8');
+    const captured: WorkerProcessOptions[] = [];
+    const adapter = createCodexWorkerAdapter();
+    const result = await adapter.executeOnce({
+      workspaceDir: workspace,
+      activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
+      invocationId: 'inv-custom-cred',
+      timeoutMs: 5_000,
+      identity: sandboxIdentity(),
+      inheritedEnv: { TEAM_LLM_AUTH: 'fixture-inert-value' },
+      probes: {
+        ...FIXTURE_ENTRY_PROBE,
+        spawnWorkerProcess: async (options) => {
+          captured.push(options);
+          return procResult({ stdout: JSON.stringify({ workspaceDir: workspace, mode: 'ready' }) });
+        },
+      },
+    });
+    // TEAM_LLM_AUTH matches no credential PATTERN — only the config-derived
+    // allowlist keeps it alive for the worker's resolveProviderApiKey chain.
+    expect(captured[0]?.env.TEAM_LLM_AUTH).toBe('fixture-inert-value');
+    // The PERSISTED report carries NAMES only — the value never lands there.
+    expect(JSON.stringify(result.worker.environmentReport)).toContain('TEAM_LLM_AUTH');
+    expect(JSON.stringify(result.worker.environmentReport)).not.toContain('fixture-inert-value');
+    expect(result.cycleOutcome).toBe('cycle_completed_without_business_progress');
   });
 });

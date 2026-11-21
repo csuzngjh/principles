@@ -879,8 +879,6 @@ serviceCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     const { handleServiceRunOnce } = await import('./commands/service-run-once.js');
-    const timeoutRaw = typeof opts.timeoutMs === 'string' ? Number.parseInt(opts.timeoutMs, 10) : undefined;
-    const timeoutMs = timeoutRaw !== undefined && Number.isInteger(timeoutRaw) ? timeoutRaw : undefined;
     await handleServiceRunOnce({
       dryRun: opts.dryRun === true,
       shadow: opts.shadow === true,
@@ -890,7 +888,9 @@ serviceCmd
             ? { host: opts.host as 'codex' | 'workbuddy' }
             : { invalidHost: opts.host })
         : {}),
-      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      // F8: the RAW string reaches the handler for full-value validation —
+      // a partial parse here used to silently mis-bound a real worker.
+      ...(typeof opts.timeoutMs === 'string' ? { timeoutMsRaw: opts.timeoutMs } : {}),
       json: opts.json === true,
     });
   });

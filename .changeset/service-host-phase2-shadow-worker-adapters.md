@@ -53,3 +53,27 @@ workspace package would re-enter the ERR-196 release-asset risk class
 (bundle staging, staged manifest rewrite, REQUIRED_COMPONENTS, packaged
 smoke, release-locks regeneration) that cannot be fully exercised outside
 the release pipeline, and Phase 2 adds no consumer that needs the split.
+
+Review round (2026-11-21, 13 findings, all verified real and fixed):
+shadow host roots resolve from the trusted home ONLY
+(`canonicalHostRootsOnly` — forged OPENCLAW_*/CODEX_HOME/
+WORKBUDDY_CONFIG_DIR overrides can no longer steer discovery nor the
+child env pins; ignored inputs recorded rc-9); host-tool declarations
+are VALIDATED via the existing `loadHostToolDeclarations` authority
+before they count as binding evidence; worker stderr/reason strings are
+sanitized (path redaction → `<path>`, control chars stripped) before
+persistence; credential NAMES from the workspace's effective `apiKeyEnv`
+join the child env allowlist so custom-named env credentials keep
+working; Codex catch-up progress counts only ACTUAL persisted rows
+(`inserted>0`, not re-checked sessions) and downstream evidence requires
+`runStatus==='succeeded'`; a cross-run progress projection
+(`service/shadow-progress.json`) keeps `lastProgressAt` across A→B→A and
+dry-run interleaving; degraded cycles with confirmed task-state changes
+now record the evidenced progress timestamp; `--timeout-ms` is validated
+as a full integer BEFORE any real cycle (no more `5m`→1s clamps or
+`five`→silent default); both workers settle the liveness record on early
+returns (no stale mid-stage `runningStage` after a pause/degradation);
+the coordinator passes its invocation id to the Worker
+(`PD_INVOCATION_ID`, TD §5.2) and both workers record it in liveness for
+correlation; the concurrency acceptance proves executability first and
+asserts at-most-once claims exactly.

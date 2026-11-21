@@ -7,12 +7,14 @@
  * no-handover evidence (manifest bytes identical, no scheduler side
  * effects).
  */
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runServiceShadowOnce, type ShadowRunResult } from '../../../src/services/service-host/shadow-run.js';
+import { runServiceRunOnce } from '../../../src/services/service-host/run-once.js';
 import { serviceRunStatusPath } from '../../../src/services/service-host/status/service-run-status.js';
+import { shadowProgressPath } from '../../../src/services/service-host/shadow-progress-store.js';
 import type { AdapterCycleResult, WorkerAdapter, WorkspaceDescriptor, AdapterSupport } from '../../../src/services/service-host/worker-adapter.js';
 import { WORKER_ADAPTER_CONTRACT_VERSION } from '../../../src/services/service-host/worker-adapter.js';
 
@@ -49,13 +51,23 @@ function installSandbox(home: string, workspaces: string[], manifestExtra: Recor
   return pdDir;
 }
 
-/** A codex-bound workspace: .pd dir + host-tool declaration (binding evidence). */
+/** A valid persisted host-tool declaration (the saveHostToolDeclaration payload shape). */
+function validDeclaration(hostKind: string): Record<string, unknown> {
+  return {
+    version: 2,
+    hostKind,
+    mappings: [{ rawToolName: 'Read', canonicalKind: 'read' }],
+    declaredAt: '2026-11-21T00:00:00.000Z',
+  };
+}
+
+/** A codex-bound workspace: .pd dir + VALID host-tool declaration (binding evidence). */
 function codexWorkspace(home: string, name: string): string {
   const ws = path.join(home, name);
   const semanticsDir = path.join(ws, '.pd', 'host-tool-semantics');
   mkdirSync(semanticsDir, { recursive: true });
   const declaration = path.join(semanticsDir, 'codex.json');
-  writeFileSync(declaration, JSON.stringify({ hostKind: 'codex' }), 'utf8');
+  writeFileSync(declaration, JSON.stringify(validDeclaration('codex')), 'utf8');
   return ws;
 }
 
@@ -206,7 +218,7 @@ describe('admission gates', () => {
     const ws = codexWorkspace(home, 'both-bound');
     mkdirSync(path.join(ws, '.pd', 'host-tool-semantics'), { recursive: true });
     const wbDeclaration = path.join(ws, '.pd', 'host-tool-semantics', 'workbuddy.json');
-    writeFileSync(wbDeclaration, JSON.stringify({ hostKind: 'workbuddy' }), 'utf8');
+    writeFileSync(wbDeclaration, JSON.stringify(validDeclaration('workbuddy')), 'utf8');
     installSandbox(home, [ws]);
     const result = await runServiceShadowOnce({
       workspaces: [ws],
@@ -319,5 +331,148 @@ describe('execution + status (task §10) + carry-forward (task §6)', () => {
     expectCompleted(result);
     expect(result.executions[0]?.workspaceState).toBe('paused');
     expect(result.executions[0]?.lastProgressAt).toBeNull();
+  });
+});
+
+describe('F1: shadow resolves host roots from the trusted home only', () => {
+  it('inherited CODEX_HOME / WORKBUDDY_CONFIG_DIR overrides cannot steer discovery, and are recorded as ignored', async () => {
+    const home = tempHome();
+    const ws = codexWorkspace(home, 'canonical-ws');
+    const fakeCodexHome = tempHome('pd-sh-evil-codex-');
+    const fakeWbConfig = tempHome('pd-sh-evil-wb-');
+    installSandbox(home, [ws]);
+    const result = await runServiceShadowOnce({
+      workspaces: [ws],
+      trustedHomeDir: home,
+      env: { CODEX_HOME: fakeCodexHome, WORKBUDDY_CONFIG_DIR: fakeWbConfig },
+      probes: { adapters: { codex: fakeAdapter('codex', { outcome: 'cycle_completed', lastProgressAt: '2026-11-21T11:00:00Z', taskStateChanged: true }), workbuddy: fakeAdapter('workbuddy') } },
+    });
+    expectCompleted(result);
+    const isolation = result.status.environmentIsolation;
+    // The fake overrides were inherited but did NOT steer anything.
+    expect(isolation.inheritedHostRootEnvVars).toContain('CODEX_HOME');
+    expect(isolation.inheritedHostRootEnvVars).toContain('WORKBUDDY_CONFIG_DIR');
+    expect(isolation.ignoredHostRootEnvVars).toContain('CODEX_HOME');
+    expect(isolation.ignoredHostRootEnvVars).toContain('WORKBUDDY_CONFIG_DIR');
+    // Host-root reports name the trusted-home defaults (source 'default'),
+    // never the inherited fake roots.
+    const codexRoot = result.status.discovery.hostRoots.find((r) => r.host === 'codex');
+    expect(codexRoot?.source).toBe('default');
+    expect(codexRoot?.root).toBe(path.join(home, '.codex'));
+    expect(codexRoot?.root).not.toBe(fakeCodexHome);
+    const wbRoot = result.status.discovery.hostRoots.find((r) => r.host === 'workbuddy');
+    expect(wbRoot?.root).toBe(path.join(home, '.workbuddy'));
+    expect(wbRoot?.root).not.toBe(fakeWbConfig);
+  });
+});
+
+describe('F2: invalid host-tool declarations are not binding evidence', () => {
+  it('a garbage same-named declaration file does NOT admit the adapter (claims still can)', async () => {
+    const home = tempHome();
+    const ws = path.join(home, 'forged-decl-ws');
+    mkdirSync(path.join(ws, '.pd', 'host-tool-semantics'), { recursive: true });
+    // A same-named file that is NOT a valid declaration (no mappings, no version).
+    const forged = path.join(ws, '.pd', 'host-tool-semantics', 'codex.json');
+    writeFileSync(forged, 'definitely not a declaration', 'utf8');
+    installSandbox(home, [ws]);
+    const result = await runServiceShadowOnce({
+      workspaces: [ws],
+      trustedHomeDir: home,
+      probes: { adapters: { codex: fakeAdapter('codex'), workbuddy: fakeAdapter('workbuddy') } },
+    });
+    expectCompleted(result);
+    // No valid claim either → refused; the forged file grants nothing.
+    expect(result.executions[0]?.admission).toBe('refused');
+    expect(result.executions[0]?.refusalReason).toContain('no_adapter_supports_workspace');
+  });
+});
+
+describe('F6: the cross-run progress projection survives A→B→A and dry-runs', () => {
+  it('progress recorded for A survives an intervening B run and a dry-run, and a later empty A cycle keeps it', async () => {
+    const home = tempHome();
+    const wsA = codexWorkspace(home, 'carry-a');
+    const wsB = codexWorkspace(home, 'carry-b');
+    const pdHome = installSandbox(home, [wsA, wsB]);
+    const adapters = {
+      codex: fakeAdapter('codex'),
+      workbuddy: fakeAdapter('workbuddy'),
+    };
+    // Run 1: A makes real progress at 08:00.
+    const runA1 = await runServiceShadowOnce({
+      workspaces: [wsA],
+      trustedHomeDir: home,
+      probes: { adapters: { ...adapters, codex: fakeAdapter('codex', { outcome: 'cycle_completed', lastProgressAt: '2026-11-21T08:00:00Z', taskStateChanged: true }) } },
+    });
+    expectCompleted(runA1);
+    expect(runA1.executions[0]?.lastProgressSource).toBe('task_state_change');
+    // Run 2: B alone (its own empty cycle).
+    const runB = await runServiceShadowOnce({
+      workspaces: [wsB],
+      trustedHomeDir: home,
+      probes: { adapters },
+    });
+    expectCompleted(runB);
+    expect(runB.executions[0]?.lastProgressAt).toBeNull();
+    // Run 3: a DRY-RUN replaces the status file with no shadow section —
+    // the projection must be untouched by it.
+    const dry = runServiceRunOnce({ env: {}, trustedHomeDir: home });
+    expect(dry.ok && dry.outcome === 'completed').toBe(true);
+    // Run 4: A again, EMPTY cycle — the 08:00 value survives.
+    const runA2 = await runServiceShadowOnce({
+      workspaces: [wsA],
+      trustedHomeDir: home,
+      probes: { adapters },
+    });
+    expectCompleted(runA2);
+    expect(runA2.executions[0]?.lastProgressAt).toBe('2026-11-21T08:00:00Z');
+    expect(runA2.executions[0]?.lastProgressSource).toBe('previous_run');
+    // The projection file exists under the PD-owned service dir.
+    expect(existsSync(shadowProgressPath(pdHome))).toBe(true);
+    // ...and its schema is the versioned v1.
+    const store = JSON.parse(readFileSync(shadowProgressPath(pdHome), 'utf8')) as { schemaVersion: string; entries: Record<string, unknown> };
+    expect(store.schemaVersion).toBe('pd.shadow-progress.v1');
+    expect(Object.keys(store.entries).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a corrupt projection store degrades observably (progressCarryVerdict) without deleting the file', async () => {
+    const home = tempHome();
+    const ws = codexWorkspace(home, 'corrupt-carry-ws');
+    const pdHome = installSandbox(home, [ws]);
+    // A pre-existing corrupt store.
+    const storeFile = shadowProgressPath(pdHome);
+    mkdirSync(path.dirname(storeFile), { recursive: true });
+    writeFileSync(storeFile, '{ this is: not: json', 'utf8');
+    const result = await runServiceShadowOnce({
+      workspaces: [ws],
+      trustedHomeDir: home,
+      probes: { adapters: { codex: fakeAdapter('codex'), workbuddy: fakeAdapter('workbuddy') } },
+    });
+    expectCompleted(result);
+    expect(result.status.shadow?.progressCarryVerdict).toBe('corrupt');
+    expect(result.executions[0]?.lastProgressAt).toBeNull();
+    // Preservation over cleanup: the corrupt file is still there.
+    expect(existsSync(storeFile)).toBe(true);
+  });
+});
+
+describe('F7: a degraded cycle with real task progress carries the evidenced timestamp', () => {
+  it('degraded outcome + taskStateChanged → lastProgressAt recorded as task_state_change', async () => {
+    const home = tempHome();
+    const ws = codexWorkspace(home, 'degraded-progress-ws');
+    installSandbox(home, [ws]);
+    const result = await runServiceShadowOnce({
+      workspaces: [ws],
+      trustedHomeDir: home,
+      probes: {
+        adapters: {
+          codex: fakeAdapter('codex', { outcome: 'degraded', lastProgressAt: '2026-11-21T12:00:00Z', taskStateChanged: true }),
+          workbuddy: fakeAdapter('workbuddy'),
+        },
+      },
+    });
+    expectCompleted(result);
+    expect(result.executions[0]?.workspaceState).toBe('degraded');
+    expect(result.executions[0]?.lastProgressAt).toBe('2026-11-21T12:00:00Z');
+    expect(result.executions[0]?.lastProgressSource).toBe('task_state_change');
   });
 });

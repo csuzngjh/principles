@@ -105,31 +105,32 @@ export function defaultListDir(dir: string): 'readable' | 'missing' | 'not_direc
 
 /**
  * Per-host root report (P1-2/P2-1): for every host, which root the claims
- * collector consulted, whether it came from an env override, and whether
- * the directory was actually LISTABLE. An unreadable root — env-selected
- * or default — is surfaced as incomplete discovery, never silently folded
+ * collector consulted, whether an env override STEERED it, and whether the
+ * directory was actually LISTABLE. "Steered" = the variable was inherited
+ * AND honored: in the default mode the inherited host-root overrides steer
+ * discovery (P1-2); in `canonicalHostRootsOnly` mode (shadow) they were
+ * ignored (`identity.environment.ignoredHostRootEnvVars`) and the root is
+ * the trusted-home default. An unreadable root — whichever way it was
+ * selected — is surfaced as incomplete discovery, never silently folded
  * into "no workspaces".
  */
 export function hostRootReports(
   identity: InstallIdentity,
-  env: Readonly<Record<string, string | undefined>>,
   listDir: (dir: string) => 'readable' | 'missing' | 'not_directory' | 'unreadable',
 ): HostRootReport[] {
-  const hasEnv = (name: string): boolean => {
-    const value = env[name];
-    return value !== undefined && value.trim().length > 0;
-  };
+  const honored = new Set(identity.environment.inheritedHostRootEnvVars);
+  for (const ignored of identity.environment.ignoredHostRootEnvVars) honored.delete(ignored);
   const roots: { host: HostRootReport['host']; root: string; source: HostRootReport['source'] }[] = [
     {
       host: 'openclaw',
       root: identity.hostRoots.openclawHome,
-      source: hasEnv('OPENCLAW_STATE_DIR') || hasEnv('OPENCLAW_HOME') ? 'env' : 'default',
+      source: honored.has('OPENCLAW_STATE_DIR') || honored.has('OPENCLAW_HOME') ? 'env' : 'default',
     },
-    { host: 'codex', root: identity.hostRoots.codexHome, source: hasEnv('CODEX_HOME') ? 'env' : 'default' },
+    { host: 'codex', root: identity.hostRoots.codexHome, source: honored.has('CODEX_HOME') ? 'env' : 'default' },
     {
       host: 'workbuddy',
       root: identity.hostRoots.workbuddyConfigDir,
-      source: hasEnv('WORKBUDDY_CONFIG_DIR') ? 'env' : 'default',
+      source: honored.has('WORKBUDDY_CONFIG_DIR') ? 'env' : 'default',
     },
   ];
   return roots.map((entry) => ({ ...entry, status: listDir(entry.root) }));

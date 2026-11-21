@@ -137,6 +137,18 @@ export function workbuddyWorkerCycleDriver(): 'companion' | 'service_host' | 'ma
   return 'manual';
 }
 
+/**
+ * F13 (TD §5.2): the coordinator passes a unique invocation id; when
+ * present it lands in the liveness record so the shared per-workspace file
+ * can be correlated back to the exact Service Host invocation.
+ */
+function invocationIdLivenessPatch(): Record<string, unknown> {
+  const invocationId = process.env.PD_INVOCATION_ID;
+  return typeof invocationId === 'string' && invocationId.length > 0
+    ? { lastInvocationId: invocationId }
+    : {};
+}
+
 /** Read the persisted liveness record, or null when absent/unreadable. */
 export function readWorkbuddyWorkerLiveness(workspaceDir: string): Record<string, unknown> | null {
   try {
@@ -191,6 +203,29 @@ function writeLiveness(workspaceDir: string, patch: Record<string, unknown>): vo
     // Liveness bookkeeping must never break the cycle (rc-9: the cycle
     // report remains the observable degradation channel).
   }
+}
+
+/**
+ * F9 review fix: settle the liveness record for EARLY returns (consumer
+ * pause, structured degradations). A cycle that stops after the `catch_up`
+ * stage write must not leave a stale runningStage + deadline behind —
+ * liveness readers would report the finished cycle as still mid-stage.
+ */
+function finalizeLiveness(
+  workspaceDir: string,
+  cycleStartedAt: Date,
+  settlement: { mode: 'paused' | 'degraded'; reason?: string },
+): void {
+  writeLiveness(workspaceDir, {
+    runningStage: null,
+    stageDeadline: null,
+    lastCycleCompletedAt: new Date().toISOString(),
+    lastCycleDurationMs: Date.now() - cycleStartedAt.getTime(),
+    lastCycleMode: settlement.mode,
+    lastCycleDriver: workbuddyWorkerCycleDriver(),
+    ...(settlement.reason !== undefined ? { lastDegradedReason: settlement.reason } : {}),
+    ...invocationIdLivenessPatch(),
+  });
 }
 
 /**
@@ -298,6 +333,9 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
       nextAction: capability.available ? undefined : capability.nextAction,
     };
   } else if (!consumerFlag.enabled) {
+    // F9: the cycle ENDED here (paused) — settle the liveness record so the
+    // in-flight `catch_up` stage and its deadline do not survive it.
+    finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'paused' });
     return {
       ...base,
       mode: 'paused',
@@ -359,10 +397,13 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+      const reason = `diagnostician_execution_failed:${detail}`;
+      // F9: settle the liveness record on the degraded early return.
+      finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'degraded', reason });
       return {
         ...base,
         mode: 'degraded',
-        reason: `diagnostician_execution_failed:${detail}`,
+        reason,
         nextAction: 'Inspect the governance workspace runtime profile and provider configuration; the task keeps its pending/retry state and no evidence was mutated.',
         report: { catchUp, reconcile, diagnostician: null, downstream: null },
       };
@@ -380,10 +421,13 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   });
   if (!declared.ok) {
     logger.warn?.(`[PD:WorkbuddyWorker] Failed to persist WorkBuddy tool declaration: ${declared.reason} — host-neutral consumers will not find it (rc-9)`);
+    const reason = `host_tool_declaration_persist_failed:${declared.reason}`;
+    // F9: settle the liveness record on the degraded early return.
+    finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'degraded', reason });
     return {
       ...base,
       mode: 'degraded',
-      reason: `host_tool_declaration_persist_failed:${declared.reason}`,
+      reason,
       nextAction: 'Repair WorkBuddy host declaration persistence (.pd/host-tool-semantics/workbuddy.json) before running the downstream internalization cycle; the worker retries automatically on the next cycle.',
       report: { catchUp, reconcile, diagnostician, downstream: null },
     };
@@ -435,6 +479,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
     lastCycleMode: degradedReason !== undefined ? 'degraded' : 'ready',
     lastCycleDriver: workbuddyWorkerCycleDriver(),
     ...(degradedReason !== undefined ? { lastDegradedReason: degradedReason } : {}),
+    ...invocationIdLivenessPatch(),
   });
   return {
     ...base,

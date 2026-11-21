@@ -22,6 +22,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getInstallLayoutPaths, getPdCliEntry } from '@principles/install-layout';
+import { loadPdConfigForPlugin } from '@principles/host-runtime';
 import type { InstallIdentity } from './install-identity.js';
 import type { ActiveReleaseFacts } from './status/service-run-status.js';
 import type { WorkspaceDiscoveryVerdict } from './workspace-discovery.js';
@@ -82,6 +83,13 @@ export interface AdapterCycleHealth {
   readonly lastCycleCompletedAt: string | null;
   readonly lastCycleMode: string | null;
   readonly runningStage: string | null;
+  /**
+   * The invocation id the worker recorded in its liveness file (F13, TD §5.2
+   * 显式传入 invocationId): when the worker ran under this adapter the value
+   * equals `invocationId`, closing the correlation loop between the
+   * coordinator-side id and the shared liveness record.
+   */
+  readonly lastInvocationId: string | null;
 }
 
 export interface AdapterCycleResult {
@@ -215,13 +223,86 @@ function livenessFacts(config: CliWorkerHostConfig, workspaceDir: string): Adapt
     lastCycleCompletedAt: record !== null ? readString(record, 'lastCycleCompletedAt') : null,
     lastCycleMode: record !== null ? readString(record, 'lastCycleMode') : null,
     runningStage: typeof runningStage === 'string' ? runningStage : null,
+    lastInvocationId: record !== null ? readString(record, 'lastInvocationId') : null,
   };
 }
 
 const STDERR_TAIL_PERSIST = 400;
 
+/**
+ * Sanitize worker-emitted free text before it reaches the persisted status
+ * (F3 review fix, CWE-532): subprocess stderr and worker-reported
+ * reason/nextAction strings can embed absolute filesystem paths, config
+ * fragments or upstream error content — truncation alone removes none of
+ * that. Discipline (EP-08 / ERR-198): strip control characters, redact
+ * absolute-path-like substrings to `<path>`, and bound the remainder.
+ * Closed reason codes produced by OUR worker survive verbatim; only
+ * embedded path/whitespace noise is normalized.
+ */
+export function sanitizeWorkerText(value: string, max: number = STDERR_TAIL_PERSIST): string {
+  const withoutPaths = value.replace(/(?:[A-Za-z]:)?(?:\\|\/)(?:[^\s"'`\\/:*?<>|]+(?:\\|\/))+[^\s"'`\\/:*?<>|]*/g, '<path>');
+  const clean = withoutPaths.replace(/[^\x20-\x7E]+/g, ' ');
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+/** Back-compat name for the stderr-tail sanitization. */
 function boundedTail(value: string): string {
-  return value.length > STDERR_TAIL_PERSIST ? `…${value.slice(-STDERR_TAIL_PERSIST)}` : value;
+  return sanitizeWorkerText(value, STDERR_TAIL_PERSIST);
+}
+
+/** Env var names that can never be re-admitted through the credential allowlist (pointer set, worker-env.ts). */
+const POINTER_ENV_NAMES = new Set([
+  'PD_EXPERIMENT_ROOT', 'PD_WORKSPACE_DIR', 'OPENCLAW_STATE_DIR', 'OPENCLAW_HOME',
+  'PD_COMPANION_WORKER_IPC', 'PD_INVOCATION_SOURCE', 'HOME', 'USERPROFILE', 'CODEX_HOME',
+  'WORKBUDDY_CONFIG_DIR',
+]);
+
+/**
+ * Read the credential names out of an effective config value (the loader
+ * wraps the merged PdConfig under `config`, verified against the
+ * host-runtime loader; a future shape change degrades to an empty allowlist
+ * — the worker reports config problems itself — never a guess).
+ */
+function collectCredentialEnvNames(effective: unknown): readonly string[] {
+  if (!isPlainRecord(effective)) return [];
+  const candidates: unknown[] = [
+    effective.config,
+    effective.runtimeProfiles !== undefined ? { runtimeProfiles: effective.runtimeProfiles } : undefined,
+  ];
+  const names = new Set<string>();
+  for (const candidate of candidates) {
+    if (!isPlainRecord(candidate)) continue;
+    const profiles: unknown = candidate.runtimeProfiles;
+    if (!isPlainRecord(profiles)) continue;
+    for (const profile of Object.values(profiles)) {
+      if (!isPlainRecord(profile)) continue;
+      const apiKeyEnv: unknown = profile.apiKeyEnv;
+      if (typeof apiKeyEnv !== 'string' || apiKeyEnv.length === 0 || apiKeyEnv.length > 64) continue;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(apiKeyEnv)) continue;
+      if (POINTER_ENV_NAMES.has(apiKeyEnv.toUpperCase())) continue;
+      names.add(apiKeyEnv);
+    }
+  }
+  return [...names];
+}
+
+/**
+ * Extract the credential variable NAMES the workspace's effective runtime
+ * config actually uses (`apiKeyEnv` on each runtime profile — F4 review
+ * fix). Read-only: an invalid/unreadable config yields an empty list (the
+ * worker will report the config problem itself); a valid config yields the
+ * exact names `resolveProviderApiKey` will read from the child env. Names
+ * are defensively validated and pointer names can never be re-admitted.
+ */
+export function readConfigCredentialEnvNames(workspaceDir: string): readonly string[] {
+  try {
+    const config = loadPdConfigForPlugin(workspaceDir);
+    if (!config.ok) return [];
+    const { effective } = config;
+    return collectCredentialEnvNames(effective);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -316,10 +397,22 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
 
       // ── Allowlist environment (TD §5.2) ──
       const inherited = input.inheritedEnv ?? process.env;
+      // F4 review fix: the workspace's OWN effective runtime config names its
+      // credential variables (`apiKeyEnv`). Names outside the generic
+      // credential pattern must still reach the child, or a workspace whose
+      // operator exported a custom-named key would lose a working credential
+      // versus a direct worker run (resolveProviderApiKey reads the env var
+      // by that exact name before falling back to the PD credentials file).
+      // Names only — values ride the inherited env untouched and are never
+      // recorded.
+      const credentialEnvAllowlist = readConfigCredentialEnvNames(workspaceDir);
       const { env, report: environmentReport } = buildWorkerEnvironment({
         identity: input.identity,
         hostKind: config.hostKind,
         inheritedEnv: inherited,
+        credentialEnvAllowlist,
+        // F13 (TD §5.2): pass the invocation id explicitly to the Worker.
+        invocationId: input.invocationId,
       });
 
       // ── Pre-cycle task snapshot (progress evidence, task §6) ──
@@ -437,8 +530,13 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         });
       }
       const mode = readString(parsed, 'mode') ?? 'unknown';
-      const workerReason = readString(parsed, 'reason') ?? undefined;
-      const workerNextAction = readString(parsed, 'nextAction') ?? undefined;
+      // F3: worker-reported free text is sanitized before persistence (paths
+      // redacted, control chars stripped, bounded) — the manual worker CLI
+      // prints the full detail; the status carries the desensitized form.
+      const rawReason = readString(parsed, 'reason');
+      const rawNextAction = readString(parsed, 'nextAction');
+      const workerReason = rawReason !== null ? sanitizeWorkerText(rawReason, 300) : undefined;
+      const workerNextAction = rawNextAction !== null ? sanitizeWorkerText(rawNextAction, 300) : undefined;
       const reportEvidence = config.extractCycleEvidence(parsed);
       const evidenceReadable = taskProgress !== null;
       const businessProgress: BusinessProgressEvidence = {
@@ -453,7 +551,19 @@ export function createOnceCliWorkerAdapter(config: CliWorkerHostConfig): WorkerA
         return assemble({ outcome: 'paused', reason: workerReason ?? 'paused', nextAction: workerNextAction, businessProgress, workerMode: mode });
       }
       if (mode === 'degraded') {
-        return assemble({ outcome: 'degraded', reason: workerReason ?? 'degraded', nextAction: workerNextAction, businessProgress, workerMode: mode });
+        // F7 review fix: a degraded CYCLE and persisted business progress are
+        // independent facts — the worker may have completed a diagnosis
+        // before a later step degraded. When the trusted task diff shows a
+        // real state change, the evidenced timestamp is recorded here (the
+        // outcome stays truthfully degraded); without one, no timestamp.
+        return assemble({
+          outcome: 'degraded',
+          reason: workerReason ?? 'degraded',
+          nextAction: workerNextAction,
+          lastProgressAt: taskProgress?.taskStateChanged === true ? taskProgress.changedAt : null,
+          businessProgress,
+          workerMode: mode,
+        });
       }
       // mode === 'ready'
       if (proc.exitCode !== 0 && proc.exitCode !== null) {
@@ -509,9 +619,14 @@ export function readReportEvidence(parsed: Record<string, unknown>): {
 } {
   const diagnostician = readReportSection(parsed, 'diagnostician');
   const downstream = readReportSection(parsed, 'downstream');
+  // F5 review fix: `downstream.ran` alone records an ATTEMPT (the shared
+  // consumer cycle started), not a persisted business outcome — only a
+  // succeeded run is progress evidence. Attempts that retried/failed are
+  // visible to the task-status diff instead.
+  const runStatus = downstream !== null ? downstream.runStatus : undefined;
   return {
     diagnosticianSucceeded: diagnostician !== null && readString(diagnostician, 'status') === 'succeeded',
-    downstreamRan: downstream !== null && downstream.ran === true,
+    downstreamRan: downstream !== null && downstream.ran === true && runStatus === 'succeeded',
   };
 }
 

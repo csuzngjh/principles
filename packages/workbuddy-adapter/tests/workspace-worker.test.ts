@@ -272,6 +272,38 @@ describe('WorkBuddy worker cycle — cycle liveness (Phase 2, PRI-1280)', () => 
     expect(Date.now() - started).toBeLessThan(60_000);
   });
 
+  it('F9: a consumer-flag pause SETTLES the liveness record — no stale mid-stage runningStage', async () => {
+    const governance = makeWorkerWorkspace({ workbuddy: true, consumer: false });
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(result.mode).toBe('paused');
+    expect(result.reason).toBe('internalization_auto_consumer_disabled');
+    const liveness = readWorkbuddyWorkerLiveness(governance);
+    // The cycle ENDED (paused): the catch_up stage write must not survive it.
+    expect(liveness?.runningStage).toBeNull();
+    expect(liveness?.stageDeadline).toBeNull();
+    expect(liveness?.lastCycleMode).toBe('paused');
+    expect(typeof liveness?.lastCycleCompletedAt).toBe('string');
+    expect(typeof liveness?.lastCycleDurationMs).toBe('number');
+  });
+
+  it('F13: a service_host-driven cycle records the coordinator invocation id in liveness', async () => {
+    const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
+    const previousSource = process.env.PD_INVOCATION_SOURCE;
+    const previousId = process.env.PD_INVOCATION_ID;
+    try {
+      process.env.PD_INVOCATION_SOURCE = 'service_host';
+      process.env.PD_INVOCATION_ID = 'inv-wb-corr-123';
+      await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+      const liveness = readWorkbuddyWorkerLiveness(governance);
+      expect(liveness?.lastInvocationId).toBe('inv-wb-corr-123');
+    } finally {
+      if (previousSource === undefined) delete process.env.PD_INVOCATION_SOURCE;
+      else process.env.PD_INVOCATION_SOURCE = previousSource;
+      if (previousId === undefined) delete process.env.PD_INVOCATION_ID;
+      else process.env.PD_INVOCATION_ID = previousId;
+    }
+  });
+
   it('readWorkbuddyWorkerLiveness returns null for an unreadable/missing record', () => {
     const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
     expect(readWorkbuddyWorkerLiveness(governance)).toBeNull();

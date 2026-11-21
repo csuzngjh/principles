@@ -156,6 +156,18 @@ export function codexWorkerCycleDriver(): 'companion' | 'service_host' | 'manual
   return 'manual';
 }
 
+/**
+ * F13 (TD §5.2): the coordinator passes a unique invocation id; when
+ * present it lands in the liveness record so the shared per-workspace file
+ * can be correlated back to the exact Service Host invocation.
+ */
+function invocationIdLivenessPatch(): Record<string, unknown> {
+  const invocationId = process.env.PD_INVOCATION_ID;
+  return typeof invocationId === 'string' && invocationId.length > 0
+    ? { lastInvocationId: invocationId }
+    : {};
+}
+
 export function readCodexWorkerLiveness(workspaceDir: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(path.join(path.resolve(workspaceDir), '.state', LIVENESS_FILE), 'utf8'));
@@ -214,6 +226,30 @@ function writeLiveness(workspaceDir: string, patch: Record<string, unknown>): vo
     // liveness bookkeeping must never break the cycle (rc-9: the cycle report
     // itself remains the observable degradation channel)
   }
+}
+
+/**
+ * F9 review fix: finalize the liveness record for EARLY returns (consumer
+ * pause, structured degradations). Without this, a cycle that stopped after
+ * the `catch_up`/`post_processing` stage write leaves a stale
+ * `runningStage` + deadline behind and liveness readers report the
+ * finished cycle as still mid-stage.
+ */
+function finalizeLiveness(
+  workspaceDir: string,
+  cycleStartedAt: Date,
+  settlement: { mode: 'paused' | 'degraded'; reason?: string },
+): void {
+  writeLiveness(workspaceDir, {
+    runningStage: null,
+    stageDeadline: null,
+    lastCycleCompletedAt: new Date().toISOString(),
+    lastCycleDurationMs: Date.now() - cycleStartedAt.getTime(),
+    lastCycleMode: settlement.mode,
+    lastCycleDriver: codexWorkerCycleDriver(),
+    ...(settlement.reason !== undefined ? { lastDegradedReason: settlement.reason } : {}),
+    ...invocationIdLivenessPatch(),
+  });
 }
 
 /**
@@ -333,6 +369,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   } else if (!consumerFlag.enabled) {
     // paused: execution pause, NOT evidence freeze. Catch-up + reconcile
     // already ran above; manual CLI remains allowed (SPEC §13).
+    // F9: settle the liveness record — the cycle ENDED here (paused), so the
+    // in-flight `catch_up` stage and its deadline must not survive it.
+    finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'paused' });
     return {
       ...base,
       mode: 'paused',
@@ -407,10 +446,14 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+      const reason = `diagnostician_execution_failed:${detail}`;
+      // F9: settle the liveness record — a degraded early return must not
+      // leave a stale mid-stage runningStage behind.
+      finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'degraded', reason });
       return {
         ...base,
         mode: 'degraded',
-        reason: `diagnostician_execution_failed:${detail}`,
+        reason,
         nextAction: 'Inspect the Workspace runtime profile and provider configuration; the task keeps its pending/retry state and no evidence was mutated.',
         report: { catchUp, reconcile, postProcessing: null, diagnostician: null, downstream: null },
       };
@@ -485,10 +528,12 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+      const reason = `post_processing_continuation_failed:${detail}`;
+      finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'degraded', reason });
       return {
         ...base,
         mode: 'degraded',
-        reason: `post_processing_continuation_failed:${detail}`,
+        reason,
         nextAction: 'Inspect the workspace state.db principle_candidates/tasks; the worker retries automatically on the next cycle.',
         report: { catchUp, reconcile, postProcessing: null, diagnostician, downstream: null },
       };
@@ -513,10 +558,12 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     // liveness contract (host_tool_declaration_missing → OpenClaw default)
     // and falsely pass host-liveness checks for a Codex activation. Degrade
     // this cycle instead; the next cycle retries the declaration first.
+    const reason = `host_tool_declaration_persist_failed:${declared.reason}`;
+    finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'degraded', reason });
     return {
       ...base,
       mode: 'degraded',
-      reason: `host_tool_declaration_persist_failed:${declared.reason}`,
+      reason,
       nextAction: 'Repair Codex host declaration persistence (.pd/host-tool-semantics/codex.json) before running the downstream internalization cycle; the worker retries automatically on the next cycle.',
       report: { catchUp, reconcile, postProcessing: null, diagnostician, downstream: null },
     };
@@ -583,6 +630,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     // this so a no_recent_cycle report names WHO stopped driving.
     lastCycleDriver: codexWorkerCycleDriver(),
     ...(degradedReason !== undefined ? { lastDegradedReason: degradedReason } : {}),
+    ...invocationIdLivenessPatch(),
   });
   return {
     ...base,

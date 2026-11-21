@@ -153,4 +153,59 @@ describe('allowlist passthrough', () => {
     // The pointer check is case-insensitive on win32 too.
     expect(env.pd_experiment_root).toBeUndefined();
   });
+
+  it('F4: a config-named credential passes through even when the name does NOT match the generic pattern', () => {
+    const { env } = buildWorkerEnvironment({
+      identity: identity(),
+      hostKind: 'workbuddy',
+      inheritedEnv: { TEAM_LLM_AUTH: 'fixture-inert-value' },
+      credentialEnvAllowlist: ['TEAM_LLM_AUTH'],
+      platform: 'linux',
+    });
+    // resolveProviderApiKey reads THIS exact name (apiKeyEnv) — without the
+    // config-derived allowlist the child would lose a working credential.
+    expect(env.TEAM_LLM_AUTH).toBe('fixture-inert-value');
+  });
+
+  it('F4: the config allowlist can never re-admit a pointer variable', () => {
+    const id = identity();
+    const { env } = buildWorkerEnvironment({
+      identity: id,
+      hostKind: 'codex',
+      inheritedEnv: { CODEX_HOME: '/evil/codex' },
+      credentialEnvAllowlist: ['CODEX_HOME', 'TEAM_LLM_AUTH'],
+      platform: 'linux',
+    });
+    // Pointer rejection outranks the config allowlist.
+    expect(env.CODEX_HOME).toBe(id.hostRoots.codexHome);
+    expect(env.CODEX_HOME).not.toBe('/evil/codex');
+  });
+
+  it('F4: malformed config allowlist names are ignored', () => {
+    const longName = 'A'.repeat(80);
+    const { env } = buildWorkerEnvironment({
+      identity: identity(),
+      hostKind: 'codex',
+      inheritedEnv: { 'BAD NAME': 'x', '../evil': 'y', [longName]: 'z' },
+      credentialEnvAllowlist: ['BAD NAME', '../evil', longName, ''],
+      platform: 'linux',
+    });
+    expect(env['BAD NAME']).toBeUndefined();
+    expect(env['../evil']).toBeUndefined();
+    expect(env[longName]).toBeUndefined();
+  });
+
+  it('F13: the invocation id is pinned into the child env and reported by name only', () => {
+    const { env, report } = buildWorkerEnvironment({
+      identity: identity(),
+      hostKind: 'codex',
+      inheritedEnv: { PD_INVOCATION_ID: 'inherited-forgery' },
+      invocationId: 'inv-fixture-42',
+      platform: 'linux',
+    });
+    expect(env.PD_INVOCATION_ID).toBe('inv-fixture-42');
+    expect(report.invocationId).toBe('inv-fixture-42');
+    // The report carries the id (run metadata), never env VALUES.
+    expect(JSON.stringify(report)).not.toContain('fixture-inert-value');
+  });
 });
