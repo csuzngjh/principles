@@ -43,6 +43,8 @@ export {
 } from './pd-hook.js';
 export {
   runWorkbuddyWorkspaceWorkerCycle,
+  readWorkbuddyWorkerLiveness,
+  workbuddyWorkerCycleDriver,
   type WorkbuddyWorkerCycleResult,
   type WorkbuddyWorkerCycleOptions,
   type WorkbuddyWorkerCycleStepReport,

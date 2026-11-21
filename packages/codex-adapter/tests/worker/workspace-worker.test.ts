@@ -1234,7 +1234,7 @@ describe('worker cycle — PRI-1264 driver liveness + degraded catch-up recovery
     expect(task).toMatchObject({ status: 'succeeded' });
   });
 
-  it('records WHO drove the cycle in the liveness file (companion vs manual)', async () => {
+  it('records WHO drove the cycle in the liveness file (companion vs service_host vs manual)', async () => {
     const ws = makeWorkspace({ ingestion: true, consumer: true });
     const previous = process.env.PD_INVOCATION_SOURCE;
     try {
@@ -1242,12 +1242,43 @@ describe('worker cycle — PRI-1264 driver liveness + degraded catch-up recovery
       await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
       expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('companion');
 
+      // Phase 2 (PRI-1280): the Service Host shadow driver identity — without
+      // the third value, stall attribution would misreport it as manual.
+      process.env.PD_INVOCATION_SOURCE = 'service_host';
+      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('service_host');
+
       delete process.env.PD_INVOCATION_SOURCE;
       await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
       expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('manual');
     } finally {
       if (previous === undefined) delete process.env.PD_INVOCATION_SOURCE;
       else process.env.PD_INVOCATION_SOURCE = previous;
+    }
+  });
+
+  it('R5: a manual/companion cycle CLEARS the previous shadow run\'s invocation id from liveness', async () => {
+    const ws = makeWorkspace({ ingestion: true, consumer: true });
+    const previousSource = process.env.PD_INVOCATION_SOURCE;
+    const previousId = process.env.PD_INVOCATION_ID;
+    try {
+      // A shadow-driven cycle records the coordinator's invocation id…
+      process.env.PD_INVOCATION_SOURCE = 'service_host';
+      process.env.PD_INVOCATION_ID = 'inv-shadow-555';
+      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(readCodexWorkerLiveness(ws.root)?.lastInvocationId).toBe('inv-shadow-555');
+      // …then a manual cycle (no PD_INVOCATION_ID) must not keep wearing it.
+      delete process.env.PD_INVOCATION_SOURCE;
+      delete process.env.PD_INVOCATION_ID;
+      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      const liveness = readCodexWorkerLiveness(ws.root);
+      expect(liveness?.lastCycleDriver).toBe('manual');
+      expect(liveness?.lastInvocationId ?? null).toBeNull();
+    } finally {
+      if (previousSource === undefined) delete process.env.PD_INVOCATION_SOURCE;
+      else process.env.PD_INVOCATION_SOURCE = previousSource;
+      if (previousId === undefined) delete process.env.PD_INVOCATION_ID;
+      else process.env.PD_INVOCATION_ID = previousId;
     }
   });
 
