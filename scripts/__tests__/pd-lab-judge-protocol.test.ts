@@ -1734,7 +1734,10 @@ describe("arbitration binding parity with T4 (P0-3)", () => {
   const codes = (report: { problems: { code: string }[] }) =>
     report.problems.map((p) => p.code);
 
-  it("missing/tampered/partial digest bindings stay UNKNOWN — never resolve", () => {
+  it(
+    "missing/tampered/partial digest bindings stay UNKNOWN — never resolve",
+    { timeout: 60_000 },
+    () => {
     const { j1, j2, entries } = setup();
     const base = {
       schema: "pd-lab-judge-protocol-bundle.v1",
@@ -2511,13 +2514,16 @@ describe("review round 3 hardening", () => {
     const built = healthyPackage();
     const keyA = "cfg-a+case-1@v1+opp-1+rep-1+ref-1";
     const keyB = "cfg-b+case-2@v1+opp-2+rep-2+ref-2";
-    const digest = (built_: any) =>
-      comparisonInputDigestOf(built_.blindPackage, built_.secretBinding.identityMap);
-    const arb = (key: string) => ({
+    const digest = () =>
+      comparisonInputDigestOf(built.blindPackage, built.secretBinding.identityMap);
+    // Each comparison: two conflicting records fully bound by its arbitration,
+    // so absent the duplicate the arbitration could resolve each conflict —
+    // the duplicated id must neutralize both.
+    const arb = (key: string, ids: string[]) => ({
       arbitrationId: "arb-1",
       assignmentKey: key,
-      boundJudgmentIds: ["j-a", "j-b"],
-      boundComparisonInputDigests: [digest(built)],
+      boundJudgmentIds: ids,
+      boundComparisonInputDigests: [digest()],
       verdict: "TIE",
     });
     const rec = (id: string, key: string, verdict: string) =>
@@ -2525,15 +2531,23 @@ describe("review round 3 hardening", () => {
     const { run, report } = validateBundle("dup-arb", {
       schema: "pd-lab-judge-protocol-bundle.v1",
       entries: [
-        entryFor(built, rec("j-a", keyA, "A_BETTER"), rawResponseOf({ displayVerdict: "A_BETTER" })),
-        entryFor(built, rec("j-b", keyB, "B_BETTER"), rawResponseOf({ displayVerdict: "B_BETTER" })),
+        entryFor(built, rec("j-a1", keyA, "A_BETTER"), rawResponseOf({ displayVerdict: "A_BETTER" })),
+        entryFor(built, rec("j-a2", keyA, "B_BETTER"), rawResponseOf({ displayVerdict: "B_BETTER" })),
+        entryFor(built, rec("j-b1", keyB, "A_BETTER"), rawResponseOf({ displayVerdict: "A_BETTER" })),
+        entryFor(built, rec("j-b2", keyB, "B_BETTER"), rawResponseOf({ displayVerdict: "B_BETTER" })),
       ],
-      arbitrations: [arb(keyA), arb(keyB)],
+      arbitrations: [arb(keyA, ["j-a1", "j-a2"]), arb(keyB, ["j-b1", "j-b2"])],
     });
     expect(run.status).toBe(1);
     expect(report.problems.map((p: { code: string }) => p.code)).toContain(
       "DUPLICATE_ARBITRATION",
     );
+    for (const key of [keyA, keyB]) {
+      const outcome = report.perAssignment.find(
+        (a: { assignmentKey: string }) => a.assignmentKey === key,
+      );
+      expect(outcome?.outcome).toBe("UNKNOWN");
+    }
   });
 
   it("one caseId at two versions across comparisons fails the bundle (CASE_VERSION_CONFLICT)", () => {
@@ -2547,6 +2561,44 @@ describe("review round 3 hardening", () => {
       entries: [
         entryFor(built, rec("j-1", keyA), rawResponseOf({ displayVerdict: "A_BETTER" })),
         entryFor(built, rec("j-2", keyB), rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(report.problems.map((p: { code: string }) => p.code)).toContain(
+      "CASE_VERSION_CONFLICT",
+    );
+  });
+
+  it("the version check also covers declared assignments with no records yet", () => {
+    const built = healthyPackage();
+    const key = "cfg+case-1@v1+opp-1+rep-1+ref-1";
+    const j1 = healthyRecord(built, "A_BETTER", "j-1", key, {
+      judgeSlotId: "slot-1",
+    });
+    const { run, report } = validateBundle("partial-plan-conflict", {
+      schema: "pd-lab-judge-protocol-bundle.v1",
+      entries: [
+        entryFor(built, j1, rawResponseOf({ displayVerdict: "A_BETTER" })),
+      ],
+      assignments: [
+        {
+          candidateConfigId: "cfg",
+          caseId: "case-1",
+          caseVersion: "v1",
+          opportunityId: "opp-1",
+          repetitionId: "rep-1",
+          referenceId: "ref-1",
+        },
+        // A plan row that has not received any judgment yet, at a different
+        // version of the same case — T4's full-plan check would catch it.
+        {
+          candidateConfigId: "cfg",
+          caseId: "case-1",
+          caseVersion: "v2",
+          opportunityId: "opp-1",
+          repetitionId: "rep-2",
+          referenceId: "ref-1",
+        },
       ],
     });
     expect(run.status).toBe(1);

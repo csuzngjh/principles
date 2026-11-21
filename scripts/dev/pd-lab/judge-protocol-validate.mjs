@@ -957,9 +957,11 @@ function main() {
   }
   // Bundle-level case-version consistency (T4's per-plan check, reproduced
   // because the per-comparison merges each see one assignment): one caseId
-  // with two different versions across the bundle is a conflict.
+  // with two different versions across the bundle is a conflict. The check
+  // covers declared assignments too — a declared comparison that has not
+  // received any judgment yet is still part of the plan.
   const caseVersions = new Map();
-  for (const [key, components] of mergeComponentsByKey) {
+  const checkCaseVersion = (key, components) => {
     const previous = caseVersions.get(components.caseId);
     if (previous === undefined) {
       caseVersions.set(components.caseId, components.caseVersion);
@@ -971,7 +973,11 @@ function main() {
         message: `case ${components.caseId} declared with versions ${previous} and ${components.caseVersion} (key ${key})`,
       });
     }
-  }
+  };
+  for (const [key, components] of mergeComponentsByKey)
+    checkCaseVersion(key, components);
+  for (const [key, components] of declaredAssignments)
+    if (!mergeComponentsByKey.has(key)) checkCaseVersion(key, components);
 
   // Per-comparison merge: every assignmentKey merges under ITS OWN seat
   // count — a preregistered registry applies to every comparison, otherwise
