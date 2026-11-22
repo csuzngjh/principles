@@ -78,17 +78,25 @@ validatedBindings: {caseVersion, sourceDigests, validatorVersion}
 
 全部必填输入通过且该path所需快照/入口/授权具备，才可派生 SPEC 的 `EXECUTABLE_FOR_DECLARED_PATH`。`NOT_EVALUATED` 不能当READY。结构损坏直接拒绝；记录合法但证据缺失返回INCOMPLETE，保留补齐队列。
 
-首批问题代码：`SOURCE_GAP`、`SOURCE_RETENTION_EXPIRED`、`TURN_BLOB_MISSING`、`TOOL_RESULT_PREVIEW_ONLY`、`PAIN_ANCHOR_MISSING`、`EXPECTATION_UNRESOLVED`、`AUTHORIZATION_UNVERIFIED`、`REFERENCE_UNAVAILABLE`、`DIGEST_MISMATCH`、`FUTURE_INFORMATION`、`ENVIRONMENT_UNAVAILABLE`。每个代码必须有真实拒绝/降级用例，不只添加枚举。
+首批问题代码：`SOURCE_GAP`、`SOURCE_RETENTION_EXPIRED`、`TURN_BLOB_MISSING`、`TOOL_RESULT_PREVIEW_ONLY`、`PAIN_ANCHOR_MISSING`、`EXPECTATION_UNRESOLVED`、`AUTHORIZATION_UNVERIFIED`、`REFERENCE_UNAVAILABLE`、`DIGEST_MISMATCH`、`FUTURE_INFORMATION`、`ENVIRONMENT_UNAVAILABLE`。**2026-11-21 r8 追加**：`INGRESS_HOST_UNRESOLVABLE`、`TOOL_RESULT_MISSING`、`EXPECTATION_VISIBILITY_UNPROVEN`（见下方 r8 规则）。每个代码必须有真实拒绝/降级用例，不只添加枚举。
 
 `SOURCE_GAP` 与 `SOURCE_RETENTION_EXPIRED` 的区分规则：不得仅凭“快照内该会话最早一行晚于 Pain 触发时间”断言保留期已删。判定 `SOURCE_RETENTION_EXPIRED` 需要保留证据支持——会话创建时间早于该最早行、`turn_index` 序列从大于 0 的值开始、或保留清扫日志等其他证据表明更早的行曾存在；否则记 `SOURCE_GAP`（真实缺失或正常会话边界），并在 `problems[].impact` 说明两种可能。正常会话中 Pain 之前只有少量轮次不是缺陷。
 
-第一版定义三条路径。`pathReadiness` 按路径分别给出，发布计数也按路径分别列出 READY 数，不合并成一个数：
+第一版定义三条路径。`pathReadiness` 按路径分别给出，发布计数也按路径分别列出 READY 数，不合并成一个数。
+
+**2026-11-21 r7 澄清（准入探测实现侧）**：历史前缀完整性（首写入者身份锚点缺失时为 UNKNOWN，见 PD-Lab T7a 准入报告 §15–§16）是样本级 `completeness` 的输入之一（非 PROVEN_COMPLETE 即 INCOMPLETE），但**不自动构成任何路径的阻断问题**。路径 `pathReadiness` 只由该路径实际所需的输入证据决定：生产诊断 fallback 无界读取会话全部 user/assistant 轮次与 correction-evidence blob（`TrajectoryTurnReader`，PRI-350），因此快照内全部相关行可读且 blob 完整时，即使前缀 UNKNOWN，`PIPELINE_REPLAY` 也可 READY。`SOURCE_GAP` 仅在观察到真实输入缺口（角色缺失、序列断档、顺序破坏、空窗口、起点晚于触发）时产生；未知前缀以 `prefixCompleteness`/`prefixCompletenessReason` 字段单独披露。`PROVEN_INCOMPLETE`（正向删除证明）仍然阻断全部轨迹依赖路径。
 
 | path | READY 的必要条件 | 首个宿主（OpenClaw 轨迹库）的已知情况 |
 | --- | --- | --- |
-| `PIPELINE_REPLAY` | 快照包含生产诊断入口为该 Pain 构造输入时会读取的全部记录；授权有效 | `SOURCE_GAP`、`SOURCE_RETENTION_EXPIRED`、`TURN_BLOB_MISSING` 阻塞。`TOOL_RESULT_PREVIEW_ONLY` 不阻塞，因为生产入口读到的同样是预览，但必须记录 |
-| `EXPECTATION_LABELING` | 与期望相关的轮次和工具输出可完整读取 | 期望依据依赖工具输出时，`TOOL_RESULT_PREVIEW_ONLY` 阻塞，需用宿主原生会话文件补齐 |
+| `PIPELINE_REPLAY` | 快照包含生产诊断入口为该 Pain 构造输入时会读取的全部记录；授权有效；实验入口可表达该样本的会话绑定 | `SOURCE_GAP`、`SOURCE_RETENTION_EXPIRED`、`TURN_BLOB_MISSING` 阻塞。`TOOL_RESULT_PREVIEW_ONLY` 不阻塞，因为生产入口读到的同样是预览，但必须记录。**r8**：会话绑定样本的宿主无法解析为 OpenClaw（未知/空/其他宿主）时 `INGRESS_HOST_UNRESOLVABLE` 阻塞——与生产 ingress fail-closed 语义一致（省略 `--host` 会被 CLI 默认为 openclaw，不得猜测归因）；无会话绑定的非 OpenClaw 宿主样本仍为 NOT_EVALUATED（不涉及入口宿主归因） |
+| `EXPECTATION_LABELING` | 与期望相关的轮次和工具输出可完整读取；期望的历史可见性可核验 | 期望依据依赖工具输出时，`TOOL_RESULT_PREVIEW_ONLY` **或** `TOOL_RESULT_MISSING` 阻塞，需用宿主原生会话文件补齐。**r8**：`basis=EXPLICIT_AT_TIME` 缺少 `visibleAt`（且无契约认可的等价证据）时 `EXPECTATION_VISIBILITY_UNPROVEN` 阻塞——依据声明本身不是可与触发时刻比较的证据；`visibleAt` 晚于触发时刻仍为 `FUTURE_INFORMATION`；不可解析的 `visibleAt` 在加载层直接结构化拒绝。`RESEARCH_INFERENCE` 不适用该规则、不自动升级 |
 | `BEHAVIOR_BRANCH` | 决策点的仓库与环境可恢复 | 历史案例没有保存环境快照，默认 `ENVIRONMENT_UNAVAILABLE` |
+
+**2026-11-21 r8 规则（准入探测实现侧）**：
+
+1. **宿主归因 fail-closed（`INGRESS_HOST_UNRESOLVABLE`）**：会话绑定样本的 `host_kind` 非 `openclaw`（null、空串、未识别或明确其他宿主；比较前做与生产一致的 trim+小写归一）时，`PIPELINE_REPLAY` 必须 BLOCKED 并给出结构化阻断原因；原始归属保留、不得转换为 openclaw、不得据此无条件阻断 `EXPECTATION_LABELING`（该路径不经 CLI 入口，按自身证据独立判定）。
+2. **工具返回证据（`TOOL_RESULT_MISSING`）**：`dependsOnToolOutput=true` 时必须存在真实可读的返回——工具调用不等于工具输出，`params_json` 是调用侧永不是返回侧。**仅统计 Pain 触发时刻及之前的调用**：触发后的完整返回对历史期望是未来信息，不能替代触发前证据（与 `FUTURE_INFORMATION` 同理）。会话无任何 `tool_calls` 行、全部调用晚于触发、或触发前各行的 `result_preview` 均为 NULL/空（且无截断预览形态、无契约认可的 Blob 等恢复路径——当前快照形态的 `tool_calls` 无 blob_ref 列，turn blob 仅覆盖 user/assistant 轮次）时，`EXPECTATION_LABELING` BLOCKED。**可证明有损的预览形态**均按 `TOOL_RESULT_PREVIEW_ONLY` 处理：500 码元截断形态（497+'...'）与对象路径的 `"__truncated__"` 键裁剪标记；无任一有损标记的非空预览是本快照形态可承载的完整可读证据（生产对纯字符串结果 ≤500 码元全量写入；content-array 结果仅序列化 text 块——该静默丢弃在行内不可检测，属生产者侧已披露的残留限制）。`PIPELINE_REPLAY` 不因该期望缺口自动阻断。
+3. **历史可见性（`EXPECTATION_VISIBILITY_UNPROVEN`）**：`EXPLICIT_AT_TIME` 声明"当时已可见"，声明需可核验——优先 `visibleAt`；缺失且无等价证据即 BLOCKED；晚于触发为 `FUTURE_INFORMATION`；不可解析为结构化拒绝；早于/等于触发则继续其余条件评估。
 
 `PIPELINE_REPLAY` 为 READY 不等于该案例是 SPEC §5 意义上的完整偏差案例；后者还要求工具返回等证据无未解释缺口。两个数字分开报告。
 

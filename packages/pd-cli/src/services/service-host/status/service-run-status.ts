@@ -27,6 +27,7 @@ import { randomUUID } from 'node:crypto';
 import { readActiveReleaseRecord, type ActiveReleaseFailureReason } from '@principles/install-layout';
 import type { InstallIdentity } from '../install-identity.js';
 import type { WorkspaceDiscoveryResult } from '../workspace-discovery.js';
+import type { AdapterCycleResult } from '../worker-adapter.js';
 
 export const SERVICE_RUN_STATUS_SCHEMA_VERSION = 'pd.service-run-status.v1';
 
@@ -102,8 +103,14 @@ export interface ServiceRunStatus {
     readonly pdExperimentRootStripped: boolean;
     /** HOME/USERPROFILE present in the inherited env but ignored for identity. */
     readonly ignoredIdentityEnvVars: readonly string[];
-    /** Host-root overrides that steered discovery (never pdHome). */
+    /** Host-root overrides present in the inherited env (steered discovery when honored). */
     readonly inheritedHostRootEnvVars: readonly string[];
+    /**
+     * Host-root overrides present in the inherited env but NOT honored
+     * (shadow runs resolve host roots from the trusted home only — F1
+     * review fix). Empty in dry-run mode, where overrides are honored.
+     */
+    readonly ignoredHostRootEnvVars?: readonly string[];
   };
   readonly manifest: {
     /** ok | missing | read_failed | unparsable | invalid | version_mismatch */
@@ -127,7 +134,48 @@ export interface ServiceRunStatus {
     readonly incomplete: boolean;
   };
   readonly workspaces: WorkspaceDiscoveryResult['workspaces'];
+  /**
+   * Phase 2 shadow section (optional, additive — v1 schema evolution):
+   * present only for shadow runs. `dryRun: false` on the same status
+   * document distinguishes the two modes. Carries per-workspace execution
+   * records ONLY — never Pain content, task payloads, or environment
+   * values (security contract above; worker environment reports carry
+   * variable NAMES, not values).
+   */
+  readonly shadow?: ShadowRunStatusSection;
   readonly nextAction: string;
+}
+
+/** Persisted per-execution record inside the shadow section (task §10). */
+export interface ShadowExecutionRecord {
+  /** The operator's requested --workspace argument (evidence, lexical form). */
+  readonly requestedDir: string;
+  /** Matched canonical discovery dir, or null when no authorized entry matched. */
+  readonly canonicalDir: string | null;
+  readonly hostKind: 'codex' | 'workbuddy' | null;
+  readonly admission: 'admitted' | 'refused';
+  readonly refusalReason?: string;
+  readonly refusalNextAction?: string;
+  /** §8.3/§10 workspace state — `process_started`/`cycle_completed`/business_progress stay strictly distinct in `execution`. */
+  readonly workspaceState: 'completed' | 'paused' | 'degraded' | 'failed' | 'unavailable';
+  /** Final carried-forward progress timestamp (this cycle or previous run; task §6). */
+  readonly lastProgressAt: string | null;
+  readonly lastProgressSource: 'task_state_change' | 'cycle_evidence' | 'previous_run' | null;
+  /** Full adapter contract result (subset-persisted fields only, no env values). */
+  readonly execution?: AdapterCycleResult;
+}
+
+export interface ShadowRunStatusSection {
+  readonly requestedWorkspaces: readonly string[];
+  readonly hostFilter?: 'codex' | 'workbuddy';
+  readonly perWorkspaceTimeoutMs: number;
+  /**
+   * Health of the cross-run progress projection read at run start (F6):
+   * `missing` = no store yet; `corrupt`/`unreadable` degrade to "no previous
+   * progress" observably instead of silently.
+   */
+  readonly progressCarryVerdict: 'ok' | 'missing' | 'corrupt' | 'unreadable';
+  readonly executions: readonly ShadowExecutionRecord[];
 }
 
 const STATUS_DIR_NAME = 'service';

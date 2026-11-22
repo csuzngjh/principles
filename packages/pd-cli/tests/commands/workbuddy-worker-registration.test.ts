@@ -67,15 +67,19 @@ describe('workbuddy worker handler (functional)', () => {
     fs.rmSync(workspaceDir, { recursive: true, force: true });
   });
 
-  it('--once reports paused with reason+nextAction when the consumer flag is off', { timeout: 20_000 }, async () => {
+  // P2-01: this fixture's workspace has a config but no trajectory.db, so the
+  // pre-pause reconcile stage really fails — the honest result is `degraded`
+  // aggregating the stage failure, never a clean `paused`.
+  it('--once reports degraded aggregating pre-pause stage failures when the consumer flag is off', { timeout: 20_000 }, async () => {
     const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
     await handleWorkbuddyWorker({ workspace: workspaceDir, once: true, json: true });
     expect(logSpy).toHaveBeenCalledTimes(1);
     const report = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as { mode: string; reason: string; nextAction: string };
-    expect(report.mode).toBe('paused');
-    expect(report.reason).toBe('internalization_auto_consumer_disabled');
-    expect(report.nextAction).toContain('pd diagnose');
-    expect(process.exitCode ?? 0).toBe(0);
+    expect(report.mode).toBe('degraded');
+    expect(report.reason).toContain('paused_stage_failures:');
+    expect(report.reason).toContain('reconcile:trajectory_db_not_found');
+    expect(report.nextAction).toContain('pd runtime init');
+    expect(process.exitCode).toBe(1);
   });
 
   it('--json without --once/--status is refused (cli-1: continuous mode is not one JSON document)', async () => {
@@ -94,7 +98,9 @@ describe('workbuddy worker handler (functional)', () => {
     await handleWorkbuddyWorker({ workspace: workspaceDir, once: true, json: false });
     const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
     expect(output).toContain('WorkBuddy governance worker');
-    expect(output).toContain('mode: paused');
+    // P2-01: the failed pre-pause reconcile stage downgrades paused to
+    // degraded with the real stage category preserved.
+    expect(output).toContain('mode: degraded (paused_stage_failures:reconcile:');
     expect(output).toContain('reconcile:');
     // The worker DOES run a bounded WorkBuddy transcript catch-up; with the
     // ingestion flag off (beforeEach default) it is skipped with a reason. The
@@ -103,7 +109,7 @@ describe('workbuddy worker handler (functional)', () => {
     expect(output).toContain('catch-up:    skipped');
     expect(output).toContain('reason=feature_disabled');
     expect(output).toContain('next action:');
-    expect(process.exitCode ?? 0).toBe(0);
+    expect(process.exitCode).toBe(1);
   });
 
   it('--status reports manual_action_required for a governance workspace absent from the install manifest', async () => {

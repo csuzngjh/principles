@@ -876,24 +876,41 @@ consentCmd
   });
 
 // ── pd service — PD Service Host (SPEC-PD-SERVICE-HOST-001 / ADR-0020 §11.6) ──
-// Phase 1: the read-only run-once coordinator. Discovers manifest-authorized
-// and claim-validated Workspaces, projects each Workspace's read-only owner
-// state, takes the install-level single-instance lock and writes the
-// versioned operational status. NO Worker is started and NO consumer
-// ownership changes in Phase 1; `--dry-run` is required accordingly.
+// Phase 1: the read-only run-once coordinator (`--dry-run`). Discovers
+// manifest-authorized and claim-validated Workspaces, projects each
+// Workspace's read-only owner state, takes the install-level single-instance
+// lock and writes the versioned operational status. NO Worker is started and
+// NO consumer ownership changes in Phase 1.
+// Phase 2 (PRI-1280): `--shadow` drives ONE explicit, bounded, REAL worker
+// cycle per selected `--workspace` through the unified Worker Adapter —
+// default-off, never scheduled, never touches the owner marker.
 const serviceCmd = program
   .command('service')
-  .description('PD Service Host operations (Phase 1: read-only dry-run coordinator)');
+  .description('PD Service Host operations (Phase 1: read-only dry-run; Phase 2: explicit shadow cycles)');
 
 serviceCmd
   .command('run-once')
-  .description('Run one bounded Service Host coordinator execution (Phase 1: dry-run only — discovers workspaces and reports owner state; starts no worker)')
-  .option('--dry-run', 'Required in Phase 1: execute the read-only discovery dry-run (no worker, no ownership change)', false)
+  .description('Run one bounded Service Host coordinator execution: --dry-run (read-only discovery) or --shadow --workspace <dir> (one real bounded worker cycle per selected workspace)')
+  .option('--dry-run', 'Phase 1 mode: execute the read-only discovery dry-run (no worker, no ownership change)', false)
+  .option('--shadow', 'Phase 2 mode: run one explicit bounded REAL worker cycle per --workspace selection (business tasks may advance; not a dry-run)', false)
+  .option('-w, --workspace <path>', 'Shadow target workspace (repeatable; at least one required with --shadow)', (value: string, previous: string[]) => [...previous, value], [] as string[])
+  .option('--host <kind>', 'Restrict shadow to one host adapter: codex | workbuddy')
+  .option('--timeout-ms <ms>', 'Per-workspace bounded execution time in ms (default 2700000, minimum 1000)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     const { handleServiceRunOnce } = await import('./commands/service-run-once.js');
     await handleServiceRunOnce({
       dryRun: opts.dryRun === true,
+      shadow: opts.shadow === true,
+      workspaces: Array.isArray(opts.workspace) ? opts.workspace : [],
+      ...(typeof opts.host === 'string'
+        ? (opts.host === 'codex' || opts.host === 'workbuddy'
+            ? { host: opts.host as 'codex' | 'workbuddy' }
+            : { invalidHost: opts.host })
+        : {}),
+      // F8: the RAW string reaches the handler for full-value validation —
+      // a partial parse here used to silently mis-bound a real worker.
+      ...(typeof opts.timeoutMs === 'string' ? { timeoutMsRaw: opts.timeoutMs } : {}),
       json: opts.json === true,
     });
   });
