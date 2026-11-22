@@ -44,6 +44,67 @@ import type {
   SchedulerRegistration,
 } from './contract.js';
 
+/** Parsed unit-file structure used by the fail-closed ownership checks. */
+type UnitDocumentEntry =
+  | { readonly kind: 'section'; readonly section: string }
+  | { readonly kind: 'setting'; readonly section: string; readonly key: string; readonly value: string };
+
+/**
+ * Parse the complete, deliberately small unit-file grammar emitted by PD.
+ * Unknown syntax, continuation lines, extra sections and extra directives
+ * are rejected rather than silently ignored by an ownership check.
+ * Comments and blank lines are semantically inert.
+ */
+function parseUnitDocument(content: string): UnitDocumentEntry[] | null {
+  const entries: UnitDocumentEntry[] = [];
+  let section: string | null = null;
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
+    const header = /^\[([A-Za-z][A-Za-z0-9]*)\]$/.exec(line);
+    if (header !== null) {
+      section = header[1] ?? null;
+      if (section === null) return null;
+      entries.push({ kind: 'section', section });
+      continue;
+    }
+    if (section === null) return null;
+    const setting = /^([A-Za-z][A-Za-z0-9]*)\s*=(.*)$/.exec(line);
+    if (setting === null) return null;
+    entries.push({
+      kind: 'setting',
+      section,
+      key: setting[1] ?? '',
+      value: (setting[2] ?? '').trim(),
+    });
+  }
+  return entries;
+}
+
+/**
+ * Compare every parsed section and directive against the canonical PD unit.
+ * The timer's OnUnitActiveSec value is the sole variable. Its syntax is
+ * validated separately by the install path; ownership still requires the
+ * exact directive shape so a malformed PD unit can be repaired or removed.
+ */
+function matchesCanonicalUnit(
+  content: string,
+  canonicalContent: string,
+  allowVariableTimerInterval = false,
+): boolean {
+  const actual = parseUnitDocument(content);
+  const expected = parseUnitDocument(canonicalContent);
+  if (actual === null || expected === null || actual.length !== expected.length) return false;
+  return actual.every((entry, index) => {
+    const canonical = expected[index];
+    if (canonical === undefined || entry.kind !== canonical.kind || entry.section !== canonical.section) return false;
+    if (entry.kind === 'section' || canonical.kind === 'section') return entry.kind === 'section' && canonical.kind === 'section';
+    if (entry.key !== canonical.key) return false;
+    if (allowVariableTimerInterval && entry.section === 'Timer' && entry.key === 'OnUnitActiveSec') return true;
+    return entry.value === canonical.value;
+  });
+}
+
 /** All `Key=` values inside `[Section]` (comments, blank lines and other
  * sections are ignored — systemd semantics). Empty `Key=` lines are kept:
  * in systemd they RESET a list setting, so ownership must see them. */
@@ -146,91 +207,6 @@ export function systemdQuote(value: string): string {
   return `"${escaped}"`;
 }
 
-/**
- * Inverse of systemdQuote for ownership parsing (task §5 review): strips
- * the surrounding quotes and reverses `\\` → `\`, `\"` → `"`, `%%` → `%`,
- * `$$` → `$`. Returns null when the quoting is malformed — a malformed
- * ExecStart is a FOREIGN unit, never ours to touch.
- */
-function systemdUnquote(token: string): string | null {
-  if (!token.startsWith('"') || !token.endsWith('"')) return null;
-  const inner = token.slice(1, -1);
-  let out = '';
-  for (let index = 0; index < inner.length; index += 1) {
-    const ch = inner[index] ?? '';
-    if (ch === '\\') {
-      const next = inner[index + 1];
-      if (next === '\\' || next === '"') {
-        out += next;
-        index += 1;
-        continue;
-      }
-      out += ch;
-      continue;
-    }
-    if (ch === '%' || ch === '$') {
-      const next = inner[index + 1];
-      if (next === ch) {
-        out += ch;
-        index += 1;
-        continue;
-      }
-      return null;
-    }
-    out += ch;
-  }
-  return out;
-}
-
-/** Split an ExecStart line into its argv tokens (whitespace-separated, quote-aware). */
-function splitExecStart(value: string): string[] | null {
-  const tokens: string[] = [];
-  const raw = value.trim();
-  for (let index = 0; index < raw.length;) {
-    while (index < raw.length && /\s/.test(raw[index] ?? '')) index += 1;
-    if (index >= raw.length) break;
-    const start = index;
-    if (raw[index] === '"') {
-      index += 1;
-      let escaped = false;
-      while (index < raw.length) {
-        const ch = raw[index] ?? '';
-        if (!escaped && ch === '"') { index += 1; break; }
-        if (!escaped && ch === '\\') { escaped = true; }
-        else { escaped = false; }
-        index += 1;
-      }
-      const token = systemdUnquote(raw.slice(start, index));
-      if (token === null) return null;
-      tokens.push(token);
-    } else {
-      while (index < raw.length && !/\s/.test(raw[index] ?? '')) index += 1;
-      tokens.push(raw.slice(start, index));
-    }
-  }
-  return tokens;
-}
-
-/** Inverse of systemdSettingEscape — `%` specifiers only (settings are
- * not env-substituted; a `$`/`$$` sequence is ambiguous → null). */
-function unescapeSetting(value: string): string | null {
-  let out = '';
-  for (let index = 0; index < value.length; index += 1) {
-    const ch = value[index] ?? '';
-    if (ch === '%') {
-      const next = value[index + 1];
-      if (next === '%') {
-        out += '%';
-        index += 1;
-        continue;
-      }
-      return null;
-    }
-    out += ch;
-  }
-  return out;
-}
-
 function secondsDuration(intervalMs: number): string {
   if (intervalMs % 1000 === 0) return `${Math.round(intervalMs / 1000)}s`;
   return `${(intervalMs / 1000).toFixed(3)}s`;
@@ -307,21 +283,10 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
    * our path strings inside another job definition is foreign.
    */
   function serviceOwnership(content: string, registration: SchedulerRegistration): boolean {
-    // Section-scoped, multiplicity-aware ownership (review §5): systemd
-    // allows several ExecStart= lines (each adds a command) and empty
-    // `ExecStart=` resets the list — our unit declares exactly ONE
-    // non-empty ExecStart inside [Service]; anything else is ambiguous.
-    const execStarts = sectionSettings(content, 'Service', 'ExecStart');
-    const workDirs = sectionSettings(content, 'Service', 'WorkingDirectory');
-    if (execStarts.length !== 1 || execStarts[0] === '') return false;
-    if (workDirs.length !== 1 || workDirs[0] === '') return false;
-    const argv = splitExecStart(execStarts[0] ?? '');
-    if (argv === null) return false;
-    const expected = [registration.nodePath, ...schedulerInvocationArgs(registration)];
-    if (argv.length !== expected.length) return false;
-    if (!argv.every((token, index) => token === expected[index])) return false;
-    const dir = unescapeSetting(workDirs[0] ?? '');
-    return dir === registration.pdHome;
+    // Prove the complete Service unit, not just matching path substrings.
+    // Extra ExecStartPre/ExecStartPost/ExecStop/User/Environment directives,
+    // duplicate sections, or any unknown setting make it foreign.
+    return matchesCanonicalUnit(content, buildLinuxServiceUnit(registration));
   }
 
   /**
@@ -330,9 +295,9 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
    * timer driving a foreign service is never ours.
    */
   function timerOwnership(content: string, registration: SchedulerRegistration): boolean {
-    // Exactly one `Unit=` pointer inside [Timer], pointing at OUR service.
-    const units = sectionSettings(content, 'Timer', 'Unit');
-    return units.length === 1 && units[0] === serviceUnitName(registration);
+    // Unit= alone is not ownership proof. Require the complete canonical
+    // Timer + Install structure, with only OnUnitActiveSec allowed to vary.
+    return matchesCanonicalUnit(content, buildLinuxTimerUnit(registration), true);
   }
 
   type UnitRead = ReturnType<SchedulerFileIo['readIfExists']>;
@@ -467,6 +432,50 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
       }
     }
     return { seen: true };
+  }
+
+  /**
+   * Verify that the manager's effective unit presence matches the pre-write
+   * disk snapshot after a rollback reload. This handles full and partial
+   * prior registrations without claiming that a missing unit is present.
+   */
+  async function managerUnitsMatchPresence(
+    registration: SchedulerRegistration,
+    expected: { readonly service: boolean; readonly timer: boolean },
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const units: readonly [string, string, boolean][] = [
+      [serviceUnitName(registration), serviceUnitPath(registration), expected.service],
+      [timerUnitName(registration), timerUnitPath(registration), expected.timer],
+    ];
+    for (const [name, file, shouldExist] of units) {
+      const result = await systemctl(['cat', name]);
+      const notFound = result.spawnError === undefined
+        && (UNIT_NOT_FOUND.test(result.stderr) || (result.code === 1 && result.stderr.trim() === ''));
+      if (!shouldExist) {
+        if (notFound) continue;
+        if (result.code === 0) return { ok: false, reason: 'manager_unexpected_unit_present:' + name };
+        return {
+          ok: false,
+          reason: 'manager_presence_query_failed:' + name + ':' + (result.code ?? 'spawn') + ':' + (result.spawnError ?? result.stderr.trim()).slice(0, 100),
+        };
+      }
+      if (result.code !== 0) {
+        return {
+          ok: false,
+          reason: notFound
+            ? 'manager_expected_unit_missing:' + name
+            : 'manager_presence_query_failed:' + name + ':' + (result.code ?? 'spawn') + ':' + (result.spawnError ?? result.stderr.trim()).slice(0, 100),
+        };
+      }
+      const headers = [...result.stdout.matchAll(/^#\s*(\S+)\s*$/gm)].map((match) => match[1] ?? '');
+      const primary = headers.find((header) => header.endsWith('.service') || header.endsWith('.timer'));
+      if (primary !== undefined && primary !== file) {
+        return { ok: false, reason: 'manager_unit_shadowed:' + name + ':' + primary };
+      }
+      const dropIn = headers.find((header) => /\.d\/[^/]+\.conf$/.test(header));
+      if (dropIn !== undefined) return { ok: false, reason: 'manager_unit_drop_in:' + name + ':' + dropIn };
+    }
+    return { ok: true };
   }
 
   /** Both units must be definitively gone from the manager's view. */
@@ -691,13 +700,13 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
       // original: its rollback removes the file this call created.
       const priorService = existingService.ok ? existingService.content : null;
       const priorTimer = existingTimer.ok ? existingTimer.content : null;
-      const rollbackUnit = (file: string, prior: string | null, reason: string): string => {
+      const rollbackUnit = (file: string, prior: string | null): { ok: boolean; detail?: string } => {
         if (prior === null) {
           const removed = fileIo.remove(file);
-          return removed.ok ? reason : `${reason}+rollback_remove_failed:${file}:${removed.reason.slice(0, 60)}`;
+          return removed.ok ? { ok: true } : { ok: false, detail: 'remove_failed:' + file + ':' + removed.reason.slice(0, 60) };
         }
         const restored = fileIo.writeAtomic(file, prior);
-        return restored.ok ? reason : `${reason}+rollback_restore_failed:${file}:${restored.reason.slice(0, 60)}`;
+        return restored.ok ? { ok: true } : { ok: false, detail: 'restore_failed:' + file + ':' + restored.reason.slice(0, 60) };
       };
 
       const writtenService = fileIo.writeAtomic(serviceFile, buildLinuxServiceUnit(effective));
@@ -706,21 +715,48 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
       }
       const writtenTimer = fileIo.writeAtomic(timerFile, buildLinuxTimerUnit(effective));
       if (!writtenTimer.ok) {
+        const serviceRestore = rollbackUnit(serviceFile, priorService);
+        const rollbackDetail = serviceRestore.ok ? '' : '+rollback_' + (serviceRestore.detail ?? 'failed');
         return {
           ok: false,
           kind: 'command_failed',
-          reason: rollbackUnit(serviceFile, priorService, `systemd_timer_write_failed:${writtenTimer.reason.slice(0, 80)}`),
-          nextAction: `Could not write ${timerFile}; the service unit was rolled back to its previous content (or removed for a first install). Re-run pd service install.`,
+          reason: 'systemd_timer_write_failed:' + writtenTimer.reason.slice(0, 80) + rollbackDetail,
+          nextAction: 'Could not write ' + timerFile + '; the service unit was rolled back to its previous content (or removed for a first install). Re-run pd service install.',
         };
       }
-      const rollbackBoth = (reason: string): string =>
-        rollbackUnit(timerFile, priorTimer, rollbackUnit(serviceFile, priorService, reason));
+      const rollbackBoth = async (reason: string): Promise<string> => {
+        const timerRestore = rollbackUnit(timerFile, priorTimer);
+        const serviceRestore = rollbackUnit(serviceFile, priorService);
+        const diskFailures = [timerRestore, serviceRestore]
+          .filter((restore) => !restore.ok)
+          .map((restore) => restore.detail ?? 'unknown_disk_restore_failure');
+
+        // The first reload may already have changed systemd's in-memory view.
+        // Reload the restored snapshot and verify the previous unit presence.
+        const rollbackReload = await systemctl(['daemon-reload']);
+        if (rollbackReload.code !== 0) {
+          const detail = 'systemd_refresh_rollback_manager_reload_failed:' + (rollbackReload.code ?? 'spawn') + ':' + (rollbackReload.spawnError ?? rollbackReload.stderr).trim().slice(0, 100);
+          return detail + ':' + reason + (diskFailures.length > 0 ? '+' + diskFailures.join('+') : '');
+        }
+        const managerRestore = await managerUnitsMatchPresence(registration, {
+          service: priorService !== null,
+          timer: priorTimer !== null,
+        });
+        if (!managerRestore.ok) {
+          const detail = 'systemd_refresh_rollback_manager_view_unverified:' + managerRestore.reason;
+          return detail + ':' + reason + (diskFailures.length > 0 ? '+' + diskFailures.join('+') : '');
+        }
+        if (diskFailures.length > 0) {
+          return 'systemd_refresh_rollback_disk_restore_failed:' + diskFailures.join('+') + ':' + reason;
+        }
+        return reason;
+      };
       const reload = await systemctl(['daemon-reload']);
       if (reload.code !== 0) {
         return {
           ok: false,
           kind: 'command_failed',
-          reason: rollbackBoth(`systemctl_daemon_reload_failed:${reload.code ?? 'spawn'}:${(reload.spawnError ?? reload.stderr).trim().slice(0, 120)}`),
+          reason: await rollbackBoth(`systemctl_daemon_reload_failed:${reload.code ?? 'spawn'}:${(reload.spawnError ?? reload.stderr).trim().slice(0, 120)}`),
           nextAction: 'Unit files were written but `systemctl --user daemon-reload` failed; the files were rolled back to their previous content (or removed for a first install). Fix the cause (a dead user bus usually means no active login session) and re-run pd service install.',
         };
       }
@@ -734,14 +770,14 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
           return {
             ok: false,
             kind: 'unsafe_state',
-            reason: 'systemd_unit_not_in_manager_search_path',
-            nextAction: `The unit files were written to ${dir} and daemon-reload succeeded, but the user manager cannot see them — this usually means HOME/XDG_CONFIG_HOME differs from where PD writes (<home>/.config/systemd/user). Fix the environment so the manager's search path includes the unit dir, then re-run pd service install.`,
+            reason: await rollbackBoth('systemd_unit_not_in_manager_search_path'),
+            nextAction: 'The manager could not see the written units. PD restored the previous unit-file snapshot and reloaded the manager; if rollback verification failed, inspect HOME/XDG_CONFIG_HOME and systemctl --user cat before retrying.',
           };
         }
         return {
           ok: false,
           kind: 'command_failed',
-          reason: rollbackBoth(view.unreadableReason),
+          reason: await rollbackBoth(view.unreadableReason),
           nextAction: 'The unit files were written but PD could not verify the manager sees them; the files were rolled back to their previous content. Inspect the stderr above and re-run pd service install.',
         };
       }
@@ -749,7 +785,7 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
         return {
           ok: false,
           kind: 'unsafe_state',
-          reason: rollbackBoth(`systemd_unit_ambiguous_manager_view:${view.shadowed.slice(0, 100)}`),
+          reason: await rollbackBoth(`systemd_unit_ambiguous_manager_view:${view.shadowed.slice(0, 100)}`),
           nextAction: `The written units are ours, but the manager's effective unit resolves differently (${view.shadowed}) — a same-name unit elsewhere or a drop-in changes what systemd would run; the files were rolled back. Inspect \`systemctl --user cat\` and resolve the conflict, then re-run pd service install.`,
         };
       }

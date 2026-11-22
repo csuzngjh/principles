@@ -48,6 +48,8 @@ interface LaunchctlState {
   loaded: boolean;
   /** launchd persistent disable override (null = no override recorded). */
   disabled: boolean | null;
+  /** Optional verbatim print-disabled fixture for parser compatibility tests. */
+  disabledOutput?: string;
 }
 
 /**
@@ -75,13 +77,17 @@ function launchctlRunner(state: LaunchctlState, failures: Readonly<Record<string
             ? { code: 0, stdout: 'state = running\n\tlast exit code = 0\n', stderr: '' }
             : { code: 1, stdout: '', stderr: 'Could not find service' };
         case 'print-disabled': {
-          // Real macOS format: `disabled services = {\n\t"label" : true\n}`
-          const lines = ['disabled services = {', '\t"com.apple.other" : false'];
+          if (state.disabledOutput !== undefined) {
+            return { code: 0, stdout: state.disabledOutput, stderr: '' };
+          }
+          // Current macOS uses => disabled|enabled; the parser also keeps
+          // compatibility with the older boolean output.
+          const lines = ['disabled services = {', '"com.apple.other" => enabled'];
           if (state.disabled !== null) {
-            lines.push(`\t"${state.label}" : ${state.disabled}`);
+            lines.push('"' + state.label + '" => ' + (state.disabled ? 'disabled' : 'enabled'));
           }
           lines.push('}');
-          return { code: 0, stdout: `${lines.join('\n')}\n`, stderr: '' };
+          return { code: 0, stdout: lines.join('\n') + '\n', stderr: '' };
         }
         case 'disable':
           state.disabled = true;
@@ -708,6 +714,70 @@ describe('lifecycle reliability round 3 (tri-state / transactional install / ref
     expect(result.reason).toContain('launchctl_bootstrap_failed');
     // Original effective registration preserved — nothing lost.
     expect(fileIo.files.get(plistFile)).toBe(prior);
+  });
+
+  it.each([
+    ['modern disabled token', '=>', 'disabled', false],
+    ['modern enabled token', '=>', 'enabled', true],
+    ['legacy true token', ':', 'true', false],
+    ['legacy false token', '=', 'false', true],
+  ] as const)('status parses %s', async (_name, separator, token, expectedEnabled) => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const label = registration.identity.macosLabel;
+    const otherValue = separator === '=>' ? 'enabled' : 'false';
+    const disabledOutput = [
+      'disabled services = {',
+      '  "com.apple.other" ' + separator + ' ' + otherValue,
+      '  "' + label + '" ' + separator + ' ' + token,
+      '}',
+      '',
+    ].join('\n');
+    const state: LaunchctlState = {
+      label,
+      loaded: true,
+      disabled: null,
+      disabledOutput,
+    };
+    const { runner } = launchctlRunner(state);
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(plistPathFor(registration), buildMacosLaunchAgentPlist(registration));
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.status(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBe(expectedEnabled);
+  });
+
+  it('status treats duplicate target labels as UNKNOWN instead of taking the last value', async () => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const label = registration.identity.macosLabel;
+    const state: LaunchctlState = {
+      label,
+      loaded: true,
+      disabled: null,
+      disabledOutput: [
+        'disabled services = {',
+        '  "' + label + '" => disabled',
+        '  "' + label + '" => enabled',
+        '}',
+        '',
+      ].join('\n'),
+    };
+    const { runner } = launchctlRunner(state);
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(plistPathFor(registration), buildMacosLaunchAgentPlist(registration));
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.status(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBeNull();
+    expect(result.facts.degradedReasons?.some((reason) => reason.includes('launchctl_print_disabled_unparseable'))).toBe(true);
   });
 
   it('status reports enabled=null when print-disabled output is unparseable (never coerced)', async () => {

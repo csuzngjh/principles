@@ -238,27 +238,37 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
   }
 
   /**
-   * Strict `launchctl print-disabled` reader: real macOS output is
-   * `disabled services = {` then one `"<label>" : true|false` entry per
-   * line then `}`. Only an exact label match decides the flag; a missing
-   * entry means not-disabled (launchd lists only overrides); ANY other
-   * non-empty, non-structural line makes the verdict UNKNOWN — never
-   * defaulted to enabled or disabled.
+   * Strict launchctl print-disabled reader. Current macOS emits
+   * quoted labels followed by => disabled|enabled; older releases emit
+   * boolean true|false (with : or =). The command lists only overrides,
+   * so an absent target label means not disabled. Malformed structure,
+   * duplicate target labels, or unknown values are UNKNOWN.
    */
   function parseDisabledFlag(stdout: string, label: string): { ok: true; disabled: boolean } | { ok: false } {
-    let flag = false;
-    for (const raw of stdout.split('\n')) {
-      const line = raw.trim();
-      if (line === '') continue;
-      if (/^disabled\s+services\s*=\s*\{?$/i.test(line) || /^\}$/.test(line)) continue;
-      const entry = /^"([^"]+)"\s*[:=]\s*(true|false|1|0)\s*$/i.exec(line);
-      if (entry === null) return { ok: false };
-      if (entry[1] === label) {
-        const value = entry[2] ?? '';
-        flag = value.toLowerCase() === 'true' || value === '1';
+    const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '');
+    if (lines.length < 2 || !/^disabled\s+services\s*=\s*\{$/i.test(lines[0] ?? '')) return { ok: false };
+
+    let closed = false;
+    let targetCount = 0;
+    let disabled = false;
+    for (const line of lines.slice(1)) {
+      if (line === '}') {
+        if (closed) return { ok: false };
+        closed = true;
+        continue;
       }
+      if (closed) return { ok: false };
+
+      const entry = /^"([^"]+)"\s*(?:=>|:|=)\s*(disabled|enabled|true|false|1|0)$/i.exec(line);
+      if (entry === null) return { ok: false };
+      if (entry[1] !== label) continue;
+      targetCount += 1;
+      if (targetCount > 1) return { ok: false };
+      const value = (entry[2] ?? '').toLowerCase();
+      disabled = value === 'disabled' || value === 'true' || value === '1';
     }
-    return { ok: true, disabled: flag };
+    if (!closed) return { ok: false };
+    return { ok: true, disabled: targetCount === 0 ? false : disabled };
   }
 
   async function run(command: string, args: readonly string[]): Promise<{ code: number | null; stdout: string; stderr: string; spawnError?: string; timedOut?: boolean }> {

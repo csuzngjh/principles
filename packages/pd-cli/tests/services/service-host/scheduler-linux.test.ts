@@ -51,11 +51,12 @@ interface SystemdState {
  *  - cat → 0 when the manager sees the unit, 1 'not-found' otherwise;
  *  - enable/disable flip enabled+active; show reports last-run facts.
  */
-function systemctlRunner(state: SystemdState, failures: Readonly<Record<string, SchedulerCommandResult>> = {}): {
+function systemctlRunner(state: SystemdState, failures: Readonly<Record<string, SchedulerCommandResult | readonly SchedulerCommandResult[]>> = {}): {
   runner: SchedulerCommandRunner;
   calls: RecordedCall[];
 } {
   const calls: RecordedCall[] = [];
+  const failureIndexes = new Map<string, number>();
   const runner: SchedulerCommandRunner = {
     async run(command, args) {
       if (command !== 'systemctl') throw new Error(`unexpected command: ${command}`);
@@ -64,7 +65,14 @@ function systemctlRunner(state: SystemdState, failures: Readonly<Record<string, 
       if (sub === undefined) throw new Error(`systemctl call without a subcommand: ${args.join(' ')}`);
       calls.push({ command, args });
       const injected = failures[sub];
-      if (injected !== undefined) return injected;
+      if (Array.isArray(injected)) {
+        const index = failureIndexes.get(sub) ?? 0;
+        failureIndexes.set(sub, index + 1);
+        const scripted = injected[index];
+        if (scripted !== undefined) return scripted;
+      } else if (injected !== undefined) {
+        return injected;
+      }
       switch (sub) {
         case 'daemon-reload':
           return { code: 0, stdout: '', stderr: '' };
@@ -364,6 +372,44 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(fileIo.files.get(timerFile)).toBe(buildLinuxTimerUnit(registration));
   });
 
+  it('install safely completes an OWN timer-only partial registration', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: false, active: false, managerSees: true });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(timerFile, buildLinuxTimerUnit(registration));
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
+    expect(result.ok).toBe(true);
+    expect(fileIo.files.get(serviceFile)).toBe(buildLinuxServiceUnit(registration));
+    expect(fileIo.files.get(timerFile)).toBe(buildLinuxTimerUnit(registration));
+  });
+
+  it('install refuses a timer-only partial registration with extra OnCalendar', async () => {
+    const registration = makeRegistration();
+    const { timerFile } = unitPaths(registration);
+    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: true });
+    const fileIo = new FakeFileIo();
+    const foreignTimer = buildLinuxTimerUnit(registration).replace(
+      'OnUnitActiveSec=120s',
+      'OnUnitActiveSec=120s\nOnCalendar=Mon..Fri 08:00',
+    );
+    fileIo.files.set(timerFile, foreignTimer);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+    expect(result.reason).toBe('systemd_timer_conflict_foreign_unit');
+    expect(fileIo.files.get(timerFile)).toBe(foreignTimer);
+    expect(fileIo.writeLog).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
   it('install refuses a FOREIGN partial registration (service unit without its timer)', async () => {
     const registration = makeRegistration();
     const { serviceFile } = unitPaths(registration);
@@ -379,6 +425,53 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(result.kind).toBe('external_conflict');
     expect(result.reason).toBe('systemd_unit_conflict_foreign_unit');
     expect(fileIo.writeLog).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    'ExecStartPre=/usr/bin/side-effect',
+    'ExecStartPost=/usr/bin/side-effect',
+    'ExecStop=/usr/bin/side-effect',
+  ])('install refuses a service unit with an extra execution directive: %s', async (directive) => {
+    const registration = makeRegistration();
+    const { serviceFile } = unitPaths(registration);
+    const { runner, calls } = systemctlRunner({ enabled: true, active: true, managerSees: true });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const canonical = fileIo.files.get(serviceFile) ?? '';
+    fileIo.files.set(serviceFile, canonical.replace('[Service]\n', '[Service]\n' + directive + '\n'));
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+    expect(result.reason).toBe('systemd_unit_conflict_foreign_unit');
+    expect(fileIo.writeLog).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('uninstall refuses a timer-only partial registration with extra OnCalendar', async () => {
+    const registration = makeRegistration();
+    const { timerFile } = unitPaths(registration);
+    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: true });
+    const fileIo = new FakeFileIo();
+    const foreignTimer = buildLinuxTimerUnit(registration).replace(
+      'OnUnitActiveSec=120s',
+      'OnUnitActiveSec=120s\nOnCalendar=Mon..Fri 08:00',
+    );
+    fileIo.files.set(timerFile, foreignTimer);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.uninstall(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+    expect(result.reason).toBe('systemd_timer_conflict_foreign_unit');
+    expect(fileIo.files.get(timerFile)).toBe(foreignTimer);
+    expect(fileIo.removeLog).toHaveLength(0);
     expect(calls).toHaveLength(0);
   });
 
@@ -401,11 +494,17 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('install reports daemon-reload failure honestly (files on disk, operation failed)', async () => {
+  it('install restores first-install files and reloads the manager after daemon-reload failure', async () => {
     const registration = makeRegistration();
-    const { runner } = systemctlRunner(
-      { enabled: false, active: false, managerSees: true },
-      { 'daemon-reload': { code: 1, stdout: '', stderr: 'Failed to connect to bus: No medium found' } },
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner, calls } = systemctlRunner(
+      { enabled: false, active: false, managerSees: false },
+      {
+        'daemon-reload': [
+          { code: 1, stdout: '', stderr: 'Failed to connect to bus' },
+          { code: 0, stdout: '', stderr: '' },
+        ],
+      },
     );
     const fileIo = new FakeFileIo();
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
@@ -414,9 +513,10 @@ describe('createLinuxSchedulerAdapter', () => {
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.kind).toBe('command_failed');
-    expect(result.reason.startsWith('systemctl_daemon_reload_failed:1:')).toBe(true);
-    expect(fileIo.writeLog).toHaveLength(2);
+    expect(result.reason).toContain('systemctl_daemon_reload_failed:1:');
+    expect(fileIo.files.has(serviceFile)).toBe(false);
+    expect(fileIo.files.has(timerFile)).toBe(false);
+    expect(subsOf(calls).filter((sub) => sub === 'daemon-reload')).toHaveLength(2);
   });
 
   it('enable refuses when no units exist (unsafe_state scheduler_not_registered)', async () => {
@@ -956,6 +1056,7 @@ describe('lifecycle reliability round 3 (verdict strictness / dual verification 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain('systemd_unit_ambiguous_manager_view');
+    expect(result.reason).toContain('systemd_refresh_rollback_manager_view_unverified');
   });
 
   it('first-install timer-write failure removes the just-written service unit', async () => {
@@ -973,19 +1074,66 @@ describe('lifecycle reliability round 3 (verdict strictness / dual verification 
     expect(fileIo.removeLog).toContain(serviceFile);
   });
 
-  it('refresh restores BOTH unit files when daemon-reload fails', async () => {
-    const registration = makeRegistration();
+  it('refresh restores both files and verifies manager state after a transient manager-view read failure', async () => {
+    const base = makeRegistration();
+    const registration: SchedulerRegistration = { ...base, intervalMs: 60_000, intervalExplicit: true };
     const { serviceFile, timerFile } = unitPaths(registration);
-    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true }, {
-      'daemon-reload': { code: 1, stdout: '', stderr: 'bus error' },
-    });
+    const transientCatFailure = {
+      code: 1,
+      stdout: '',
+      stderr: 'temporary systemctl cat failure',
+    };
+    const { runner, calls } = systemctlRunner(
+      { enabled: true, active: true, managerSees: true },
+      { cat: [transientCatFailure] },
+    );
     const fileIo = new FakeFileIo();
-    installOurs(fileIo, registration);
+    installOurs(fileIo, base);
     const priorService = fileIo.files.get(serviceFile);
     const priorTimer = fileIo.files.get(timerFile);
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
     const result = await adapter.install(registration);
+
     expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('systemctl_cat_failed');
+    expect(result.reason).not.toContain('systemd_refresh_rollback_manager_view_unverified');
+    expect(fileIo.files.get(serviceFile)).toBe(priorService);
+    expect(fileIo.files.get(timerFile)).toBe(priorTimer);
+    expect(subsOf(calls).filter((sub) => sub === 'daemon-reload')).toHaveLength(2);
+    expect(subsOf(calls).slice(0, 5)).toEqual(['daemon-reload', 'cat', 'daemon-reload', 'cat', 'cat']);
+  });
+  it('reports a distinct failure when the manager cannot reload the restored snapshot', async () => {
+    const base = makeRegistration();
+    const registration: SchedulerRegistration = { ...base, intervalMs: 60_000, intervalExplicit: true };
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const shadowed = {
+      code: 0,
+      stdout: '# ' + serviceFile + '\n# ' + serviceFile + '.d/10-override.conf\n',
+      stderr: '',
+    };
+    const { runner } = systemctlRunner(
+      { enabled: true, active: true, managerSees: true },
+      {
+        'daemon-reload': [
+          { code: 0, stdout: '', stderr: '' },
+          { code: 1, stdout: '', stderr: 'rollback bus error' },
+        ],
+        cat: [shadowed],
+      },
+    );
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, base);
+    const priorService = fileIo.files.get(serviceFile);
+    const priorTimer = fileIo.files.get(timerFile);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('systemd_refresh_rollback_manager_reload_failed');
     expect(fileIo.files.get(serviceFile)).toBe(priorService);
     expect(fileIo.files.get(timerFile)).toBe(priorTimer);
   });
