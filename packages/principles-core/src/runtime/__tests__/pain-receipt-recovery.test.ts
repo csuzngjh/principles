@@ -746,7 +746,7 @@ describe('recoverTaskIdentityFromReceipt — G: lease_generation CAS fencing (re
     // fencing token moved even though every legacy column matches.
     const fenced = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
       taskId,
-      snapshot.diagnosticJson,
+      snapshot.diagnosticJson ?? null,
       { diagnosticJson: JSON.stringify({ ...JSON.parse(snapshot.diagnosticJson ?? '{}'), abTest: true }) },
       {
         expectedStatus: snapshot.status,
@@ -763,7 +763,7 @@ describe('recoverTaskIdentityFromReceipt — G: lease_generation CAS fencing (re
     // bug directive G closes.
     const unfenced = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
       taskId,
-      snapshot.diagnosticJson,
+      snapshot.diagnosticJson ?? null,
       { diagnosticJson: JSON.stringify({ ...JSON.parse(snapshot.diagnosticJson ?? '{}'), abTest: true }) },
       {
         expectedStatus: snapshot.status,
@@ -787,7 +787,7 @@ describe('recoverTaskIdentityFromReceipt — G: lease_generation CAS fencing (re
     // Worker A submits with its OLD generation — rejected.
     const aWrite = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
       taskId,
-      aSnapshot.diagnosticJson,
+      aSnapshot.diagnosticJson ?? null,
       { diagnosticJson: JSON.stringify({ ...JSON.parse(aSnapshot.diagnosticJson ?? '{}'), staleWorker: true }) },
       {
         expectedStatus: aSnapshot.status,

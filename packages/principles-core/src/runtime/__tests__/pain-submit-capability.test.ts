@@ -526,7 +526,7 @@ describe('submitPainCapability host-session association (PRI-1260)', () => {
 // ── Review round 2 (directives I2/I4/J3): targetTurnId normalization + consent-blocked persistence ──
 
 describe('submitPainCapability — requested target hint normalization and consent gating', () => {
-  async function persistedHint(input: { targetTurnId?: string }, detail: string): Promise<Record<string, unknown> | undefined> {
+  async function persistedHint(input: { targetTurnId?: string }, detail: string): Promise<string | undefined> {
     writeLedger([{ id: 'P-42' }]);
     const painId = freshPainId('00000009');
     const receipt = await submitPainCapability({
@@ -537,9 +537,11 @@ describe('submitPainCapability — requested target hint normalization and conse
     expect(receipt.status, JSON.stringify(receipt.error)).toBe('submitted');
     const payload = await diagnosticJsonOf(receipt.taskId as string);
     const ingress = payload.painIngress as Record<string, unknown> | undefined;
-    return ingress !== undefined && Object.hasOwn(ingress, 'requestedTargetTurnId')
+    const hint = ingress !== undefined && Object.hasOwn(ingress, 'requestedTargetTurnId')
       ? ingress.requestedTargetTurnId
       : undefined;
+    expect(hint === undefined || typeof hint === 'string').toBe(true);
+    return typeof hint === 'string' ? hint : undefined;
   }
 
   it('I4: turn-10, " turn-10 " and "turn-10 " persist the IDENTICAL trimmed id; case is preserved', async () => {
