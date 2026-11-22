@@ -168,8 +168,10 @@ describe.skipIf(REAL_ENGINE === undefined)('WorkBuddy installer ↔ REAL engine 
 
       // Declared WorkBuddy root carries the frozen-format registration.
       const settings = JSON.parse(fs.readFileSync(path.join(lab.wbConfigDir, 'settings.json'), 'utf8')) as { enabledPlugins: Record<string, unknown> };
-      // install ≠ enable: the real engine honors the manifest defaultEnabled=false.
-      expect(settings.enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+      // Out of the box: the real engine honors the manifest defaultEnabled=true,
+      // so a fresh install is enabled (its hooks and bundled pd-recall MCP server
+      // load on the next session) without a manual plugin-manager step.
+      expect(settings.enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(true);
       const registry = JSON.parse(fs.readFileSync(path.join(lab.wbConfigDir, 'plugins', 'installed_plugins.json'), 'utf8')) as { plugins: Record<string, unknown> };
       expect(registry.plugins[WORKBUDDY_PLUGIN_KEY]).toBeDefined();
       // Versioned cache copy landed under the declared root too.

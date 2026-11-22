@@ -493,6 +493,53 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
   });
 });
 
+// ─── legacy USER-level MCP entry cleanup ─────────────────────────────────────
+
+describe('WorkBuddyHostInstaller.install — legacy user-level MCP entry cleanup', () => {
+  it('removes a proven PD-owned pd-recall entry and preserves every other server', async () => {
+    const created = lab({ engine: 'unreachable' });
+    // The skeleton ships the REAL launcher (PD stamp) under the adapter payload,
+    // so ownership can be proven from the bytes instead of the key name.
+    const legacyLauncher = path.join(created.payloadRoot, 'workbuddy-adapter', 'plugin', 'mcp', 'launcher.cjs');
+    expect(fs.existsSync(legacyLauncher)).toBe(true);
+    const mcpPath = path.join(created.configDir, 'mcp.json');
+    fs.mkdirSync(created.configDir, { recursive: true });
+    fs.writeFileSync(mcpPath, JSON.stringify({
+      mcpServers: {
+        'pd-recall': { command: 'node', args: [legacyLauncher] },
+        'other-server': { command: 'npx', args: ['other'] },
+      },
+      unknownKey: { keep: true },
+    }, null, 2));
+
+    const result = await created.installer.install(installCtx(created));
+
+    expect(result.success).toBe(true);
+    const config = readJson(mcpPath);
+    const servers = config.mcpServers as Record<string, unknown>;
+    expect(servers['pd-recall']).toBeUndefined();
+    expect(servers['other-server']).toEqual({ command: 'npx', args: ['other'] });
+    expect(config.unknownKey).toEqual({ keep: true });
+    expect((result.warnings ?? []).join('\n')).toContain('legacy user-level');
+    const backups = fs.readdirSync(created.configDir).filter((name) => name.startsWith('mcp.json.pd-legacy-'));
+    expect(backups).toHaveLength(1);
+  });
+
+  it('leaves a foreign same-name entry byte-identical (never guesses ownership)', async () => {
+    const created = lab({ engine: 'unreachable' });
+    const mcpPath = path.join(created.configDir, 'mcp.json');
+    fs.mkdirSync(created.configDir, { recursive: true });
+    const foreign = JSON.stringify({
+      mcpServers: { 'pd-recall': { command: 'npx', args: ['someone-else'] } },
+    }, null, 2);
+    fs.writeFileSync(mcpPath, foreign);
+
+    await created.installer.install(installCtx(created));
+
+    expect(fs.readFileSync(mcpPath, 'utf8')).toBe(foreign);
+  });
+});
+
 // ─── install (engine-unreachable direct-write path) ──────────────────────────
 
 describe('WorkBuddyHostInstaller.install — engine-unreachable direct-write fallback', () => {
@@ -1567,18 +1614,19 @@ describe('WorkBuddy user-facing copy guard', () => {
     // "governance off by default" claim must never come back.
     expect(text, 'InstallGuide must not claim governance is off by default').not.toContain('治理默认关闭');
     expect(text, 'InstallGuide must not claim governance is off by default').not.toContain('governance is OFF by default');
-    expect(text, 'InstallGuide must not claim install equals enable').not.toContain('installed means enabled');
-    expect(text, 'InstallGuide must not claim install equals enable (zh)').not.toContain('装完即启用');
-    expect(text, 'InstallGuide must state a fresh install is not enabled (zh)').toContain('已安装但未启用');
-    expect(text, 'InstallGuide must state a fresh install is not enabled (en)').toContain('INSTALLED but NOT ENABLED');
+    expect(text, 'InstallGuide must not collapse install into an unconditional enable').not.toContain('installed means enabled');
+    expect(text, 'InstallGuide must state a fresh install is enabled out of the box (zh)').toContain('全新安装默认已启用');
+    expect(text, 'InstallGuide must state a fresh install is enabled out of the box (en)').toContain('ENABLED out of the box');
+    expect(text, 'InstallGuide must preserve the Owner disable path (zh)').toContain('显式禁用过的选择会被原样保留');
     expect(text, 'InstallGuide must show the default ON value').toContain('enabled: true');
   });
 
-  it('plugin manifest separates installed / enabled / governance and drops the "inactive until" conflation', () => {
+  it('plugin manifest separates installed / enabled / governance and states the out-of-box default', () => {
     const text = fs.readFileSync(path.join(REPO_ROOT, 'packages/workbuddy-adapter/plugin/.codebuddy-plugin/plugin.json'), 'utf8');
-    expect(text, 'manifest must not claim install equals enable').not.toContain('installed means enabled');
+    expect(text, 'manifest must not claim install equals enable unconditionally').not.toContain('installed means enabled');
     expect(text, 'manifest must not claim the manifest default only applies outside the PD installer').not.toContain('applies only when a host installs this plugin WITHOUT the PD installer');
-    expect(text, 'manifest must state a fresh install is not enabled').toContain('a fresh install is INSTALLED but NOT ENABLED');
+    expect(text, 'manifest must state a fresh install is enabled out of the box').toContain('a fresh install is ENABLED out of the box');
+    expect(text, 'manifest must preserve the Owner opt-out').toContain('can still disable it at any time');
     expect(text).toContain('governance is ON by default at install');
     expect(text).toContain('automatic pain detection/correction is NOT available');
     expect(text).not.toContain('inactive until');

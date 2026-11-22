@@ -240,10 +240,11 @@ describe.skipIf(!PD_CLI_AVAILABLE)('R1 chain: real install → enable → real w
     expect(afterDisable.status).toBe(0);
     expect(afterDisable.stdout.trim()).toBe('');
 
-    // Registration bookkeeping stayed intact through the whole chain, including
-    // install ≠ enable (the plugin stays at its declared default, disabled).
+    // Registration bookkeeping stayed intact through the whole chain; a fresh
+    // install lands the manifest default (defaultEnabled=true), so both the
+    // hooks and the bundled pd-recall MCP server are available out of the box.
     const settings = JSON.parse(fs.readFileSync(path.join(lab.home, '.workbuddy', 'settings.json'), 'utf8')) as { enabledPlugins: Record<string, unknown> };
-    expect(settings.enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+    expect(settings.enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(true);
   });
 });
 

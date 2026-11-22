@@ -74,7 +74,7 @@ export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
 export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
 const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
 import { atomicReplaceTextFile, AtomicReplaceCleanupError, AtomicReplaceConflictError, errnoCode } from '../utils/config-file-io.js';
-import { checkMcpRegistrationConflict } from './mcp-registration-conflict.js';
+import { checkMcpRegistrationConflict, PD_MCP_SERVER_NAME } from './mcp-registration-conflict.js';
 import { deprecateAllLegacyWorkbuddySkills } from './legacy-workbuddy-skill.js';
 import { resolveMcpServerDir, resolveMcpServerEntry } from '../mcp-server-layout-compat.js';
 import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
@@ -1169,7 +1169,8 @@ export interface WorkbuddyPluginPayload {
   version: string;
   /**
    * Manifest-declared default. Only an explicit `defaultEnabled: true` counts
-   * as enabled-on-install; PD declares `false` (install ≠ enable, SPEC §6.4).
+   * as enabled-on-install; PD declares `true` so a fresh install works out of
+   * the box (an explicit Owner `false` in settings.json still wins).
    */
   defaultEnabled: boolean;
 }
@@ -2600,11 +2601,11 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // re-create the very deadlock this fix removes. The host's own registration
     // record survives that, so either signal counts.
     //
-    // Why proceeding is not a user-config write: this installer writes no part
-    // of `~/.workbuddy/mcp.json` — no writer for it exists anywhere in this
-    // repository, and the classifier beside this code is read-only. The bytes
-    // stay identical whether the install proceeds or not (the test asserts the
-    // sha256). What PD itself does write is its own payload + binding.
+    // Why proceeding is not a user-config write AT THIS GATE: the conflict
+    // classifier is read-only, so the bytes stay identical whether the install
+    // proceeds or not here (the test asserts the sha256). A separate,
+    // ownership-proven legacy cleanup (step 3c, `removeLegacyPdOwnedUserMcpEntry`)
+    // may later strip a PD-owned `pd-recall` entry — never another server's.
     const pdMcpBindingPresent = existsSync(path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json'));
     const pdAlreadyInstalledForHost = pdMcpBindingPresent || details.registered;
     const mcpRegistration = checkMcpRegistrationConflict('workbuddy', {
@@ -2630,6 +2631,27 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const mcpRegistrationWarning = mcpRegistration.ok
       ? undefined
       : `${mcpRegistration.reason} PD left that entry untouched and continued so this host is not left bound to the previous MCP server version. ${mcpRegistration.nextAction}`;
+
+    // 3c. Legacy USER-level entry migration. Before the plugin-bundled
+    // `.mcp.json` became the only source, PD also registered a USER-level
+    // `<config>/mcp.json` entry. That origin is a DIFFERENT MCP origin: it
+    // requires a manual trust decision and duplicates the plugin's own server
+    // in the MCP list, so an upgraded machine would still look broken. Remove
+    // it ONLY when PD ownership is proven from the launcher bytes; a byte
+    // backup is written first and every other key/format is preserved.
+    let legacyUserMcpCleanup: string | undefined;
+    if (mcpRegistration.ok && mcpRegistration.state === 'pd_owned') {
+      const cleanup = this.removeLegacyPdOwnedUserMcpEntry([payload.pluginDir]);
+      if (cleanup.ok) {
+        if (cleanup.removed) {
+          legacyUserMcpCleanup =
+            `Removed the legacy user-level "${PD_MCP_SERVER_NAME}" entry from ${path.join(p.configDir, 'mcp.json')} ` +
+            `(backup: ${cleanup.backupPath}). The plugin's bundled .mcp.json is the single MCP source now.`;
+        }
+      } else {
+        legacyUserMcpCleanup = `${cleanup.reason} ${cleanup.nextAction}`;
+      }
+    }
 
     // 4. Materialize the PD-owned marketplace (source stays inside its root).
     try {
@@ -2864,6 +2886,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const installWarnings = [
       ...legacySkill.warnings,
       ...(mcpRegistrationWarning === undefined ? [] : [mcpRegistrationWarning]),
+      ...(legacyUserMcpCleanup === undefined ? [] : [legacyUserMcpCleanup]),
     ];
     return {
       success: true,
@@ -3086,7 +3109,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   /**
    * The value an install should leave behind: an explicit boolean already in
    * settings.json is the Owner's choice and always wins; otherwise the plugin
-   * manifest's `defaultEnabled` applies. Install never enables by itself.
+   * manifest's `defaultEnabled` applies. PD ships `true`, so a fresh WorkBuddy
+   * install is enabled (and its bundled pd-recall MCP server loads) without a
+   * manual plugin-manager step.
    */
   private resolveInstalledEnabledValue(declaredDefaultEnabled: boolean):
     { ok: true; value: boolean; fromOwnerChoice: boolean } | { ok: false; reason: string; nextAction: string } {
@@ -3098,6 +3123,52 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       : undefined;
     if (typeof current === 'boolean') return { ok: true, value: current, fromOwnerChoice: true };
     return { ok: true, value: declaredDefaultEnabled, fromOwnerChoice: false };
+  }
+
+  /**
+   * Remove the LEGACY user-level `pd-recall` entry from `<config>/mcp.json`.
+   *
+   * Ownership comes from `checkMcpRegistrationConflict` (launcher bytes), never
+   * from the key name: only a `pd_owned` verdict may be deleted, and every
+   * other key/format stays byte-identical. The caller turns the outcome into a
+   * warning, so a cleanup failure can never fail the install.
+   */
+  private removeLegacyPdOwnedUserMcpEntry(pdLauncherRoots: string[]):
+    | { ok: true; removed: boolean; backupPath?: string }
+    | { ok: false; reason: string; nextAction: string } {
+    const mcpPath = path.join(this.paths().configDir, 'mcp.json');
+    const read = readHostJsonFile(mcpPath);
+    if (!read.ok) return { ok: false, reason: read.reason, nextAction: read.nextAction };
+    if (!read.existed) return { ok: true, removed: false };
+    const root = read.value;
+    const servers = isRecord(root?.mcpServers) ? root.mcpServers : undefined;
+    if (servers === undefined || !Object.hasOwn(servers, PD_MCP_SERVER_NAME)) return { ok: true, removed: false };
+    const verdict = checkMcpRegistrationConflict('workbuddy', {
+      homeDir: this.deps.homeDir(),
+      workbuddyConfigDir: this.paths().configDir,
+      pdLauncherRoots,
+    });
+    // Only a PROVEN PD-owned entry may be removed. `conflict`, `unverifiable`
+    // and an unreadable config keep the existing read-only gate semantics.
+    if (!verdict.ok || verdict.state !== 'pd_owned') return { ok: true, removed: false };
+    const nextServers: Record<string, unknown> = { ...servers };
+    delete nextServers[PD_MCP_SERVER_NAME];
+    const nextRoot: Record<string, unknown> = { ...(root ?? {}) };
+    if (Object.keys(nextServers).length === 0) delete nextRoot.mcpServers;
+    else nextRoot.mcpServers = nextServers;
+    const backupPath = `${mcpPath}.pd-legacy-${Date.now()}.bak`;
+    try {
+      writeFileSync(backupPath, readFileSync(mcpPath));
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `workbuddy_legacy_mcp_backup_failed: ${error instanceof Error ? error.message : String(error)}. The legacy entry was left untouched.`,
+        nextAction: `Check write permissions beside ${mcpPath}, then re-run the installer.`,
+      };
+    }
+    const write = writeHostJsonFileProtected(mcpPath, JSON.stringify(nextRoot, null, 2) + '\n');
+    if (!write.ok) return { ok: false, reason: write.reason, nextAction: write.nextAction };
+    return { ok: true, removed: true, backupPath };
   }
 
   /** Write enabledPlugins[OUR_KEY]=value, preserving every other key. */
@@ -3132,9 +3203,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
 
   /**
    * Direct-write registration for engine-unreachable machines, aligned with the
-   * frozen P01 formats: enabledPlugins[key] carries the manifest default or the
-   * Owner's existing choice (install never enables by itself; other keys and
-   * other plugins preserved), installed_plugins.json v2 user registration
+   * frozen P01 formats: enabledPlugins[key] carries the manifest default (PD
+   * ships `true`, so a fresh install is enabled out of the box) or the Owner's
+   * existing choice (other keys and other plugins preserved), installed_plugins.json v2 user registration
    * (native scope array or legacy object), and the versioned cache
    * copy under plugins/cache/<marketplace>/<plugin>/<version>/.
    */
@@ -3166,8 +3237,8 @@ export class WorkBuddyHostInstaller implements HostInstaller {
 
     // settings.json merge — computed here, WRITTEN after the cache lands (see
     // below): a failed payload must leave no registration state behind.
-    // Install ≠ enable (SPEC §6.4): an explicit Owner choice is preserved;
-    // otherwise the manifest's defaultEnabled applies.
+    // An explicit Owner choice is preserved; otherwise the manifest's
+    // defaultEnabled applies (PD ships true: enabled out of the box).
     const currentEnabled = isRecord(settings.value?.enabledPlugins)
       ? settings.value.enabledPlugins[WORKBUDDY_PLUGIN_KEY]
       : undefined;
