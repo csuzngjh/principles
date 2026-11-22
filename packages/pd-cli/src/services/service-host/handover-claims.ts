@@ -7,6 +7,7 @@
  * when OpenClaw holds a VALIDATED claim (default dir / host declaration /
  * payload binding) and no OTHER host claims it.
  */
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { findForeignWorkspaceOwner, collectHostWorkspaceClaims } from '@principles/install-layout';
 import { resolveCoordinatorInstallIdentity } from './install-identity.js';
@@ -31,11 +32,21 @@ export function collectHostWorkspaceClaimsFor(
   const options = claimOptionsFor(identity.identity, diagnostics);
   const claims = collectHostWorkspaceClaims(options);
   const canonical = path.resolve(workspaceDir);
-  const samePath = (candidate: string): boolean => {
-    const a = process.platform === 'win32' ? candidate.toLowerCase() : candidate;
-    const b = process.platform === 'win32' ? canonical.toLowerCase() : canonical;
-    return a === b;
+  // Claims are matched by REAL-directory identity, not lexical spelling —
+  // the manifest may hold an alias of the same directory (PRI-1282 review),
+  // which is exactly the shape `findForeignWorkspaceOwner` resolves too.
+  const identityOf = (candidate: string): string => {
+    const lexical = path.resolve(candidate);
+    let resolved = lexical;
+    try {
+      resolved = fs.realpathSync.native(lexical);
+    } catch {
+      // Best effort: a missing path compares lexically.
+    }
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
   };
+  const canonicalIdentity = identityOf(canonical);
+  const samePath = (candidate: string): boolean => identityOf(candidate) === canonicalIdentity;
   const openclawClaimed = claims.some((claim) => claim.host === 'openclaw' && samePath(claim.workspaceDir));
   const foreign = findForeignWorkspaceOwner('openclaw', canonical, options);
   const foreignOwner = foreign.owners.length > 0 ? foreign.owners.join('+') : null;

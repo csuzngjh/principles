@@ -56,6 +56,10 @@ import {
   INSTALL_LAYOUT_VERSION,
   type InstallHost,
 } from '@principles/install-layout';
+// withInstallManifestWriteLock ships with the PRI-1282 install-layout
+// cohort; a registry-resolved older dep lacks it, so the merge below
+// detects the export (same release-window posture as installer.ts).
+import * as installLayoutModule from '@principles/install-layout';
 // 2026-11-08: the shared state DEFINITIONS for pd-cli health live in
 // @principles/install-layout (interpretWorkbuddyPluginState /
 // getWorkbuddyHostConfigPaths). The installer does NOT import them at
@@ -1240,7 +1244,7 @@ function readInstallJsonRecord(manifestPath: string): Record<string, unknown> | 
  * channel/autoCheck/releaseMetadataUrl — PRI-709 P0-1) are carried through.
  * Malformed existing manifest → hard stop, zero modification.
  */
-export function mergeWorkbuddyIntoInstallManifest(
+function mergeWorkbuddyIntoInstallManifestLocked(
   manifestPath: string,
   governanceDir: string,
   atomicReplace: typeof atomicReplaceTextFile = atomicReplaceTextFile,
@@ -1309,14 +1313,53 @@ export function mergeWorkbuddyIntoInstallManifest(
   }
 }
 
+export function mergeWorkbuddyIntoInstallManifest(
+  manifestPath: string,
+  governanceDir: string,
+  atomicReplace: typeof atomicReplaceTextFile = atomicReplaceTextFile,
+): { ok: true; writtenContent: string } | { ok: false; reason: string; nextAction: string; committed?: boolean; writtenContent?: string } {
+  // PRI-1282 review (ERR-168 follow-up): the manifest also carries §8.4
+  // ownership records whose single-writer mutator takes the CAS lock — this
+  // read-modify-write MUST join that critical section or an interleaved
+  // handover/rollback write can be silently dropped.
+  const lock = installLayoutModule.withInstallManifestWriteLock;
+  if (typeof lock === 'function') {
+    const locked = lock(
+      { manifestPath, operation: 'workbuddy.mergeInstallManifest', context: governanceDir },
+      () => mergeWorkbuddyIntoInstallManifestLocked(manifestPath, governanceDir, atomicReplace),
+    );
+    if (!locked.ok) {
+      return {
+        ok: false,
+        reason: `install_manifest_lock_unavailable: ${locked.message}. No write was performed.`,
+        nextAction: 'Wait for the in-flight manifest operation to finish and re-run the installer; the write is never done unlocked.',
+      };
+    }
+    return locked.value;
+  }
+  return mergeWorkbuddyIntoInstallManifestLocked(manifestPath, governanceDir, atomicReplace);
+}
+
 /** Remove 'workbuddy' from manifest hosts (uninstall bookkeeping; workspaces/governance data preserved). */
 function removeWorkbuddyFromInstallManifestHosts(manifestPath: string): void {
-  try {
+  const write = (): void => {
     const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf-8'));
     if (!isRecord(parsed) || !Array.isArray(parsed.hosts)) return;
     const hosts = parsed.hosts.filter((h): h is InstallHost => typeof h === 'string' && h !== 'workbuddy');
     const payload: Record<string, unknown> = { ...parsed, hosts };
     writeFileSync(manifestPath, JSON.stringify(payload, null, 2) + '\n', 'utf-8');
+  };
+  try {
+    // Same §8.4 CAS lock as every other manifest writer (PRI-1282 review).
+    const lock = installLayoutModule.withInstallManifestWriteLock;
+    if (typeof lock === 'function') {
+      lock(
+        { manifestPath, operation: 'workbuddy.removeFromInstallManifest', context: path.dirname(manifestPath) },
+        write,
+      );
+      return;
+    }
+    write();
   } catch {
     // Uninstall must not fail on manifest bookkeeping; the preserved-state
     // report below still names the governance dir. rc-9: surfaced via paths.

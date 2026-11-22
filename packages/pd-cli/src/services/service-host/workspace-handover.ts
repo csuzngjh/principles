@@ -43,9 +43,12 @@ import {
 } from '@principles/install-layout';
 import { resolveCoordinatorInstallIdentity } from './install-identity.js';
 import { collectHostWorkspaceClaimsFor } from './handover-claims.js';
-import { acquireServiceRunLock } from './locking/service-run-lock.js';
+import { acquireServiceRunLock, releaseServiceRunLock } from './locking/service-run-lock.js';
+import { runSchedulerLifecycle } from './scheduler/index.js';
+import { readActiveReleaseFacts } from './status/service-run-status.js';
 import { buildWorkerEnvironment } from './worker-env.js';
-import { resolveActiveReleaseCliEntry } from './worker-adapter.js';
+import { readConfigCredentialEnvNames, resolveActiveReleaseCliEntry, type AdapterCycleResult } from './worker-adapter.js';
+import { createOpenClawWorkerAdapter } from './worker-adapter-openclaw.js';
 import { runWorkerProcess } from './worker-process.js';
 import type { WorkerProcessResult } from './worker-process.js';
 
@@ -53,6 +56,7 @@ export const DEFAULT_HANDOVER_ACK_WAIT_MS = 15 * 60_000;
 export const DEFAULT_HANDOVER_STEP_TIMEOUT_MS = 2 * 60_000;
 export const DEFAULT_ROLLBACK_RESUME_WAIT_MS = 90_000;
 const HANDOVER_EVIDENCE_SCHEMA = 'pd.service-handover-evidence.v1';
+const HANDOVER_INTENT_SCHEMA = 'pd.service-handover-intent.v1';
 
 // ─── Shared plumbing ────────────────────────────────────────────────────────
 
@@ -62,6 +66,16 @@ export interface HandoverContextInput {
   readonly ackWaitMs?: number;
   readonly stepTimeoutMs?: number;
   readonly signal?: AbortSignal;
+  /**
+   * Test seam: the scheduler-enabled probe the handover runs before the CAS
+   * flip (default: real `runSchedulerLifecycle('status', …)`).
+   */
+  readonly probes?: {
+    readonly schedulerStatus?: () => Promise<
+      | { ok: true; registered: boolean | null; enabled: boolean | null }
+      | { ok: false; reason: string }
+    >;
+  };
 }
 
 export type HandoverContext =
@@ -254,6 +268,84 @@ export function readHandoverEvidence(pdHome: string, canonicalDir: string, opera
   }
 }
 
+// ─── Commit intent (crash recovery, PRI-1282 review) ────────────────────────
+
+/**
+ * The persisted commit INTENT written BEFORE the CAS flip: the steady-state
+ * `service_host_owned` marker deliberately clears `operationId`, so a run
+ * killed between the flip and the evidence write would otherwise be
+ * unattributable and unresumable. The intent is the auditable "this
+ * operation committed generation N" fact the resume path verifies against
+ * workspace + operationId + committed generation.
+ */
+export interface HandoverCommitIntent {
+  schemaVersion: typeof HANDOVER_INTENT_SCHEMA;
+  kind: 'handover';
+  operationId: string;
+  workspaceDir: string;
+  preparingGeneration: number;
+  committedGeneration: number;
+  writtenAt: string;
+}
+
+export function handoverIntentPath(pdHome: string, canonicalDir: string, operationId: string): string {
+  return path.join(pdHome, 'service', 'handover', workspaceEvidenceKey(canonicalDir), `${operationId}.intent.json`);
+}
+
+export function writeHandoverIntent(intent: HandoverCommitIntent, pdHome: string): { ok: boolean; path: string; reason?: string } {
+  const target = handoverIntentPath(pdHome, intent.workspaceDir, intent.operationId);
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    // Write-once, same posture as the evidence document.
+    if (fs.existsSync(target)) return { ok: true, path: target, reason: 'already_exists' };
+    const tmp = `${target}.${process.pid}.${crypto.randomUUID().slice(0, 8)}.tmp`;
+    const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(intent, null, 2) + '\n');
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, target);
+    return { ok: true, path: target };
+  } catch (error) {
+    return { ok: false, path: target, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Read + field-validate a persisted commit intent (null = absent/untrusted). */
+export function readHandoverIntent(pdHome: string, canonicalDir: string, operationId: string): HandoverCommitIntent | null {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(handoverIntentPath(pdHome, canonicalDir, operationId), 'utf8'));
+    if (!isJsonObject(parsed)) return null;
+    if (parsed.schemaVersion !== HANDOVER_INTENT_SCHEMA || parsed.kind !== 'handover') return null;
+    if (!isNonEmptyString(parsed.operationId) || parsed.operationId !== operationId) return null;
+    if (!isNonEmptyString(parsed.workspaceDir) || !isNonEmptyString(parsed.writtenAt)) return null;
+    if (typeof parsed.preparingGeneration !== 'number' || !Number.isInteger(parsed.preparingGeneration) || parsed.preparingGeneration < 0) return null;
+    if (typeof parsed.committedGeneration !== 'number' || !Number.isInteger(parsed.committedGeneration) || parsed.committedGeneration < 1) return null;
+    return {
+      schemaVersion: HANDOVER_INTENT_SCHEMA,
+      kind: 'handover',
+      operationId: parsed.operationId,
+      workspaceDir: parsed.workspaceDir,
+      preparingGeneration: parsed.preparingGeneration,
+      committedGeneration: parsed.committedGeneration,
+      writtenAt: parsed.writtenAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Default scheduler-enabled fact probe: `pd service status` on this install. */
+async function probeSchedulerEnabled(
+  context: { homeDir: string },
+  env: Readonly<Record<string, string | undefined>> | undefined,
+): Promise<{ ok: true; registered: boolean | null; enabled: boolean | null } | { ok: false; reason: string }> {
+  const status = await runSchedulerLifecycle('status', { env: env ?? process.env, trustedHomeDir: context.homeDir });
+  if (!status.ok) return { ok: false, reason: status.reason };
+  return { ok: true, registered: status.facts.registered, enabled: status.facts.enabled };
+}
+
 /** Spawn a bounded active-release CLI probe (readiness or one cycle). */
 async function runActiveReleaseWorkerProbe(args: {
   homeDir: string;
@@ -272,7 +364,10 @@ async function runActiveReleaseWorkerProbe(args: {
     identity: identity.identity,
     hostKind: 'openclaw',
     inheritedEnv: process.env,
-    credentialEnvAllowlist: [],
+    // Same allowlist the managed adapter uses: the workspace's own
+    // `apiKeyEnv` names must reach the probe child or a console-saved /
+    // custom-named credential is stripped (PRI-1282 review).
+    credentialEnvAllowlist: readConfigCredentialEnvNames(args.workspaceDir),
   });
   const result = await runWorkerProcess({
     cliEntry: entry.entry,
@@ -282,6 +377,39 @@ async function runActiveReleaseWorkerProbe(args: {
     ...(args.signal !== undefined ? { signal: args.signal } : {}),
   });
   return { ok: true, result };
+}
+
+/**
+ * One REAL worker cycle through the SAME managed adapter the scheduler's
+ * run-once uses (PRI-1282 review): entry resolution, allowlist env build
+ * (workspace credential names included), spawn, task-progress diffing,
+ * JSON/workspace/mode validation and liveness normalization are all the
+ * adapter's verified contract — the handover never trusts raw stdout.
+ */
+async function runManagedOpenClawCycle(args: {
+  homeDir: string;
+  workspaceDir: string;
+  invocationId: string;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<{ ok: true; result: AdapterCycleResult } | { ok: false; reason: string; nextAction: string }> {
+  const identity = resolveCoordinatorInstallIdentity(process.env, { trustedHomeDir: args.homeDir });
+  if (!identity.ok) return { ok: false, reason: `install_identity_unresolved:${identity.reason}`, nextAction: identity.nextAction };
+  const result = await createOpenClawWorkerAdapter().executeOnce({
+    workspaceDir: args.workspaceDir,
+    activeRelease: readActiveReleaseFacts(identity.identity.activeRecordPath),
+    invocationId: args.invocationId,
+    timeoutMs: args.timeoutMs,
+    ...(args.signal !== undefined ? { signal: args.signal } : {}),
+    identity: identity.identity,
+    inheritedEnv: process.env,
+  });
+  return { ok: true, result };
+}
+
+/** The cycle outcomes that prove a first managed cycle actually worked. */
+function verifiedCycleOutcome(result: AdapterCycleResult): boolean {
+  return result.cycleOutcome === 'cycle_completed' || result.cycleOutcome === 'cycle_completed_without_business_progress';
 }
 
 function parseWorkerJson(stdout: string): Record<string, unknown> | null {
@@ -340,49 +468,76 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
     return { ok: false, outcome: 'blocked', reason: `ownership_unreadable:${initial.reason}`, nextAction: initial.nextAction };
   }
   // ── Crash-recovery continuation (design §7.3): a prior run already flipped
-  // the marker. With the SAME operationId's completed evidence this converges
-  // as verify-only (one worker cycle + evidence reconciliation); WITHOUT that
-  // proof it refuses — the command never claims an operation it cannot
-  // attribute (the marker does not retain operationId in steady states).
+  // the marker. Attribution comes from EITHER the completed evidence OR the
+  // commit intent the flip path persists first — a run killed between flip
+  // and evidence write is resumable because the intent carries
+  // workspace + operationId + committed generation (PRI-1282 review).
   // ──
   if (initial.status === 'service_host_owned') {
     const priorOp = options.resumeOperationId ?? '';
     const priorEvidence = priorOp !== '' ? readHandoverEvidence(context.pdHome, context.workspaceDir, priorOp) : null;
-    if (priorOp !== '' && priorEvidence !== null && priorEvidence.outcome === 'completed') {
-      record('already_service_host_owned', 'verify_only_continuation');
-      const cycleCont = await runActiveReleaseWorkerProbe({ homeDir: context.homeDir, workspaceDir: context.workspaceDir, mode: 'once', timeoutMs: Math.max(stepTimeoutMs, 10 * 60_000), ...(options.signal !== undefined ? { signal: options.signal } : {}) });
-      const cycleContJson = cycleCont.ok ? parseWorkerJson(cycleCont.result.stdout) : null;
-      record('worker_cycle', cycleCont.ok ? String(cycleContJson?.mode ?? `exit=${cycleCont.result.exitCode}`) : cycleCont.reason);
-      const ownershipAfter = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
-      const evidenceCont: HandoverEvidence = {
-        schemaVersion: HANDOVER_EVIDENCE_SCHEMA,
-        kind: 'handover',
-        operationId: priorOp,
-        workspaceDir: context.workspaceDir,
-        startedAt,
-        completedAt: nowIso(),
-        outcome: 'completed',
-        steps,
-        finalOwnership: ownershipAfter,
-      };
-      const writtenCont = writeHandoverEvidence(evidenceCont, context.pdHome);
-      return {
-        ok: true,
-        outcome: 'completed',
-        operationId: priorOp,
-        workspaceDir: context.workspaceDir,
-        generation: ownershipAfter.status === 'service_host_owned' ? ownershipAfter.generation : 0,
-        readiness: 'ready',
-        quiesceAck: { operationId: priorOp, generation: priorEvidence.finalOwnership.status === 'service_host_owned' ? priorEvidence.finalOwnership.generation : 0, outcome: 'verified_by_prior_evidence', startedVia: 'prior_run' },
-        workerCycle: { mode: String(cycleContJson?.mode ?? 'unknown'), exitCode: cycleCont.ok ? cycleCont.result.exitCode : null, evidencePath: writtenCont.path },
-        evidencePath: writtenCont.path,
-      };
+    const priorIntent = priorOp !== '' ? readHandoverIntent(context.pdHome, context.workspaceDir, priorOp) : null;
+    const intentMatches = priorIntent !== null
+      && priorIntent.workspaceDir === context.workspaceDir
+      && priorIntent.committedGeneration === initial.generation;
+    if (priorOp !== '' && (priorEvidence?.outcome === 'completed' || intentMatches)) {
+      record('already_service_host_owned', intentMatches && priorEvidence?.outcome !== 'completed' ? 'verify_only_continuation_by_intent' : 'verify_only_continuation');
+      // The re-verification cycle joins the same install-level run mutex as
+      // the scheduler and rollback — a concurrent managed run must not
+      // overlap this verification (PRI-1282 review).
+      const contLock = acquireServiceRunLock(context.pdHome);
+      if (!contLock.ok) {
+        return { ok: false, outcome: 'blocked', reason: `service_run_in_progress:${contLock.kind}`, nextAction: 'A managed run-once is currently executing; wait for it to finish and rerun `pd service handover --resume` to re-verify.', operationId: priorOp };
+      }
+      try {
+        const cycleCont = await runManagedOpenClawCycle({ homeDir: context.homeDir, workspaceDir: context.workspaceDir, invocationId: priorOp, timeoutMs: Math.max(stepTimeoutMs, 10 * 60_000), ...(options.signal !== undefined ? { signal: options.signal } : {}) });
+        record('worker_cycle', cycleCont.ok ? `${cycleCont.result.cycleOutcome}${cycleCont.result.workerMode !== undefined ? `(${cycleCont.result.workerMode})` : ''}` : cycleCont.reason);
+        if (!cycleCont.ok || !verifiedCycleOutcome(cycleCont.result)) {
+          return {
+            ok: false,
+            outcome: 'failed',
+            reason: `first_cycle_unverified:${cycleCont.ok ? cycleCont.result.cycleOutcome : cycleCont.reason}`,
+            nextAction: 'The workspace is service_host_owned but the verification cycle did not complete; rerun `pd service handover --resume` to re-verify, or `pd service rollback` to return it to the Gateway.',
+            operationId: priorOp,
+            ...(cycleCont.ok && cycleCont.result.reason !== undefined ? { detail: cycleCont.result.reason } : {}),
+          };
+        }
+        const ownershipAfter = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
+        const evidenceCont: HandoverEvidence = {
+          schemaVersion: HANDOVER_EVIDENCE_SCHEMA,
+          kind: 'handover',
+          operationId: priorOp,
+          workspaceDir: context.workspaceDir,
+          startedAt,
+          completedAt: nowIso(),
+          outcome: 'completed',
+          steps,
+          finalOwnership: ownershipAfter,
+        };
+        const writtenCont = writeHandoverEvidence(evidenceCont, context.pdHome);
+        if (!writtenCont.ok) {
+          return { ok: false, outcome: 'failed', reason: `handover_evidence_write_failed:${writtenCont.reason ?? 'io'}`, nextAction: 'The verification cycle passed but the evidence could not be persisted; rerun `pd service handover --resume` after fixing the write failure.', operationId: priorOp };
+        }
+        return {
+          ok: true,
+          outcome: 'completed',
+          operationId: priorOp,
+          workspaceDir: context.workspaceDir,
+          generation: ownershipAfter.status === 'service_host_owned' ? ownershipAfter.generation : 0,
+          readiness: 'ready',
+          quiesceAck: { operationId: priorOp, generation: priorEvidence?.finalOwnership.status === 'service_host_owned' ? priorEvidence.finalOwnership.generation : (priorIntent?.committedGeneration ?? 0), outcome: 'verified_by_prior_evidence', startedVia: 'prior_run' },
+          workerCycle: { mode: cycleCont.result.workerMode ?? cycleCont.result.cycleOutcome, exitCode: cycleCont.result.worker.exitCode, evidencePath: writtenCont.path },
+          evidencePath: writtenCont.path,
+        };
+      } finally {
+        releaseServiceRunLock(contLock.handle);
+      }
     }
     return {
       ok: false,
       outcome: 'blocked',
       reason: 'already_service_host_owned',
-      nextAction: 'This workspace already belongs to the Service Host. Pass --resume <operationId> of the completed handover to re-verify, or use pd service rollback to return it to the legacy consumer.',
+      nextAction: 'This workspace already belongs to the Service Host. Pass --resume <operationId> of the committed handover to re-verify, or use pd service rollback to return it to the legacy consumer.',
     };
   }
   const binding = collectHostWorkspaceClaimsFor(context.workspaceDir, context.homeDir, options.env);
@@ -418,6 +573,34 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
     record('aborted', 'legacy_owned');
     return { ok: false, outcome: 'aborted', reason: 'handover_aborted_by_operator', nextAction: 'The workspace is back to legacy ownership; the Gateway consumer is the sole owner.', operationId: target };
   }
+
+  // ── 1.5. Scheduler gate (PRI-1282 review): handing ownership to the
+  // Service Host while no enabled OS trigger exists would leave the
+  // workspace consumed by NOBODY. Verified BEFORE the ownership-changing
+  // transition so a refusal keeps the workspace cleanly legacy-owned (and
+  // never blocks a recovery --abort); the command never enables the trigger
+  // on the operator's behalf. ──
+  const schedulerStatus = options.probes?.schedulerStatus !== undefined
+    ? await options.probes.schedulerStatus()
+    : await probeSchedulerEnabled(context, options.env);
+  if (!schedulerStatus.ok) {
+    return {
+      ok: false,
+      outcome: 'blocked',
+      reason: `service_host_scheduler_status_unavailable:${schedulerStatus.reason}`,
+      nextAction: 'The Service Host scheduler status could not be determined; resolve that first (the workspace stays legacy-owned and untouched).',
+    };
+  }
+  if (schedulerStatus.registered !== true || schedulerStatus.enabled !== true) {
+    return {
+      ok: false,
+      outcome: 'blocked',
+      reason: 'service_host_scheduler_not_enabled',
+      nextAction: 'Install and enable the Service Host scheduler for this install first (`pd service install`, `pd service enable`); without an enabled trigger a handed-over workspace is consumed by nobody, so the workspace stays legacy-owned.',
+    };
+  }
+  record('scheduler_trigger', 'registered_and_enabled');
+
   const operationId = resumeOp ?? options.resumeOperationId ?? `handover-${crypto.randomUUID()}`;
   const begin = transitionWorkspaceBackgroundExecution({
     manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'begin_handover', operationId, registerWorkspace: true,
@@ -502,53 +685,110 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
   }
   record('quiesce_ack', 'quiesced', `startedVia=${ack.writer.startedVia}`);
 
-  // ── 5. The single CAS flip. ──
-  const flip = transitionWorkspaceBackgroundExecution({
-    manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'complete_handover', operationId, expectedGeneration: preparingGeneration,
-  });
-  if (!flip.ok) {
-    // unexpected_state on service_host_owned can mean a prior crashed run
-    // already flipped: distinguish via the marker, never by guessing.
-    const after = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
-    if (after.status === 'service_host_owned') {
-      record('cas_flip', 'already_service_host_owned', flip.reason);
-    } else {
-      return { ok: false, outcome: 'failed', reason: `complete_handover_failed:${flip.reason}`, nextAction: flip.nextAction ?? 'Re-read the ownership record and retry; the workspace is still handover_preparing.', operationId, detail: flip.message };
-    }
-  } else {
-    record('cas_flip', 'service_host_owned', `generation=${flip.record.generation}`);
+  // ── 5-7. Commit section — under the SAME install-level run mutex the
+  // scheduler and rollback serialize on (PRI-1282 review): holding it from
+  // before the flip until the first worker child exits means a rollback can
+  // never flip ownership back while this cycle is still consuming, and a
+  // managed run-once sees `already_running` instead of overlapping us. A
+  // bare `pd openclaw worker --once` stays lock-free BY DESIGN — it is the
+  // leaf consumer the orchestrators drive; serializing it too would
+  // self-deadlock every launch below. ──
+  const runLock = acquireServiceRunLock(context.pdHome);
+  if (!runLock.ok) {
+    return {
+      ok: false,
+      outcome: 'blocked',
+      reason: `service_run_in_progress:${runLock.kind}`,
+      nextAction: 'A managed run-once or rollback is currently executing; wait for it to finish and rerun the handover — the workspace stays handover_preparing and this operationId resumes.',
+      operationId,
+    };
   }
+  try {
+    // Persist the commit intent BEFORE the flip: the steady-state marker
+    // clears operationId, so a crash between flip and evidence write would
+    // leave the commit unattributable without it (PRI-1282 review).
+    const intentWritten = writeHandoverIntent({
+      schemaVersion: HANDOVER_INTENT_SCHEMA,
+      kind: 'handover',
+      operationId,
+      workspaceDir: context.workspaceDir,
+      preparingGeneration,
+      committedGeneration: preparingGeneration + 1,
+      writtenAt: nowIso(),
+    }, context.pdHome);
+    if (!intentWritten.ok) {
+      return { ok: false, outcome: 'failed', reason: `handover_intent_write_failed:${intentWritten.reason ?? 'io'}`, nextAction: 'The commit intent could not be persisted; the workspace stays handover_preparing — fix the write failure and rerun (the operation resumes).', operationId };
+    }
 
-  // ── 6. One real worker cycle through the active release. ──
-  const cycle = await runActiveReleaseWorkerProbe({ homeDir: context.homeDir, workspaceDir: context.workspaceDir, mode: 'once', timeoutMs: Math.max(stepTimeoutMs, 10 * 60_000), ...(options.signal !== undefined ? { signal: options.signal } : {}) });
-  const cycleJson = cycle.ok ? parseWorkerJson(cycle.result.stdout) : null;
-  record('worker_cycle', cycle.ok ? String(cycleJson?.mode ?? `exit=${cycle.result.exitCode}`) : cycle.reason, cycle.ok ? cycle.result.stdout.slice(0, 400) : cycle.nextAction);
+    // ── 5. The single CAS flip. ──
+    const flip = transitionWorkspaceBackgroundExecution({
+      manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'complete_handover', operationId, expectedGeneration: preparingGeneration,
+    });
+    if (!flip.ok) {
+      // unexpected_state on service_host_owned can mean a prior crashed run
+      // already flipped: distinguish via the marker, never by guessing.
+      const after = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
+      if (after.status === 'service_host_owned') {
+        record('cas_flip', 'already_service_host_owned', flip.reason);
+      } else {
+        return { ok: false, outcome: 'failed', reason: `complete_handover_failed:${flip.reason}`, nextAction: flip.nextAction ?? 'Re-read the ownership record and retry; the workspace is still handover_preparing.', operationId, detail: flip.message };
+      }
+    } else {
+      record('cas_flip', 'service_host_owned', `generation=${flip.record.generation}`);
+    }
 
-  // ── 7. Completion evidence (write-once, operationId keyed). ──
-  const finalOwnership = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
-  const evidence: HandoverEvidence = {
-    schemaVersion: HANDOVER_EVIDENCE_SCHEMA,
-    kind: 'handover',
-    operationId,
-    workspaceDir: context.workspaceDir,
-    startedAt,
-    completedAt: nowIso(),
-    outcome: 'completed',
-    steps,
-    finalOwnership,
-  };
-  const written = writeHandoverEvidence(evidence, context.pdHome);
-  return {
-    ok: true,
-    outcome: 'completed',
-    operationId,
-    workspaceDir: context.workspaceDir,
-    generation: finalOwnership.status === 'service_host_owned' ? finalOwnership.generation : (flip.ok ? flip.record.generation : preparingGeneration),
-    readiness: 'ready',
-    quiesceAck: { operationId: ack.operationId ?? operationId, generation: ack.generation, outcome: ack.outcome, startedVia: ack.writer.startedVia },
-    workerCycle: { mode: String(cycleJson?.mode ?? 'unknown'), exitCode: cycle.ok ? cycle.result.exitCode : null, evidencePath: written.path },
-    evidencePath: written.path,
-  };
+    // ── 6. One real worker cycle through the SAME managed adapter the
+    // scheduler drives — its contract already validates spawn, exit code,
+    // workspace match and worker mode, so a failed/garbage first cycle is
+    // never recorded as success (PRI-1282 review). ──
+    const cycle = await runManagedOpenClawCycle({ homeDir: context.homeDir, workspaceDir: context.workspaceDir, invocationId: operationId, timeoutMs: Math.max(stepTimeoutMs, 10 * 60_000), ...(options.signal !== undefined ? { signal: options.signal } : {}) });
+    record('worker_cycle', cycle.ok ? `${cycle.result.cycleOutcome}${cycle.result.workerMode !== undefined ? `(${cycle.result.workerMode})` : ''}` : cycle.reason);
+    if (!cycle.ok || !verifiedCycleOutcome(cycle.result)) {
+      // Ownership is committed but the FIRST cycle is not verified —
+      // reported as a resumable failure, NEVER as a completed handover.
+      return {
+        ok: false,
+        outcome: 'failed',
+        reason: `first_cycle_unverified:${cycle.ok ? cycle.result.cycleOutcome : cycle.reason}`,
+        nextAction: 'Ownership already flipped to the Service Host but the first managed cycle did not verify; fix the worker problem and rerun `pd service handover --resume <operationId>` to re-verify, or `pd service rollback` to return the workspace to the Gateway.',
+        operationId,
+        detail: cycle.ok ? (cycle.result.reason ?? cycle.result.worker.stderrTail ?? undefined) : cycle.nextAction,
+      };
+    }
+
+    // ── 7. Completion evidence (write-once, operationId keyed). The
+    // handover only reports completion when BOTH the verified cycle and
+    // this write landed. ──
+    const finalOwnership = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
+    const evidence: HandoverEvidence = {
+      schemaVersion: HANDOVER_EVIDENCE_SCHEMA,
+      kind: 'handover',
+      operationId,
+      workspaceDir: context.workspaceDir,
+      startedAt,
+      completedAt: nowIso(),
+      outcome: 'completed',
+      steps,
+      finalOwnership,
+    };
+    const written = writeHandoverEvidence(evidence, context.pdHome);
+    if (!written.ok) {
+      return { ok: false, outcome: 'failed', reason: `handover_evidence_write_failed:${written.reason ?? 'io'}`, nextAction: 'The first managed cycle verified but the completion evidence could not be persisted; fix the write failure and rerun `pd service handover --resume <operationId>`.', operationId };
+    }
+    return {
+      ok: true,
+      outcome: 'completed',
+      operationId,
+      workspaceDir: context.workspaceDir,
+      generation: finalOwnership.status === 'service_host_owned' ? finalOwnership.generation : (flip.ok ? flip.record.generation : preparingGeneration),
+      readiness: 'ready',
+      quiesceAck: { operationId: ack.operationId ?? operationId, generation: ack.generation, outcome: ack.outcome, startedVia: ack.writer.startedVia },
+      workerCycle: { mode: cycle.result.workerMode ?? cycle.result.cycleOutcome, exitCode: cycle.result.worker.exitCode, evidencePath: written.path },
+      evidencePath: written.path,
+    };
+  } finally {
+    releaseServiceRunLock(runLock.handle);
+  }
 }
 
 // ─── Rollback ────────────────────────────────────────────────────────────────
@@ -658,7 +898,6 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
       evidencePath: written.path,
     };
   } finally {
-    const { releaseServiceRunLock } = await import('./locking/service-run-lock.js');
     releaseServiceRunLock(runLock.handle);
   }
 }

@@ -42,6 +42,7 @@ import {
   resolvePdHome,
   type WorkspaceBackgroundOwnership,
 } from '@principles/install-layout';
+import { pdProviderCredentials } from '@principles/core/runtime';
 import { AGENT_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, READ_ONLY_TOOL_NAMES } from './constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS, OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from './constants/tool-semantics.js';
 import { SystemLogger } from './core/system-logger.js';
@@ -283,13 +284,15 @@ export function computeOpenClawWorkerReadiness(workspaceDir: string, options?: {
     checks.evidencePort = false;
   }
 
-  // Credentials: the workspace's runtime profiles name their credential env
-  // vars (`apiKeyEnv`); readiness asserts at least one referenced name is
-  // REACHABLE (name presence only — values never recorded).
+  // Credentials: resolve through the SAME resolver the consuming cycle uses
+  // (resolveProviderApiKey): env wins when non-empty, otherwise the console-
+  // saved credentials file (<home>/.pd/credentials.yaml) is the fallback —
+  // name-presence alone would wrongly refuse a workspace whose key only
+  // exists in the file (PRI-1282 review). An empty env var does NOT count.
   try {
     const config = loadPdConfigForPlugin(workspaceDirResolved);
     const names = config.ok ? collectWorkspaceCredentialEnvNames(config.effective) : [];
-    checks.credentials = names.some((name: string) => process.env[name] !== undefined);
+    checks.credentials = names.some((name: string) => pdProviderCredentials.resolve(name).value !== null);
   } catch {
     checks.credentials = false;
   }

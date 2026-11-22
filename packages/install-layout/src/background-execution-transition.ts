@@ -80,6 +80,17 @@ export type CasLockAcquireResult =
   | { ok: true; handle: CasLockHandle }
   | { ok: false; reason: 'lock_busy' | 'lock_invalid' | 'lock_io_error'; message: string; holder?: CasLockOwner };
 
+/** Best-effort realpath probe (injectable for platform/alias tests). */
+export type RealpathProbe = (target: string) => string | undefined;
+
+function defaultRealpath(target: string): string | undefined {
+  try {
+    return fs.realpathSync.native(target);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Filesystem seam so tests can inject failures without monkey-patching node. */
 export interface CasFsOps {
   mkdirExclusive(dir: string): { ok: true } | { ok: false; code: 'exists' | 'io'; error?: Error };
@@ -390,7 +401,74 @@ export interface ReadOwnershipOptions {
   workspaceDir: string;
   platform?: string;
   fsOps?: CasFsOps;
+  /** Realpath probe for alias identity (default: native realpath). */
+  realpath?: RealpathProbe;
 }
+
+// ─── Real-directory identity (PRI-1282 review: path alias hole) ─────────────
+
+/**
+ * Ownership must resolve by the REAL directory, not the lexical spelling the
+ * caller happened to pass: `workspaces[]` may hold an alias (symlinked or
+ * differently-spelled canonical path) of the same directory while the worker
+ * is launched with the real path — a lexical lookup then misses the record
+ * and silently drops the workspace to the legacy default. Every
+ * `workspaces[]` entry naming the same real directory is a candidate record
+ * key; several disagreeing records under one real directory are
+ * refuse-to-guess structural damage, never silently merged.
+ */
+interface OwnershipIdentityResolution {
+  /** `workspaces[]` entries naming the queried real directory. */
+  registeredAliases: string[];
+  /** The distinct ownership records found under those keys (deduped). */
+  records: { key: string; record: BackgroundExecutionRecord }[];
+  /** Two or more DIFFERENT records under the same real directory. */
+  conflicting: boolean;
+}
+
+function sameOwnershipRecord(a: BackgroundExecutionRecord, b: BackgroundExecutionRecord): boolean {
+  return a.state === b.state
+    && a.effectiveOwner === b.effectiveOwner
+    && a.generation === b.generation
+    && a.operationId === b.operationId
+    && a.previousOwner === b.previousOwner
+    && a.targetOwner === b.targetOwner;
+}
+
+function resolveOwnershipIdentity(args: {
+  readonly manifest: InstallManifest;
+  readonly workspaceDir: string;
+  readonly platform: string;
+  readonly realpath: RealpathProbe;
+}): OwnershipIdentityResolution {
+  const { manifest, workspaceDir, platform, realpath } = args;
+  const api = platform === 'win32' ? path.win32 : path.posix;
+  const identityOf = (candidate: string): string => {
+    const lexical = api.resolve(candidate);
+    const resolved = realpath(lexical) ?? lexical;
+    return platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  const target = identityOf(workspaceDir);
+  const registeredAliases = (manifest.workspaces ?? []).filter((entry) => identityOf(entry) === target);
+  const records: { key: string; record: BackgroundExecutionRecord }[] = [];
+  for (const key of registeredAliases) {
+    const record = manifest.backgroundExecutions?.[key];
+    if (record !== undefined && !records.some((entry) => sameOwnershipRecord(entry.record, record))) {
+      records.push({ key, record });
+    }
+  }
+  return { registeredAliases, records, conflicting: records.length > 1 };
+}
+
+/** The workspaces[] key a NEW record for this real directory is written under. */
+function ownershipWriteKey(identity: OwnershipIdentityResolution, canonical: string): string {
+  if (identity.records[0] !== undefined) return identity.records[0].key;
+  if (identity.registeredAliases.includes(canonical)) return canonical;
+  return identity.registeredAliases[0] ?? canonical;
+}
+
+const OWNER_ALIAS_CONFLICT_NEXT_ACTION =
+  'Two registered path spellings of the same directory carry DIFFERENT ownership records; a writer must reconcile ~/.pd/install.json (remove the duplicate workspace entry / record) before background execution decisions.';
 
 /**
  * The single read-side projection of §8.4 ownership for ONE workspace.
@@ -429,10 +507,23 @@ export function readWorkspaceBackgroundOwnership(options: ReadOwnershipOptions):
       nextAction: 'The PD install manifest failed validation; repair ~/.pd/install.json before background execution decisions.',
     };
   }
-  const api = (options.platform ?? process.platform) === 'win32' ? path.win32 : path.posix;
-  // Canonicalize with the manifest's own path rules (platform-injected tests).
+  const platform = options.platform ?? process.platform;
+  const api = platform === 'win32' ? path.win32 : path.posix;
   const canonical = api.resolve(options.workspaceDir);
-  const record = parsed.manifest.backgroundExecutions?.[canonical];
+  const identity = resolveOwnershipIdentity({
+    manifest: parsed.manifest,
+    workspaceDir: canonical,
+    platform,
+    realpath: options.realpath ?? defaultRealpath,
+  });
+  if (identity.conflicting) {
+    return {
+      status: 'manifest_unreadable',
+      reason: `owner_alias_conflict:${identity.records.map((entry) => entry.key).join('|')}`,
+      nextAction: OWNER_ALIAS_CONFLICT_NEXT_ACTION,
+    };
+  }
+  const record = identity.records[0]?.record;
   if (record === undefined) {
     return { status: 'legacy_owned', source: 'no_record', generation: 0 };
   }
@@ -472,6 +563,8 @@ export interface TransitionBackgroundExecutionInput {
   now?: () => Date;
   staleMs?: number;
   fsOps?: CasFsOps;
+  /** Realpath probe for alias identity (default: native realpath). */
+  realpath?: RealpathProbe;
 }
 
 export interface TransitionBackgroundExecutionSuccess {
@@ -619,10 +712,24 @@ export function transitionWorkspaceBackgroundExecution(
     const pathApi = platform === 'win32' ? path.win32 : path.posix;
     const canonical = pathApi.resolve(input.workspaceDir);
 
+    // Identity is the REAL directory: the record may live under any
+    // workspaces[] spelling of it (PRI-1282 review). Conflicting records
+    // under one real directory refuse — never guess which alias wins.
+    const identity = resolveOwnershipIdentity({ manifest, workspaceDir: canonical, platform, realpath: input.realpath ?? defaultRealpath });
+    if (identity.conflicting) {
+      return {
+        ok: false,
+        reason: 'manifest_unreadable',
+        message: `conflicting ownership records across path aliases: ${identity.records.map((entry) => entry.key).join(' vs ')}`,
+        nextAction: OWNER_ALIAS_CONFLICT_NEXT_ACTION,
+      };
+    }
+
     // Workspace registration: begin_handover may register (single atomic write
     // together with the record); every other kind requires existing membership
-    // because a marker key outside `workspaces[]` cannot parse back.
-    const registered = (manifest.workspaces ?? []).includes(canonical);
+    // because a marker key outside `workspaces[]` cannot parse back. An alias
+    // registration for the same real directory counts as registered.
+    const registered = identity.registeredAliases.length > 0;
     if (!registered && !(input.kind === 'begin_handover' && input.registerWorkspace === true)) {
       return {
         ok: false,
@@ -633,7 +740,8 @@ export function transitionWorkspaceBackgroundExecution(
     }
 
     const spec = TRANSITION_SPECS[input.kind];
-    const currentRecord = manifest.backgroundExecutions?.[canonical];
+    const recordKey = ownershipWriteKey(identity, canonical);
+    const currentRecord = identity.records[0]?.record;
     const currentState: BackgroundExecutionState = currentRecord?.state ?? 'legacy_owned';
     const currentGeneration = currentRecord?.generation ?? 0;
 
@@ -695,8 +803,9 @@ export function transitionWorkspaceBackgroundExecution(
     });
 
     // Mutate the RAW object (unknown top-level fields survive) using the same
-    // single-key authority helper the schema exposes.
-    const nextRecords = setInstallManifestBackgroundExecution(manifest, { workspaceDir: canonical, platform }, target);
+    // single-key authority helper the schema exposes. The record key keeps
+    // the established workspaces[] spelling for this real directory.
+    const nextRecords = setInstallManifestBackgroundExecution(manifest, { workspaceDir: recordKey, platform }, target);
     if (Object.keys(nextRecords).length > 0) {
       raw.backgroundExecutions = nextRecords;
     } else {
@@ -711,7 +820,7 @@ export function transitionWorkspaceBackgroundExecution(
 
     // Re-validate the exact bytes we are about to land.
     const revalidated = parseInstallManifest(raw, input.platform);
-    if (!revalidated.manifest || revalidated.manifest.backgroundExecutions?.[canonical] === undefined) {
+    if (!revalidated.manifest || revalidated.manifest.backgroundExecutions?.[recordKey] === undefined) {
       return {
         ok: false,
         reason: 'io_error',
