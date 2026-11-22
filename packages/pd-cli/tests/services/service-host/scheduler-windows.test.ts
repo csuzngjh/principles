@@ -247,6 +247,9 @@ describe('createWindowsSchedulerAdapter', () => {
     expect(result.facts.registered).toBe(true);
     expect(result.facts.enabled).toBe(true);
     expect(calls.length).toBe(3);
+    // Register-ScheduledTask does not overwrite — the refresh must Unregister
+    // our own task first (real Windows 0x800700b7 evidence).
+    expect(scriptAt(calls, 1)).toContain('Unregister-ScheduledTask');
     expect(scriptAt(calls, 1)).toContain('Register-ScheduledTask');
     // The refreshed definition keeps the enabled flag ON (not the fresh-install false).
     expect(fileIo.writeLog.length).toBe(1);

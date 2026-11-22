@@ -542,6 +542,12 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
   $xmlText = Get-Content -LiteralPath $env:PD_TASK_XML -Raw -Encoding UTF8
   $user = "$env:USERDOMAIN\\$env:USERNAME" -replace '&','&amp;'
   $xmlText = $xmlText.Replace('__PD_TASK_USER__', $user)
+  # Register-ScheduledTask does NOT overwrite an existing task — it fails
+  # with HRESULT 0x800700b7 "Cannot create a file when that file already
+  # exists" (real Windows Server 2025 CI evidence). Drop our own
+  # registration first so the rewrite is idempotent on refresh (the task
+  # is provably ours — the ownership check ran before this script).
+  Unregister-ScheduledTask -TaskName '${name}' -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
   Register-ScheduledTask -TaskName '${name}' -Xml $xmlText | Out-Null
   [PSCustomObject]@{ done = $true } | ConvertTo-Json -Compress`;
     return runMutation(registration, body, { extraEnv: { PD_TASK_XML: xmlFile } });

@@ -50,8 +50,6 @@ const unelevatedAdapter = createWindowsSchedulerAdapter({
 
 /** Set by the regime probe (first test): which adapter the lifecycle uses. */
 let lifecycleAdapter: SchedulerAdapter = unelevatedAdapter;
-/** True when the probe's unelevated install already registered the task (standard hosts). */
-let probeInstalled = false;
 /**
  * Set when the hardened-host regime cannot reach an elevated context (UAC
  * consent unavailable in a headless/disconnected session — observed live):
@@ -127,7 +125,6 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
       if (result.ok) {
         // Standard host: the unelevated production path registered the task.
         lifecycleAdapter = unelevatedAdapter;
-        probeInstalled = true;
         expect(result.facts.registered).toBe(true);
         expect(result.facts.enabled).toBe(false);
         return;
@@ -169,9 +166,10 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
       expect(result.ok, explain(result)).toBe(true);
       if (!result.ok) return;
       // Standard host: the probe already registered — this re-install is the
-      // idempotent no-op. Hardened host: the elevated bridge does the real
+      // refresh rewrite (changed=true, definition re-registered preserving
+      // OS state). Hardened host: the elevated bridge does the real first
       // registration here.
-      expect(result.changed).toBe(!probeInstalled);
+      expect(result.changed).toBe(true);
       expect(result.facts.registered).toBe(true);
       expect(result.facts.enabled).toBe(false);
       expect(result.facts.platform).toBe('win32');
@@ -189,7 +187,10 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
       const result = await lifecycleAdapter.install(registration);
       expect(result.ok, explain(result)).toBe(true);
       if (!result.ok) return;
-      expect(result.changed).toBe(false);
+      // Refresh semantics: the definition is re-registered (Unregister →
+      // Register) preserving interval and the DISABLED state — a converged
+      // rewrite, not a skipped no-op.
+      expect(result.changed).toBe(true);
       expect(result.facts.enabled).toBe(false);
     },
   );
