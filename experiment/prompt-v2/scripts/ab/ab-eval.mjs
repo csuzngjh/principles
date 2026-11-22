@@ -1,9 +1,15 @@
 /**
  * PD-SPEC-001 Phase 5 — independent blind evaluator (SPEC §7).
  *
- * Evaluator model: openrouter baidu/ernie-5.5-flash-preview:free — a DIFFERENT
- * provider+model from the generation model (GLM-5.3-Flash on the AMD
- * endpoint), satisfying §7.4's independent-model preference. Scoring follows
+ * Evaluator model: ZAI glm-5.3 (open.bigmodel.cn, ZAI_API_KEY) — the SAME
+ * model family as the generation model (GLM-5.3), per SPEC §7.4's
+ * same-model-family fallback with the relation disclosed at the record level
+ * by the judge protocol. Historical note (2026-11-22, PRI-1259): this header
+ * previously claimed openrouter baidu/ernie-5.5-flash-preview:free as a
+ * different-provider evaluator; that never matched the implementation below
+ * (callEvaluator has always targeted ZAI glm-5.3). Comment-only correction —
+ * rubrics, prompts, output format, evaluation records and hashes unchanged.
+ * Scoring follows
  * the SPEC §6.2 weighted rubrics; every dimension requires Score/Evidence/
  * Rationale/Deduction/Severity/DownstreamImpact (§7.3). Blind: the evaluator
  * sees only Output-A/Output-B in the randomized order fixed by ab-blindpack.
