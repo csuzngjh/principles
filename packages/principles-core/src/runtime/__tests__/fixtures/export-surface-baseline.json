@@ -431,7 +431,7 @@
     {
       "entry": "./runtime",
       "source": "src/runtime/index.ts",
-      "count": 2058,
+      "count": 2057,
       "symbols": [
         "ADAPTIVE_DELIVERY_RECORD_ENUMS",
         "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -2262,7 +2262,6 @@
         "isMockLeakPath",
         "isMvpChannel",
         "isOwnerEvidenceScopeError",
-        "isOwnerExplicitCorrectionChannel",
         "isOwnerExplicitManual",
         "isOwnerExplicitStatementReason",
         "isOwnerManualCorrectionEvidence",

@@ -371,18 +371,6 @@
     },
     {
       "entry": "./runtime",
-      "symbol": "isOwnerExplicitCorrectionChannel",
-      "kind": "value",
-      "consumers": [
-        "packages/host-runtime/src/source-revocation-sweep.ts"
-      ],
-      "whyNotInternal": "The revocation sweep must classify explicit Owner submission channels so Owner statements survive a host revocation; the classification is one shared judgment with the recall/assembler/console read gates.",
-      "alternativeConsidered": "A channel list literal inside the sweep, rejected because four read paths would drift on the next channel addition.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime",
       "symbol": "isOwnerExplicitStatementReason",
       "kind": "value",
       "consumers": [

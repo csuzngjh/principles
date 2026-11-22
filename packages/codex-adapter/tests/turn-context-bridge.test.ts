@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig } from '@principles/core/runtime';
+import { getDefaultPdConfig, fingerprintStatement } from '@principles/core/runtime';
 import { processHookInvocation } from '../src/pd-hook.js';
 import { registerCurrentTurnOwnerStatement, writeCurrentTurnContext, TURN_CONTEXT_FILENAME_PREFIX, TURN_CONTEXT_MAX_AGE_MS } from '../src/ingestion/turn-context.js';
 import { writeGrantedCodexConsent } from './helpers/consent.js';
@@ -219,8 +219,22 @@ describe('hook publishes the live turn context', () => {
   });
 });
 
+/** Append a genuine user-message transcript record for `turnId` (the shape
+ * the verbatim Owner-confirmation check reads: response_item user.text). */
+function appendUserTurnToTranscript(ws: Workspace, text: string, turnId = TURN_1): void {
+  fs.appendFileSync(ws.transcriptPath, JSON.stringify({
+    timestamp: new Date().toISOString(),
+    type: 'response_item',
+    payload: {
+      type: 'message', role: 'user',
+      content: [{ type: 'input_text', text }],
+      internal_chat_message_metadata_passthrough: { turn_id: turnId, content_item_kinds: ['user.text'] },
+    },
+  }) + '\n');
+}
+
 describe('agent-assisted registration through the real chain', () => {
-  it('registers one real pain + one task from an explicit no-prefix request', async () => {
+  it('registers one real pain + one task from an explicit no-prefix request, classified Agent-derived when the Owner words are not verifiable in the transcript', async () => {
     const ws = makeWorkspace(true);
     const result0 = await processHookInvocation(promptPayload(ws, '请用 PD 记录这条痛苦：' + OWNER_WORDS), { CODEX_HOME: ws.codexHome }, ws.root);
     expect(result0.stderr.some((line) => line.includes('owner_statement_received'))).toBe(false);
@@ -236,12 +250,43 @@ describe('agent-assisted registration through the real chain', () => {
     expect(pains).toHaveLength(1);
     expect(pains[0].source).toBe('user_correction');
     expect(pains[0].text).toBe(OWNER_WORDS);
-    expect(pains[0].reason).toContain('agent-assisted');
+    // The fixture transcript does not contain the Owner words verbatim → the
+    // statement persists as Agent-derived (channel disclosed, no owner
+    // classification) — it must NOT carry the owner_manual exemption.
+    expect(pains[0].reason).toContain('owner confirmation unverified');
     expect(markers).toHaveLength(1);
     expect(markers[0].diagnostician_task_id).toContain(pains[0].canonical_pain_id);
-    const payload = JSON.parse(markers[0].task_payload_json) as { correctionEvidence?: { channel?: string; text?: string } };
+    const payload = JSON.parse(markers[0].task_payload_json) as { correctionEvidence?: { channel?: string; text?: string; classification?: string; ownerConfirmation?: unknown } };
     expect(payload.correctionEvidence?.channel).toBe('codex_explicit_agent');
     expect(payload.correctionEvidence?.text).toBe(OWNER_WORDS);
+    expect(payload.correctionEvidence?.classification).toBeUndefined();
+    expect(payload.correctionEvidence?.ownerConfirmation).toBeUndefined();
+    expect(stateDbTaskIds(ws.root)).toHaveLength(1);
+  });
+
+  it('classifies the statement owner_manual when the submitted words appear verbatim in the current turn transcript', async () => {
+    const ws = makeWorkspace(true);
+    const prompt = '请用 PD 记录这条痛苦：' + OWNER_WORDS;
+    // The Owner's own current-turn message, in the host-validated transcript —
+    // the credible Owner interaction record the ruling requires.
+    appendUserTurnToTranscript(ws, prompt);
+    const result0 = await processHookInvocation(promptPayload(ws, prompt), { CODEX_HOME: ws.codexHome }, ws.root);
+    expect(result0.stderr.some((line) => line.includes('owner_statement_received'))).toBe(false);
+    const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
+    expect(receipt.status).toBe('received');
+    if (receipt.status !== 'received') return;
+    const db = trajectoryOf(ws.root);
+    const pains = db.prepare('SELECT canonical_pain_id, text, reason, source FROM pain_events').all() as { canonical_pain_id: string; text: string; reason: string; source: string }[];
+    const markers = db.prepare('SELECT task_payload_json FROM governance_signal_admissions').all() as { task_payload_json: string }[];
+    db.close();
+    expect(pains).toHaveLength(1);
+    expect(pains[0].reason).toContain('agent-assisted, owner confirmed');
+    const payload = JSON.parse(markers[0].task_payload_json) as { correctionEvidence?: { channel?: string; text?: string; classification?: string; ownerConfirmation?: { kind?: string; statementFingerprint?: string } } };
+    expect(payload.correctionEvidence?.channel).toBe('codex_explicit_agent');
+    expect(payload.correctionEvidence?.classification).toBe('owner_statement');
+    // The confirmation binds to the PERSISTED (sanitized) text.
+    expect(payload.correctionEvidence?.ownerConfirmation?.kind).toBe('owner_verbatim_turn_match');
+    expect(payload.correctionEvidence?.ownerConfirmation?.statementFingerprint).toBe(fingerprintStatement(payload.correctionEvidence?.text ?? ''));
     expect(stateDbTaskIds(ws.root)).toHaveLength(1);
   });
 

@@ -2237,7 +2237,10 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
     && own(correctionEvidence, 'ownerConfirmation') === undefined;
   if (correctionEvidence !== undefined && !hasOwnerStatement && !isAgentDerivedStatement) return false;
   const evidence = own(value, 'evidence');
-  if (!Array.isArray(evidence) || (evidence.length === 0 && !hasOwnerStatement) || evidence.length > 8) return false;
+  // An explicit submission — owner-confirmed OR agent-derived (CR-02) — is a
+  // first-class input basis, so the evidence array may legitimately be empty
+  // (e.g. conversation-ingestion off → no persisted observation to bind).
+  if (!Array.isArray(evidence) || (evidence.length === 0 && !hasOwnerStatement && !isAgentDerivedStatement) || evidence.length > 8) return false;
   for (const entry of evidence) {
     if (!isRecord(entry)) return false;
     const sourceRef = own(entry, 'sourceRef');

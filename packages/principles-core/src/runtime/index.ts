@@ -457,7 +457,6 @@ export { evaluateAndPersistAdmissionFromStore } from './pain-signal-bridge.js';
 export {
   GOVERNANCE_OBSERVATION_SOURCE_REF_PREFIX,
   denyAllSourceMaterialAuthorization,
-  isOwnerExplicitCorrectionChannel,
   isOwnerExplicitStatementReason,
   isOwnerManualCorrectionEvidence,
 } from './source-material-authorization.js';
