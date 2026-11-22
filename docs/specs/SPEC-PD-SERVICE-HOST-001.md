@@ -410,6 +410,7 @@ ADR-0020 §11.6 dated amendment（2026-11-19）已记录 Owner 对本 SPEC 窄�
 - **风险**：跨用户/系统级误注册；凭据进入计划任务参数。
 - **验收条件**：§10 全部条款；AC-08 重叠触发收敛。
 - **退出条件**：登录周期触发在真实安装上稳定 ≥ 约定观察窗；禁用/卸载可逆。
+- **实施状态（2026-11-22，PRI-1281）**：已实施——三平台 Scheduler Adapter（Windows Task Scheduler / macOS LaunchAgent / Linux systemd --user，统一 install/enable/disable/status/uninstall 契约）、managed 执行入口（裸 `pd service run-once --json` 按 §8.4 只消费 `effectiveOwner=service_host`）、统一只读状态契约 `pd.service-status.v1`、installer 桥接（显式同意注册 / 升级 refresh-if-registered / 卸载撤销）、Console 只读 `GET /api/service-host/status`。Windows 完成真实 Task Scheduler 生命周期验收（真实注册/启用/真实 OS 启动/禁用/卸载/幂等/零遗留；含权限拒绝不伪装未安装的真实验证——验收主机策略拒绝非提升注册，全生命周期经提升 PowerShell 桥执行并在测试中如实披露）。macOS / Linux 为伪造命令边界下的单元测试，真实平台验收 **NOT_VERIFIED**（运维矩阵与命令文档见 `docs/runbooks/PD_SERVICE_HOST_SCHEDULER.md`；真实安装验收报告见 `docs/reports/PD_SERVICE_HOST_PHASE3_ACCEPTANCE_20261122.md`）。
 
 ### Phase 4 — OpenClaw 解耦接入
 

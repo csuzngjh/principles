@@ -69,13 +69,17 @@ import {
   type ShadowExecutionRecord,
 } from './status/service-run-status.js';
 import type {
-  AdapterCycleResult,
   WorkerAdapter,
   WorkerHostKind,
   WorkspaceDescriptor,
   resolveActiveReleaseCliEntry,
 } from './worker-adapter.js';
-import { WORKER_HOST_KINDS, sanitizeWorkerText } from './worker-adapter.js';
+import { WORKER_HOST_KINDS } from './worker-adapter.js';
+import {
+  carriedProgress,
+  dispatchWorkspaceAdapters,
+  workspaceStateFor,
+} from './workspace-dispatch.js';
 import type { WorkerProcessOptions, WorkerProcessResult } from './worker-process.js';
 import { createCodexWorkerAdapter } from './worker-adapter-codex.js';
 import { createWorkbuddyWorkerAdapter } from './worker-adapter-workbuddy.js';
@@ -210,51 +214,6 @@ function readPreviousProgress(pdHome: string): { at: Map<string, string>; verdic
     at.set(key, entry.lastProgressAt);
   }
   return { at, verdict: read.verdict };
-}
-
-function workspaceStateFor(outcome: AdapterCycleResult['cycleOutcome']): ShadowExecutionRecord['workspaceState'] {
-  switch (outcome) {
-    case 'cycle_completed':
-    case 'cycle_completed_without_business_progress':
-      return 'completed';
-    case 'paused':
-      return 'paused';
-    case 'degraded':
-      return 'degraded';
-    case 'failed':
-    case 'timeout':
-    case 'cancelled':
-      return 'failed';
-    default:
-      return 'unavailable';
-  }
-}
-
-/**
- * Carry-forward rule (task §6 + F7 review fix): EVIDENCED task progress
- * wins for ANY outcome (a degraded cycle whose task diff shows a real
- * state change did make persisted progress — the degraded reason and the
- * progress timestamp are independent facts); otherwise a cycle_completed
- * run's cycle-evidence timestamp applies; otherwise the previous value is
- * preserved. Never the completion time of an empty/failed cycle.
- */
-function carriedProgress(result: AdapterCycleResult, previous: string | undefined): Pick<ShadowExecutionRecord, 'lastProgressAt' | 'lastProgressSource'> {
-  if (result.businessProgress.taskStateChanged && result.lastProgressAt !== null) {
-    return { lastProgressAt: result.lastProgressAt, lastProgressSource: 'task_state_change' };
-  }
-  // P2-02 (final-remediation review): a non-null lastProgressAt is real
-  // evidenced progress for ANY outcome — a paused/degraded cycle that
-  // persisted catch-up/downstream work keeps its timestamp too, not only a
-  // completed one.
-  if (result.cycleOutcome === 'cycle_completed' || result.lastProgressAt !== null) {
-    return {
-      lastProgressAt: result.lastProgressAt ?? previous ?? null,
-      lastProgressSource: result.lastProgressAt !== null ? 'cycle_evidence' : previous !== undefined ? 'previous_run' : null,
-    };
-  }
-  // No business progress this cycle (empty cycle, pause, failure, kill):
-  // keep the last known truthful value — never the cycle completion time.
-  return { lastProgressAt: previous ?? null, lastProgressSource: previous !== undefined ? 'previous_run' : null };
 }
 
 /** Assemble the versioned shadow status document (v1 + additive shadow section). */
@@ -497,27 +456,37 @@ async function completeShadowRun(identity: InstallIdentity, context: {
     dispatchedIdentities.add(requestedIdentity);
     const descriptor = buildDescriptor(entry);
     const hostKinds = options.hostFilter !== undefined ? [options.hostFilter] : [...WORKER_HOST_KINDS];
-    // CR review fix + P1-01: `perWorkspaceTimeoutMs` is the budget for the
-    // WHOLE workspace — serial bound adapters share one deadline instead of
-    // each receiving a fresh full timeout, and the deadline is a MONOTONIC
-    // timestamp (performance.now) so wall-clock adjustments cannot stretch
-    // or collapse it.
-    const workspaceDeadline = performance.now() + timeoutMs;
-    let ranAny = false;
-    for (const hostKind of hostKinds) {
-      // R2 review fix: same pre-dispatch check inside the host loop — an
-      // interrupt between two bound adapters skips the queued one.
-      if (isAborted()) break;
-      const adapter = context.adapters[hostKind];
-      const support = adapter.supports(descriptor);
-      if (!support.supported) {
-        continue; // Not binding evidence for THIS host — not an error; other hosts may still run.
-      }
-      ranAny = true;
-      const remainingMs = workspaceDeadline - performance.now();
-      if (remainingMs <= 0) {
-        // Budget exhausted by an earlier adapter on this workspace — record
-        // the timeout truthfully instead of starting another Worker.
+    const previousAt = previousProgress.at.get(requestedIdentity);
+    const hadPrevious = previousProgress.at.has(requestedIdentity);
+    // Shared bounded dispatch (workspace-dispatch): one monotonic budget for
+    // the WHOLE workspace, serial bound adapters, abort checks before every
+    // dispatch — identical semantics in shadow and managed modes.
+    const dispatch = await dispatchWorkspaceAdapters({
+      workspaceDir: entry.canonicalDir,
+      descriptor,
+      hostKinds,
+      timeoutMs,
+      adapters: context.adapters,
+      activeRelease,
+      identity,
+      inheritedEnv: context.env,
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+      probes: {
+        ...(context.options.probes?.spawnWorkerProcess !== undefined
+          ? { spawnWorkerProcess: context.options.probes.spawnWorkerProcess }
+          : {}),
+        ...(context.options.probes?.resolveCliEntry !== undefined
+          ? { resolveCliEntry: context.options.probes.resolveCliEntry }
+          : {}),
+        ...(context.options.probes?.now !== undefined ? { now: context.options.probes.now } : {}),
+      },
+      isAborted,
+    });
+    let supportedAny = false;
+    for (const { hostKind, outcome } of dispatch.entries) {
+      if (outcome.kind === 'unsupported') continue; // not binding evidence for THIS host; other hosts may still run
+      supportedAny = true;
+      if (outcome.kind === 'budget_exhausted') {
         executions.push({
           requestedDir: requested,
           canonicalDir: entry.canonicalDir,
@@ -526,63 +495,37 @@ async function completeShadowRun(identity: InstallIdentity, context: {
           workspaceState: 'failed',
           refusalReason: 'workspace_timeout_budget_exhausted',
           refusalNextAction: 'The per-workspace timeout budget was consumed by an earlier adapter cycle on this workspace; raise --timeout-ms or select hosts in separate runs.',
-          lastProgressAt: previousProgress.at.get(requestedIdentity) ?? null,
-          lastProgressSource: previousProgress.at.has(requestedIdentity) ? 'previous_run' : null,
+          lastProgressAt: previousAt ?? null,
+          lastProgressSource: hadPrevious ? 'previous_run' : null,
         });
         continue;
       }
-      let result: AdapterCycleResult;
-      try {
-        result = await adapter.executeOnce({
-          workspaceDir: entry.canonicalDir,
-          activeRelease,
-          invocationId: randomUUID(),
-          timeoutMs: remainingMs,
-          // P1-01: the absolute monotonic deadline rides along — the adapter
-          // checks it again before spawn and before the post-cycle snapshot.
-          deadlineAtMs: workspaceDeadline,
-          ...(options.signal !== undefined ? { signal: options.signal } : {}),
-          identity,
-          inheritedEnv: context.env,
-          probes: {
-            ...(context.options.probes?.spawnWorkerProcess !== undefined
-              ? { spawnWorkerProcess: context.options.probes.spawnWorkerProcess }
-              : {}),
-            ...(context.options.probes?.resolveCliEntry !== undefined
-              ? { resolveCliEntry: context.options.probes.resolveCliEntry }
-              : {}),
-            ...(context.options.probes?.now !== undefined ? { now: context.options.probes.now } : {}),
-          },
-        });
-      } catch (error) {
-        // An adapter must never take down the whole run (FR-07); the same
-        // structured failed shape is recorded for this workspace only.
-        const message = error instanceof Error ? error.message : String(error);
+      if (outcome.kind === 'adapter_threw') {
         executions.push({
           requestedDir: requested,
           canonicalDir: entry.canonicalDir,
           hostKind,
           admission: 'admitted',
           workspaceState: 'failed',
-          lastProgressAt: previousProgress.at.get(requestedIdentity) ?? null,
-          lastProgressSource: previousProgress.at.has(requestedIdentity) ? 'previous_run' : null,
-          refusalReason: `adapter_threw:${sanitizeWorkerText(message, 160)}`,
+          lastProgressAt: previousAt ?? null,
+          lastProgressSource: hadPrevious ? 'previous_run' : null,
+          refusalReason: `adapter_threw:${outcome.sanitizedMessage}`,
           refusalNextAction: 'The Worker Adapter threw before returning a structured result; inspect the adapter and workspace state, then re-run the shadow cycle.',
         });
         continue;
       }
-      const carried = carriedProgress(result, previousProgress.at.get(requestedIdentity));
+      const carried = carriedProgress(outcome.result, previousAt);
       executions.push({
         requestedDir: requested,
         canonicalDir: entry.canonicalDir,
         hostKind,
         admission: 'admitted',
-        workspaceState: workspaceStateFor(result.cycleOutcome),
+        workspaceState: workspaceStateFor(outcome.result.cycleOutcome),
         ...carried,
-        execution: result,
+        execution: outcome.result,
       });
     }
-    if (!ranAny) {
+    if (!supportedAny) {
       // The abort landed between the workspace gate and the first adapter
       // dispatch — skip this workspace entirely rather than recording a
       // refusal the workspace never earned.
