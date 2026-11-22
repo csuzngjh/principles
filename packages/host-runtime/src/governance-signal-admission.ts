@@ -67,6 +67,7 @@ import {
 } from './production-pain-evidence.js';
 import { promoteGovernanceEvidence, ensureGovernanceSchema, type ObservationDatabaseFactory } from './governance-observation-store.js';
 import { readSourceMaterialAuthorization } from './source-material-authorization.js';
+import { readConversationIngestionConsent } from './conversation-ingestion/consent.js';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { isAutomaticPainSubmissionAuthorized } from './auto-pain-authorization.js';
 import { createHostIntentDocReader } from './intent-doc-reader.js';
@@ -1537,13 +1538,21 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
       }
       // Directive A4: latest-consent re-validation at claim time. The row's
       // own host attribution (host_kind column) is the authority — never the
-      // caller's assumption. Blocked consent terminates the row instead of
-      // yielding a candidate whose text would flow into a model call.
-      const authorization = readSourceMaterialAuthorization({
-        workspaceDir: path.resolve(input.workspaceDir),
-        hostKind: parsed.hostKind === 'workbuddy' ? 'workbuddy' : 'codex',
-      });
-      if (authorization.status === 'blocked') {
+      // caller's assumption. The three ledger states mirror the R3 sweep
+      // EXACTLY (one authorization judgment, directive B2):
+      //   - a RECORDED non-granted decision (revoked/pending/failed) is a
+      //     revocation: the pending row is TERMINATED here (CAS on the exact
+      //     payload) instead of yielding a candidate whose text would flow
+      //     into a model call;
+      //   - a MISSING record is NOT a revocation (the sweep skips it too) —
+      //     the lifecycle proceeds; pending rows on ledger-less workspaces
+      //     are historical admission-chain output, not revoked material;
+      //   - an UNREADABLE ledger fails closed: no claim, no termination.
+      const consentRead = readConversationIngestionConsent(path.resolve(input.workspaceDir), parsed.hostKind === 'workbuddy' ? 'workbuddy' : 'codex');
+      if (!consentRead.ok) {
+        return { ok: false, reason: `pending_claim_consent_unreadable:${consentRead.reason}`, nextAction: `${consentRead.nextAction} — pending rows stay durable and unclaimed until the ledger is readable.` };
+      }
+      if (consentRead.record !== null && consentRead.record.decision !== 'granted') {
         const { changes } = db.prepare(`UPDATE governance_signal_admissions
           SET decision = 'abandoned', reason = 'source_revoked', task_payload_json = ?, updated_at = ?
           WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
@@ -1641,12 +1650,17 @@ export function verifyPendingClaimForClassification(input: VerifyPendingClaimInp
     if (currentClaimToken === undefined || currentClaimToken !== input.claimToken) {
       return { ok: true, allowed: false, reason: 'claim_not_owned' };
     }
-    const authorization = readSourceMaterialAuthorization({
-      workspaceDir: path.resolve(input.workspaceDir),
-      hostKind: parsed.hostKind === 'workbuddy' ? 'workbuddy' : 'codex',
-    });
-    if (authorization.status === 'blocked') {
-      return { ok: true, allowed: false, reason: authorization.reason === 'consent_revoked' ? 'source_revoked' : 'consent_not_granted' };
+    // Same three-state ledger semantics as the claim path and the R3 sweep
+    // (one authorization judgment): a RECORDED non-granted decision blocks
+    // the model request; a MISSING record is not a revocation (the claim
+    // path let it through, and so must the pre-classifier gate); an
+    // UNREADABLE ledger fails closed.
+    const consentRead = readConversationIngestionConsent(path.resolve(input.workspaceDir), parsed.hostKind === 'workbuddy' ? 'workbuddy' : 'codex');
+    if (!consentRead.ok) {
+      return { ok: false, reason: `pending_claim_consent_unreadable:${consentRead.reason}`, nextAction: consentRead.nextAction };
+    }
+    if (consentRead.record !== null && consentRead.record.decision !== 'granted') {
+      return { ok: true, allowed: false, reason: consentRead.record.decision === 'revoked' ? 'source_revoked' : 'consent_not_granted' };
     }
     return { ok: true, allowed: true };
   } finally {

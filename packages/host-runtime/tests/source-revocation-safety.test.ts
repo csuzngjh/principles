@@ -721,6 +721,27 @@ describe('PRI-1283 r2 A — pending review terminated by revocation (real SQLite
     const admitted = admitGovernanceSignals({ workspaceDir, candidates: [candidate], now: new Date('2026-11-21T12:01:00.000Z'), keywordStore: buildSharedSeedKeywordStore() });
     expect(admitted.ok && admitted.outcomes[0]?.disposition).toBe('pending_llm_review');
   });
+
+  it('ledger semantics: MISSING is not a revocation (claim proceeds, row intact); UNREADABLE fails closed without consuming or terminating', async () => {
+    // MISSING record: the pending lifecycle proceeds exactly like the R3
+    // sweep's own skip decision (one authorization judgment).
+    seedPendingReviewWithSecret();
+    fs.rmSync(path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'));
+    const claimMissing = claimPendingCorrectionCandidates({ workspaceDir, now: new Date('2026-11-21T11:05:00.000Z') });
+    expect(claimMissing.ok).toBe(true);
+    if (claimMissing.ok) {
+      expect(claimMissing.candidates.length).toBe(1);
+      expect(claimMissing.revoked).toBe(0);
+    }
+    expect(markerRow().decision).toBe('pending_llm_review');
+
+    // UNREADABLE ledger: fail closed — no candidate, no termination.
+    fs.writeFileSync(path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'), '{not json');
+    const claimUnreadable = claimPendingCorrectionCandidates({ workspaceDir, now: new Date('2026-11-21T11:06:00.000Z') });
+    expect(claimUnreadable.ok).toBe(false);
+    if (!claimUnreadable.ok) expect(claimUnreadable.reason).toContain('consent_unreadable');
+    expect(markerRow().decision).toBe('pending_llm_review');
+  });
 });
 
 // ── Review round 2 (directive B4): explicit Owner statement preservation ─────
