@@ -44,10 +44,10 @@ import {
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
-const USAGE = 'usage: node ab-run.mjs --config <experiment-config.json> --run-id <id> [--samples S1,S2] [--arms <armA>,<armB>] [--shard-id <id>] [--max-formation-loops N]';
+const USAGE = 'usage: node ab-run.mjs --config <experiment-config.json> --run-id <id> [--samples S1,S2] [--arms <armA>,<armB>] [--shard-id <id>] [--max-formation-loops N] [--reps N] [--formation-depth N]';
 
 function parseArgs(argv) {
-  const out = { samples: null, arms: null, shardId: 'solo', maxFormationLoops: 24 };
+  const out = { samples: null, arms: null, shardId: 'solo', maxFormationLoops: 24, reps: null, formationDepth: null };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--run-id') out.runId = argv[++i];
@@ -55,6 +55,8 @@ function parseArgs(argv) {
     else if (a === '--arms') out.arms = argv[++i].split(',');
     else if (a === '--shard-id') out.shardId = argv[++i];
     else if (a === '--max-formation-loops') out.maxFormationLoops = Number(argv[++i]);
+    else if (a === '--reps') out.reps = Number(argv[++i]);
+    else if (a === '--formation-depth') out.formationDepth = Number(argv[++i]);
     else if (a !== '--config' && !(i > 0 && argv[i - 1] === '--config')) throw new Error(`unknown arg: ${a}`);
   }
   if (!out.runId) throw new Error('--run-id is required');
@@ -324,22 +326,96 @@ async function runSampleArm(sample, arm, rep) {
         newTaskId = j.taskId ?? j.task_id ?? (j.pain ? j.pain.taskId : null) ?? (j.diagnosis ? j.diagnosis.taskId : null);
         record.ingressJson = j;
       } catch { /* stdout tail retained in log */ }
-      if (ingress.code !== 0 || !newTaskId) return fail('ingress_failed', `ingress exit=${ingress.code}, taskId=${newTaskId ?? 'none'}`);
+      // Recovery fix 2026-11-22 (intent ON/OFF pilot): `pain record` can exit 1
+      // with status "degraded" while the diagnosis chain itself COMPLETED and
+      // the stdout carries the real taskId — the reuse gate parked a duplicate
+      // candidate for Owner review (reuse_review_required), which is a
+      // legitimate research state, not an ingress failure. Discarding the
+      // taskId here forced surplus re-records of the same pain.
+      const ingressStatus = record.ingressJson?.status;
+      if (newTaskId && ingress.code !== 0 && ingressStatus === 'degraded') {
+        log('ingress-degraded-usable', {
+          status: ingressStatus,
+          message: String(record.ingressJson?.message ?? '').slice(0, 300),
+          note: 'diagnosis chain completed; degradation = reuse gate parked a duplicate candidate — treated as a completed ingress',
+        });
+      } else if (ingress.code !== 0 || !newTaskId) {
+        return fail('ingress_failed', `ingress exit=${ingress.code}, taskId=${newTaskId ?? 'none'}`);
+      }
     } else {
       log('ingress', { mode: 'resumed', reusedTaskId: newTaskId });
     }
     record.newTaskId = newTaskId;
 
     // 2) Diagnosis chain with lease-reaper CAS + one lease_conflict retry.
-    const reapNow = () => reapExpiredLeases(arm, args.shardId, newTaskId, new Date().toISOString());
-    const reaped = reapNow();
-    if (reaped > 0) log('lease-reap', { reaped });
-    let diag = await runPd(arm, ['diagnose', 'run', '--task-id', newTaskId], { timeoutMs: 3 * 60 * 60_000, shardId: args.shardId });
-    if (diag.code !== 0 && /lease_conflict/.test(diag.stdout + diag.stderr)) {
-      await new Promise((r2) => setTimeout(r2, 10 * 60_000));
-      const reaped2 = reapNow();
-      log('lease-reap-retry', { reaped: reaped2 });
+    // Recovery fix 2026-11-22 (intent ON/OFF pilot): `pain record` runs the
+    // WHOLE diagnosis chain inline (internalization_auto_consumer). When the
+    // ingress JSON already reports a completed chain (furthestStage reached,
+    // parent task + router succeeded in the arm DB), the manual `diagnose run`
+    // is redundant and can only fail lease acquisition ("Task is succeeded,
+    // expected pending/retry_wait"). Skip it and synthesize the diag evidence
+    // from the ingress JSON instead of waiting 10 minutes for a doomed retry.
+    const chainAlreadyDiagnosed = (() => {
+      const wsDbPre = new Database(path.join(armWorkspaceDir(arm, args.shardId), '.pd', 'state.db'), { readonly: true });
+      try {
+        const parent = wsDbPre.prepare('SELECT status FROM tasks WHERE task_id = ?').get(newTaskId)?.status;
+        const router = wsDbPre.prepare('SELECT status FROM tasks WHERE task_id = ?').get(`diag_router-${newTaskId}`)?.status;
+        return { parent, router, done: parent === 'succeeded' && router === 'succeeded' };
+      } finally { wsDbPre.close(); }
+    })();
+    let diag;
+    if (chainAlreadyDiagnosed.done) {
+      log('diagnose-run', {
+        code: 0,
+        skipped: 'already_succeeded',
+        parentStatus: chainAlreadyDiagnosed.parent,
+        routerStatus: chainAlreadyDiagnosed.router,
+        note: 'pain record completed the diagnosis chain inline; redundant diagnose run skipped',
+      });
+      diag = { code: 0, stdout: JSON.stringify(record.ingressJson ?? { status: 'succeeded', taskId: newTaskId }), stderr: '' };
+    } else {
+      const reapNow = () => reapExpiredLeases(arm, args.shardId, newTaskId, new Date().toISOString());
+      const reaped = reapNow();
+      if (reaped > 0) log('lease-reap', { reaped });
       diag = await runPd(arm, ['diagnose', 'run', '--task-id', newTaskId], { timeoutMs: 3 * 60 * 60_000, shardId: args.shardId });
+      // A lease_conflict against an ALREADY-succeeded task is the spurious
+      // inline-consumer condition — verify from the DB BEFORE burning the
+      // 10-minute retry sleep; only a genuinely held lease waits and retries.
+      if (diag.code !== 0 && /lease_conflict/i.test(diag.stdout + diag.stderr)) {
+        const recheck = (() => {
+          const wsDbRe = new Database(path.join(armWorkspaceDir(arm, args.shardId), '.pd', 'state.db'), { readonly: true });
+          try {
+            return {
+              parent: wsDbRe.prepare('SELECT status FROM tasks WHERE task_id = ?').get(newTaskId)?.status,
+              router: wsDbRe.prepare('SELECT status FROM tasks WHERE task_id = ?').get(`diag_router-${newTaskId}`)?.status,
+            };
+          } finally { wsDbRe.close(); }
+        })();
+        if (recheck.parent === 'succeeded' && recheck.router === 'succeeded') {
+          log('diagnose-already-succeeded', recheck);
+          diag = { code: 0, stdout: JSON.stringify(record.ingressJson ?? { status: 'succeeded', taskId: newTaskId }), stderr: '' };
+        } else {
+          await new Promise((r2) => setTimeout(r2, 10 * 60_000));
+          const reaped2 = reapNow();
+          log('lease-reap-retry', { reaped: reaped2 });
+          diag = await runPd(arm, ['diagnose', 'run', '--task-id', newTaskId], { timeoutMs: 3 * 60 * 60_000, shardId: args.shardId });
+          if (diag.code !== 0 && /lease_conflict/i.test(diag.stdout + diag.stderr)) {
+            const recheck2 = (() => {
+              const wsDbRe2 = new Database(path.join(armWorkspaceDir(arm, args.shardId), '.pd', 'state.db'), { readonly: true });
+              try {
+                return {
+                  parent: wsDbRe2.prepare('SELECT status FROM tasks WHERE task_id = ?').get(newTaskId)?.status,
+                  router: wsDbRe2.prepare('SELECT status FROM tasks WHERE task_id = ?').get(`diag_router-${newTaskId}`)?.status,
+                };
+              } finally { wsDbRe2.close(); }
+            })();
+            if (recheck2.parent === 'succeeded' && recheck2.router === 'succeeded') {
+              log('diagnose-already-succeeded-after-retry', recheck2);
+              diag = { code: 0, stdout: JSON.stringify(record.ingressJson ?? { status: 'succeeded', taskId: newTaskId }), stderr: '' };
+            }
+          }
+        }
+      }
     }
     log('diagnose-run', { code: diag.code, stdoutTail: diag.stdout.slice(-5000), stderrTail: diag.stderr.slice(-2000) });
     if (diag.code !== 0) {
@@ -361,39 +437,79 @@ async function runSampleArm(sample, arm, rep) {
     }
 
     // 3) Formation: round-robin ALL THREE runner kinds.
+    // Recovery fix 2026-11-22 (intent ON/OFF pilot): run-once leases the
+    // workspace-oldest pending task of the kind, workspace-WIDE. The off arm
+    // carries surplus pending dreamers from out-of-design repeat reps, so an
+    // unbounded loop would drain them too (quota + scope damage). The loop is
+    // now bounded to THIS chain's formation tasks (via its candidates), with
+    // an oldest-first guard so run-once is only invoked when the workspace-
+    // oldest live task of that kind belongs to this chain, plus an optional
+    // --formation-depth N that stops after N complete candidate chains
+    // (dreamer->philosopher->scribe) for upstream request-budget control.
     const wsDb = path.join(armWorkspaceDir(arm, args.shardId), '.pd', 'state.db');
-    const chainState = () => {
+    const chainFormationSnapshot = () => {
       const sdb = new Database(wsDb, { readonly: true });
       try {
-        const router = sdb.prepare('SELECT status FROM tasks WHERE task_id = ?').get(`diag_router-${newTaskId}`);
-        const live = sdb.prepare("SELECT count(*) AS c FROM tasks WHERE task_kind IN ('dreamer','philosopher','scribe') AND status IN ('pending','leased','running','retry_wait')").get().c;
-        const byKind = sdb.prepare("SELECT task_kind, status, count(*) AS c FROM tasks WHERE task_kind IN ('dreamer','philosopher','scribe') GROUP BY task_kind, status").all();
-        return { router: router?.status ?? 'missing', liveInternalization: live, byKind };
+        const stageIds = [newTaskId, `diag_rootcause-${newTaskId}`, `diag_distiller-${newTaskId}`, `diag_router-${newTaskId}`];
+        const cands = sdb.prepare(`SELECT candidate_id FROM principle_candidates WHERE task_id IN (?,?,?,?)`).all(...stageIds).map((c) => c.candidate_id);
+        const like = cands.length > 0 ? `(${cands.map(() => 'task_id LIKE ?').join(' OR ')}) AND` : '1=0 AND';
+        const rows = sdb.prepare(
+          `SELECT task_id, task_kind, status, updated_at FROM tasks WHERE task_kind IN ('dreamer','philosopher','scribe') AND ${like} TRUE`,
+        ).all(...cands.map((id) => `%${id}%`));
+        const byTaskId = new Map(rows.map((r) => [r.task_id, r]));
+        // Workspace-oldest LIVE (pending/retry_wait) task per kind — the task
+        // run-once would actually lease next.
+        const oldestLive = {};
+        for (const kind of ['dreamer', 'philosopher', 'scribe']) {
+          oldestLive[kind] = sdb.prepare(
+            "SELECT task_id FROM tasks WHERE task_kind = ? AND status IN ('pending','retry_wait') ORDER BY updated_at ASC, task_id ASC LIMIT 1",
+          ).get(kind)?.task_id ?? null;
+        }
+        return { byTaskId, oldestLive, scribeTerminal: rows.filter((r) => r.task_kind === 'scribe' && (r.status === 'succeeded' || r.status === 'failed')).length };
       } finally { sdb.close(); }
     };
     const loopLog = [];
     for (let i = 0; i < args.maxFormationLoops; i++) {
-      const st = chainState();
-      if ((st.router === 'succeeded' || st.router === 'failed') && st.liveInternalization === 0) {
-        loopLog.push({ i, note: 'terminal', chain: st });
+      const snap = chainFormationSnapshot();
+      const chainTasks = [...snap.byTaskId.values()];
+      const liveChain = chainTasks.filter((t) => ['pending', 'leased', 'running', 'retry_wait'].includes(t.status));
+      const scribeSucceeded = chainTasks.filter((t) => t.task_kind === 'scribe' && t.status === 'succeeded').length;
+      if (liveChain.length === 0) {
+        loopLog.push({ i, note: 'chain-terminal', chainTasks: chainTasks.length });
+        break;
+      }
+      if (args.formationDepth !== null && scribeSucceeded >= args.formationDepth) {
+        loopLog.push({ i, note: 'formation-depth-reached', scribeSucceeded, remainingLive: liveChain.length });
         break;
       }
       let ranWork = false;
       for (const runner of ['dreamer', 'philosopher', 'scribe']) {
+        // Only invoke run-once when THIS chain owns the workspace-oldest live
+        // task of the kind (orchestrator lease order: updated_at ASC) —
+        // otherwise the invocation would lease a foreign chain's task.
+        const chainLiveOfKind = liveChain.filter((t) => t.task_kind === runner && ['pending', 'retry_wait'].includes(t.status));
+        if (chainLiveOfKind.length === 0) continue;
+        // Same order as the orchestrator's lease contract (updated_at ASC,
+        // task_id ASC) — this is the task run-once would lease next.
+        const chainOldest = [...chainLiveOfKind].sort((a, b) => (a.updated_at < b.updated_at ? -1 : a.updated_at > b.updated_at ? 1 : a.task_id < b.task_id ? -1 : 1))[0].task_id;
+        if (snap.oldestLive[runner] !== null && snap.oldestLive[runner] !== chainOldest) {
+          loopLog.push({ i, runner, skipped: 'not_workspace_oldest', oldest: snap.oldestLive[runner] });
+          continue;
+        }
         const once = await runPd(arm, ['runtime', 'internalization', 'run-once', '--runner', runner], { timeoutMs: 30 * 60_000, shardId: args.shardId });
         let j = null;
         try { j = JSON.parse(once.stdout.slice(once.stdout.indexOf('{'))); } catch { /* raw */ }
         const decision = j?.decision ?? 'unknown';
-        loopLog.push({ i, runner, code: once.code, decision, reason: j?.reason ?? null });
+        loopLog.push({ i, runner, code: once.code, decision, reason: j?.reason ?? null, taskId: j?.taskId ?? null });
         if (decision === 'leased' || decision === 'would_lease') ranWork = true;
       }
       if (!ranWork) {
-        // No runner had work this round; loop again (successors may appear
-        // asynchronously via auto-enqueue) until the terminal check above or
-        // the loop budget ends.
+        // Chain tasks are leased/running elsewhere (e.g. a live consumer) or
+        // blocked on ordering — poll again on the next round.
+        await new Promise((r2) => setTimeout(r2, 15_000));
       }
     }
-    log('internalization-loop', { rounds: loopLog.length, finalChain: chainState(), tail: loopLog.slice(-8) });
+    log('internalization-loop', { rounds: loopLog.length, formationDepth: args.formationDepth, chainTasks: [...chainFormationSnapshot().byTaskId.values()].map((t) => ({ kind: t.task_kind, status: t.status })), tail: loopLog.slice(-10) });
 
     // 4) Collect + STRICT terminal verification.
     record.artifacts = collectArtifacts(arm, args.shardId, newTaskId);
@@ -474,7 +590,15 @@ async function runSampleArm(sample, arm, rep) {
 }
 
 const repeatPicks = dataset.repeatRunPicks ?? [];
-const repsFor = (sid) => (repeatPicks.includes(sid) ? [0, 1, 2] : [0]);
+// Recovery fix 2026-11-22: the frozen dataset carries repeatRunPicks
+// (S07/S10/S12/S02/S14 -> 3 reps per arm), but this experiment's frozen
+// design is ONE run per sample per arm (8 chains, requestCap 64). --reps N
+// caps the rep set explicitly instead of silently burning the quota on
+// surplus reps.
+const repsFor = (sid) => {
+  const datasetReps = repeatPicks.includes(sid) ? [0, 1, 2] : [0];
+  return args.reps === null ? datasetReps : datasetReps.filter((r) => r < args.reps);
+};
 
 (async () => {
   for (let si = 0; si < samples.length; si++) {

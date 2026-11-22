@@ -47,6 +47,50 @@ describe('parseIntentDocSections', () => {
     expect(s.why).toBeDefined();
     expect(s.desiredOutcome).toBeDefined();
   });
+  // Regression (2026-11-22, intent ON/OFF pilot ON arm): a heading with a
+  // separator-introduced localization annotation — `## 1. Why — 为什么存在`
+  // — parsed as missing, silently degrading the whole Intent chain to
+  // not_configured while the file carried full Owner content. The canonical
+  // title followed by an em/en dash or colon annotation must stay canonical.
+  it('parses sections with separator-introduced heading annotations (zh-CN style)', () => {
+    const s = parseIntentDocSections(`# INTENT.zh-CN.md
+
+## 1. Why — 为什么存在
+
+帮助 Agent 形成可观察的行为改进。
+
+## 2. Desired Outcome: 期望结果
+
+Agent 依据可追溯证据做判断。
+
+## 3. Non-negotiables —不可妥协事项
+
+不编造事实。
+
+## 4. Stop / Escalation — 停止与升级条件
+
+关键证据缺失时停止。
+
+## 5. Current Strategic Focus — 当前战略重点
+
+建立证据驱动的迭代闭环。
+`);
+    expect(s.why).toContain('可观察的行为改进');
+    expect(s.desiredOutcome).toContain('可追溯证据');
+    expect(s.nonNegotiables).toContain('不编造事实');
+    expect(s.stopEscalation).toContain('关键证据缺失');
+    expect(s.currentStrategicFocus).toContain('迭代闭环');
+  });
+  it('still rejects headings where the title continues into other words', () => {
+    const s = parseIntentDocSections('## 1. Why not do this\n\nbody\n');
+    expect(s.why).toBeUndefined();
+  });
+  it('round-trips: assemble output still parses under the tolerant regexes', () => {
+    const sections: IntentDocSections = { why: 'w-content', desiredOutcome: 'd-content' };
+    const s = parseIntentDocSections(assembleIntentDoc(sections));
+    expect(s.why).toBe('w-content');
+    expect(s.desiredOutcome).toBe('d-content');
+  });
 });
 
 describe('assembleIntentDoc', () => {

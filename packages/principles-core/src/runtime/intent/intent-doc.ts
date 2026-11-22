@@ -4,12 +4,25 @@ export interface IntentDocWarning { code: IntentDocWarningCode; message: string;
 export const INTENT_MAX_BYTES = 32 * 1024;
 const MIN_SECTION_LENGTH = 10;
 interface SectionDef { key: keyof IntentDocSections; headerRegex: RegExp; label: string; header: string; }
+// Suffix-tolerant section headings. The canonical wizard format is
+// `## 1. Why` (exact, EOL-anchored). Owners writing a localized doc very
+// naturally add a separator-introduced annotation to the SAME heading —
+// `## 1. Why — 为什么存在` — and the strict anchor parsed every section of
+// such a document as missing, silently degrading the whole Intent chain to
+// not_configured (found 2026-11-22 in the ON arm of the intent ON/OFF pilot:
+// all five sections len=0 while the file carried full Owner content). A
+// heading therefore remains canonical when the title is followed by an
+// em/en dash, colon or full-width colon and then non-space annotation text.
+// Anything else after the title (e.g. `## 1. Why not`) is still NOT the
+// canonical section, preserving the exact-title semantics for content that
+// merely starts with the section title.
+const SUFFIX_ANNOTATION = '(?:\\s*[—–:：]\\s*\\S.*)?';
 const SECTION_DEFS: SectionDef[] = [
-  { key: 'why', headerRegex: /^##\s+1\.\s*Why\s*$/im, label: 'why', header: '## 1. Why' },
-  { key: 'desiredOutcome', headerRegex: /^##\s+2\.\s*Desired Outcome\s*$/im, label: 'desiredOutcome', header: '## 2. Desired Outcome' },
-  { key: 'nonNegotiables', headerRegex: /^##\s+3\.\s*Non-negotiables\s*$/im, label: 'nonNegotiables', header: '## 3. Non-negotiables' },
-  { key: 'stopEscalation', headerRegex: /^##\s+4\.\s*Stop\s*\/\s*Escalation\s*$/im, label: 'stopEscalation', header: '## 4. Stop / Escalation' },
-  { key: 'currentStrategicFocus', headerRegex: /^##\s+5\.\s*Current Strategic Focus\s*$/im, label: 'currentStrategicFocus', header: '## 5. Current Strategic Focus' },
+  { key: 'why', headerRegex: new RegExp(`^##\\s+1\\.\\s*Why\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'why', header: '## 1. Why' },
+  { key: 'desiredOutcome', headerRegex: new RegExp(`^##\\s+2\\.\\s*Desired Outcome\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'desiredOutcome', header: '## 2. Desired Outcome' },
+  { key: 'nonNegotiables', headerRegex: new RegExp(`^##\\s+3\\.\\s*Non-negotiables\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'nonNegotiables', header: '## 3. Non-negotiables' },
+  { key: 'stopEscalation', headerRegex: new RegExp(`^##\\s+4\\.\\s*Stop\\s*\\/\\s*Escalation\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'stopEscalation', header: '## 4. Stop / Escalation' },
+  { key: 'currentStrategicFocus', headerRegex: new RegExp(`^##\\s+5\\.\\s*Current Strategic Focus\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'currentStrategicFocus', header: '## 5. Current Strategic Focus' },
 ];
 export function parseIntentDocSections(raw: string): IntentDocSections {
   const sections: IntentDocSections = {};
