@@ -31,14 +31,21 @@ import type { AdapterCycleResult } from '../worker-adapter.js';
 
 export const SERVICE_RUN_STATUS_SCHEMA_VERSION = 'pd.service-run-status.v1';
 
-/** How this run was triggered. Phase 1 only ever has the manual CLI trigger. */
-export type ServiceRunTriggerSource = 'manual';
+/**
+ * How this run was triggered (task §4): `manual` = a human at the CLI;
+ * `scheduler` = the OS-level registration invoked the managed entry. The
+ * two OS trigger flavours (login vs periodic) are deliberately NOT
+ * distinguished — no platform reports that reliably, so PD never fabricates
+ * a finer source than it can prove.
+ */
+export type ServiceRunTriggerSource = 'manual' | 'scheduler';
 
 /** Top-level run outcome (distinct from per-workspace verdicts). */
 export type ServiceRunOutcome =
   | 'completed'
   | 'already_running'
-  | 'refused';
+  | 'refused'
+  | 'failed';
 
 /**
  * The five task-required read verdicts (missing / read_failed / unparsable /
@@ -143,6 +150,14 @@ export interface ServiceRunStatus {
    * variable NAMES, not values).
    */
   readonly shadow?: ShadowRunStatusSection;
+  /**
+   * Phase 3 managed section (optional, additive — v1 schema evolution):
+   * present only for managed runs (`pd service run-once --json`, the
+   * scheduler entry). Carries per-workspace admission/executions for
+   * `effectiveOwner=service_host` workspaces ONLY — the same security
+   * contract as the shadow section applies (no payloads, no env values).
+   */
+  readonly managed?: ManagedRunStatusSection;
   readonly nextAction: string;
 }
 
@@ -178,11 +193,84 @@ export interface ShadowRunStatusSection {
   readonly executions: readonly ShadowExecutionRecord[];
 }
 
+/**
+ * Phase 3 managed-run per-workspace record (task §4 admission matrix). A
+ * workspace is either executed (service_host_owned + authorized + bound
+ * adapter) or skipped with a structured reason — legacy workspaces keep
+ * their legacy owner, transition states are never consumed.
+ */
+export interface ManagedExecutionRecord {
+  readonly canonicalDir: string;
+  readonly hostKind: 'codex' | 'workbuddy' | null;
+  /** `executed` = a real Worker cycle ran for this workspace. */
+  readonly admission: 'executed' | 'skipped';
+  /** Structured skip reason (skipped records only): owner state, authorization, adapter or budget. */
+  readonly skipReason?: string;
+  readonly skipNextAction?: string;
+  readonly workspaceState: 'completed' | 'paused' | 'degraded' | 'failed' | 'unavailable';
+  readonly lastProgressAt: string | null;
+  readonly lastProgressSource: 'task_state_change' | 'cycle_evidence' | 'previous_run' | null;
+  readonly execution?: AdapterCycleResult;
+}
+
+export interface ManagedRunStatusSection {
+  readonly triggerSource: ServiceRunTriggerSource;
+  readonly perWorkspaceTimeoutMs: number;
+  readonly progressCarryVerdict: 'ok' | 'missing' | 'corrupt' | 'unreadable';
+  /**
+   * Set when NO workspace was in the service_host_owned state this run —
+   * the legal empty execution (task §4): no Worker started, nothing failed.
+   */
+  readonly emptyReason?: 'no_service_host_owned_workspaces';
+  readonly executions: readonly ManagedExecutionRecord[];
+}
+
 const STATUS_DIR_NAME = 'service';
 const STATUS_FILE_NAME = 'run-once-status.json';
 
 export function serviceRunStatusPath(pdHome: string): string {
   return path.join(pdHome, STATUS_DIR_NAME, STATUS_FILE_NAME);
+}
+
+export type ServiceRunStatusRead =
+  | { readonly ok: true; readonly status: ServiceRunStatus }
+  | { readonly ok: false; readonly verdict: 'missing' | 'unreadable' | 'corrupt'; readonly detail?: string };
+
+/**
+ * Read the latest persisted run-once status (Phase 3 `pd service status`).
+ * The file is UNTRUSTED runtime data (rc-1): missing / unreadable /
+ * unparsable / non-conforming stay distinct (rc-3) — a corrupt status file
+ * is `corrupt`, never "no run ever happened".
+ */
+export function readServiceRunStatus(pdHome: string): ServiceRunStatusRead {
+  const file = serviceRunStatusPath(pdHome);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    const { code } = error as Error & { code?: string };
+    if (code === 'ENOENT') return { ok: false, verdict: 'missing' };
+    return { ok: false, verdict: 'unreadable', detail: code ?? 'read_failed' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return { ok: false, verdict: 'corrupt', detail: error instanceof Error ? error.message.slice(0, 120) : 'unparsable' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, verdict: 'corrupt', detail: 'not_an_object' };
+  }
+  const doc = parsed as Record<string, unknown>;
+  if (
+    !Object.hasOwn(doc, 'schemaVersion') || doc.schemaVersion !== SERVICE_RUN_STATUS_SCHEMA_VERSION
+    || !Object.hasOwn(doc, 'runId') || typeof doc.runId !== 'string'
+    || !Object.hasOwn(doc, 'outcome') || (doc.outcome !== 'completed' && doc.outcome !== 'already_running' && doc.outcome !== 'refused' && doc.outcome !== 'failed')
+    || !Object.hasOwn(doc, 'triggerSource') || (doc.triggerSource !== 'manual' && doc.triggerSource !== 'scheduler')
+  ) {
+    return { ok: false, verdict: 'corrupt', detail: 'schema_mismatch' };
+  }
+  return { ok: true, status: parsed as ServiceRunStatus };
 }
 
 /** Maximum persisted length of any reason string (rc-8 bounded output). */

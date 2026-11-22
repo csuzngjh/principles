@@ -212,6 +212,9 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     workspaceDir: typeof options.workspace === 'string' ? options.workspace : undefined,
     host,
     stopGateway: options.stopGateway === true,
+    // PRI-1281 Phase 3: explicit scheduler consent flags (task §6).
+    registerServiceHost: options.enableServiceHost === true || options.registerServiceHost === true,
+    enableServiceHost: options.enableServiceHost === true,
   };
 
   if (options.force) {
@@ -361,6 +364,9 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         host,
         runtimeProfile: cliOptions.runtimeProfile,
         stopGateway: cliOptions.stopGateway === true,
+        // PRI-1281 Phase 3: explicit scheduler consent flags (task §6).
+        registerServiceHost: cliOptions.enableServiceHost === true || cliOptions.registerServiceHost === true,
+        enableServiceHost: cliOptions.enableServiceHost === true,
       }
     : await runPrompts(cliOptions, workspaceInfo);
 
@@ -644,6 +650,11 @@ program
   // Gateway lock prevention: auto-stop a running OpenClaw gateway before
   // install (avoids EPERM on the backup rename) and restart it afterwards.
   .option('--stop-gateway', 'Stop the OpenClaw gateway before install if running, restart after', false)
+  // PRI-1281 Phase 3: EXPLICIT operator consent for the user-level OS
+  // scheduler (task §6: never enabled without consent). Register creates
+  // installed_disabled; enable arms the automatic managed runs.
+  .option('--register-service-host', 'Register the user-level OS scheduler trigger after install (created DISABLED; consent required)', false)
+  .option('--enable-service-host', 'Register AND enable the OS scheduler after install (implies --register-service-host; consent required)', false)
   .action(async (options) => {
     await runInstall(options);
   });

@@ -345,15 +345,18 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 
 | 顺序 | 位置 | 变更意图 |
 |---|---|---|
-| 1 | 新 packages/pd-service-host | 实现 run-once coordinator、scheduler adapter、lock、status |
-| 2 | packages/pd-cli | 增加 pd service 命令；复用既有 --once Worker CLI |
-| 3 | packages/create-principles-disciple | 注册/撤销用户级 scheduler；升级时做 owner handover |
-| 4 | packages/openclaw-plugin + 新 OpenClaw Adapter seam | 将 Gateway timer 与可独立执行能力分开 |
-| 5 | packages/pd-companion | 移除 Worker supervision 接线，保留 status / notification |
-| 6 | packages/pd-console | 增加服务状态查询与显式操作；不拥有生命周期 |
-| 7 | docs / architecture tests | 同步架构边界、依赖规则、生命周期与回滚测试 |
+| 1 | ~~新 packages/pd-service-host~~ → **已修正：packages/pd-cli/src/services/service-host/** | 实现 run-once coordinator、scheduler adapter（Phase 3：`scheduler/` 子目录）、lock、status。**不抽独立包**（ERR-196 发布资产风险类；Phase 1 决策，Phase 3 沿用） |
+| 2 | packages/pd-cli | 增加 pd service 命令；复用既有 --once Worker CLI（Phase 3：install/enable/disable/status/uninstall + managed run-once + 共享派发核心 workspace-dispatch.ts） |
+| 3 | packages/create-principles-disciple | 注册/撤销用户级 scheduler（Phase 3：经桥接调用已安装 CLI —— 显式同意注册 / 升级 refresh-if-registered / 卸载撤销） |
+| 4 | packages/openclaw-plugin + 新 OpenClaw Adapter seam | 将 Gateway timer 与可独立执行能力分开（Phase 4，未实施） |
+| 5 | packages/pd-companion | 移除 Worker supervision 接线，保留 status / notification（Phase 5，未实施） |
+| 6 | packages/pd-console | 增加服务状态查询与显式操作；不拥有生命周期（Phase 3：只读 `GET /api/service-host/status` 已落地） |
+| 7 | docs / architecture tests | 同步架构边界、依赖规则、生命周期与回滚测试（Phase 3：`docs/runbooks/PD_SERVICE_HOST_SCHEDULER.md`） |
+
+**§11 修正说明（2026-11-22，PRI-1281 Phase 3）**：本节原建议"新 packages/pd-service-host 独立包"。实际实施位置为 `packages/pd-cli/src/services/service-host/`（Phase 1 即如此决策，依据 §2.2 约束让位 + ERR-196 发布资产/发布锁风险：独立包需捆绑 staging、staged manifest 重写、release-locks 等全套发布接线，且当前没有需要拆分的消费者）。Phase 3 的 Scheduler Adapter（contract / windows / macos / linux / runtime-io / index / service-status）、managed run（managed-run.ts）与共享 Worker 派发核心（workspace-dispatch.ts）均在该目录内。平台矩阵、命令文档与安全边界见 `docs/runbooks/PD_SERVICE_HOST_SCHEDULER.md`。
 
 当前 PR 只提交文档与设计，不创建上述 package、不修改运行时代码、不注册 OS Scheduler。架构已获 ADR-0020 §11.6 批准（见上位 SPEC §2.0/§11）；运行时实现按正常开发评审流程推进，超出 §11.6 范围的能力仍需单独决策。
+（本段为 v0.3 原文存档；Phase 1–3 已按上表实施，各 Phase 实施状态见 SPEC §11 条目。）
 
 ## 12. 现有文档对齐
 
