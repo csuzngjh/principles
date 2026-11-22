@@ -20,6 +20,7 @@
  * - cli-5: --readiness never mutates business state (safe by construction).
  * - cli-6: paused/degraded results carry reason + nextAction.
  */
+import * as fs from 'node:fs';
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { resolvePdHome } from '@principles/install-layout';
@@ -181,8 +182,16 @@ export async function handleOpenClawWorker(options: OpenClawWorkerOptions): Prom
     process.exitCode = 1;
     return;
   }
-  const workspaceLock = acquireWorkspaceServiceRunLock(home.pdHome, workspace);
-  if (!workspaceLock.ok) {
+  // The mutex only guards against another CONSUMING worker of the same
+  // install: without an existing pdHome there is no install manifest, hence
+  // no service_host_owned marker and nothing the lock could be arbitrating.
+  // Acquiring it would mkdir <pdHome>/service/ as a pure side effect — §1.1
+  // reserves that tree for the installer — so an absent pdHome runs
+  // unlocked and the cycle's own ownership gate reports not-managed.
+  const workspaceLock = fs.existsSync(home.pdHome)
+    ? acquireWorkspaceServiceRunLock(home.pdHome, workspace)
+    : null;
+  if (workspaceLock !== null && !workspaceLock.ok) {
     // 'held' means a live worker already consumes this workspace — paused,
     // not degraded: the mutex kept the second consumer out, nothing broke.
     const held = workspaceLock.kind === 'held';
@@ -204,7 +213,7 @@ export async function handleOpenClawWorker(options: OpenClawWorkerOptions): Prom
     printCycleReport(result, options.json === true);
     if (result.mode === 'degraded') process.exitCode = 1;
   } finally {
-    releaseServiceRunLock(workspaceLock.handle);
+    if (workspaceLock !== null) releaseServiceRunLock(workspaceLock.handle);
   }
 }
 
