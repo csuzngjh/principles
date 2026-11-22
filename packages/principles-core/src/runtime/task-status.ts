@@ -125,6 +125,15 @@ export const DiagnosticianTaskRecordSchema = Type.Intersect([
     // PRI-844: the Owner's verbatim correction, when the persisted
     // diagnosticJson carries one. Optional — legacy rows predate the field.
     correctionEvidence: Type.Optional(PainCorrectionEvidenceSchema),
+    /**
+     * PRI-1274 (B1 / P1-3): submission identity turn vs TARGET evidence
+     * turn — distinct concepts. The submission turn is where pd_submit_pain
+     * was called; the target turn is the ONE turn the diagnosis may read as
+     * conversation evidence (the explicit request, else the submission
+     * turn). Absent on legacy/unbound rows (session-level policy then).
+     */
+    submissionTurnId: Type.Optional(Type.String()),
+    targetTurnId: Type.Optional(Type.String()),
   }),
 ]);
 export type DiagnosticianTaskRecord = Static<typeof DiagnosticianTaskRecordSchema>;

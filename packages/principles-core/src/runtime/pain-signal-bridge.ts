@@ -31,6 +31,9 @@ import {
   isRecord,
 } from './pain-ingress-payload.js';
 import type { PainIngressV1Payload, PainDeviationAnchor } from './pain-ingress-payload.js';
+// PRI-1274: leaf import — the disposition block this bridge persists at
+// task-creation time (no cycle; the recovery module imports from here).
+import type { PainRecoveryDisposition } from './pain-admission-disposition.js';
 import { sanitizeStringUnbounded } from './evidence-sanitizer.js';
 import type { PainAnchor, PainCorrectionEvidence } from './context-payload.js';
 
@@ -133,6 +136,15 @@ export interface PainDetectedData {
    * re-entry validates the two against each other.
    */
   painIngress?: PainIngressV1Payload;
+  /**
+   * PRI-1274 (B1 / P1-3): the task's admission disposition at creation time.
+   * Set when the submission bound a session and named a target turn whose
+   * text is not yet collectable — `buildDiagnosticJson` persists it under the
+   * SAME `recovery` JSON block the receipt fallback writes, so the candidate
+   * picker's SQL gate and the worker reconcile read ONE authority. Absent on
+   * every ordinarily-admissible submission (no waiting, no behavior change).
+   */
+  admissionDisposition?: PainRecoveryDisposition;
 }
 
 export type PainSignalBridgeStatus = 'succeeded' | 'skipped' | 'failed' | 'retried' | 'degraded';
@@ -420,6 +432,22 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
   return { provenance: inferProvenance(recordData), evidenceCount, errorCode: null, ...(correctionEvidence !== undefined ? { correctionEvidence } : {}) };
 }
 
+/**
+ * PRI-1274 (B1 / P1-3): the task's current admission-disposition state from
+ * the `recovery` block, or null when absent/malformed. Read-only helper for
+ * the execution gate; the worker reconcile owns flipping it.
+ */
+function readRecoveryState(diagnosticJson: string | undefined): string | null {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(diagnosticJson);
+    if (!isRecord(parsed) || !isRecord(parsed.recovery)) return null;
+    return typeof parsed.recovery.state === 'string' ? parsed.recovery.state : null;
+  } catch {
+    return null;
+  }
+}
+
 function provenanceReason(provenance: PainProvenance): string {
   switch (provenance) {
     case 'host_context_bound':
@@ -460,6 +488,10 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     // PRI-642 SPEC §9: one builder produces BOTH the legacy top-level fields
     // and the versioned nested namespace; re-entry validates consistency.
     ...(data.painIngress ? { painIngress: data.painIngress } : {}),
+    // PRI-1274 (B1 / P1-3): the SAME `recovery` block the receipt fallback
+    // writes — submit-time it marks `waiting_for_target_evidence`, which the
+    // candidate picker's SQL excludes and the worker reconcile flips.
+    ...(data.admissionDisposition ? { recovery: data.admissionDisposition } : {}),
   });
 }
 
@@ -1162,6 +1194,15 @@ export class PainSignalBridge {
     }
     if (!isRetryWaitBackoffElapsed(task.status, task.leaseExpiresAt)) {
       return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'retry_wait_pending' };
+    }
+
+    // PRI-1274 (B1 / P1-3): a task explicitly waiting for its target turn's
+    // text is not admissible yet — neither the worker's picker (SQL gate) nor
+    // a manual run may diagnose it on OTHER turns' text. The worker
+    // reconcile flips the disposition once the authorized target evidence
+    // exists; until then this is a skip, never a failure.
+    if (readRecoveryState(task.diagnosticJson) === 'waiting_for_target_evidence') {
+      return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'target_evidence_pending' };
     }
 
     // PRI-642 SPEC §9: re-entry validates the persisted rev-2 facts BEFORE

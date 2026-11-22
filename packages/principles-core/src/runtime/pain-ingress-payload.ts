@@ -449,6 +449,17 @@ export interface PainIngressV1Payload {
    * historical rows and on submissions with no verified claim.
    */
   verifiedHostSession?: { status: 'verified'; sessionId: string; submissionTurnId?: string; targetTurnId?: string };
+  /**
+   * PRI-1274 r2b (devin finding 0001): the caller's EXPLICIT target turn,
+   * shape-validated but NOT host-verified, persisted when the submission
+   * could not bind a session (no trusted `_meta`). The PostToolUse receipt
+   * recovery re-reads it after binding the host-authoritative session and
+   * honors it as the target — an explicit earlier turn is never replaced by
+   * the submission turn. Absent when the caller omitted a target; NEVER
+   * written on the verified path (verifiedHostSession.targetTurnId is the
+   * authority there).
+   */
+  requestedTargetTurnId?: string;
 }
 
 export type PainIngressV1ParseResult =
@@ -495,6 +506,11 @@ export function parsePainIngressV1Payload(value: unknown): PainIngressV1ParseRes
   if (invariantViolation !== null) return { ok: false, reasonCode: invariantViolation };
   // PRI-1260: optional verified association — absent on historical rows; a
   // PRESENT but malformed one fails closed like every other field (rc-3).
+  // PRI-1274 (B1): submissionTurnId and targetTurnId are validated
+  // INDEPENDENTLY — a trusted session may carry only the submission turn
+  // (target evidence is a separate, later concern) or only a target clue.
+  // Historical rows always carry both or neither, so this widening accepts
+  // strictly more of what the writer produces and nothing else.
   let verifiedHostSession: PainIngressV1Payload['verifiedHostSession'];
   if (value.verifiedHostSession !== undefined) {
     const candidate = value.verifiedHostSession;
@@ -503,17 +519,35 @@ export function parsePainIngressV1Payload(value: unknown): PainIngressV1ParseRes
       return { ok: false, reasonCode: 'ingress_verified_session_invalid' };
     }
     const { submissionTurnId, targetTurnId } = candidate;
-    if ((submissionTurnId !== undefined || targetTurnId !== undefined) &&
-      (typeof submissionTurnId !== 'string' || submissionTurnId.trim().length === 0 || submissionTurnId.length > 200
-        || typeof targetTurnId !== 'string' || targetTurnId.trim().length === 0 || targetTurnId.length > 200)) {
+    const submissionTurnValid = submissionTurnId === undefined
+      || (typeof submissionTurnId === 'string' && submissionTurnId.trim().length > 0 && submissionTurnId.length <= 200);
+    const targetTurnValid = targetTurnId === undefined
+      || (typeof targetTurnId === 'string' && targetTurnId.trim().length > 0 && targetTurnId.length <= 200);
+    if (!submissionTurnValid || !targetTurnValid) {
       return { ok: false, reasonCode: 'ingress_verified_session_invalid' };
     }
     verifiedHostSession = {
       status: 'verified', sessionId: candidate.sessionId,
-      ...(typeof submissionTurnId === 'string' && typeof targetTurnId === 'string' ? { submissionTurnId, targetTurnId } : {}),
+      ...(submissionTurnId === undefined ? {} : { submissionTurnId }),
+      ...(targetTurnId === undefined ? {} : { targetTurnId }),
     };
   }
-  return { ok: true, payload: { version: PAIN_INGRESS_PAYLOAD_VERSION, origin, correlation: correlation.value, evidenceClass, ...(verifiedHostSession !== undefined ? { verifiedHostSession } : {}) } };
+  // PRI-1274 r2b: the unverified explicit-target hint — same shape rule as
+  // the verified turn ids; a PRESENT but malformed one fails closed (rc-3),
+  // it is never silently dropped.
+  let requestedTargetTurnId: string | undefined;
+  if (value.requestedTargetTurnId !== undefined) {
+    const hint = value.requestedTargetTurnId;
+    if (typeof hint !== 'string' || hint.trim().length === 0 || hint.length > 200) {
+      return { ok: false, reasonCode: 'ingress_requested_target_turn_invalid' };
+    }
+    requestedTargetTurnId = hint;
+  }
+  return { ok: true, payload: {
+    version: PAIN_INGRESS_PAYLOAD_VERSION, origin, correlation: correlation.value, evidenceClass,
+    ...(verifiedHostSession !== undefined ? { verifiedHostSession } : {}),
+    ...(requestedTargetTurnId !== undefined ? { requestedTargetTurnId } : {}),
+  } };
 }
 
 /**
@@ -596,4 +630,28 @@ export function checkIngressTopLevelConsistency(input: {
   }
 
   return null;
+}
+
+// ── Requested target-turn id normalization (PRI-1274 review round 2, I) ─────
+
+export type NormalizedTargetTurnId =
+  | { readonly ok: true; readonly value: string }
+  | { readonly ok: false; readonly reason: 'empty' | 'too_long' | 'control_chars' };
+
+/**
+ * The ONE normalization rule for a requested target-turn identifier (directive
+ * I1), shared by the submit capability (persist-time, I2) and the receipt
+ * recovery (historical read, I3): outer whitespace is trimmed (a whitespace-
+ * only value is "no target"), the length bound matches the host-id contract
+ * (200), and control characters (C0/C1) are refused. Case and inner bytes are
+ * NEVER altered — a turn id is an opaque host identifier, not text to munge.
+ */
+export function normalizeRequestedTargetTurnId(value: unknown): NormalizedTargetTurnId {
+  if (typeof value !== 'string') return { ok: false, reason: 'empty' };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { ok: false, reason: 'empty' };
+  if (trimmed.length > 200) return { ok: false, reason: 'too_long' };
+  // eslint-disable-next-line no-control-regex -- C0 (U+0000–U+001F) and C1 (U+007F–U+009F) are exactly what is rejected here.
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(trimmed)) return { ok: false, reason: 'control_chars' };
+  return { ok: true, value: trimmed };
 }
