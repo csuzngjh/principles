@@ -102,15 +102,23 @@ const elevatedAdapter = createWindowsSchedulerAdapter({
   fileIo: nodeSchedulerFileIo,
 });
 
-afterAll(() => {
+afterAll(async () => {
   // Unconditional cleanup with BOTH adapters: the temp identity's task must
-  // not survive the suite even when an assertion failed earlier.
-  void elevatedAdapter.uninstall(registration)
-    .then(() => unelevatedAdapter.uninstall(registration))
-    .finally(() => {
-      rmSync(home, { recursive: true, force: true });
-    });
-});
+  // not survive the suite even when an assertion failed earlier. Each
+  // uninstall is AWAITED — a discarded Promise lets the test process exit
+  // mid-cleanup and leak the scheduled task.
+  try {
+    await elevatedAdapter.uninstall(registration);
+  } catch {
+    // Best-effort: the unelevated pass below still runs.
+  }
+  try {
+    await unelevatedAdapter.uninstall(registration);
+  } catch {
+    // Best-effort cleanup — the temp dir removal still runs.
+  }
+  rmSync(home, { recursive: true, force: true });
+}, 120_000);
 
 describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecycle (isolated identity)', () => {
   it(

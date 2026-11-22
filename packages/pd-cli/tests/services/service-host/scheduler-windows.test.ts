@@ -546,3 +546,53 @@ describe('createWindowsSchedulerAdapter', () => {
     expect(refreshed).toContain('<Enabled>true</Enabled>');
   });
 });
+
+describe('lifecycle reliability round 3 (LastTaskResult int64 + Actions completeness)', () => {
+  it('reads LastTaskResult as int64 — UInt32 HRESULTs must not overflow [int]', async () => {
+    const registration = makeRegistration();
+    const { runner, calls } = sequentialRunner([psResult({ found: false })]);
+    const adapter = createWindowsSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
+    await adapter.status(registration);
+    const script = scriptAt(calls, 0);
+    expect(script).toContain('[int64]$info.LastTaskResult');
+    expect(script).not.toContain('[int]$info.LastTaskResult');
+  });
+
+  it('status surfaces a UInt32-width LastTaskResult unchanged', async () => {
+    const registration = makeRegistration();
+    // 0x80070002 = ERROR_FILE_NOT_FOUND — exceeds int32 positive range.
+    const { runner } = sequentialRunner([
+      psResult({ found: true, state: 'Ready', xml: oursXml(registration), lastResult: 2147942402 }),
+    ]);
+    const adapter = createWindowsSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
+    const result = await adapter.status(registration);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.lastResult).toBe('2147942402');
+  });
+
+  it.each([
+    ['an extra <Exec> action', '<Exec><Command>C:\\other.exe</Command></Exec>'],
+    ['a non-Exec action', '<ComHandler><ClassId>{123}</ClassId></ComHandler>'],
+  ])('install refuses a task whose Actions block carries %s (external_conflict)', async (_label, extra) => {
+    const registration = makeRegistration();
+    const xml = oursXml(registration).replace('</Actions>', `${extra}</Actions>`);
+    const { runner } = sequentialRunner([psResult({ found: true, state: 'Ready', xml })]);
+    const adapter = createWindowsSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+  });
+
+  it('install refuses a task whose first Exec matches but principal UserId is duplicated/ambiguous', async () => {
+    const registration = makeRegistration();
+    const xml = oursXml(registration).replace('</LogonTrigger>', '<UserId>OTHER\\user</UserId></LogonTrigger>');
+    const { runner } = sequentialRunner([psResult({ found: true, state: 'Ready', xml })]);
+    const adapter = createWindowsSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+  });
+});

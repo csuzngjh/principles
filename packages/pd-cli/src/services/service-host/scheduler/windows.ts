@@ -249,18 +249,35 @@ function unescapeXml(value: string): string {
     .replace(/&amp;/g, '&');
 }
 
-/** First `<tag>text</tag>` inside the Exec Actions block, or null. */
-function execElement(xml: string, tag: string): string | null {
-  const execMatch = /<Exec\b[^>]*>([\s\S]*?)<\/Exec>/i.exec(xml);
-  const scope = execMatch?.[1] ?? xml;
+/** First `<tag>text</tag>` inside a scope fragment, or null. */
+function xmlElement(scope: string, tag: string): string | null {
   const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i').exec(scope);
   return match === null ? null : unescapeXml(match[1] ?? '');
 }
 
-/** First `<UserId>text</UserId>` (LogonTrigger principal), or null. */
-function taskPrincipalUser(xml: string): string | null {
-  const match = /<UserId>([\s\S]*?)<\/UserId>/i.exec(xml);
-  return match === null ? null : unescapeXml(match[1] ?? '').trim();
+/**
+ * Actions completeness (task review §4): parse the WHOLE `<Actions>`
+ * block. Our task declares exactly ONE `<Exec>` action — a matching first
+ * Exec plus extra `<Exec>`s or any non-Exec action (ComHandler,
+ * ShowMessage, SendEmail) is a FOREIGN task. Every action tag anywhere
+ * inside Actions counts; forged content in comments still trips the
+ * count (conservative refusal).
+ */
+function taskActionsExec(xml: string): { ok: true; exec: string } | { ok: false; detail: string } {
+  const actionsMatch = /<Actions\b[^>]*>([\s\S]*?)<\/Actions>/i.exec(xml);
+  if (actionsMatch === null) return { ok: false, detail: 'no_actions_block' };
+  const scope = actionsMatch[1] ?? '';
+  const actionTags = [...scope.matchAll(/<(Exec|ComHandler|ShowMessage|SendEmail)\b/gi)].map((m) => m[1] ?? '');
+  const execBlocks = [...scope.matchAll(/<Exec\b[^>]*>([\s\S]*?)<\/Exec>/gi)].map((m) => m[1] ?? '');
+  if (execBlocks.length !== 1 || actionTags.length !== 1 || actionTags[0]?.toLowerCase() !== 'exec') {
+    return { ok: false, detail: `unexpected_actions:${actionTags.join('+') || 'none'}` };
+  }
+  return { ok: true, exec: execBlocks[0] ?? '' };
+}
+
+/** All `<UserId>text</UserId>` values — a PD task declares exactly one. */
+function taskPrincipalUsers(xml: string): string[] {
+  return [...xml.matchAll(/<UserId>([\s\S]*?)<\/UserId>/gi)].map((m) => unescapeXml(m[1] ?? '').trim());
 }
 
 interface PowerShellQueryBody {
@@ -381,7 +398,7 @@ try {
     # 1899- AND 1999-dated sentinons on real hosts).
     if ($info.LastRunTime -and $info.LastTaskResult -ne 267011 -and $info.LastRunTime.Year -gt 1899) { $lastRun = $info.LastRunTime.ToString('o') }
     $lastResult = $null
-    if ($null -ne $info.LastTaskResult) { $lastResult = [int]$info.LastTaskResult }
+    if ($null -ne $info.LastTaskResult) { $lastResult = [int64]$info.LastTaskResult }
     $nextRun = $null
     if ($info.NextRunTime -and $info.NextRunTime.Year -gt 1899) { $nextRun = $info.NextRunTime.ToString('o') }
     [PSCustomObject]@{ found = $true; state = [string]$task.State; xml = [string]$xml; lastRunAt = $lastRun; lastResult = $lastResult; nextRunTime = $nextRun } | ConvertTo-Json -Compress
@@ -454,10 +471,14 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
    */
   function ownershipVerdict(body: PowerShellQueryBody, registration: SchedulerRegistration): { ours: true } | { ours: false; conflict: 'external'; detail: string } {
     if (!body.found || typeof body.xml !== 'string') return { ours: false, conflict: 'external', detail: 'no_exported_xml' };
-    const command = execElement(body.xml, 'Command');
-    const argsText = execElement(body.xml, 'Arguments');
-    const workDir = execElement(body.xml, 'WorkingDirectory');
-    const principal = taskPrincipalUser(body.xml);
+    const exec = taskActionsExec(body.xml);
+    if (!exec.ok) {
+      return { ours: false, conflict: 'external', detail: `unparsable_exec:${exec.detail}` };
+    }
+    const command = xmlElement(exec.exec, 'Command');
+    const argsText = xmlElement(exec.exec, 'Arguments');
+    const workDir = xmlElement(exec.exec, 'WorkingDirectory');
+    const principals = taskPrincipalUsers(body.xml);
     if (command === null || argsText === null || workDir === null) {
       const missing = [command === null ? 'Command' : '', argsText === null ? 'Arguments' : '', workDir === null ? 'WorkingDirectory' : ''].filter(Boolean).join('+');
       return { ours: false, conflict: 'external', detail: `unparsable_exec:${missing}` };
@@ -467,14 +488,14 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
     const execMatches = execArgv.length === expectedArgv.length
       && execArgv.every((token, index) => token.toLowerCase() === expectedArgv[index]?.toLowerCase());
     const workDirMatches = workDir.toLowerCase() === registration.pdHome.toLowerCase();
-    // The task must run under an interactive user principal — an empty
-    // principal means a definition PD did not write.
-    const principalPresent = principal !== null && principal !== '';
-    if (execMatches && workDirMatches && principalPresent) return { ours: true };
+    // The task must run under exactly ONE non-empty interactive user
+    // principal — zero or several means a definition PD did not write.
+    const principalMatches = principals.length === 1 && (principals[0] ?? '') !== '';
+    if (execMatches && workDirMatches && principalMatches) return { ours: true };
     const detail = [
       execMatches ? '' : `argv_mismatch(expected ${expectedArgv.length} got ${execArgv.length})`,
       workDirMatches ? '' : 'workdir_mismatch',
-      principalPresent ? '' : 'missing_principal',
+      principalMatches ? '' : `principal_mismatch(count=${principals.length})`,
     ].filter(Boolean).join('+');
     return { ours: false, conflict: 'external', detail };
   }
