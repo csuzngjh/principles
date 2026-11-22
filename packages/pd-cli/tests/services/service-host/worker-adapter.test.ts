@@ -956,24 +956,36 @@ describe('final-closure review — post-cycle snapshot deadline (P1-02)', () => 
     expect(result.worker.exitCode).toBe(0);
   });
 
-  it('a timed-out snapshot that DID measure a task-state change keeps the evidenced changedAt — the timeout cannot silently lose real progress (review follow-up)', async () => {
+  it(
+    'a timed-out snapshot that DID measure a task-state change keeps the evidenced changedAt — the timeout cannot silently lose real progress (review follow-up)',
+    { timeout: 30_000 },
+    async () => {
     const workspace = await workspaceWithStore();
     const adapter = createCodexWorkerAdapter();
     let reads = 0;
+    let testDeadline = 0;
     const result = await adapter.executeOnce({
       workspaceDir: workspace,
       activeRelease: { present: true, readable: true, valid: true, verdict: 'ok' },
       invocationId: 'inv-snapshot-overrun-progress',
       timeoutMs: 60_000,
-      deadlineAtMs: performance.now() + 120,
+      // The deadline must outlive the (real-SQLite) spawn on loaded CI but be
+      // crossed DURING the second snapshot read — the stall below waits until
+      // just past the deadline instead of a fixed delay, so a slow spawn
+      // cannot exhaust the budget before the read and skip the measured
+      // change entirely.
+      deadlineAtMs: (() => {
+        const deadline = performance.now() + 5_000;
+        testDeadline = deadline;
+        return deadline;
+      })(),
       identity: sandboxIdentity(),
       probes: {
         ...FIXTURE_ENTRY_PROBE,
         readTaskProgressSnapshot: (dir, options) => {
           reads += 1;
           if (reads === 2) {
-            const waitUntil = performance.now() + 200;
-            while (performance.now() < waitUntil) { /* synchronous stall */ }
+            while (performance.now() < testDeadline + 20) { /* synchronous stall until just past the deadline */ }
           }
           return readTaskProgressSnapshot(dir, options);
         },

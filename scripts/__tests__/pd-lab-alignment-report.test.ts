@@ -2263,9 +2263,13 @@ describe('alignment-report.mjs purity', () => {
     expect(source).not.toMatch(/writeFile/);
   });
 
-  it('exports exactly mergeJudgments and buildAlignmentReport', async () => {
+  it('exports exactly mergeJudgments, buildAlignmentReport and twoSidedThreshold', async () => {
+    // PRI-1258: twoSidedThreshold joined the pinned surface as the single
+    // statistical authority for k(n, alpha) — the T6 qualification engine
+    // reuses it instead of duplicating the exact BigInt tail math. The
+    // TECH 3.2 export table is updated in the same change.
     const module = await import('../dev/pd-lab/alignment-report.mjs');
-    expect(Object.keys(module).sort()).toEqual(['buildAlignmentReport', 'mergeJudgments']);
+    expect(Object.keys(module).sort()).toEqual(['buildAlignmentReport', 'mergeJudgments', 'twoSidedThreshold']);
   });
 });
 
