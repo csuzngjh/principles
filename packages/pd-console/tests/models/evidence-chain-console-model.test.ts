@@ -21,7 +21,7 @@ import * as os from 'os';
 import Database from 'better-sqlite3';
 import { EvidenceChainConsoleModel } from '../../src/server/models/EvidenceChainConsoleModel.js';
 import { resolveProvenanceBadge } from '../../src/ui/pages/pain/pain-card-helpers.js';
-import { crossReferenceByTimestamp } from '@principles/core/runtime';
+import { crossReferenceByTimestamp, fingerprintStatement } from '@principles/core/runtime';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
 
@@ -47,7 +47,8 @@ function createTrajectoryDb(): Database.Database {
       text TEXT,
       created_at TEXT NOT NULL,
       canonical_pain_id TEXT,
-      runtime_task_id TEXT
+      runtime_task_id TEXT,
+      host_kind TEXT
     )
   `);
 
@@ -109,9 +110,10 @@ function insertPainEvent(db: Database.Database, event: {
   createdAt?: string;
   canonicalPainId?: string;
   runtimeTaskId?: string;
+  hostKind?: string;
 }): number {
   const info = db.prepare(
-    'INSERT INTO pain_events (session_id, source, score, reason, severity, text, created_at, canonical_pain_id, runtime_task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO pain_events (session_id, source, score, reason, severity, text, created_at, canonical_pain_id, runtime_task_id, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     event.sessionId ?? 'session-001',
     event.source,
@@ -122,6 +124,7 @@ function insertPainEvent(db: Database.Database, event: {
     event.createdAt ?? '2026-06-07T10:00:00.000Z',
     event.canonicalPainId ?? null,
     event.runtimeTaskId ?? null,
+    event.hostKind ?? null,
   );
   return Number(info.lastInsertRowid);
 }
@@ -2293,5 +2296,133 @@ describe('v0.8 §6.6.4: EvidenceChainConsoleModel — provenance passthrough', (
     expect(record.degradedReason).toBe('Diagnostic data for this record could not be parsed');
     // The card must NOT expose the raw enum and must NOT claim authorization.
     expect(resolveProvenanceBadge(record).kind).toBe('unverified_agent_report');
+  });
+});
+
+// ── PRI-1283 R2: post-revocation display via the console entry ────────────────
+//
+// The earlier suites exercise the sweep/task-creation entry; this one verifies
+// the CONSOLE read path: after consent is revoked, records still surface but
+// governed conversation text is replaced with a visible withheld marker —
+// EXCEPT Owner statements (direct submission or agent-relayed with a bound
+// Owner confirmation), which are Owner acts, not conversation ingestion.
+
+describe('EvidenceChainConsoleModel — PRI-1283 R2 post-revocation display', () => {
+  const REVOKED_MARK = '[source consent not granted — conversation-derived excerpt withheld (PRI-1283 R2)]';
+
+  function seedChainRecord(args: { canonicalPainId: string; correctionEvidence: Record<string, unknown> }): void {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'user_correction',
+      text: `governed excerpt for ${args.canonicalPainId}`,
+      createdAt: '2026-06-07T10:00:00.000Z',
+      canonicalPainId: args.canonicalPainId,
+      hostKind: 'codex',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_${args.canonicalPainId}`,
+      status: 'pending',
+      inputRef: args.canonicalPainId,
+      diagnosticJson: JSON.stringify({
+        sourcePainId: args.canonicalPainId,
+        hostKind: 'codex',
+        correctionEvidence: args.correctionEvidence,
+      }),
+    });
+    stateDb.close();
+  }
+
+  // The v3 ledger write lives in @principles/host-runtime's non-exported
+  // conversation-ingestion/consent module; the test writes the single
+  // authority file directly instead of depending on a package-internal path.
+  function writeConsentLedger(decision: 'granted' | 'revoked'): void {
+    const filePath = path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify({
+      schemaVersion: '3',
+      hosts: {
+        codex: {
+          decision,
+          disclosureVersion: 'test-disclosure',
+          decidedAt: '2026-06-07T11:00:00.000Z',
+          decidedVia: 'pd_codex_setup',
+          schemaVersion: '3',
+        },
+      },
+    }));
+  }
+
+  it('keeps a direct Owner statement and a confirmation-bound agent relay; hides an unconfirmed relay', async () => {
+    seedChainRecord({
+      canonicalPainId: 'pain-owner-direct',
+      correctionEvidence: {
+        text: 'PD记录痛苦：直接陈述',
+        classification: 'owner_statement',
+        channel: 'codex_explicit_prefix',
+      },
+    });
+    const confirmedText = 'agent relayed, owner confirmed';
+    seedChainRecord({
+      canonicalPainId: 'pain-agent-confirmed',
+      correctionEvidence: {
+        text: confirmedText,
+        classification: 'owner_statement',
+        channel: 'codex_explicit_agent',
+        ownerConfirmation: {
+          kind: 'owner_verbatim_turn_match',
+          statementFingerprint: fingerprintStatement(confirmedText),
+        },
+      },
+    });
+    seedChainRecord({
+      canonicalPainId: 'pain-agent-unconfirmed',
+      correctionEvidence: {
+        text: 'agent relayed, never confirmed',
+        classification: 'owner_statement',
+        channel: 'codex_explicit_agent',
+      },
+    });
+    writeConsentLedger('revoked');
+
+    const result = await model.getEvidenceChain();
+    const byCanonicalId = new Map(result.records.map((r) => [r.canonicalPainId, r]));
+
+    const ownerDirect = byCanonicalId.get('pain-owner-direct');
+    expect(ownerDirect).toBeDefined();
+    expect(ownerDirect?.summary).not.toBe(REVOKED_MARK);
+    expect(ownerDirect?.correctionEvidence?.ownerManual).toBe(true);
+    expect(ownerDirect?.correctionEvidence?.text).toBe('PD记录痛苦：直接陈述');
+
+    const agentConfirmed = byCanonicalId.get('pain-agent-confirmed');
+    expect(agentConfirmed).toBeDefined();
+    expect(agentConfirmed?.summary).not.toBe(REVOKED_MARK);
+    expect(agentConfirmed?.correctionEvidence?.ownerManual).toBe(true);
+    expect(agentConfirmed?.correctionEvidence?.text).toBe(confirmedText);
+
+    const agentUnconfirmed = byCanonicalId.get('pain-agent-unconfirmed');
+    expect(agentUnconfirmed).toBeDefined();
+    expect(agentUnconfirmed?.summary).toBe(REVOKED_MARK);
+    expect(agentUnconfirmed?.correctionEvidence).toBeUndefined();
+  });
+
+  it('serves all three records unchanged while consent is granted', async () => {
+    seedChainRecord({
+      canonicalPainId: 'pain-agent-unconfirmed',
+      correctionEvidence: {
+        text: 'agent relayed, never confirmed',
+        classification: 'owner_statement',
+        channel: 'codex_explicit_agent',
+      },
+    });
+    writeConsentLedger('granted');
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find((r) => r.canonicalPainId === 'pain-agent-unconfirmed');
+    expect(record).toBeDefined();
+    expect(record?.summary).not.toBe(REVOKED_MARK);
+    expect(record?.correctionEvidence?.text).toBe('agent relayed, never confirmed');
   });
 });

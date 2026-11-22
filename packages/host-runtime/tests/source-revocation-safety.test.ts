@@ -9,6 +9,7 @@ import {
   claimPendingCorrectionCandidates,
   ensureGovernanceDiagnosticianTask,
   recordPendingCorrectionReview,
+  releasePendingCorrectionClaim,
   verifyPendingClaimForClassification,
   type GovernanceCorrectionCandidate,
 } from '../src/governance-signal-admission.js';
@@ -745,6 +746,48 @@ describe('PRI-1283 r2 A — pending review terminated by revocation (real SQLite
     expect(claimUnreadable.ok).toBe(false);
     if (!claimUnreadable.ok) expect(claimUnreadable.reason).toContain('consent_unreadable');
     expect(markerRow().decision).toBe('pending_llm_review');
+  });
+
+  it('stage-2 pre-classifier recheck on an unreadable ledger refuses, releases the claim, and consumes no attempt', async () => {
+    // A worker claimed the row while the ledger was readable; the ledger is
+    // corrupted BETWEEN claim and the verifyPendingClaimForClassification
+    // gate that signal-stage2-cycle runs before the model request.
+    writeConsent('codex', 'granted');
+    const { key } = seedPendingReviewWithSecret();
+    const claim = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
+    if (!claim.ok || claim.candidates.length === 0) throw new Error('claim failed');
+    const workerToken = claim.candidates[0]?.claimToken;
+    if (workerToken === undefined || workerToken === null) throw new Error('no claim token');
+
+    fs.writeFileSync(path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'), '{not json');
+
+    // The recheck fails closed: no model request may start against an
+    // unreadable authority.
+    const verified = verifyPendingClaimForClassification({ workspaceDir, logicalObservationKey: key, claimToken: workerToken });
+    expect(verified.ok).toBe(false);
+    if (!verified.ok) expect(verified.reason).toContain('consent_unreadable');
+
+    // The cycle's release path still works: the claim is given back so the
+    // next cycle can re-claim once the ledger is repaired, and the refusal
+    // consumed NO review attempt (no classifier ran).
+    const released = releasePendingCorrectionClaim({ workspaceDir, logicalObservationKey: key, claimToken: workerToken });
+    expect(released.ok).toBe(true);
+    if (released.ok) expect(released.released).toBe(true);
+    const row = markerRow();
+    expect(row.decision).toBe('pending_llm_review');
+    const payload = JSON.parse(row.task_payload_json ?? '{}') as { review?: { attempts?: number; claimToken?: string; claimedAt?: string } };
+    expect(payload.review?.attempts).toBe(0);
+    expect(payload.review?.claimToken).toBeUndefined();
+    expect(payload.review?.claimedAt).toBeUndefined();
+
+    // After the ledger is repaired the same row is claimable again. The
+    // consent writer refuses to clobber a malformed authority, so restore the
+    // ledger by removing the torn file first.
+    fs.rmSync(path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'));
+    writeConsent('codex', 'granted');
+    const reclaim = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: new Date('2026-11-21T11:06:00.000Z') });
+    expect(reclaim.ok).toBe(true);
+    if (reclaim.ok) expect(reclaim.candidates.length).toBe(1);
   });
 });
 

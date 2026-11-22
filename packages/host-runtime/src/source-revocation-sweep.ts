@@ -169,7 +169,14 @@ export type SourceRevocationSweepReport =
     readonly ranAt: string;
     readonly apply: boolean;
     readonly hosts: readonly SourceRevocationSweepHostReport[];
-    readonly reason: null;
+    /**
+     * `null` on completed; a stable reason on partial so an operator (or
+     * `--json` consumer) does not have to mine per-host failures for the
+     * headline. PRI-1283 review: the report promised a top-level cause and
+     * recovery step, matching the failed/skipped variant below.
+     */
+    readonly reason: string | null;
+    readonly nextAction?: string;
   }
   | {
     readonly outcome: 'skipped' | 'failed';
@@ -1008,5 +1015,16 @@ export async function runSourceRevocationSweep(options: RunSourceRevocationSweep
     });
   }
 
+  if (outcome === 'partial') {
+    return {
+      outcome,
+      workspaceDir,
+      ranAt,
+      apply,
+      hosts: hostReports,
+      reason: 'sweep_partial_failures: one or more purge steps failed',
+      nextAction: 'Inspect the per-host failures above; the sweep is idempotent — fix the cause (lock, permission, torn JSON) and rerun `pd consent sweep-revoked --apply` until it reports completed.',
+    };
+  }
   return { outcome, workspaceDir, ranAt, apply, hosts: hostReports, reason: null };
 }

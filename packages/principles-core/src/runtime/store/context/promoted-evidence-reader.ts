@@ -199,11 +199,11 @@ export function readPromotedEvidenceWindow(input: {
     // shape with three bind slots (one per governance host); an unauthorized
     // host binds NULL, and `host_kind = NULL` is never true — an explicitly
     // EMPTY authorized list therefore yields zero rows without dynamic SQL.
-    const hostSlots: readonly (string | null)[] = input.authorizedHostKinds === undefined
-      ? [null, null, null]
-      : ['codex', 'workbuddy', 'openclaw'].map(
-        (host) => (input.authorizedHostKinds?.includes(host) === true ? host : null),
-      );
+    // An ABSENT list preserves the pre-R2 contract (no host filter — test
+    // seams only), so all three slots bind to their host kind.
+    const hostSlots: readonly (string | null)[] = ['codex', 'workbuddy', 'openclaw'].map(
+      (host) => (input.authorizedHostKinds === undefined || input.authorizedHostKinds.includes(host) ? host : null),
+    );
     const rows: unknown[] = db.prepare(`
       SELECT id, kind, visible_text, source_order, observed_at, sanitized_tool_facts_json
       FROM (

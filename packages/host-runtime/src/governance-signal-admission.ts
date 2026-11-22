@@ -2263,6 +2263,26 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
   return true;
 }
 
+/**
+ * PRI-1283 round 5 (review): the correction evidence a recovery re-persists
+ * must carry the SAME classification judgment the validator applied — never
+ * the marker's stale label. A legacy pre-round-3 agent-relayed row may still
+ * claim `classification:'owner_statement'` without a bound confirmation; the
+ * shared ruling treats it as Agent-derived, and the current writer shape
+ * carries no classification for agent-derived text. Persisting the stale
+ * claim would let Recall re-serve a false `owner_statement` classification.
+ */
+function recoveryCorrectionEvidence(
+  persisted: NonNullable<GovernanceTaskSubmissionPayload['correctionEvidence']>,
+  sessionId: string,
+): NonNullable<GovernanceTaskSubmissionPayload['correctionEvidence']> {
+  const next = { ...persisted, sessionId };
+  if (!isOwnerManualCorrectionEvidence(next)) {
+    delete (next as { classification?: 'owner_statement' }).classification;
+  }
+  return next;
+}
+
 export interface EnsureGovernanceTaskInput {
   readonly workspaceDir: string;
   readonly logicalObservationKey: string;
@@ -2463,7 +2483,12 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
             return {
               ok: false,
               reason: 'source_authorization_revoked',
-              nextAction: `purge persisted copies first: pd consent sweep-revoked --apply (host: ${markerHostKind})`,
+              // An unreadable ledger cannot be swept (the sweep refuses to
+              // purge against an unreadable authority) — point at the ledger
+              // repair FIRST instead of a command that cannot run.
+              nextAction: authz.reason === 'consent_unreadable'
+                ? `repair the consent ledger first (<workspace>/.state/conversation-ingestion-consent.json is unreadable); the sweep refuses to run until the authority is readable`
+                : `purge persisted copies first: pd consent sweep-revoked --apply (host: ${markerHostKind})`,
             };
           }
         }
@@ -2506,7 +2531,12 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
           // CR-02: replay the explicit Owner statement verbatim (classified,
           // channel-disclosed) so re-created tasks keep the same input basis.
           ...(payloadParsed.correctionEvidence !== undefined
-            ? { correctionEvidence: { ...payloadParsed.correctionEvidence, sessionId: payloadParsed.sessionId } }
+            ? {
+              correctionEvidence: recoveryCorrectionEvidence(
+                payloadParsed.correctionEvidence,
+                payloadParsed.sessionId,
+              ),
+            }
             : {}),
           recordObservability: true,
         });

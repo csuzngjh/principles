@@ -864,7 +864,13 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery, 
             if (isRecord(persisted) && typeof persisted.text === 'string' && persisted.text.length > 0 && !correctionBlocked) {
               correction = {
                 text: persisted.text,
-                ...(ownString(persisted, 'classification') !== null ? { classification: ownString(persisted, 'classification') ?? undefined } : {}),
+                // PRI-1283 round 5: only an owner-manual verdict may re-serve
+                // the `owner_statement` classification. A legacy agent-relayed
+                // row can still carry the pre-round-3 label without a bound
+                // confirmation; re-deriving through the shared judgment keeps
+                // the read consistent with the recovery-time source ruling
+                // (Agent-derived → no owner_statement classification).
+                ...(isOwnerManualCorrectionEvidence(persisted) && ownString(persisted, 'classification') !== null ? { classification: ownString(persisted, 'classification') ?? undefined } : {}),
                 ...(ownString(persisted, 'channel') !== null ? { channel: ownString(persisted, 'channel') ?? undefined } : {}),
                 ...(ownString(persisted, 'sessionId') !== null ? { sessionId: ownString(persisted, 'sessionId') ?? undefined } : {}),
                 ...(ownString(persisted, 'occurredAt') !== null ? { occurredAt: ownString(persisted, 'occurredAt') ?? undefined } : {}),
