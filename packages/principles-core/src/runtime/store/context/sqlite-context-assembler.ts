@@ -292,7 +292,10 @@ export class SqliteContextAssembler implements ContextAssembler {
     // starve the diagnosis of the session's original turns.
     const historyHasUsableText = conversationEntries.some((entry) => typeof entry.text === 'string' && entry.text.trim().length > 0);
     if (!usedPromotedWindow && !historyHasUsableText && dt.sessionIdHint && dt.workspaceDir !== '<unknown>' && this.trajectoryTurnReader) {
-      const trajectoryEntries = this.readTrajectoryTurns(dt.sessionIdHint, ambiguityNotes);
+      // PRI-1274 (B1 / P1-3): a NAMED target turn narrows the read to that
+      // exact (session, turn) — never the whole session (the other turns
+      // must not substitute the target), and never a guessed "latest" turn.
+      const trajectoryEntries = this.readTrajectoryTurns(dt.sessionIdHint, ambiguityNotes, { targetTurnId: dt.targetTurnId, hostKind: dt.hostKind });
       if (trajectoryEntries.length > 0) {
         if (conversationEntries.length > 0) {
           ambiguityNotes.push(
@@ -503,11 +506,45 @@ export class SqliteContextAssembler implements ContextAssembler {
   /**
    * PRI-350: Read turns from TrajectoryDB and convert to HistoryQueryEntry[].
    * Returns empty array if no turns found, with ambiguityNote added (ERR-002).
+   *
+   * PRI-1274 (B1 / P1-3): when `targetTurnId` is known, the read is EXACT —
+   * only that (session, host turn id) may enter the window. The session's
+   * other turns never substitute a named target, and an unreadable target
+   * stays unreadable (observable note) instead of being replaced.
    */
-  private readTrajectoryTurns(sessionId: string, ambiguityNotes: string[]): HistoryQueryEntry[] {
+  private readTrajectoryTurns(
+    sessionId: string,
+    ambiguityNotes: string[],
+    target?: { readonly targetTurnId?: string; readonly hostKind?: 'openclaw' | 'codex' | 'workbuddy' },
+  ): HistoryQueryEntry[] {
+    const { targetTurnId } = target ?? {};
     const reader = this.trajectoryTurnReader;
     // Caller guarantees reader is defined; guard for type safety
     if (!reader) return [];
+
+    if (targetTurnId !== undefined) {
+      if (reader.listTurnTextsForHostTurnId === undefined) {
+        ambiguityNotes.push(
+          `Target turn ${targetTurnId} named for sessionId=${sessionId} but the trajectory reader cannot read by host turn id; session-wide substitution skipped`,
+        );
+        return [];
+      }
+      const exact = reader.listTurnTextsForHostTurnId(sessionId, targetTurnId, target?.hostKind);
+      const entries: HistoryQueryEntry[] = [];
+      for (const turn of exact.userTurns) {
+        entries.push({ ts: turn.createdAt, role: 'user', text: turn.rawExcerpt });
+      }
+      for (const turn of exact.assistantTurns) {
+        entries.push({ ts: turn.createdAt, role: 'assistant', text: sanitizeString(turn.sanitizedText) });
+      }
+      entries.sort((a, b) => a.ts.localeCompare(b.ts));
+      if (entries.length === 0) {
+        ambiguityNotes.push(
+          `Target turn ${targetTurnId} for sessionId=${sessionId} has no readable text in the authorized trajectory store; session-wide substitution skipped`,
+        );
+      }
+      return entries;
+    }
 
     const userTurns = reader.listUserTurnsForSession(sessionId);
     const assistantTurns = reader.listAssistantTurns(sessionId);
@@ -638,6 +675,11 @@ export class SqliteContextAssembler implements ContextAssembler {
             sessionIdHint: SqliteContextAssembler.extractStringField(parsed, 'sessionIdHint'),
             agentIdHint: SqliteContextAssembler.extractStringField(parsed, 'agentIdHint'),
             workspaceDir: SqliteContextAssembler.extractStringField(parsed, 'workspaceDir'),
+            // PRI-1274 (B1 / P1-3): the verified submission/target turn ids —
+            // read-only pointers into painIngress.verifiedHostSession; a
+            // malformed block degrades to absence (session-level policy),
+            // never to a guessed turn.
+            ...SqliteContextAssembler.extractVerifiedTurnIds(parsed),
             anchor,
             provenance: Object.hasOwn(parsed, 'provenance') && (isPainProvenance(parsed.provenance) || parsed.provenance === 'openclaw_context_bound')
               ? (isPainProvenance(parsed.provenance) ? parsed.provenance : 'host_context_bound')
@@ -675,6 +717,31 @@ export class SqliteContextAssembler implements ContextAssembler {
       provenanceReason: extra.provenanceReason,
       evidence: extra.evidence,
       correctionEvidence: extra.correctionEvidence,
+      submissionTurnId: extra.submissionTurnId,
+      targetTurnId: extra.targetTurnId,
+    };
+  }
+
+  /**
+   * PRI-1274 (B1 / P1-3): read the verified submission/target turn ids from
+   * `painIngress.verifiedHostSession`. Strictly guarded — a malformed block
+   * yields neither id (the diagnosis then stays on session-level policy
+   * rather than reading a guessed turn).
+   */
+  private static extractVerifiedTurnIds(parsed: Record<string, unknown>): { submissionTurnId?: string; targetTurnId?: string } {
+    const {painIngress} = parsed;
+    if (!isRecord(painIngress)) return {};
+    const verified = painIngress.verifiedHostSession;
+    if (!isRecord(verified) || verified.status !== 'verified') return {};
+    const submissionTurnId = typeof verified.submissionTurnId === 'string' && verified.submissionTurnId.length > 0
+      ? verified.submissionTurnId
+      : undefined;
+    const targetTurnId = typeof verified.targetTurnId === 'string' && verified.targetTurnId.length > 0
+      ? verified.targetTurnId
+      : undefined;
+    return {
+      ...(submissionTurnId === undefined ? {} : { submissionTurnId }),
+      ...(targetTurnId === undefined ? {} : { targetTurnId }),
     };
   }
 }

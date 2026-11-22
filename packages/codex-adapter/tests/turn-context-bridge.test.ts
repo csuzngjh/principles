@@ -11,7 +11,7 @@
  * ingestion and automatic-pain opt-in are off (with a granted source ledger);
  * unverified wording stays agent-derived; ordinary quoted prompts create
  * nothing; lineage comes only from the host-written context; replay dedupes;
- * context files contain ids/paths only; Stop/SessionStart withdraw the context.
+ * context files contain ids/paths and a closed-set intent marker only; Stop/SessionStart withdraw the context.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -156,6 +156,8 @@ function stateDbDiagnostic(root: string, taskId: string): Record<string, unknown
 }
 
 const OWNER_WORDS = '额度有限的任务应委派给低成本模型的子代理完成，而不是全部由高价模型自己执行';
+const OWNER_REQUEST_PREFIX = 'PD\u4ee3\u5f55\u75db\u82e6\uff1a';
+function ownerRequest(prompt: string): string { return OWNER_REQUEST_PREFIX + prompt; }
 
 describe('hook publishes the live turn context', () => {
   it('writes ids/paths only — never prompt text — on every UserPromptSubmit', async () => {
@@ -167,11 +169,21 @@ describe('hook publishes the live turn context', () => {
     expect(raw).not.toContain('请创建痛苦信号');
     expect(raw).not.toContain('历史对话');
     const context = JSON.parse(raw) as Record<string, unknown>;
-    expect(context.schemaVersion).toBe(1);
+    expect(context.schemaVersion).toBe(2);
     expect(context.sessionId).toBe(ROOT_SESSION);
     expect(context.turnId).toBe(TURN_1);
     expect(context.transcriptPath).toBe(ws.transcriptPath);
     expect(context.workspaceDir).toBe(ws.root);
+    expect(context.ownerIntent).toBeNull();
+  });
+
+  it('captures only a closed-set Owner intent marker for an explicit current-turn request', async () => {
+    const ws = makeWorkspace(false);
+    await processHookInvocation(promptPayload(ws, ownerRequest(OWNER_WORDS)), { CODEX_HOME: ws.codexHome }, ws.root);
+    const raw = fs.readFileSync(turnContextFile(ws.root), 'utf8');
+    const context = JSON.parse(raw) as Record<string, unknown>;
+    expect(context.ownerIntent).toBe('explicit_pain_registration');
+    expect(raw).not.toContain(OWNER_WORDS);
   });
 
   it('a payload without transcript lineage withdraws the context instead of leaving a stale one', async () => {
@@ -186,7 +198,7 @@ describe('hook publishes the live turn context', () => {
 
   it('Stop and SessionStart withdraw the context (fail-closed after the turn)', async () => {
     const ws = makeWorkspace(false);
-    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('当前轮')), { CODEX_HOME: ws.codexHome }, ws.root);
     expect(fs.existsSync(turnContextFile(ws.root))).toBe(true);
     await processHookInvocation(stopPayload(ws), { CODEX_HOME: ws.codexHome }, ws.root);
     expect(fs.existsSync(turnContextFile(ws.root))).toBe(false);
@@ -240,9 +252,20 @@ function appendUserTurnToTranscript(ws: Workspace, text: string, turnId = TURN_1
 }
 
 describe('agent-assisted registration through the real chain', () => {
-  it('registers one real pain + one task from an explicit no-prefix request, classified Agent-derived when the Owner words are not verifiable in the transcript', async () => {
+  it('refuses an agent/tool invocation when the current Owner message did not explicitly request registration', async () => {
     const ws = makeWorkspace(true);
-    const result0 = await processHookInvocation(promptPayload(ws, '请用 PD 记录这条痛苦：' + OWNER_WORDS), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, 'analyze this issue and suggest a solution'), { CODEX_HOME: ws.codexHome }, ws.root);
+    const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
+    expect(receipt).toMatchObject({ status: 'rejected', reason: 'owner_intent_missing' });
+    const db = trajectoryOf(ws.root);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(0);
+    db.close();
+    expect(stateDbTaskIds(ws.root)).toHaveLength(0);
+  });
+
+  it('registers one real pain + one task from an explicit Owner-intent request, classified Agent-derived when the Owner words are not verifiable in the transcript', async () => {
+    const ws = makeWorkspace(true);
+    const result0 = await processHookInvocation(promptPayload(ws, ownerRequest('请用 PD 记录这条痛苦：' + OWNER_WORDS)), { CODEX_HOME: ws.codexHome }, ws.root);
     expect(result0.stderr.some((line) => line.includes('owner_statement_received'))).toBe(false);
     const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
     expect(receipt.status).toBe('received');
@@ -272,7 +295,7 @@ describe('agent-assisted registration through the real chain', () => {
 
   it('classifies the statement owner_manual when the submitted words appear verbatim in the current turn transcript', async () => {
     const ws = makeWorkspace(true);
-    const prompt = '请用 PD 记录这条痛苦：' + OWNER_WORDS;
+    const prompt = ownerRequest('请用 PD 记录这条痛苦：' + OWNER_WORDS);
     // The Owner's own current-turn message, in the host-validated transcript —
     // the credible Owner interaction record the ruling requires.
     appendUserTurnToTranscript(ws, prompt);
@@ -298,7 +321,7 @@ describe('agent-assisted registration through the real chain', () => {
 
   it('keeps the Owner words verbatim even when the model passed them through a longer message', async () => {
     const ws = makeWorkspace(true);
-    await processHookInvocation(promptPayload(ws, '任务完成了但我很不满意，请用 PD 把下面这句原话记成痛苦信号：' + OWNER_WORDS), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('任务完成了但我很不满意，请用 PD 把下面这句原话记成痛苦信号：' + OWNER_WORDS)), { CODEX_HOME: ws.codexHome }, ws.root);
     const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
     expect(receipt.status).toBe('received');
     const db = trajectoryOf(ws.root);
@@ -309,7 +332,7 @@ describe('agent-assisted registration through the real chain', () => {
 
   it('same-turn replay converges on the SAME canonical pain (A17 extension)', async () => {
     const ws = makeWorkspace(true);
-    await processHookInvocation(promptPayload(ws, '请用 PD 记录：' + OWNER_WORDS), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('请用 PD 记录：' + OWNER_WORDS)), { CODEX_HOME: ws.codexHome }, ws.root);
     const first = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
     const second = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
     expect(first.status).toBe('received');
@@ -351,7 +374,7 @@ describe('agent-assisted registration through the real chain', () => {
 
   it('works with the conversation-ingestion flag OFF (no transcript content read)', async () => {
     const ws = makeWorkspace(false);
-    await processHookInvocation(promptPayload(ws, '请用 PD 记录：' + OWNER_WORDS), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('请用 PD 记录：' + OWNER_WORDS)), { CODEX_HOME: ws.codexHome }, ws.root);
     const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
     expect(receipt.status).toBe('received');
     const db = trajectoryOf(ws.root);
@@ -382,7 +405,7 @@ describe('lineage integrity — the context file is the only lineage source', ()
 
   it('corrupt or wrong-schema context is rejected, never trusted', async () => {
     const ws = makeWorkspace(true);
-    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('当前轮')), { CODEX_HOME: ws.codexHome }, ws.root);
     const original = fs.readFileSync(turnContextFile(ws.root), 'utf8');
     const context = JSON.parse(original) as Record<string, unknown>;
     fs.writeFileSync(turnContextFile(ws.root), '{not json');
@@ -399,7 +422,7 @@ describe('lineage integrity — the context file is the only lineage source', ()
 
   it('a stale context (writtenAt beyond the TTL) fails closed with zero writes', async () => {
     const ws = makeWorkspace(true);
-    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('当前轮')), { CODEX_HOME: ws.codexHome }, ws.root);
     const context = JSON.parse(fs.readFileSync(turnContextFile(ws.root), 'utf8')) as Record<string, unknown>;
     context.writtenAt = new Date(Date.now() - TURN_CONTEXT_MAX_AGE_MS - 60_000).toISOString();
     fs.writeFileSync(turnContextFile(ws.root), JSON.stringify(context));
@@ -412,7 +435,7 @@ describe('lineage integrity — the context file is the only lineage source', ()
 
   it('a context whose writtenAt is not a timestamp is rejected as invalid', async () => {
     const ws = makeWorkspace(true);
-    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('当前轮')), { CODEX_HOME: ws.codexHome }, ws.root);
     const context = JSON.parse(fs.readFileSync(turnContextFile(ws.root), 'utf8')) as Record<string, unknown>;
     context.writtenAt = 'not-a-timestamp';
     fs.writeFileSync(turnContextFile(ws.root), JSON.stringify(context));
@@ -425,7 +448,7 @@ describe('lineage integrity — the context file is the only lineage source', ()
 
   it('a withdrawal failure is surfaced as a diagnostic, never silently swallowed (rc-9)', async () => {
     const ws = makeWorkspace(false);
-    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('当前轮')), { CODEX_HOME: ws.codexHome }, ws.root);
     // Make withdrawal impossible: occupy the context path with a directory.
     fs.rmSync(turnContextFile(ws.root));
     fs.mkdirSync(turnContextFile(ws.root));
@@ -448,7 +471,7 @@ describe('lineage integrity — the context file is the only lineage source', ()
 
   it('a tampered transcript path is re-validated at registration time (zero writes)', async () => {
     const ws = makeWorkspace(true);
-    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('当前轮')), { CODEX_HOME: ws.codexHome }, ws.root);
     const context = JSON.parse(fs.readFileSync(turnContextFile(ws.root), 'utf8')) as Record<string, unknown>;
     context.transcriptPath = path.join(ws.codexHome, 'sessions', 'rollout-2026-08-28T22-03-23-doesnotexist.jsonl');
     fs.writeFileSync(turnContextFile(ws.root), JSON.stringify(context));
@@ -462,7 +485,7 @@ describe('lineage integrity — the context file is the only lineage source', ()
   it('a context file copied into another workspace is refused (workspace mismatch)', async () => {
     const ws = makeWorkspace(true);
     const other = makeWorkspace(true);
-    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('当前轮')), { CODEX_HOME: ws.codexHome }, ws.root);
     fs.copyFileSync(turnContextFile(ws.root), turnContextFile(other.root));
     const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: other.root, statementText: OWNER_WORDS });
     expect(receipt).toMatchObject({ status: 'rejected', reason: 'turn_context_workspace_mismatch' });
@@ -473,7 +496,7 @@ describe('lineage integrity — the context file is the only lineage source', ()
 
   it('statement bounds: empty and over-limit are rejected, never truncated', async () => {
     const ws = makeWorkspace(true);
-    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('当前轮')), { CODEX_HOME: ws.codexHome }, ws.root);
     const empty = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: '   ' });
     expect(empty).toMatchObject({ status: 'rejected', reason: 'statement_empty' });
     const overlong = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: '长'.repeat(MAX_OWNER_STATEMENT_CHARS + 1) });
@@ -487,12 +510,12 @@ describe('lineage integrity — the context file is the only lineage source', ()
     const ws = makeWorkspace(true);
     for (let i = 1; i <= 5; i++) {
       const turnId = `01a048ae-b344-7eb2-804b-a2fa34302f${String(i).padStart(2, '0')}`;
-      await processHookInvocation(promptPayload(ws, `第${i}轮的反馈`, turnId), { CODEX_HOME: ws.codexHome }, ws.root);
+      await processHookInvocation(promptPayload(ws, ownerRequest(`第${i}轮的反馈`), turnId), { CODEX_HOME: ws.codexHome }, ws.root);
       const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: `${OWNER_WORDS}（第${i}轮）` });
       expect(receipt.status).toBe('received');
     }
     const turnId6 = '01a048ae-b344-7eb2-804b-a2fa34302f06';
-    await processHookInvocation(promptPayload(ws, '第六轮的反馈', turnId6), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, ownerRequest('第六轮的反馈'), turnId6), { CODEX_HOME: ws.codexHome }, ws.root);
     const sixth = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: `${OWNER_WORDS}（第6轮）` });
     expect(sixth).toMatchObject({ status: 'rejected', reason: 'rate_limited' });
     const db = trajectoryOf(ws.root);

@@ -1348,6 +1348,40 @@ describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', (
           correctionEvidence: { text: `${SECRET} relayed`, channel: 'codex_explicit_agent' },
         }),
       });
+      await manager.createTask({
+        taskId: 'diagnosis_agent_origin_' + painId,
+        taskKind: 'diagnostician',
+        inputRef: painId,
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        diagnosticJson: JSON.stringify({
+          sourcePainId: painId,
+          source: 'user_correction',
+          reasonSummary: 'agent-assisted Codex correction with no remaining excerpt',
+          severity: 'moderate',
+          sessionIdHint: 'root-session-1',
+          agentIdHint: null,
+          provenance: 'agent_reported_owner_approved',
+          provenanceReason: 'Owner authorized agent-assisted registration; wording was not transcript-verified',
+          hostKind: 'codex',
+          evidence: [],
+          workspaceDir: null,
+          painIngress: {
+            version: 'v1',
+            origin: { kind: 'agent_assisted', channel: 'codex_explicit_agent' },
+            correlation: {
+              status: 'bound',
+              hostKind: 'codex',
+              rootSessionId: 'root-session-1',
+              rolloutIdentity: 'rollout-1',
+              logicalObservationKey: 'codex|rollout-1|turn-g|user',
+              hostTurnId: 'turn-g',
+            },
+            evidenceClass: { status: 'unavailable', reason: 'trajectory_unavailable' },
+          },
+        }),
+      });
     } finally {
       await manager.close().catch(() => undefined);
     }
@@ -1360,6 +1394,18 @@ describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', (
     const parsed = JSON.parse(task.diagnostic_json) as { correctionEvidence?: unknown };
     expect(parsed.correctionEvidence).toBeUndefined();
     expect(task.diagnostic_json).not.toContain(SECRET);
+
+    const emptyAgentTask = withState((db) => db.prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?').get('diagnosis_agent_origin_' + painId) as { diagnostic_json: string });
+    const emptyAgentPayload = JSON.parse(emptyAgentTask.diagnostic_json) as {
+      painIngress?: { evidenceClass?: { status?: string; reason?: string } };
+      sourceRevocation?: { codex?: unknown };
+      correctionEvidence?: unknown;
+      evidence?: unknown[];
+    };
+    expect(emptyAgentPayload.correctionEvidence).toBeUndefined();
+    expect(emptyAgentPayload.evidence).toEqual([]);
+    expect(emptyAgentPayload.painIngress?.evidenceClass).toEqual({ status: 'unavailable', reason: 'source_revoked' });
+    expect(emptyAgentPayload.sourceRevocation?.codex).toBeDefined();
   });
 
   it('H. 撤回授权后任务恢复拒绝重持久化受管摘录; owner_manual 仍豁免', async () => {

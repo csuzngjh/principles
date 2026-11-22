@@ -352,6 +352,49 @@ describe('checkIngressTopLevelConsistency (review blocker 2 closure)', () => {
     if (!malformed.ok) expect(malformed.reasonCode).toBe('ingress_verified_session_invalid');
   });
 
+  // ── PRI-1274 (B1): submission/target turn fields are validated INDEPENDENTLY —
+  // a trusted session may carry only the submission turn (target evidence is a
+  // separate later concern). Historical rows always carry both or neither, so
+  // this widening accepts strictly more of what the writer produces.
+
+  it('PRI-1274: a verified association with submissionTurnId but no targetTurnId parses', () => {
+    const parsed = parsePainIngressV1Payload({
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
+      correlation: { status: 'unbound', reason: 'missing_host_session' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      verifiedHostSession: { status: 'verified', sessionId: 'sess-verified', submissionTurnId: 'turn-7' },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.payload.verifiedHostSession).toEqual({ status: 'verified', sessionId: 'sess-verified', submissionTurnId: 'turn-7' });
+  });
+
+  it('PRI-1274: a session-only verified association (no turns) still parses', () => {
+    const parsed = parsePainIngressV1Payload({
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
+      correlation: { status: 'unbound', reason: 'missing_host_session' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      verifiedHostSession: { status: 'verified', sessionId: 'sess-verified' },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.payload.verifiedHostSession).toEqual({ status: 'verified', sessionId: 'sess-verified' });
+  });
+
+  it('PRI-1274: an empty-string turn id still fails closed (rc-3)', () => {
+    const parsed = parsePainIngressV1Payload({
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
+      correlation: { status: 'unbound', reason: 'missing_host_session' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      verifiedHostSession: { status: 'verified', sessionId: 'sess-verified', submissionTurnId: '   ' },
+    });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.reasonCode).toBe('ingress_verified_session_invalid');
+  });
+
   it('accepts a consistent bound OpenClaw v1 with matching evidence count', () => {
     const payload: PainIngressV1Payload = {
       version: 'v1',

@@ -94,6 +94,21 @@ function parseDiagnosticJsonObject(raw: string | null | undefined): Record<strin
   return candidate as Record<string, unknown>;
 }
 
+/**
+ * PRI-1274 r2b: is this diagnostician task explicitly waiting for its named
+ * target turn's text (the persisted admission disposition)? Read-only; a
+ * malformed payload simply reads as "not waiting" — the admission gates
+ * elsewhere fail closed on the same payload.
+ */
+function waitingTargetEvidenceState(diagnosticJson: string | null | undefined): boolean {
+  const {recovery} = parseDiagnosticJsonObject(diagnosticJson);
+  if (typeof recovery !== 'object' || recovery === null || Array.isArray(recovery)) return false;
+  // runtime-contract-exempt: ERR-001 the guards above narrow `recovery` to a
+  // non-null non-array object; the single field read below is typeof-checked.
+  const {state} = (recovery as Record<string, unknown>);
+  return state === 'waiting_for_target_evidence';
+}
+
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === 'string');
@@ -254,10 +269,50 @@ export class SplitDiagnosticianRunner {
       return this.budgetExhaustedBeforeLeaseFailure(parentTaskId);
     }
 
+    // PRI-1274 r2b (devin finding 0003): a task explicitly waiting for its
+    // target turn's text is not admissible on ANY execution path. The
+    // bridge's executePendingDiagnosis refuses it for the automatic cycle;
+    // this runner is the other entry (manual `pd diagnose run` / split
+    // pipeline). Review round 2 (directives H1/H2/H4): the check below is a
+    // FAST-PATH refusal only; the AUTHORITATIVE judgment rides the lease
+    // acquisition itself — `refuseIf` evaluates the fresh row inside the
+    // acquisition's BEGIN IMMEDIATE transaction, closing the read→check→lease
+    // race where a recovery flips the task to waiting between this check and
+    // the lease. A store read failure here is FAIL-CLOSED: the runner refuses
+    // to execute against an unreadable authoritative state — no lease, no
+    // run, no provider call, structured storage error.
+    try {
+      const task = await this.stateManager.getTask(parentTaskId);
+      // `undefined` is a test-double shape for "no row"; production reads
+      // null — both mean "not waiting" here (the lease acquisition owns the
+      // authoritative not-found path).
+      if (task !== null && task !== undefined && waitingTargetEvidenceState(task.diagnosticJson)) {
+        return {
+          status: 'failed',
+          taskId: parentTaskId,
+          errorCategory: 'input_invalid',
+          failureReason: 'target_evidence_pending: the task waits for its named target turn text; the workspace worker reconcile flips it once the evidence exists',
+          attemptCount: 0,
+        };
+      }
+    } catch (error) {
+      // Directive H4: an unreadable authoritative task state must never
+      // default to "allowed". The store message is bounded and structured;
+      // it carries no submission content.
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'failed',
+        taskId: parentTaskId,
+        errorCategory: 'storage_unavailable',
+        failureReason: `target_evidence_gate_unreadable: the authoritative task state could not be read before diagnosis; refusing to execute (fail closed): ${message.slice(0, 160)}`,
+        attemptCount: 0,
+      };
+    }
+
     // Bug-N fix: acquire lease on the parent task so markTaskSucceeded (called
     // at the end of run()) has a run record to update. Without this, the
-    // parent task is marked succeeded in the tasks table but no run record
-    // is created, leaving runs/tasks truth out of sync (8 diagnosis_manual_*
+    // parent task is marked succeeded in the tasks table but no run record is
+    // created, leaving runs/tasks truth out of sync (8 diagnosis_manual_*
     // tasks hit this in production). The parent task is created by
     // PainSignalBridge but never lease-acquired — this runner must do it.
     try {
@@ -268,20 +323,32 @@ export class SplitDiagnosticianRunner {
         // resolved kind the stage runners also use), not a hardcoded label.
         runtimeKind: this.runtimeKind ?? 'openclaw',
         durationMs: this.executionTiming.leaseTtlMs,
+        // Directive H2: the FINAL waiting judgment, atomically inside the
+        // lease acquisition transaction (before the lease/generation/run).
+        refuseIf: (row) => (waitingTargetEvidenceState(row.diagnosticJson)
+          ? 'target_evidence_pending: the task waits for its named target turn text; the workspace worker reconcile flips it once the evidence exists'
+          : null),
       });
       this.parentRunId = acquisition.runId;
       this.parentFence = leaseFenceOf(acquisition.task);
     } catch (error) {
       // lease_conflict = another worker is already running this task.
       // Non-mutating: do not call markTaskFailed/markTaskRetryWait (rc-3 fail-loud).
-      const isLeaseConflict = error instanceof PDRuntimeError && error.category === 'lease_conflict';
+      // input_invalid = the in-transaction waiting gate (H2) refused the
+      // acquisition — same zero-mutation contract, the task stays pending.
+      const pdError = error instanceof PDRuntimeError ? error : null;
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const category = pdError?.category === 'lease_conflict'
+        ? 'lease_conflict'
+        : pdError?.category === 'input_invalid'
+          ? 'input_invalid'
+          : 'execution_failed';
       return {
         status: 'failed',
         taskId: parentTaskId,
-        errorCategory: isLeaseConflict ? 'lease_conflict' : 'execution_failed',
+        errorCategory: category,
         failureReason: `Parent task ${parentTaskId} lease acquisition failed: ${errorMessage}`,
-        attemptCount: 1,
+        attemptCount: category === 'input_invalid' ? 0 : 1,
       };
     }
 

@@ -3,6 +3,479 @@
   "_comment": "Export admissions for packages/principles-core. Schema and rules: scripts/check-core-export-surface.mjs. Every record needs expiresAt; consumers are parsed and must import AND use the symbol.",
   "admissions": [
     {
+      "entry": "./runtime",
+      "symbol": "DreamerSeedSuppression",
+      "kind": "type",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/commands/diagnose.ts",
+        "packages/pd-cli/src/commands/candidate.ts"
+      ],
+      "whyNotInternal": "The suppression verdict crosses the package boundary with the function, so its result shape must too; a pd-cli-local structural copy would keep compiling after the guard adds a suppression reason.",
+      "alternativeConsidered": "Returning a bare boolean was rejected: the CLI must report WHICH durable fact suppressed the seed (resolved onto principle X vs park pending), and a boolean erases that observability."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "GOVERNANCE_OBSERVATION_SOURCE_REF_PREFIX",
+      "kind": "value",
+      "consumers": [
+        "packages/host-runtime/src/source-revocation-sweep.ts"
+      ],
+      "whyNotInternal": "The revocation sweep lives in host-runtime and must attribute persisted evidence sourceRefs to the swept host with the exact prefix the codex/workbuddy ingestion producers write; a private copy would drift from the one mapping authority.",
+      "alternativeConsidered": "Re-declaring the prefix literal in host-runtime, rejected because two independent prefix constants would silently diverge on the next producer change.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "IntentSectionState",
+      "kind": "type",
+      "addedIn": "PRI-1224",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-console/src/server/models/IntentPageModel.ts"
+      ],
+      "whyNotInternal": "The sectionStates DTO type is the return element type of analyzeIntentDocSections; the console model types its projection with it so an upstream enum change is a compile error, not a silent shape drift.",
+      "alternativeConsidered": "Re-declaring the union locally, rejected: a second union drifts from the classifier contract silently."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "OwnerDecisionRecord",
+      "kind": "type",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/services/reuse-park-release.ts",
+        "packages/pd-cli/src/commands/candidate.ts"
+      ],
+      "whyNotInternal": "The typed decision record crosses the package boundary as the store method parameter/return; pd-cli cannot reference it without the export.",
+      "alternativeConsidered": "Rejected: pd-cli-local mirror of the record shape — a second truth for the lifecycle fields the core store validates."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "PainReceiptRecoveryOutcome",
+      "kind": "type",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/ingestion/pain-receipt-fallback.ts"
+      ],
+      "whyNotInternal": "The fallback result type wraps the recovery outcome for the hook's bounded stderr diagnostic; the adapter names it explicitly in its own result surface, so a structural duplicate would drift from the outcome vocabulary (recovered/already_bound/rejected).",
+      "alternativeConsidered": "Type-only inference from the function return was rejected: the adapter's PainReceiptFallbackResult is part of its own exported surface and needs the named type."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "SourceAuthorizationState",
+      "kind": "type",
+      "consumers": [
+        "packages/host-runtime/src/source-material-authorization.ts"
+      ],
+      "whyNotInternal": "The authorization decision shape is the port contract host-runtime implements and pd-cli annotates; keeping it internal would force any implementer to redeclare it.",
+      "alternativeConsidered": "Re-exporting the type from host-runtime only, rejected because pd-cli would then depend on host-runtime for a core contract type.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "SourceMaterialAuthorizationPort",
+      "kind": "type",
+      "consumers": [
+        "packages/pd-cli/src/services/admission-write-gate.ts",
+        "packages/host-runtime/src/source-material-authorization.ts"
+      ],
+      "whyNotInternal": "The port is implemented in host-runtime and injected from pd-cli composition roots; both packages must name the interface or the injection is untyped.",
+      "alternativeConsidered": "A structural inline type in each consumer, rejected because a drifted shape would compile until a revocation slipped through.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "SourceMaterialDenialReason",
+      "kind": "type",
+      "consumers": [
+        "packages/host-runtime/src/source-material-authorization.ts"
+      ],
+      "whyNotInternal": "The ledger-backed port implementation in host-runtime returns the structured denial reason codes operators and the console surface; the codes are part of the port contract.",
+      "alternativeConsidered": "Widening the result to plain strings, rejected because unstructured denials are the rc-9 regression this gate exists to prevent.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "SourceMaterialHostKind",
+      "kind": "type",
+      "consumers": [
+        "packages/host-runtime/src/source-material-authorization.ts",
+        "packages/host-runtime/src/governance-trajectory-turn-reader.ts"
+      ],
+      "whyNotInternal": "host-runtime implements and consumes the authorization port; its public signatures need the governed-host union so a new host kind is a compile error, not a silent string.",
+      "alternativeConsidered": "Declaring a structural string union in host-runtime, rejected because it would accept kinds core does not govern.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "Stage2ConversationContext",
+      "kind": "type",
+      "addedIn": "PRI-1212",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/host-runtime/src/signal-classifier.ts",
+        "packages/openclaw-plugin/src/core/signal-collector-host.ts"
+      ],
+      "whyNotInternal": "Stage-2 classification runs in two other packages (the shared host-runtime classifier factory and the OpenClaw plugin host that owns the trajectory). Both must construct and pass the same fact shape into the core-owned prompt builder; a relative core-internal import is not possible across packages, and duplicating the shape would create a second contract for the same evidence.",
+      "alternativeConsidered": "Inlining a structural type in each consumer was rejected: the prompt builder and the gate would then accept shapes no shared type constrains, which is exactly how the R3 'no behavioral fact' misclassification reached admission."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "StrategicConflictView",
+      "kind": "type",
+      "addedIn": "PRI-1218",
+      "expiresAt": "2027-11-15",
+      "consumers": [
+        "packages/pd-console/src/server/models/ApprovalsGroupedConsoleModel.ts"
+      ],
+      "whyNotInternal": "The value above crosses the package boundary, so its shape must too; a console-local structural copy would silently accept fields the producer removed.",
+      "alternativeConsidered": "Duplicating the interface in pd-console was rejected: the console would keep compiling after the gate projection changes, hiding a real contract break."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "TargetEvidenceReconcileReport",
+      "kind": "type",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/worker/workspace-worker.ts"
+      ],
+      "whyNotInternal": "The reconcile report (checked/flipped/stillWaiting/errors) is a field of the worker cycle's exported report type, so the adapter must name the type; core owns the vocabulary the report counts.",
+      "alternativeConsidered": "Re-declaring the report shape in the adapter was rejected: the worker JSON report and the core reconcile would then describe one run with two drifting shapes."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "analyzeIntentDocSections",
+      "kind": "value",
+      "addedIn": "PRI-1224",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-console/src/server/models/IntentPageModel.ts"
+      ],
+      "whyNotInternal": "The console summary/save responses must project per-section authored/placeholder/missing states from the SAME deterministic classifier Stage A and the prompt hook use; a console-local copy would create a second template-matching truth (SPEC §7.1 shared pure function).",
+      "alternativeConsidered": "A console-local regex classifier, rejected: SPEC §7.1/§12.2 explicitly forbid re-implementing classification in the UI layer."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "appliedOwnerDecision",
+      "kind": "value",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/services/reuse-park-release.ts"
+      ],
+      "whyNotInternal": "Phase A resume/already-applied detection in the pd-cli review service reads the applied record to report a completed decision without re-executing it (crash-recovery contract).",
+      "alternativeConsidered": "Rejected: reading the raw document in pd-cli and filtering executionStatus by hand — the newest-applied selection rule would live in two packages."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "buildOwnerDecisionIntent",
+      "kind": "value",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/services/reuse-park-release.ts"
+      ],
+      "whyNotInternal": "Phase A intent construction lives in the pd-cli review service (the only caller that owns the verified Owner identity context), while the decisionId formula and policy stamp are the admission document's own contract in core — exporting the builder keeps one implementation instead of duplicating the hash formula in pd-cli.",
+      "alternativeConsidered": "Rejected: exporting only the decisionId hash formula (or duplicating it in pd-cli) — two implementations of the identity contract could drift; the builder keeps one."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "denyAllSourceMaterialAuthorization",
+      "kind": "value",
+      "consumers": [
+        "packages/host-runtime/src/governance-trajectory-turn-reader.ts"
+      ],
+      "whyNotInternal": "host-runtime composition roots need the fail-closed default port so an unwired authorization check denies governance-sourced turns instead of silently re-opening the R2 read gate.",
+      "alternativeConsidered": "Constructing an inline deny port in each host-runtime root, rejected because the denial reason string would be duplicated and drift from the documented default.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "deriveIntentDocState",
+      "kind": "value",
+      "addedIn": "PRI-1224",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-console/src/server/models/IntentPageModel.ts"
+      ],
+      "whyNotInternal": "Document-level readiness (template_only/incomplete/configured) must be derived by the one shared function so the API counts cannot disagree with Stage A snapshot gating.",
+      "alternativeConsidered": "Counting authored sections inline in the model, rejected: the not_configured/partially/configured thresholds are contract, not display logic."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "evaluateDreamerSeedSuppression",
+      "kind": "value",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/commands/diagnose.ts",
+        "packages/pd-cli/src/commands/candidate.ts"
+      ],
+      "whyNotInternal": "Both Dreamer seeding entry points live in pd-cli (the diagnose seed loop and the review-create/backfill seed paths) while the bridge seeds from core; a resolved-to-existing or reuse-parked candidate must get the SAME suppression verdict in every entry point, and that verdict must derive from persistent ledger identity + admission processing, not a transient intake result — so the guard has to be one shared function crossing the package boundary.",
+      "alternativeConsidered": "Re-implementing the two-fact check inline in each pd-cli entry point was rejected: four copies (diagnose, review-create, backfill, bridge) would drift, and the 19aa989d production anomaly (consumed AND parked AND seeded) came exactly from seeding decisions that did not consult persistent identity."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "fingerprintStatement",
+      "kind": "value",
+      "consumers": [
+        "packages/host-runtime/src/governance-signal-admission.ts"
+      ],
+      "whyNotInternal": "The admission writer must bind the Owner confirmation record to the sha256 of the persisted statement text; fingerprintStatement is the canonical statement fingerprint algorithm.",
+      "alternativeConsidered": "Recomputing sha256 inline in host-runtime, rejected because the fingerprint algorithm is a single source of truth already owned by admission-document.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "hostSessionClaimConflictsWithContext",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/pd-mcp-server/src/submit-assembly.ts"
+      ],
+      "whyNotInternal": "The fail-closed conflict check between the model-supplied hostSession claim and the trusted _meta context runs inside the MCP server's per-request resolution; keeping it beside the normalizer it guards prevents two packages re-implementing the trust rule.",
+      "alternativeConsidered": "Folding the check into resolveHostSubmissionContext was rejected: the claim is model-visible input the normalizer never sees; separating them keeps one input source per function."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "isIntentAnchoringEnabled",
+      "kind": "value",
+      "addedIn": "PRI-1224",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/host-runtime/src/intent-doc-reader.ts"
+      ],
+      "whyNotInternal": "Host-runtime (and through it pd-cli, codex-adapter, workbuddy-adapter) must evaluate the single intent_engineering predicate against the ENTRY-provided effectiveConfig; core owns the predicate so no entry re-implements the flag decision (SPEC-PD-INTENT-UNIFICATION-001 §9.3 rule 5).",
+      "alternativeConsidered": "Re-exporting computeFeatureFlagsFromConfig and re-deriving the flag per consumer, rejected because SPEC §7.2/P2-2 requires ONE predicate for the whole anchoring chain; a second derivation is exactly the drift the unification removed."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "isOwnerExplicitStatementReason",
+      "kind": "value",
+      "consumers": [
+        "packages/host-runtime/src/source-revocation-sweep.ts"
+      ],
+      "whyNotInternal": "The revocation sweep classifies persisted pain/admission reasons by the explicit-owner marker so legacy marker-only Owner statements are never wrongly purged.",
+      "alternativeConsidered": "Substring matching the marker text in each consumer, rejected because the marker string would exist in two packages.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "isOwnerManualCorrectionEvidence",
+      "kind": "value",
+      "consumers": [
+        "packages/host-runtime/src/source-revocation-sweep.ts",
+        "packages/host-runtime/src/governance-signal-admission.ts"
+      ],
+      "whyNotInternal": "Owner manual-vs-agent-derived classification is ONE judgment shared by the revocation sweep, task-payload validation, console redaction and every read gate; duplicating it per package would fork the Owner's classification ruling.",
+      "alternativeConsidered": "A narrow subpath export, rejected because the sibling classification helpers already live behind ./runtime and splitting one judgment across two entries invites drift.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "pdProviderCatalog",
+      "kind": "value",
+      "addedIn": "PRI-1213",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/pd-console/src/server/routes/config.ts"
+      ],
+      "whyNotInternal": "The console runs in a separate package and cannot import the core-internal pi-ai catalog bridge. It needs the same read-only projection the runtime already trusts, otherwise the picker would ship a second, hand-maintained provider/model list.",
+      "alternativeConsidered": "Importing @earendil-works/pi-ai directly in pd-console was rejected: the catalog entry shapes would then be interpreted twice (adapter and console), and the console would drift from the runtime's provider validation."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "pdProviderCredentials",
+      "kind": "value",
+      "addedIn": "PRI-1213",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/pd-console/src/server/routes/config.ts",
+        "packages/pd-console/src/server/models/AdaptiveActivationConsoleModel.ts",
+        "packages/host-runtime/src/adaptive-selection.ts",
+        "packages/host-runtime/src/signal-classifier.ts",
+        "packages/host-runtime/src/adaptive-priority-provider.ts",
+        "packages/pd-cli/src/services/runtime-adapter-resolver.ts",
+        "packages/pd-cli/src/services/config-doctor.ts",
+        "packages/pd-cli/src/commands/runtime.ts",
+        "packages/pd-cli/src/commands/runtime-internalization-run-rulehost.ts"
+      ],
+      "whyNotInternal": "Provider keys are resolved in five separate processes (console, host-runtime classifier/selection, pd-cli probe and rule-host). They live in different packages and cannot import a core-internal module; without one shared resolver each process keeps its own env lookup and the local credentials file silently stops working for the agents the Owner configured.",
+      "alternativeConsidered": "Adding apiKey values to .pd/config.yaml was rejected: ADR-0016 still forbids secret fields in config.yaml, and the validator keeps rejecting them. Duplicating the file reader per process was rejected because it recreates the precedence rule (env first) and the YAML schema in every consumer."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "pendingOwnerDecision",
+      "kind": "value",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/commands/candidate.ts",
+        "packages/pd-cli/src/commands/diagnose.ts",
+        "packages/pd-cli/src/services/reuse-park-release.ts"
+      ],
+      "whyNotInternal": "Every Dreamer seeding entry point and the review service must read the SAME pending-decision verdict from the admission document as the intake service does in core; a core-internal-only helper would force each caller to re-implement the scan.",
+      "alternativeConsidered": "Rejected: exposing the raw ownerDecisions array type alone and letting each caller scan it — four callers would re-implement the same newest-pending scan."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "probeProviderConnection",
+      "kind": "value",
+      "addedIn": "PRI-1213",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/pd-console/src/server/routes/config.ts"
+      ],
+      "whyNotInternal": "The console route must run the exact same provider/model resolution and transport classification the runtime uses; a console-local HTTP probe would validate a different code path than the one that actually runs agents.",
+      "alternativeConsidered": "Calling `pd runtime probe` as a subprocess was rejected: it adds a process boundary, a second error serialization format, and cannot classify model-list vs chat stages without parsing CLI text."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "readStrategicConflictView",
+      "kind": "value",
+      "addedIn": "PRI-1218",
+      "expiresAt": "2027-11-15",
+      "consumers": [
+        "packages/pd-console/src/server/models/ApprovalsGroupedConsoleModel.ts"
+      ],
+      "whyNotInternal": "The console renders the approval card in a separate package and must read the SAME server verdict the approval write path enforces; re-deriving the gate in the console would create a second authority that can promise an approval the server refuses.",
+      "alternativeConsidered": "Re-deriving the conflict verdict in the console model from the artifact JSON was rejected: it duplicates the resolution-binding rules and would drift from the write path that actually blocks the approval."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "reconcileWaitingTargetEvidenceTasks",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/worker/workspace-worker.ts"
+      ],
+      "whyNotInternal": "The workspace worker cycle (separate package) flips waiting_for_target_evidence dispositions through the same task-store CAS the recovery uses; the state machine for the disposition vocabulary the picker's SQL gates on belongs to core.",
+      "alternativeConsidered": "Implementing the flip inside the worker was rejected: the SQL gate and the flip are two halves of one admission state machine; splitting them across packages lets the waiting state vocabulary drift."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "recoverTaskIdentityFromReceipt",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/ingestion/pain-receipt-fallback.ts"
+      ],
+      "whyNotInternal": "The receipt-driven identity recovery on the original task (CAS with full status/lease preconditions) is invoked from the Codex hook process; the recovery policy must stay in core beside the task store it mutates.",
+      "alternativeConsidered": "Moving the recovery into codex-adapter was rejected: it would put the tasks-table mutation contract outside the package that owns RuntimeStateManager and its CAS preconditions."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "resolveHostSubmissionContext",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/pd-mcp-server/src/submit-assembly.ts"
+      ],
+      "whyNotInternal": "The pd-mcp-server per-request identity resolution normalizes host-injected tools/call _meta through this pure normalizer before the original Pain/Task write; the server is a separate package and cannot reach core-internal module paths.",
+      "alternativeConsidered": "A narrow ./runtime/host-submission subpath was rejected: the symbol set is three values plus types all consumed by the same server, and a fourth entry widens the surface the gate must freeze for one caller."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "validatePainSubmitReceipt",
+      "kind": "value",
+      "addedIn": "PRI-1274",
+      "expiresAt": "2027-05-22",
+      "consumers": [
+        "packages/codex-adapter/src/ingestion/pain-receipt-fallback.ts"
+      ],
+      "whyNotInternal": "The Codex PostToolUse fallback (separate package) strictly validates the structured receipt document before any recovery write; the strict allowed-key/schema surface must be the same validator the producer contract specifies, not a copy.",
+      "alternativeConsidered": "Re-declaring the validation in codex-adapter was rejected: two validators over one receipt schema is exactly the drift class that lets a degraded transport form slip through on one side."
+    },
+    {
+      "entry": "./runtime/intent-browser",
+      "symbol": "IntentSectionState",
+      "kind": "type",
+      "addedIn": "PRI-1245",
+      "expiresAt": "2027-11-17",
+      "consumers": [
+        "packages/pd-console/src/ui/pages/intent/IntentOnboarding.tsx"
+      ],
+      "whyNotInternal": "The Intent wizard runs in the browser bundle and imports from the browser-safe subpath; it must classify user input with the SAME deterministic function the server uses post-save, or the wizard finish summary can label template text as 已填写 while the saved state says placeholder (PR #2684 review).",
+      "alternativeConsidered": "Duplicating the classifier in the console, rejected: SPEC §7.1 requires exactly one shared classification; a second copy is the drift this PR removes."
+    },
+    {
+      "entry": "./runtime/intent-browser",
+      "symbol": "classifyIntentSectionContent",
+      "kind": "value",
+      "addedIn": "PRI-1245",
+      "expiresAt": "2027-11-17",
+      "consumers": [
+        "packages/pd-console/src/ui/pages/intent/IntentOnboarding.tsx"
+      ],
+      "whyNotInternal": "The Intent wizard runs in the browser bundle and imports from the browser-safe subpath; it must classify user input with the SAME deterministic function the server uses post-save, or the wizard finish summary can label template text as 已填写 while the saved state says placeholder (PR #2684 review).",
+      "alternativeConsidered": "Duplicating the classifier in the console, rejected: SPEC §7.1 requires exactly one shared classification; a second copy is the drift this PR removes."
+    },
+    {
+      "entry": "./runtime/internalization/rule-host-input-builder",
+      "symbol": "buildRuleHostInput",
+      "kind": "value",
+      "addedIn": "PRI-1208",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/host-runtime/src/production-rulehost-gate.ts"
+      ],
+      "whyNotInternal": "host-runtime owns the live decision gate in a separate package and cannot use a core-internal relative import; this subpath is the single input-assembly contract shared with Golden Trace replay, so the two paths cannot derive workspace.isRiskPath differently.",
+      "alternativeConsidered": "Re-exporting through the wide ./runtime barrel was rejected: it widens an already large public surface and hides which contract the host actually needs."
+    },
+    {
+      "entry": "./runtime/pain-recall",
+      "symbol": "PainRecallOptions",
+      "kind": "type",
+      "consumers": [
+        "packages/pd-cli/src/commands/pain-recall.ts"
+      ],
+      "whyNotInternal": "The pd pain-recall command forwards the authorization port into recall so governance excerpts are gated at the CLI boundary; the options type is that seam.",
+      "alternativeConsidered": "A positional extra parameter without a published type, rejected because the CLI would redeclare the option shape and drift.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime/pain-submit-capability",
+      "symbol": "HostSessionClaim",
+      "kind": "type",
+      "addedIn": "PRI-1260",
+      "expiresAt": "2027-11-18",
+      "consumers": [
+        "packages/pd-mcp-server/src/submit-assembly.ts"
+      ],
+      "whyNotInternal": "The MCP submit assembly (separate package) validates the host-provided claim and injects the verification seam; the claim shape is the cross-package contract between the server tool schema and the core capability. A core-internal-only type would force the server to re-declare the shape and drift from the strict zod contract.",
+      "alternativeConsidered": "Structural typing without an exported type was rejected: the verifier injection would be untyped at the boundary and claim-field drift would compile until runtime."
+    },
+    {
+      "entry": "./runtime/pain-submit-capability",
+      "symbol": "HostSessionVerification",
+      "kind": "type",
+      "addedIn": "PRI-1260",
+      "expiresAt": "2027-11-18",
+      "consumers": [
+        "packages/pd-mcp-server/src/submit-assembly.ts"
+      ],
+      "whyNotInternal": "Same boundary as HostSessionClaim: the verification verdict shape flows from the pd-mcp-server verifier (host-runtime store read) into the core capability which stays I/O-free; both packages must share one contract.",
+      "alternativeConsidered": "Inlining the union in submit-assembly was rejected: the capability receipt field would then be typed by a foreign duplicate that can drift."
+    },
+    {
       "entry": "./runtime/storage-paths",
       "symbol": "./runtime/storage-paths",
       "kind": "subpath",
@@ -13,32 +486,6 @@
       ],
       "whyNotInternal": "Console and CLI packages must resolve the two workspace database paths; without a public subpath every consumer keeps its own '.pd' / '.state' path.join literal, which is exactly the drift this batch removes.",
       "alternativeConsidered": "Re-exporting the resolvers from the wide ./runtime barrel, rejected because that entry already carries 2,032 symbols and this batch must not widen it."
-    },
-    {
-      "entry": "./runtime/storage-paths",
-      "symbol": "resolveStateDbPath",
-      "kind": "value",
-      "addedIn": "PRI-2576",
-      "expiresAt": "2027-05-12",
-      "consumers": [
-        "packages/pd-console/src/server/models/ActivationsConsoleModel.ts",
-        "packages/pd-console/src/server/models/GovernanceConsoleModel.ts",
-        "packages/pd-console/src/server/routes/principles.ts"
-      ],
-      "whyNotInternal": "The console runs in a separate package that cannot import core-internal relative modules; it needs the single workspace-state path authority at runtime.",
-      "alternativeConsidered": "Copying the '.pd/state.db' literal in each console model, rejected because that keeps 20+ independent path authorities."
-    },
-    {
-      "entry": "./runtime/storage-paths",
-      "symbol": "resolveTrajectoryDbPath",
-      "kind": "value",
-      "addedIn": "PRI-2576",
-      "expiresAt": "2027-05-12",
-      "consumers": [
-        "packages/pd-console/src/server/models/EvidenceChainConsoleModel.ts"
-      ],
-      "whyNotInternal": "The console opens trajectory.db directly for read-only counts and pain lookups; it cannot reach the core-internal storage-paths module by relative import.",
-      "alternativeConsidered": "Importing it from ./trajectory-store, rejected because that entry is the trajectory API surface, not the workspace path contract."
     },
     {
       "entry": "./runtime/storage-paths",
@@ -80,393 +527,30 @@
       "alternativeConsidered": "Using resolveStateDbPath for config.yaml too was rejected: it hardcodes the state.db filename and cannot express the workspace-relative file map."
     },
     {
-      "entry": "./runtime/internalization/rule-host-input-builder",
-      "symbol": "buildRuleHostInput",
+      "entry": "./runtime/storage-paths",
+      "symbol": "resolveStateDbPath",
       "kind": "value",
-      "addedIn": "PRI-1208",
-      "expiresAt": "2027-05-14",
+      "addedIn": "PRI-2576",
+      "expiresAt": "2027-05-12",
       "consumers": [
-        "packages/host-runtime/src/production-rulehost-gate.ts"
+        "packages/pd-console/src/server/models/ActivationsConsoleModel.ts",
+        "packages/pd-console/src/server/models/GovernanceConsoleModel.ts",
+        "packages/pd-console/src/server/routes/principles.ts"
       ],
-      "whyNotInternal": "host-runtime owns the live decision gate in a separate package and cannot use a core-internal relative import; this subpath is the single input-assembly contract shared with Golden Trace replay, so the two paths cannot derive workspace.isRiskPath differently.",
-      "alternativeConsidered": "Re-exporting through the wide ./runtime barrel was rejected: it widens an already large public surface and hides which contract the host actually needs."
+      "whyNotInternal": "The console runs in a separate package that cannot import core-internal relative modules; it needs the single workspace-state path authority at runtime.",
+      "alternativeConsidered": "Copying the '.pd/state.db' literal in each console model, rejected because that keeps 20+ independent path authorities."
     },
     {
-      "entry": "./runtime",
-      "symbol": "pdProviderCredentials",
+      "entry": "./runtime/storage-paths",
+      "symbol": "resolveTrajectoryDbPath",
       "kind": "value",
-      "addedIn": "PRI-1213",
-      "expiresAt": "2027-05-14",
+      "addedIn": "PRI-2576",
+      "expiresAt": "2027-05-12",
       "consumers": [
-        "packages/pd-console/src/server/routes/config.ts",
-        "packages/pd-console/src/server/models/AdaptiveActivationConsoleModel.ts",
-        "packages/host-runtime/src/adaptive-selection.ts",
-        "packages/host-runtime/src/signal-classifier.ts",
-        "packages/host-runtime/src/adaptive-priority-provider.ts",
-        "packages/pd-cli/src/services/runtime-adapter-resolver.ts",
-        "packages/pd-cli/src/services/config-doctor.ts",
-        "packages/pd-cli/src/commands/runtime.ts",
-        "packages/pd-cli/src/commands/runtime-internalization-run-rulehost.ts"
+        "packages/pd-console/src/server/models/EvidenceChainConsoleModel.ts"
       ],
-      "whyNotInternal": "Provider keys are resolved in five separate processes (console, host-runtime classifier/selection, pd-cli probe and rule-host). They live in different packages and cannot import a core-internal module; without one shared resolver each process keeps its own env lookup and the local credentials file silently stops working for the agents the Owner configured.",
-      "alternativeConsidered": "Adding apiKey values to .pd/config.yaml was rejected: ADR-0016 still forbids secret fields in config.yaml, and the validator keeps rejecting them. Duplicating the file reader per process was rejected because it recreates the precedence rule (env first) and the YAML schema in every consumer."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "pdProviderCatalog",
-      "kind": "value",
-      "addedIn": "PRI-1213",
-      "expiresAt": "2027-05-14",
-      "consumers": [
-        "packages/pd-console/src/server/routes/config.ts"
-      ],
-      "whyNotInternal": "The console runs in a separate package and cannot import the core-internal pi-ai catalog bridge. It needs the same read-only projection the runtime already trusts, otherwise the picker would ship a second, hand-maintained provider/model list.",
-      "alternativeConsidered": "Importing @earendil-works/pi-ai directly in pd-console was rejected: the catalog entry shapes would then be interpreted twice (adapter and console), and the console would drift from the runtime's provider validation."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "probeProviderConnection",
-      "kind": "value",
-      "addedIn": "PRI-1213",
-      "expiresAt": "2027-05-14",
-      "consumers": [
-        "packages/pd-console/src/server/routes/config.ts"
-      ],
-      "whyNotInternal": "The console route must run the exact same provider/model resolution and transport classification the runtime uses; a console-local HTTP probe would validate a different code path than the one that actually runs agents.",
-      "alternativeConsidered": "Calling `pd runtime probe` as a subprocess was rejected: it adds a process boundary, a second error serialization format, and cannot classify model-list vs chat stages without parsing CLI text."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "Stage2ConversationContext",
-      "kind": "type",
-      "addedIn": "PRI-1212",
-      "expiresAt": "2027-05-14",
-      "consumers": [
-        "packages/host-runtime/src/signal-classifier.ts",
-        "packages/openclaw-plugin/src/core/signal-collector-host.ts"
-      ],
-      "whyNotInternal": "Stage-2 classification runs in two other packages (the shared host-runtime classifier factory and the OpenClaw plugin host that owns the trajectory). Both must construct and pass the same fact shape into the core-owned prompt builder; a relative core-internal import is not possible across packages, and duplicating the shape would create a second contract for the same evidence.",
-      "alternativeConsidered": "Inlining a structural type in each consumer was rejected: the prompt builder and the gate would then accept shapes no shared type constrains, which is exactly how the R3 'no behavioral fact' misclassification reached admission."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "readStrategicConflictView",
-      "kind": "value",
-      "addedIn": "PRI-1218",
-      "expiresAt": "2027-11-15",
-      "consumers": [
-        "packages/pd-console/src/server/models/ApprovalsGroupedConsoleModel.ts"
-      ],
-      "whyNotInternal": "The console renders the approval card in a separate package and must read the SAME server verdict the approval write path enforces; re-deriving the gate in the console would create a second authority that can promise an approval the server refuses.",
-      "alternativeConsidered": "Re-deriving the conflict verdict in the console model from the artifact JSON was rejected: it duplicates the resolution-binding rules and would drift from the write path that actually blocks the approval."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "StrategicConflictView",
-      "kind": "type",
-      "addedIn": "PRI-1218",
-      "expiresAt": "2027-11-15",
-      "consumers": [
-        "packages/pd-console/src/server/models/ApprovalsGroupedConsoleModel.ts"
-      ],
-      "whyNotInternal": "The value above crosses the package boundary, so its shape must too; a console-local structural copy would silently accept fields the producer removed.",
-      "alternativeConsidered": "Duplicating the interface in pd-console was rejected: the console would keep compiling after the gate projection changes, hiding a real contract break."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "evaluateDreamerSeedSuppression",
-      "kind": "value",
-      "addedIn": "PRI-1243",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/pd-cli/src/commands/diagnose.ts",
-        "packages/pd-cli/src/commands/candidate.ts"
-      ],
-      "whyNotInternal": "Both Dreamer seeding entry points live in pd-cli (the diagnose seed loop and the review-create/backfill seed paths) while the bridge seeds from core; a resolved-to-existing or reuse-parked candidate must get the SAME suppression verdict in every entry point, and that verdict must derive from persistent ledger identity + admission processing, not a transient intake result \u2014 so the guard has to be one shared function crossing the package boundary.",
-      "alternativeConsidered": "Re-implementing the two-fact check inline in each pd-cli entry point was rejected: four copies (diagnose, review-create, backfill, bridge) would drift, and the 19aa989d production anomaly (consumed AND parked AND seeded) came exactly from seeding decisions that did not consult persistent identity."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "DreamerSeedSuppression",
-      "kind": "type",
-      "addedIn": "PRI-1243",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/pd-cli/src/commands/diagnose.ts",
-        "packages/pd-cli/src/commands/candidate.ts"
-      ],
-      "whyNotInternal": "The suppression verdict crosses the package boundary with the function, so its result shape must too; a pd-cli-local structural copy would keep compiling after the guard adds a suppression reason.",
-      "alternativeConsidered": "Returning a bare boolean was rejected: the CLI must report WHICH durable fact suppressed the seed (resolved onto principle X vs park pending), and a boolean erases that observability."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "buildOwnerDecisionIntent",
-      "kind": "value",
-      "addedIn": "PRI-1243",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/pd-cli/src/services/reuse-park-release.ts"
-      ],
-      "whyNotInternal": "Phase A intent construction lives in the pd-cli review service (the only caller that owns the verified Owner identity context), while the decisionId formula and policy stamp are the admission document's own contract in core \u2014 exporting the builder keeps one implementation instead of duplicating the hash formula in pd-cli.",
-      "alternativeConsidered": "Rejected: exporting only the decisionId hash formula (or duplicating it in pd-cli) \u2014 two implementations of the identity contract could drift; the builder keeps one."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "pendingOwnerDecision",
-      "kind": "value",
-      "addedIn": "PRI-1243",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/pd-cli/src/commands/candidate.ts",
-        "packages/pd-cli/src/commands/diagnose.ts",
-        "packages/pd-cli/src/services/reuse-park-release.ts"
-      ],
-      "whyNotInternal": "Every Dreamer seeding entry point and the review service must read the SAME pending-decision verdict from the admission document as the intake service does in core; a core-internal-only helper would force each caller to re-implement the scan.",
-      "alternativeConsidered": "Rejected: exposing the raw ownerDecisions array type alone and letting each caller scan it \u2014 four callers would re-implement the same newest-pending scan."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "appliedOwnerDecision",
-      "kind": "value",
-      "addedIn": "PRI-1243",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/pd-cli/src/services/reuse-park-release.ts"
-      ],
-      "whyNotInternal": "Phase A resume/already-applied detection in the pd-cli review service reads the applied record to report a completed decision without re-executing it (crash-recovery contract).",
-      "alternativeConsidered": "Rejected: reading the raw document in pd-cli and filtering executionStatus by hand \u2014 the newest-applied selection rule would live in two packages."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "OwnerDecisionRecord",
-      "kind": "type",
-      "addedIn": "PRI-1243",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/pd-cli/src/services/reuse-park-release.ts",
-        "packages/pd-cli/src/commands/candidate.ts"
-      ],
-      "whyNotInternal": "The typed decision record crosses the package boundary as the store method parameter/return; pd-cli cannot reference it without the export.",
-      "alternativeConsidered": "Rejected: pd-cli-local mirror of the record shape \u2014 a second truth for the lifecycle fields the core store validates."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "isIntentAnchoringEnabled",
-      "kind": "value",
-      "addedIn": "PRI-1224",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/host-runtime/src/intent-doc-reader.ts"
-      ],
-      "whyNotInternal": "Host-runtime (and through it pd-cli, codex-adapter, workbuddy-adapter) must evaluate the single intent_engineering predicate against the ENTRY-provided effectiveConfig; core owns the predicate so no entry re-implements the flag decision (SPEC-PD-INTENT-UNIFICATION-001 \u00a79.3 rule 5).",
-      "alternativeConsidered": "Re-exporting computeFeatureFlagsFromConfig and re-deriving the flag per consumer, rejected because SPEC \u00a77.2/P2-2 requires ONE predicate for the whole anchoring chain; a second derivation is exactly the drift the unification removed."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "analyzeIntentDocSections",
-      "kind": "value",
-      "addedIn": "PRI-1224",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/pd-console/src/server/models/IntentPageModel.ts"
-      ],
-      "whyNotInternal": "The console summary/save responses must project per-section authored/placeholder/missing states from the SAME deterministic classifier Stage A and the prompt hook use; a console-local copy would create a second template-matching truth (SPEC \u00a77.1 shared pure function).",
-      "alternativeConsidered": "A console-local regex classifier, rejected: SPEC \u00a77.1/\u00a712.2 explicitly forbid re-implementing classification in the UI layer."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "deriveIntentDocState",
-      "kind": "value",
-      "addedIn": "PRI-1224",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/pd-console/src/server/models/IntentPageModel.ts"
-      ],
-      "whyNotInternal": "Document-level readiness (template_only/incomplete/configured) must be derived by the one shared function so the API counts cannot disagree with Stage A snapshot gating.",
-      "alternativeConsidered": "Counting authored sections inline in the model, rejected: the not_configured/partially/configured thresholds are contract, not display logic."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "IntentSectionState",
-      "kind": "type",
-      "addedIn": "PRI-1224",
-      "expiresAt": "2027-11-16",
-      "consumers": [
-        "packages/pd-console/src/server/models/IntentPageModel.ts"
-      ],
-      "whyNotInternal": "The sectionStates DTO type is the return element type of analyzeIntentDocSections; the console model types its projection with it so an upstream enum change is a compile error, not a silent shape drift.",
-      "alternativeConsidered": "Re-declaring the union locally, rejected: a second union drifts from the classifier contract silently."
-    },
-    {
-      "entry": "./runtime/intent-browser",
-      "symbol": "classifyIntentSectionContent",
-      "kind": "value",
-      "addedIn": "PRI-1245",
-      "expiresAt": "2027-11-17",
-      "consumers": [
-        "packages/pd-console/src/ui/pages/intent/IntentOnboarding.tsx"
-      ],
-      "whyNotInternal": "The Intent wizard runs in the browser bundle and imports from the browser-safe subpath; it must classify user input with the SAME deterministic function the server uses post-save, or the wizard finish summary can label template text as \u5df2\u586b\u5199 while the saved state says placeholder (PR #2684 review).",
-      "alternativeConsidered": "Duplicating the classifier in the console, rejected: SPEC \u00a77.1 requires exactly one shared classification; a second copy is the drift this PR removes."
-    },
-    {
-      "entry": "./runtime/intent-browser",
-      "symbol": "IntentSectionState",
-      "kind": "type",
-      "addedIn": "PRI-1245",
-      "expiresAt": "2027-11-17",
-      "consumers": [
-        "packages/pd-console/src/ui/pages/intent/IntentOnboarding.tsx"
-      ],
-      "whyNotInternal": "The Intent wizard runs in the browser bundle and imports from the browser-safe subpath; it must classify user input with the SAME deterministic function the server uses post-save, or the wizard finish summary can label template text as \u5df2\u586b\u5199 while the saved state says placeholder (PR #2684 review).",
-      "alternativeConsidered": "Duplicating the classifier in the console, rejected: SPEC \u00a77.1 requires exactly one shared classification; a second copy is the drift this PR removes."
-    },
-    {
-      "entry": "./runtime/pain-submit-capability",
-      "symbol": "HostSessionClaim",
-      "kind": "type",
-      "addedIn": "PRI-1260",
-      "expiresAt": "2027-11-18",
-      "consumers": [
-        "packages/pd-mcp-server/src/submit-assembly.ts"
-      ],
-      "whyNotInternal": "The MCP submit assembly (separate package) validates the host-provided claim and injects the verification seam; the claim shape is the cross-package contract between the server tool schema and the core capability. A core-internal-only type would force the server to re-declare the shape and drift from the strict zod contract.",
-      "alternativeConsidered": "Structural typing without an exported type was rejected: the verifier injection would be untyped at the boundary and claim-field drift would compile until runtime."
-    },
-    {
-      "entry": "./runtime/pain-submit-capability",
-      "symbol": "HostSessionVerification",
-      "kind": "type",
-      "addedIn": "PRI-1260",
-      "expiresAt": "2027-11-18",
-      "consumers": [
-        "packages/pd-mcp-server/src/submit-assembly.ts"
-      ],
-      "whyNotInternal": "Same boundary as HostSessionClaim: the verification verdict shape flows from the pd-mcp-server verifier (host-runtime store read) into the core capability which stays I/O-free; both packages must share one contract.",
-      "alternativeConsidered": "Inlining the union in submit-assembly was rejected: the capability receipt field would then be typed by a foreign duplicate that can drift."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "GOVERNANCE_OBSERVATION_SOURCE_REF_PREFIX",
-      "kind": "value",
-      "consumers": [
-        "packages/host-runtime/src/source-revocation-sweep.ts"
-      ],
-      "whyNotInternal": "The revocation sweep lives in host-runtime and must attribute persisted evidence sourceRefs to the swept host with the exact prefix the codex/workbuddy ingestion producers write; a private copy would drift from the one mapping authority.",
-      "alternativeConsidered": "Re-declaring the prefix literal in host-runtime, rejected because two independent prefix constants would silently diverge on the next producer change.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "denyAllSourceMaterialAuthorization",
-      "kind": "value",
-      "consumers": [
-        "packages/host-runtime/src/governance-trajectory-turn-reader.ts"
-      ],
-      "whyNotInternal": "host-runtime composition roots need the fail-closed default port so an unwired authorization check denies governance-sourced turns instead of silently re-opening the R2 read gate.",
-      "alternativeConsidered": "Constructing an inline deny port in each host-runtime root, rejected because the denial reason string would be duplicated and drift from the documented default.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "isOwnerExplicitStatementReason",
-      "kind": "value",
-      "consumers": [
-        "packages/host-runtime/src/source-revocation-sweep.ts"
-      ],
-      "whyNotInternal": "The revocation sweep classifies persisted pain/admission reasons by the explicit-owner marker so legacy marker-only Owner statements are never wrongly purged.",
-      "alternativeConsidered": "Substring matching the marker text in each consumer, rejected because the marker string would exist in two packages.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "SourceMaterialHostKind",
-      "kind": "type",
-      "consumers": [
-        "packages/host-runtime/src/source-material-authorization.ts",
-        "packages/host-runtime/src/governance-trajectory-turn-reader.ts"
-      ],
-      "whyNotInternal": "host-runtime implements and consumes the authorization port; its public signatures need the governed-host union so a new host kind is a compile error, not a silent string.",
-      "alternativeConsidered": "Declaring a structural string union in host-runtime, rejected because it would accept kinds core does not govern.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "SourceMaterialDenialReason",
-      "kind": "type",
-      "consumers": [
-        "packages/host-runtime/src/source-material-authorization.ts"
-      ],
-      "whyNotInternal": "The ledger-backed port implementation in host-runtime returns the structured denial reason codes operators and the console surface; the codes are part of the port contract.",
-      "alternativeConsidered": "Widening the result to plain strings, rejected because unstructured denials are the rc-9 regression this gate exists to prevent.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "SourceAuthorizationState",
-      "kind": "type",
-      "consumers": [
-        "packages/host-runtime/src/source-material-authorization.ts"
-      ],
-      "whyNotInternal": "The authorization decision shape is the port contract host-runtime implements and pd-cli annotates; keeping it internal would force any implementer to redeclare it.",
-      "alternativeConsidered": "Re-exporting the type from host-runtime only, rejected because pd-cli would then depend on host-runtime for a core contract type.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "SourceMaterialAuthorizationPort",
-      "kind": "type",
-      "consumers": [
-        "packages/pd-cli/src/services/admission-write-gate.ts",
-        "packages/host-runtime/src/source-material-authorization.ts"
-      ],
-      "whyNotInternal": "The port is implemented in host-runtime and injected from pd-cli composition roots; both packages must name the interface or the injection is untyped.",
-      "alternativeConsidered": "A structural inline type in each consumer, rejected because a drifted shape would compile until a revocation slipped through.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime/pain-recall",
-      "symbol": "PainRecallOptions",
-      "kind": "type",
-      "consumers": [
-        "packages/pd-cli/src/commands/pain-recall.ts"
-      ],
-      "whyNotInternal": "The pd pain-recall command forwards the authorization port into recall so governance excerpts are gated at the CLI boundary; the options type is that seam.",
-      "alternativeConsidered": "A positional extra parameter without a published type, rejected because the CLI would redeclare the option shape and drift.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "isOwnerManualCorrectionEvidence",
-      "kind": "value",
-      "consumers": [
-        "packages/host-runtime/src/source-revocation-sweep.ts",
-        "packages/host-runtime/src/governance-signal-admission.ts"
-      ],
-      "whyNotInternal": "Owner manual-vs-agent-derived classification is ONE judgment shared by the revocation sweep, task-payload validation, console redaction and every read gate; duplicating it per package would fork the Owner's classification ruling.",
-      "alternativeConsidered": "A narrow subpath export, rejected because the sibling classification helpers already live behind ./runtime and splitting one judgment across two entries invites drift.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "fingerprintStatement",
-      "kind": "value",
-      "consumers": [
-        "packages/host-runtime/src/governance-signal-admission.ts"
-      ],
-      "whyNotInternal": "The admission writer must bind the Owner confirmation record to the sha256 of the persisted statement text; fingerprintStatement is the canonical statement fingerprint algorithm.",
-      "alternativeConsidered": "Recomputing sha256 inline in host-runtime, rejected because the fingerprint algorithm is a single source of truth already owned by admission-document.",
-      "addedIn": "PRI-1283",
-      "expiresAt": "2027-05-22"
+      "whyNotInternal": "The console opens trajectory.db directly for read-only counts and pain lookups; it cannot reach the core-internal storage-paths module by relative import.",
+      "alternativeConsidered": "Importing it from ./trajectory-store, rejected because that entry is the trajectory API surface, not the workspace path contract."
     }
   ],
   "removals": [
@@ -574,13 +658,43 @@
     },
     {
       "entry": "./prompt-builder",
+      "symbol": "cleanupStaleInfoPure",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
       "symbol": "compressFocusContent",
       "removedIn": "PRI-1269",
       "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
+      "symbol": "deduplicateArtifacts",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "extractDescription",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
       "symbol": "extractMilestones",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "extractNextActions",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "extractProblems",
       "removedIn": "PRI-1269",
       "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
@@ -611,36 +725,6 @@
     {
       "entry": "./prompt-builder",
       "symbol": "workingMemoryToInjection",
-      "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1270-merge-window-removals.md"
-    },
-    {
-      "entry": "./prompt-builder",
-      "symbol": "cleanupStaleInfoPure",
-      "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1270-merge-window-removals.md"
-    },
-    {
-      "entry": "./prompt-builder",
-      "symbol": "deduplicateArtifacts",
-      "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1270-merge-window-removals.md"
-    },
-    {
-      "entry": "./prompt-builder",
-      "symbol": "extractDescription",
-      "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1270-merge-window-removals.md"
-    },
-    {
-      "entry": "./prompt-builder",
-      "symbol": "extractNextActions",
-      "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1270-merge-window-removals.md"
-    },
-    {
-      "entry": "./prompt-builder",
-      "symbol": "extractProblems",
       "removedIn": "PRI-1269",
       "changeset": ".changeset/pri-1270-merge-window-removals.md"
     }

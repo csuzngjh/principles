@@ -630,7 +630,7 @@ async function sweepStateDb(args: {
       // refs; (b) rows carrying ANY correctionEvidence — legacy agent-assisted
       // submissions can persist the governed statement text with no session
       // sourceRef at all, and the per-row governed check below decides.
-      const taskRows = (db.prepare("SELECT task_id, diagnostic_json FROM tasks WHERE diagnostic_json LIKE ? OR diagnostic_json LIKE '%correctionEvidence%'").all(likePattern)) as { task_id: string; diagnostic_json: string | null }[];
+      const taskRows = (db.prepare("SELECT task_id, diagnostic_json FROM tasks WHERE diagnostic_json LIKE ? OR diagnostic_json LIKE '%correctionEvidence%' OR diagnostic_json LIKE '%agent_assisted%' OR diagnostic_json LIKE '%codex_explicit_agent%'").all(likePattern)) as { task_id: string; diagnostic_json: string | null }[];
       for (const row of taskRows) {
         if (typeof row.diagnostic_json !== 'string') continue;
         let payload: unknown;
@@ -670,19 +670,40 @@ async function sweepStateDb(args: {
           }
         }
 
-        // painIngress evidenceClass must stay truthful against the evidence array.
+        // Keep the v1 evidence class truthful, including an agent-assisted
+        // bundle that was already unavailable/empty before the sweep.
+        // The durable origin survives deletion of correctionEvidence.
         const ingress = next.painIngress;
-        if (isRecord(ingress) && isRecord(ingress.evidenceClass) && ingress.evidenceClass.status === 'available') {
+        const origin = isRecord(ingress) && isRecord(ingress.origin) ? ingress.origin : null;
+        const agentDerivedCodexIngress = hostKind === 'codex'
+          && !isOwnerManualCorrectionEvidence(correction)
+          && (
+            origin?.kind === 'agent_assisted'
+            || (origin?.kind === 'owner_manual' && origin.channel === 'codex_explicit_agent')
+            || (isRecord(correction) && correction.channel === 'codex_explicit_agent')
+          );
+        if (isRecord(ingress)) {
           const remaining = Array.isArray(next.evidence) ? next.evidence.length : 0;
-          const computed = remaining > 0 ? { status: 'available', entryCount: remaining } : { status: 'unavailable', reason: 'source_revoked' };
-          // Idempotence: only mark changed when the recomputed class differs —
-          // rows retained for their kept Owner evidence would otherwise be
-          // rewritten (and counted) on every rerun.
-          if (JSON.stringify(computed) !== JSON.stringify(ingress.evidenceClass)) {
+          const currentClass = isRecord(ingress.evidenceClass) ? ingress.evidenceClass : null;
+          const computed = agentDerivedCodexIngress
+            ? (remaining > 0
+              ? { status: 'available', entryCount: remaining }
+              : { status: 'unavailable', reason: 'source_revoked' })
+            : currentClass?.status === 'available'
+              ? (remaining > 0
+                ? { status: 'available', entryCount: remaining }
+                : { status: 'unavailable', reason: 'source_revoked' })
+              : null;
+          // Idempotence: only mark changed when the recomputed class differs.
+          if (computed !== null && JSON.stringify(computed) !== JSON.stringify(currentClass)) {
             next.painIngress = { ...ingress, evidenceClass: computed };
             changed = true;
           }
         }
+        // Even an empty Agent-derived task needs a durable tombstone. This
+        // makes revocation irreversible for the old payload after re-grant.
+        const existingAudit = isRecord(next.sourceRevocation) ? next.sourceRevocation : {};
+        if (agentDerivedCodexIngress && !isRecord(existingAudit.codex)) changed = true;
 
         if (changed) {
           // Non-sensitive audit metadata: verdict + counts + time (no text).

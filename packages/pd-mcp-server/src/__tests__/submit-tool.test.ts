@@ -42,7 +42,7 @@ function recordCodexConsent(workspaceDir: string): void {
   });
   if (!recorded.ok) throw new Error(recorded.reason);
 }
-import { evaluateAdmission, RuntimeStateManager } from '@principles/core/runtime';
+import { evaluateAdmission, getDefaultPdConfig, RuntimeStateManager } from '@principles/core/runtime';
 import {
   deriveSubmitTaskId,
   type PainSubmitReceipt,
@@ -231,13 +231,24 @@ describe('input contract (§5.3) — rejected before any write', () => {
     await h.close();
   });
 
-  // ── PRI-1260: the hostSession claim block ────────────────────────────────
+  // ── PRI-1260 → PRI-1274: the hostSession claim block and the B1 prebind ──
+
+  /** B1 fixture workspace: real state.db + a config that grants the minimal
+   * identity-metadata authorization (the new Workspace-level gate). */
+  async function b1Workspace(flags: { readonly minimalMetadata: boolean }): Promise<string> {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'pd-b1-prebind-'));
+    const config = getDefaultPdConfig();
+    if (flags.minimalMetadata) config.features.host_identity_minimal_metadata.enabled = true;
+    await mkdir(join(workspaceDir, '.pd'), { recursive: true });
+    await writeFile(join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    return workspaceDir;
+  }
 
   it('uses Codex request metadata and stores evidence only from the targeted turn in that session', async () => {
-    const workspaceDir = await mkdtemp(join(tmpdir(), 'pd-codex-pain-evidence-'));
+    const workspaceDir = await b1Workspace({ minimalMetadata: true });
     const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
     try {
-      await state.initialize();
       await mkdir(join(workspaceDir, '.state'), { recursive: true });
       // PRI-1283 R2: target-turn evidence reads require granted consent.
       recordCodexConsent(workspaceDir);
@@ -273,7 +284,6 @@ describe('input contract (§5.3) — rejected before any write', () => {
           anchorType: 'owner_expectation',
           anchorRef: 'Owner request in the preceding turn',
           painType: 'user_frustration',
-          hostSession: { threadId: 'thread-b' },
         };
         const meta = { threadId: 'thread-a', 'x-codex-turn-metadata': { turn_id: 'submit' } };
         const result = parseReceipt(await h.client.callTool({
@@ -300,19 +310,224 @@ describe('input contract (§5.3) — rejected before any write', () => {
           inputEvidenceCount: diagnostic.evidence.length,
         }).decision).toBe('admitted');
 
-        for (const [targetTurnId, requestMeta, detail] of [
-          ['other', meta, 'codex_target_evidence_unavailable'],
-          ['target', undefined, 'codex_host_metadata_missing'],
+        // PRI-1274 (B1) contract change, explicit and Owner-visible: a
+        // missing TARGET TURN TEXT no longer negates the trusted session —
+        // the old `codex_target_evidence_unavailable` coupling is gone; the
+        // task binds the session and simply carries no turn evidence.
+        const decoupled = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: { ...args, targetTurnId: 'other' },
+          _meta: meta,
+        }));
+        expect(decoupled.status, JSON.stringify(decoupled.error)).toBe('submitted');
+        expect(decoupled.sessionAssociation).toEqual({
+          status: 'verified', sessionId: 'thread-a', submissionTurnId: 'submit', targetTurnId: 'other',
+        });
+        if (decoupled.taskId === null) throw new Error('decoupled receipt is missing its task ID');
+        const decoupledTask = await state.getTask(decoupled.taskId);
+        expect(JSON.parse(decoupledTask?.diagnosticJson ?? '{}')).toMatchObject({
+          sessionIdHint: 'thread-a',
+          evidence: [],
+        });
+
+        // No request metadata at all → the legal unbound save with the
+        // explicit cause (the receipt-fallback territory).
+        const unbound = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME, arguments: { ...args, targetTurnId: 'target' },
+        }));
+        expect(unbound.sessionAssociation).toEqual({ status: 'unverified', detail: 'codex_host_metadata_missing' });
+        if (unbound.taskId === null) throw new Error('unbound receipt is missing its task ID');
+        const unboundTask = await state.getTask(unbound.taskId);
+        expect(JSON.parse(unboundTask?.diagnosticJson ?? '{}')).toMatchObject({ sessionIdHint: null, evidence: [] });
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  // ── PRI-1274 (B1): trusted _meta prebind — the T1 main-path contract ─────
+
+  it('B1/T1: pre-binds the session at the initial write even with NO turn id and NO collected target text', async () => {
+    const workspaceDir = await b1Workspace({ minimalMetadata: true });
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      await mkdir(join(workspaceDir, '.state'), { recursive: true });
+      await writeFile(join(workspaceDir, '.state', 'trajectory.db'), '');
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: {
+            reason: 'Anchor: owner asked to verify before shipping. Observed: shipped unverified. Deviation: skipped verification.',
+            anchorType: 'owner_expectation',
+            anchorRef: 'Owner request earlier in this conversation',
+            painType: 'user_frustration',
+          },
+          // threadId ONLY — the exact Codex _meta shape when turn metadata
+          // is unavailable; the target text has never entered PD's trajectory.
+          _meta: { threadId: 'thread-t1' },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toEqual({ status: 'verified', sessionId: 'thread-t1' });
+        expect(result.warnings).not.toContain('host_session_unverified:codex_host_metadata_missing');
+        if (result.taskId === null) throw new Error('receipt missing task id');
+        const task = await state.getTask(result.taskId);
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic.sessionIdHint).toBe('thread-t1');
+        expect(diagnostic.evidence).toEqual([]);
+        const painIngress = diagnostic.painIngress as Record<string, unknown>;
+        expect(painIngress.verifiedHostSession).toEqual({ status: 'verified', sessionId: 'thread-t1' });
+        // The receipt identity is the business anchor — unchanged by binding.
+        expect(task?.inputRef).toBe(result.painId);
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('B1/T3: authorization off keeps the trusted-meta submission legally unbound with blocked_by_consent', async () => {
+    const workspaceDir = await b1Workspace({ minimalMetadata: false });
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: {
+            reason: 'Anchor: owner expectation. Observed: behavior. Deviation: mismatch.',
+            anchorType: 'owner_expectation',
+            anchorRef: 'Owner statement',
+            painType: 'user_frustration',
+          },
+          _meta: { threadId: 'thread-consent-off' },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toEqual({ status: 'unverified', detail: 'blocked_by_consent' });
+        expect(result.warnings).toContain('host_session_unverified:blocked_by_consent');
+        if (result.taskId === null) throw new Error('receipt missing task id');
+        const task = await state.getTask(result.taskId);
+        expect(JSON.parse(task?.diagnosticJson ?? '{}').sessionIdHint).toBeNull();
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('B1/T3: a model-supplied hostSession conflicting with trusted _meta fails closed (no binding from either)', async () => {
+    const workspaceDir = await b1Workspace({ minimalMetadata: true });
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: {
+            reason: 'Anchor: owner expectation. Observed: behavior. Deviation: mismatch.',
+            anchorType: 'owner_expectation',
+            anchorRef: 'Owner statement',
+            painType: 'user_frustration',
+            hostSession: { threadId: 'forged-by-model' },
+          },
+          _meta: { threadId: 'thread-trusted' },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toEqual({ status: 'unverified', detail: 'host_context_conflict' });
+        expect(result.warnings).toContain('host_session_unverified:host_context_conflict');
+        if (result.taskId === null) throw new Error('receipt missing task id');
+        const task = await state.getTask(result.taskId);
+        expect(JSON.parse(task?.diagnosticJson ?? '{}').sessionIdHint).toBeNull();
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('B1/T3: sentinel and malformed host metadata never degrade into a trusted identity', async () => {
+    const workspaceDir = await b1Workspace({ minimalMetadata: true });
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        for (const [meta, detail] of [
+          // P2 review round: a present-but-sentinel threadId carries its OWN
+          // invalid code now — it never falls back to sessionId and never
+          // reads as "no metadata".
+          [{ threadId: 'cli' }, 'host_context_invalid:codex_thread_id_invalid'],
+          [{ threadId: 'thread-s', 'x-codex-turn-metadata': 'garbage' }, 'host_context_invalid:codex_turn_metadata_invalid'],
         ] as const) {
-          const unbound = parseReceipt(await h.client.callTool({
-            name: SUBMIT_TOOL_NAME, arguments: { ...args, targetTurnId },
-            ...(requestMeta === undefined ? {} : { _meta: requestMeta }),
+          const result = parseReceipt(await h.client.callTool({
+            name: SUBMIT_TOOL_NAME,
+            arguments: {
+              reason: 'Anchor: owner expectation. Observed: behavior. Deviation: mismatch.',
+              anchorType: 'owner_expectation',
+              anchorRef: 'Owner statement',
+              painType: 'user_frustration',
+            },
+            _meta: meta,
           }));
-          expect(unbound.sessionAssociation).toEqual({ status: 'unverified', detail });
-          if (unbound.taskId === null) throw new Error('unbound receipt is missing its task ID');
-          const unboundTask = await state.getTask(unbound.taskId);
-          expect(JSON.parse(unboundTask?.diagnosticJson ?? '{}')).toMatchObject({ sessionIdHint: null, evidence: [] });
+          expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+          expect(result.sessionAssociation).toEqual({ status: 'unverified', detail });
+          if (result.taskId === null) throw new Error('receipt missing task id');
+          const task = await state.getTask(result.taskId);
+          expect(JSON.parse(task?.diagnosticJson ?? '{}').sessionIdHint).toBeNull();
         }
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('B1: non-Codex hosts consume the namespaced pd.host-context.v1 _meta (unified consumer contract)', async () => {
+    const workspaceDir = await b1Workspace({ minimalMetadata: true });
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'workbuddy', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: {
+            reason: 'Anchor: owner expectation. Observed: behavior. Deviation: mismatch.',
+            anchorType: 'owner_expectation',
+            anchorRef: 'Owner statement',
+            painType: 'user_frustration',
+          },
+          _meta: { 'pd.host-context.v1': { sessionId: 'wb-session-1', toolCallId: 'wb-call-9' } },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toEqual({ status: 'verified', sessionId: 'wb-session-1' });
+        if (result.taskId === null) throw new Error('receipt missing task id');
+        const task = await state.getTask(result.taskId);
+        expect(JSON.parse(task?.diagnosticJson ?? '{}').sessionIdHint).toBe('wb-session-1');
       } finally {
         await h.close();
       }
@@ -325,10 +540,10 @@ describe('input contract (§5.3) — rejected before any write', () => {
   it('keeps the LAST 12 turn texts when a turn exceeds the evidence cap', async () => {
     // Review finding: observations come back in capture order; slice(0,12)
     // kept the earliest messages and dropped the turn's final answer.
-    const workspaceDir = await mkdtemp(join(tmpdir(), 'pd-codex-pain-evidence-cap-'));
+    const workspaceDir = await b1Workspace({ minimalMetadata: true });
     const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
     try {
-      await state.initialize();
       await mkdir(join(workspaceDir, '.state'), { recursive: true });
       // PRI-1283 R2: target-turn evidence reads require granted consent.
       recordCodexConsent(workspaceDir);
@@ -688,4 +903,170 @@ describe('transport budget degradation (§5.4.3, T14b)', () => {
     expect(parsed.status).toBe('unavailable');
     expect(parsed.error?.code).toBe('response_budget_exceeded');
   });
+});
+
+// ── PRI-1274 review round 2 (directive K3): structured target-turn evidence degradation ──
+
+describe('target-turn evidence read classification (K)', () => {
+  async function kWorkspace(flags: { readonly minimalMetadata: boolean }, withObservation: boolean, corruptDb = false): Promise<string> {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'pd-k3-'));
+    const config = getDefaultPdConfig();
+    if (flags.minimalMetadata) config.features.host_identity_minimal_metadata.enabled = true;
+    await mkdir(join(workspaceDir, '.pd'), { recursive: true });
+    await writeFile(join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    await mkdir(join(workspaceDir, '.state'), { recursive: true });
+    recordCodexConsent(workspaceDir);
+    if (corruptDb) {
+      // Not a database: the store open fails — the read_failed classification.
+      await writeFile(join(workspaceDir, '.state', 'trajectory.db'), 'definitely not sqlite');
+      return workspaceDir;
+    }
+    await writeFile(join(workspaceDir, '.state', 'trajectory.db'), '');
+    if (withObservation) {
+      const ingested = ingestGovernanceObservations({
+        workspaceDir,
+        observations: [{
+          hostKind: 'codex',
+          rolloutIdentity: 'thread-k',
+          rootSessionId: 'thread-k',
+          hostTurnId: 'turn-target',
+          kind: 'user_turn',
+          logicalObservationKey: 'thread-k|turn-target|user',
+          visibleText: 'The exact target turn text',
+          source: 'live_hook',
+          completeness: 'complete',
+          observedAt: new Date().toISOString(),
+        }],
+      });
+      if (!ingested.ok) throw new Error(ingested.reason);
+    }
+    return workspaceDir;
+  }
+
+  const K_ARGS = {
+    reason: 'The target turn was never fulfilled.',
+    anchorType: 'owner_expectation',
+    anchorRef: 'Owner request in the preceding turn',
+    painType: 'user_frustration',
+  };
+
+  it('available: an existing target turn feeds evidence into the verified submission', async () => {
+    const workspaceDir = await kWorkspace({ minimalMetadata: true }, true);
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: { ...K_ARGS, targetTurnId: 'turn-target' },
+          _meta: { threadId: 'thread-k', 'x-codex-turn-metadata': { turn_id: 'turn-submit' } },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toMatchObject({ status: 'verified', targetTurnId: 'turn-target' });
+        if (result.taskId === null) throw new Error('missing task id');
+        const task = await state.getTask(result.taskId);
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic.evidence).toEqual([
+          { sourceRef: 'governance_observation:thread-k|turn-target|user', note: 'The exact target turn text' },
+        ]);
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('not_found: a missing target turn keeps the submission legal with EMPTY evidence (no fabrication, no session loss)', async () => {
+    const workspaceDir = await kWorkspace({ minimalMetadata: true }, false);
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: { ...K_ARGS, targetTurnId: 'turn-nowhere' },
+          _meta: { threadId: 'thread-k', 'x-codex-turn-metadata': { turn_id: 'turn-submit' } },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        // Session binding survives; evidence is honestly EMPTY.
+        expect(result.sessionAssociation).toMatchObject({ status: 'verified', sessionId: 'thread-k', targetTurnId: 'turn-nowhere' });
+        if (result.taskId === null) throw new Error('missing task id');
+        const task = await state.getTask(result.taskId);
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic.sessionIdHint).toBe('thread-k');
+        expect(diagnostic.evidence).toEqual([]);
+        // The waiting semantics own completion — no fabricated evidence.
+        expect(diagnostic.painIngress.evidenceClass.status).toBe('unavailable');
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('read_failed: a broken store degrades the ENRICHMENT only — submission still succeeds, degradation observable', async () => {
+    const workspaceDir = await kWorkspace({ minimalMetadata: true }, false, true);
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const errors: string[] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        errors.push(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
+      };
+      let assembly;
+      try {
+        assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      } finally {
+        console.error = originalError;
+      }
+      if (!assembly.ok || assembly.call === undefined) throw new Error('capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        console.error = (...args: unknown[]) => {
+          errors.push(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
+        };
+        let result: PainSubmitReceipt;
+        try {
+          result = parseReceipt(await h.client.callTool({
+            name: SUBMIT_TOOL_NAME,
+            arguments: { ...K_ARGS, targetTurnId: 'turn-target' },
+            _meta: { threadId: 'thread-k', 'x-codex-turn-metadata': { turn_id: 'turn-submit' } },
+          }));
+        } finally {
+          console.error = originalError;
+        }
+        // K2: the ORIGINAL pain/task submission is never aborted by the
+        // optional read; the session binding and the task survive intact.
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toMatchObject({ status: 'verified', sessionId: 'thread-k' });
+        if (result.taskId === null) throw new Error('missing task id');
+        const task = await state.getTask(result.taskId);
+        expect(task).not.toBeNull();
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic.evidence).toEqual([]);
+        // K1: the degraded read is OBSERVABLE (structured stderr note), never
+        // a silent empty success.
+        expect(errors.some((line) => line.includes('target-turn evidence read degraded') && line.includes('read_failed'))).toBe(true);
+      } finally {
+        console.error = originalError;
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      // A failed SQLite open on the corrupt db can hold the file briefly on
+      // Windows — retry the temp cleanup (the dir is disposable either way).
+      await rm(workspaceDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
+    }
+  }, 10_000);
 });
