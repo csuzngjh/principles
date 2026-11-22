@@ -1,13 +1,9 @@
-/**
- * P1-2: Owner-manual and automatic-hook PainIngress must stay separate.
- *
- * - explicit Owner statement → origin.kind=owner_manual, correctionEvidence
- *   channel, manual_pain_id, bound correlation → provenance host_context_bound
- *   (bound explicit reports legitimately DEGRADE when transcript evidence is
- *   absent — never observation_only).
- * - automatic correction → origin.kind=automatic_hook → provenance
- *   automatic_hook.
- * - an inconsistent admitted marker fails closed during recovery.
+/*
+ * P1-2: Owner-manual, agent-assisted, and automatic-hook PainIngress remain
+ * distinct. Direct/confirmed Owner statements use owner_manual; unverified
+ * Codex agent-assisted submissions use agent_assisted with
+ * agent_reported_owner_approved provenance; ordinary corrections use
+ * automatic_hook. Bound submissions degrade honestly when evidence is absent.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
@@ -337,8 +333,9 @@ describe('Owner Manual vs Automatic Hook ingress (P1-2)', () => {
     const ensured = await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: candidate.logicalObservationKey, canonicalPainId: painId });
     if (!ensured.ok) throw new Error(`${ensured.reason} / ${ensured.nextAction}`);
     const diagnostic = readDiagnosticJson();
-    expect(diagnostic.provenance).toBe('automatic_hook');
+    expect(diagnostic.provenance).toBe('agent_reported_owner_approved');
     expect(diagnostic.correctionEvidence).toMatchObject({ channel: 'codex_explicit_agent' });
+    expect((diagnostic.correctionEvidence as Record<string, unknown>).classification).toBeUndefined();
     expect((diagnostic.correctionEvidence as Record<string, unknown>).classification).toBeUndefined();
   });
 

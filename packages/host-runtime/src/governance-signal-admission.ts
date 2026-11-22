@@ -1044,6 +1044,38 @@ function buildOwnerCorrectionIngressReport(facts: OwnerCorrectionIngressFacts): 
   };
 }
 
+function buildAgentAssistedCorrectionIngressReport(facts: {
+  readonly logicalObservationKey: string;
+  readonly rolloutIdentity: string;
+  readonly rootSessionId: string;
+  readonly hostTurnId: string;
+  readonly painId: string;
+  readonly reason: string;
+  readonly evidence: readonly IngressEvidenceEntry[];
+}): PainIngressReport {
+  const [first, ...rest] = facts.evidence;
+  const bundle: PainIngressReport['evidence'] = first === undefined
+    ? { status: 'unavailable', reason: 'trajectory_unavailable' }
+    : { status: 'available', entries: [first, ...rest] };
+  return {
+    identity: { kind: 'manual_pain_id', painId: facts.painId },
+    painType: 'user_frustration',
+    source: 'user_correction',
+    reason: facts.reason,
+    score: GOVERNANCE_STRONG_PAIN_SCORE,
+    origin: { kind: 'agent_assisted', channel: 'codex_explicit_agent' },
+    correlation: {
+      status: 'bound',
+      hostKind: 'codex',
+      rootSessionId: facts.rootSessionId,
+      rolloutIdentity: facts.rolloutIdentity,
+      logicalObservationKey: facts.logicalObservationKey,
+      hostTurnId: facts.hostTurnId,
+    },
+    evidence: bundle,
+  };
+}
+
 function ownerExplicitChannel(candidate: GovernanceCorrectionCandidate): 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix' {
   if (candidate.explicitChannel !== undefined) return candidate.explicitChannel;
   return candidate.hostKind === 'workbuddy' ? 'workbuddy_explicit_prefix' : 'codex_explicit_prefix';
@@ -1196,50 +1228,46 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
       text: candidate.text,
     });
     const ingressReasonValue = correctionReason(candidate, detection?.output.matchedTerms ?? []);
-    const ingressDecision = isExplicit
-      ? evaluatePainIngress(buildOwnerCorrectionIngressReport({
-        hostKind: candidate.hostKind,
-        channel: ownerExplicitChannel(candidate),
-        logicalObservationKey: candidate.logicalObservationKey,
-        rolloutIdentity: candidate.rolloutIdentity,
-        rootSessionId: candidate.rootSessionId,
-        hostTurnId: candidate.hostTurnId,
-        painId,
-        reason: ingressReasonValue,
-        // Codex has a real governance observation anchor when ingestion
-        // persisted one; otherwise (ingestion disabled) the statement degrades
-        // to the Owner Manual path instead of fabricating a trace. WorkBuddy
-        // explicit intake has no transcript evidence and degrades honestly.
-        evidence: correctionIngressEvidence({
-          db,
-          hostKind: candidate.hostKind,
-          logicalObservationKey: candidate.logicalObservationKey,
-          rolloutIdentity: candidate.rolloutIdentity,
-          rootSessionId: candidate.rootSessionId,
-          hostTurnId: candidate.hostTurnId,
-          text: candidate.text,
-          workspaceDir,
-        }),
+    const ingressEvidence = correctionIngressEvidence({
+      db,
+      hostKind: candidate.hostKind,
+      logicalObservationKey: candidate.logicalObservationKey,
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+      hostTurnId: candidate.hostTurnId,
+      text: candidate.text,
+      workspaceDir,
+    });
+    const correctionFacts: CorrectionIngressFacts = {
+      hostKind: candidate.hostKind,
+      logicalObservationKey: candidate.logicalObservationKey,
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+      hostTurnId: candidate.hostTurnId,
+      painId,
+      reason: ingressReasonValue,
+      evidence: ingressEvidence,
+    };
+    const agentAssistedExplicit = isExplicit
+      && candidate.hostKind === 'codex'
+      && candidate.explicitChannel === 'codex_explicit_agent'
+      && candidate.ownerVerbatimConfirmed !== true;
+    const ingressDecision = agentAssistedExplicit
+      ? evaluatePainIngress(buildAgentAssistedCorrectionIngressReport({
+        logicalObservationKey: correctionFacts.logicalObservationKey,
+        rolloutIdentity: correctionFacts.rolloutIdentity,
+        rootSessionId: correctionFacts.rootSessionId,
+        hostTurnId: correctionFacts.hostTurnId,
+        painId: correctionFacts.painId,
+        reason: correctionFacts.reason,
+        evidence: correctionFacts.evidence,
       }))
-      : evaluatePainIngress(buildCorrectionIngressReport({
-        hostKind: candidate.hostKind,
-        logicalObservationKey: candidate.logicalObservationKey,
-        rolloutIdentity: candidate.rolloutIdentity,
-        rootSessionId: candidate.rootSessionId,
-        hostTurnId: candidate.hostTurnId,
-        painId,
-        reason: ingressReasonValue,
-        evidence: correctionIngressEvidence({
-          db,
-          hostKind: candidate.hostKind,
-          logicalObservationKey: candidate.logicalObservationKey,
-          rolloutIdentity: candidate.rolloutIdentity,
-          rootSessionId: candidate.rootSessionId,
-          hostTurnId: candidate.hostTurnId,
-          text: candidate.text,
-          workspaceDir,
-        }),
-      }));
+      : isExplicit
+        ? evaluatePainIngress(buildOwnerCorrectionIngressReport({
+          ...correctionFacts,
+          channel: ownerExplicitChannel(candidate),
+        }))
+        : evaluatePainIngress(buildCorrectionIngressReport(correctionFacts));
     const ingressReason = ingressDecision.action === 'refuse' || ingressDecision.action === 'observation_only'
       ? ingressDecision.reasonCode
       : null;
@@ -2345,7 +2373,11 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
 
     const hasExistingTaskLink = typeof existingTaskId === 'string' && existingTaskId.length > 0;
     const markerHostKind = payloadParsed.hostKind;
-    const ownerManual = isOwnerManualCorrectionEvidence(payloadParsed.correctionEvidence);
+    const { correctionEvidence } = payloadParsed;
+    const ownerManual = isOwnerManualCorrectionEvidence(correctionEvidence);
+    const agentAssistedExplicit = isRecord(correctionEvidence)
+      && correctionEvidence.channel === 'codex_explicit_agent'
+      && !ownerManual;
     const sourceAuthorization = markerHostKind === 'codex' || markerHostKind === 'workbuddy'
       ? readSourceMaterialAuthorization({ workspaceDir, hostKind: markerHostKind })
       : undefined;
@@ -2363,10 +2395,11 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
     }
 
     // After revocation, repair a crash-after-create task link without reading
-    // the historical observation. If the deterministic task does not exist,
-    // refuse before any governance_observations.visible_text query.
+    // the historical observation. An agent-assisted explicit statement is
+    // still Agent-derived: even a missing ledger cannot authorize re-persisting
+    // it into a NEW task. A direct Owner channel remains independently allowed.
     if (!ownerManual && sourceAuthorization?.status === 'blocked'
-      && sourceAuthorization.reason !== 'consent_missing') {
+      && (sourceAuthorization.reason !== 'consent_missing' || agentAssistedExplicit)) {
       const taskId = createDiagnosticianTaskId(input.canonicalPainId);
       const stateManager = new RuntimeStateManager({ workspaceDir });
       try {
@@ -2382,12 +2415,16 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       }
       return {
         ok: false,
-        reason: 'source_authorization_revoked',
-        nextAction: sourceAuthorization.reason === 'consent_unreadable'
-          ? 'repair the consent ledger first (<workspace>/.state/conversation-ingestion-consent.json is unreadable); the sweep refuses to run until the authority is readable'
-          : sourceAuthorization.reason === 'consent_revoked'
-            ? `purge persisted copies first: pd consent sweep-revoked --workspace "${workspaceDir}" --apply (host: ${markerHostKind})`
-            : `resolve the pending or failed conversation-ingestion consent decision for ${markerHostKind} in "${workspaceDir}" before retrying; a revocation sweep is only appropriate after the ledger records a revocation`,
+        reason: sourceAuthorization.reason === 'consent_missing'
+          ? 'pain_ingress_agent_assisted_consent_required'
+          : 'source_authorization_revoked',
+        nextAction: sourceAuthorization.reason === 'consent_missing'
+          ? 'The Codex agent-assisted wording is Agent-derived; record a Codex conversation-ingestion consent grant before creating a diagnostic task, or use the direct Owner explicit prefix for Owner-authored words.'
+          : sourceAuthorization.reason === 'consent_unreadable'
+            ? 'repair the consent ledger first (<workspace>/.state/conversation-ingestion-consent.json is unreadable); the sweep refuses to run until the authority is readable'
+            : sourceAuthorization.reason === 'consent_revoked'
+              ? `purge persisted copies first: pd consent sweep-revoked --workspace "${workspaceDir}" --apply (host: ${markerHostKind})`
+              : `resolve the pending or failed conversation-ingestion consent decision for ${markerHostKind} in "${workspaceDir}" before retrying; a revocation sweep is only appropriate after the ledger records a revocation`,
       };
     }
 
@@ -2432,31 +2469,32 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       // source. An explicit Owner statement is owner_manual (manual_pain_id,
       // correctionEvidence channel); everything else is the automatic hook.
       const ownerChannel = payloadParsed.correctionEvidence?.channel;
+      const ingressFacts: CorrectionIngressFacts = {
+        hostKind: markerHostKind,
+        logicalObservationKey: markerKey,
+        rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
+        rootSessionId: payloadParsed.sessionId,
+        hostTurnId,
+        painId: input.canonicalPainId,
+        reason: payloadParsed.reason,
+        evidence: ingressEvidence,
+      };
       const ingressDecision = ownerManual && ownerChannel !== undefined
         ? evaluatePainIngress(buildOwnerCorrectionIngressReport({
-          hostKind: markerHostKind,
+          ...ingressFacts,
           channel: ownerChannel,
-          logicalObservationKey: markerKey,
-          rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
-          rootSessionId: payloadParsed.sessionId,
-          hostTurnId,
-          painId: input.canonicalPainId,
-          reason: payloadParsed.reason,
-          // CR-02: never fabricate transcript evidence for an Owner statement;
-          // an empty list is the honest basis and bound explicit reports
-          // legitimately degrade.
-          evidence: ingressEvidence,
         }))
-        : evaluatePainIngress(buildCorrectionIngressReport({
-          hostKind: markerHostKind,
-          logicalObservationKey: markerKey,
-          rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
-          rootSessionId: payloadParsed.sessionId,
-          hostTurnId,
-          painId: input.canonicalPainId,
-          reason: payloadParsed.reason,
-          evidence: ingressEvidence,
-        }));
+        : agentAssistedExplicit && markerHostKind === 'codex'
+          ? evaluatePainIngress(buildAgentAssistedCorrectionIngressReport({
+            logicalObservationKey: ingressFacts.logicalObservationKey,
+            rolloutIdentity: ingressFacts.rolloutIdentity,
+            rootSessionId: ingressFacts.rootSessionId,
+            hostTurnId: ingressFacts.hostTurnId,
+            painId: ingressFacts.painId,
+            reason: ingressFacts.reason,
+            evidence: ingressFacts.evidence,
+          }))
+          : evaluatePainIngress(buildCorrectionIngressReport(ingressFacts));
       if (ingressDecision.action === 'refuse' || ingressDecision.action === 'observation_only') {
         // Fail closed: an inconsistent/evidence-less admitted marker must not
         // silently become a task (and must never be relabelled automatic_hook).

@@ -96,6 +96,48 @@ describe('painIngress.v1 dual-write round trip (PRI-642 §9, §13)', () => {
     expect(executed.message).not.toContain('ingress_payload_mismatch');
   });
 
+  it('round-trips a bound agent-assisted Codex submission with honest empty evidence', async () => {
+    const bridge = makeBridge();
+    const { taskId } = await bridge.submitPainSignal({
+      painId: 'codex_agent_rt_1',
+      painType: 'user_frustration',
+      source: 'user_correction',
+      reason: 'Owner explicitly requested an agent-assisted registration; wording is not transcript-verified.',
+      sessionId: 'codex-root-session',
+      provenance: 'agent_reported_owner_approved',
+      hostKind: 'codex',
+      evidence: [],
+      painIngress: {
+        version: 'v1',
+        origin: { kind: 'agent_assisted', channel: 'codex_explicit_agent' },
+        correlation: {
+          status: 'bound',
+          hostKind: 'codex',
+          rootSessionId: 'codex-root-session',
+          rolloutIdentity: 'codex-rollout',
+          logicalObservationKey: 'codex|codex-rollout|turn-agent|user',
+          hostTurnId: 'turn-agent',
+        },
+        evidenceClass: { status: 'unavailable', reason: 'trajectory_unavailable' },
+      },
+    });
+    const task = await stateManager.getTask(taskId);
+    if (task === null) throw new Error('agent-assisted task missing after submit');
+    const parsed = JSON.parse(task.diagnosticJson as string) as Record<string, unknown>;
+    expect(parsed.provenance).toBe('agent_reported_owner_approved');
+    expect(parsed.evidence).toEqual([]);
+    const ingress = parsePainIngressV1Payload(parsed.painIngress);
+    expect(ingress.ok).toBe(true);
+    if (!ingress.ok) return;
+    expect(ingress.payload.origin).toEqual({ kind: 'agent_assisted', channel: 'codex_explicit_agent' });
+    expect(checkIngressTopLevelConsistency({
+      payload: ingress.payload,
+      topLevelProvenance: parsed.provenance,
+      topLevelSessionIdHint: parsed.sessionIdHint,
+      topLevelEvidenceCount: 0,
+    })).toBeNull();
+  });
+
   it('a submission without ingress facts keeps the legacy-only payload (compatibility window)', async () => {
     const bridge = makeBridge();
     const { taskId } = await bridge.submitPainSignal({

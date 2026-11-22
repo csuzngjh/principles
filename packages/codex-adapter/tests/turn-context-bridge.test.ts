@@ -1,23 +1,17 @@
-/**
- * Agent-assisted explicit Owner pain registration (no `PD记录痛苦：` prefix):
- * the hook publishes the CURRENT turn's host-verified identity to
- * `<workspace>/.state/pd_current_turn_context.json` and the bridge
- * (`registerCurrentTurnOwnerStatement`, surfaced as `pd pain explicit`)
- * hands the Owner's verbatim words to the SAME admission chain the prefix
- * entry uses. Everything runs through the real production surfaces:
- * processHookInvocation → turn-context file → recordExplicitOwnerStatement →
- * governance admission → diagnostician task. No test doubles.
+/*
+ * Agent-assisted explicit Codex pain registration (no native prefix): the
+ * hook publishes the current turn's host-verified identity; the explicit
+ * registration path submits the supplied wording to the shared admission
+ * chain. Only a consent-authorized transcript match classifies that wording
+ * as Owner-verbatim. Everything runs through real production surfaces:
+ * processHookInvocation -> turn-context file -> recordExplicitOwnerStatement
+ * -> governance admission -> diagnostician task.
  *
- * Pins (SPEC acceptance):
- * - explicit no-prefix authorization registers one real pain + one task;
- * - the Owner's words are preserved verbatim, channel auditable as
- *   codex_explicit_agent (distinct from the prefix channel);
- * - quoted/ordinary prompts register NOTHING on their own;
- * - lineage comes only from the host-written context (missing / corrupt /
- *   tampered / cross-workspace contexts fail closed with zero writes);
- * - same-turn replay converges on one canonical pain (A17 extension);
- * - the turn context carries ids/paths only — never prompt text;
- * - Stop/SessionStart withdraw the context (fail-closed after the turn).
+ * Pins: explicit requests create one pain and one task even when transcript
+ * ingestion and automatic-pain opt-in are off (with a granted source ledger);
+ * unverified wording stays agent-derived; ordinary quoted prompts create
+ * nothing; lineage comes only from the host-written context; replay dedupes;
+ * context files contain ids/paths only; Stop/SessionStart withdraw the context.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -51,6 +45,7 @@ function makeWorkspace(ingestionEnabled: boolean): Workspace {
   const config = getDefaultPdConfig();
   config.features['host.codex'].enabled = true;
   config.features['codex_conversation_ingestion'].enabled = ingestionEnabled;
+  config.features = { ...config.features, automatic_pain_submission: { category: 'quiet', enabled: false } };
   (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {
     type: 'pi-ai', provider: 'test-provider', model: 'test-model',
     apiKeyEnv: 'PD_TURN_CTX_TEST_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
@@ -144,6 +139,17 @@ function stateDbTaskIds(root: string): string[] {
   const db = new Database(dbPath, { readonly: true });
   try {
     return (db.prepare("SELECT task_id FROM tasks WHERE task_kind = 'diagnostician'").all() as { task_id: string }[]).map((r) => r.task_id);
+  } finally {
+    db.close();
+  }
+}
+
+function stateDbDiagnostic(root: string, taskId: string): Record<string, unknown> {
+  const db = new Database(path.join(root, '.pd', 'state.db'), { readonly: true });
+  try {
+    const row = db.prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?').get(taskId) as { diagnostic_json: string } | undefined;
+    if (row === undefined) throw new Error('diagnostic task ' + taskId + ' missing');
+    return JSON.parse(row.diagnostic_json) as Record<string, unknown>;
   } finally {
     db.close();
   }
@@ -351,6 +357,16 @@ describe('agent-assisted registration through the real chain', () => {
     const db = trajectoryOf(ws.root);
     expect((db.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(1);
     db.close();
+
+    const taskIds = stateDbTaskIds(ws.root);
+    expect(taskIds).toHaveLength(1);
+    const diagnostic = stateDbDiagnostic(ws.root, taskIds[0]);
+    expect(diagnostic.provenance).toBe('agent_reported_owner_approved');
+    expect(diagnostic.evidence).toEqual([]);
+    const correction = diagnostic.correctionEvidence as Record<string, unknown>;
+    expect(correction.channel).toBe('codex_explicit_agent');
+    expect(correction.classification).toBeUndefined();
+    expect(correction.ownerConfirmation).toBeUndefined();
   });
 });
 

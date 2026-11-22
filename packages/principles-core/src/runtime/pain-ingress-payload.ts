@@ -51,6 +51,14 @@ export type PainIngressOriginV1 =
         // conversation. Neither a CLI statement nor a fake host session.
         | 'mcp_agent_assisted';
     }
+  | {
+      // Owner explicitly requested the Codex agent to register a pain, but
+      // the submitted wording was not verified verbatim against the Owner's
+      // transcript. It is agent-reported/Owner-authorized, not Owner-authored
+      // and not an automatic hook.
+      kind: 'agent_assisted';
+      channel: 'codex_explicit_agent';
+    }
   | { kind: 'automatic_hook'; source: string };
 
 export type PainIngressCorrelationV1 =
@@ -176,6 +184,9 @@ export function parseOrigin(value: unknown): PainOrigin | null {
       return { kind: 'owner_manual', channel };
     }
     return null;
+  }
+  if (value.kind === 'agent_assisted' && value.channel === 'codex_explicit_agent') {
+    return { kind: 'agent_assisted', channel: 'codex_explicit_agent' };
   }
   if (value.kind === 'automatic_hook' && typeof value.source === 'string' && value.source.length > 0) {
     return { kind: 'automatic_hook', source: value.source };
@@ -325,7 +336,7 @@ export function parsePainIngressReport(input: unknown): PainIngressParseResult {
   if (!hasOwnString(input, 'reason')) return { ok: false, reasonCode: 'reason_invalid', message: 'reason is required' };
 
   const origin = parseOrigin(input.origin);
-  if (origin === null) return { ok: false, reasonCode: 'origin_invalid', message: 'origin must be owner_manual{channel} or automatic_hook{source}' };
+  if (origin === null) return { ok: false, reasonCode: 'origin_invalid', message: 'origin must be owner_manual{channel}, agent_assisted{channel}, or automatic_hook{source}' };
 
   const correlation = parseCorrelation(input.correlation);
   if (correlation.error !== undefined) {
@@ -387,6 +398,11 @@ export function validateOriginCorrelationInvariant(
   origin: PainOrigin,
   correlation: PainCorrelation,
 ): string | null {
+  if (origin.kind === 'agent_assisted') {
+    return correlation.status === 'bound' && correlation.hostKind === 'codex'
+      ? null
+      : 'origin_correlation_mismatch';
+  }
   if (origin.kind !== 'owner_manual') return null;
   if (origin.channel === 'external_cli_unbound' && correlation.status === 'bound') {
     return 'origin_correlation_mismatch';
@@ -533,6 +549,7 @@ export function deriveProvenanceFromIngressFacts(
   correlation: PainIngressCorrelationV1,
 ): PainProvenance {
   if (origin.kind === 'automatic_hook') return 'automatic_hook';
+  if (origin.kind === 'agent_assisted') return 'agent_reported_owner_approved';
   // Agent observed the behaviour, Owner authorized the submission
   // (SPEC v0.8 §6.6.3). This is NOT "Owner reported": the Owner did not
   // observe the behaviour and must never be shown as its author.
