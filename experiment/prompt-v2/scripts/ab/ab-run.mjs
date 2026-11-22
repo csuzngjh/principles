@@ -489,6 +489,22 @@ async function runSampleArm(sample, arm, rep) {
         // otherwise the invocation would lease a foreign chain's task.
         const chainLiveOfKind = liveChain.filter((t) => t.task_kind === runner && ['pending', 'retry_wait'].includes(t.status));
         if (chainLiveOfKind.length === 0) continue;
+        // Depth semantics: while a candidate chain of this arm is mid-flight
+        // (a live philosopher/scribe exists), do NOT start another dreamer —
+        // round-robin would otherwise launch every candidate's dreamer before
+        // the first scribe lands and depth-1 could not bound the call count.
+        if (runner === 'dreamer' && args.formationDepth !== null) {
+          const midFlight = liveChain.some((t) => (t.task_kind === 'philosopher' || t.task_kind === 'scribe') && ['pending', 'leased', 'running', 'retry_wait'].includes(t.status));
+          // A dreamer that left 'pending' (leased/running/succeeded/failed/
+          // retry_wait) counts as a STARTED candidate chain; depth bounds how
+          // many chains may ever start, so at most `depth` candidate chains
+          // consume upstream requests in this arm.
+          const startedChains = chainTasks.filter((t) => t.task_kind === 'dreamer' && t.status !== 'pending').length;
+          if (midFlight || startedChains >= args.formationDepth) {
+            loopLog.push({ i, runner, skipped: 'depth_in_flight', midFlight, startedChains });
+            continue;
+          }
+        }
         // Same order as the orchestrator's lease contract (updated_at ASC,
         // task_id ASC) — this is the task run-once would lease next.
         const chainOldest = [...chainLiveOfKind].sort((a, b) => (a.updated_at < b.updated_at ? -1 : a.updated_at > b.updated_at ? 1 : a.task_id < b.task_id ? -1 : 1))[0].task_id;
