@@ -1539,6 +1539,39 @@ If a failure is confirmed pre-existing/environmental:
 
 ---
 
+# 25A. PD-Lab — Agent Behavior-Experiment Infrastructure
+
+PD-Lab answers a question unit tests cannot: did the change actually alter
+Agent **behavior**, in the intended direction? Any change claiming "the agent
+now does X better / safer / closer to intent" (Agent Prompt, Intent, Memory
+injection, Diagnostician/Dreamer/Philosopher/Scribe chains, decision and
+tool-call strategy, self-correction mechanisms, principles/guardrails) must
+be **evaluated** for PD-Lab use — the PR template's PD-Lab Impact field
+records the verdict with a one-line reason. Pure UI/CSS, pure docs, and
+deterministic fixes that never touch the Agent behavior surface are usually
+`NOT_REQUIRED`. "Must evaluate" means "must judge and record", not "must run
+a full experiment on every PR".
+
+Hard rules when an experiment IS warranted:
+
+* **Reuse the existing lab CLI** (`npm run lab:*`) and its Metrics /
+  Blindpack / Evaluator / Summary chain. Never build a second Runner,
+  Evaluator, Evidence Store, or Report system.
+* **Never bypass the authorization gates** (D2 model/budget/statistics,
+  D3 real snapshots, D4 INTENT content, D5 Owner blind eval, D6 full-fidelity
+  data). Without authorization, only offline synthetic verification and
+  read-only probes/qualification are allowed. Verbal approval, chat
+  summaries, prior experiment grants, and synthetic fixtures are not
+  approvals.
+* **Never describe BLOCKED as PASS.** Results must distinguish
+  `PASS` / `PASS_WITH_LIMITATIONS` / `BLOCKED` / `NOT_RUN`.
+
+Authoritative usage guide (the only one): `docs/process/PD-LAB-USAGE.md` —
+evaluation table, standard flow, command reference (kept in sync with
+`package.json`), authorization boundaries, and non-use cases.
+
+---
+
 # 26. Private Docs Access
 
 PD keeps a separate **private repository** for Owner-sensitive docs:
