@@ -24,6 +24,7 @@ import {
   admitGovernanceSignals,
   ensureGovernanceDiagnosticianTask,
   promoteAdmittedGovernanceEvidence,
+  readSourceMaterialAuthorization,
   type GovernanceSignalCandidate,
 } from '@principles/host-runtime';
 import { resolveCodexHome } from './codex-home.js';
@@ -221,6 +222,11 @@ export async function recordExplicitOwnerStatement(args: {
     // when consent is off (or the match fails) the statement persists as
     // Agent-derived — classified down, never rejected outright.
     ...(args.explicitChannel === 'codex_explicit_agent' && args.conversationIngestionEnabled
+      // Transcript content is consent-governed material: the feature flag
+      // alone is not the authority — the consent ledger must still grant
+      // codex ingestion before any confirmation reads transcript content
+      // (a revoked-but-still-flagged workspace must not mint exemptions).
+      && readSourceMaterialAuthorization({ workspaceDir: args.workspaceDir, hostKind: 'codex' }).status === 'authorized'
       && verifyOwnerVerbatimTurnMatch({ validated, turnId: fields.turnId, statementText: args.statementText })
       ? { ownerVerbatimConfirmed: true }
       : {}),

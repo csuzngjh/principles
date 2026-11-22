@@ -1235,4 +1235,39 @@ describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', (
     expect(after.correctionEvidence).toBeUndefined();
     expect(after.reason).not.toContain('explicit owner statement');
   });
+
+  it('G. 代录任务的 diagnostic_json 只含受管正文 (无会话 sourceRef): 撤回清退移除 correctionEvidence', async () => {
+    writeConsent('codex', 'granted');
+    const painId = seedAgentChannelPain({ text: `${SECRET} relayed`, turnId: 'turn-g', confirmed: false });
+    // Legacy shape: a diagnosis task carrying ONLY the governed statement
+    // text — no persisted session sourceRef to match the LIKE probe.
+    const manager = new RuntimeStateManager({ workspaceDir });
+    try {
+      await manager.initialize();
+      await manager.createTask({
+        taskId: `diagnosis_legacy_${painId}`,
+        taskKind: 'diagnostician',
+        inputRef: painId,
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        diagnosticJson: JSON.stringify({
+          sourcePainId: painId,
+          hostKind: 'codex',
+          correctionEvidence: { text: `${SECRET} relayed`, channel: 'codex_explicit_agent' },
+        }),
+      });
+    } finally {
+      await manager.close().catch(() => undefined);
+    }
+
+    writeConsent('codex', 'revoked');
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+
+    const task = withState((db) => db.prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?').get(`diagnosis_legacy_${painId}`) as { diagnostic_json: string });
+    const parsed = JSON.parse(task.diagnostic_json) as { correctionEvidence?: unknown };
+    expect(parsed.correctionEvidence).toBeUndefined();
+    expect(task.diagnostic_json).not.toContain(SECRET);
+  });
 });

@@ -374,10 +374,9 @@
       "symbol": "isOwnerExplicitStatementReason",
       "kind": "value",
       "consumers": [
-        "packages/pd-console/src/server/models/EvidenceChainConsoleModel.ts",
         "packages/host-runtime/src/source-revocation-sweep.ts"
       ],
-      "whyNotInternal": "Console evidence-chain redaction and the revocation sweep both classify persisted pain/admission reasons by the explicit-owner marker so Owner statements are never wrongly withheld or purged.",
+      "whyNotInternal": "The revocation sweep classifies persisted pain/admission reasons by the explicit-owner marker so legacy marker-only Owner statements are never wrongly purged.",
       "alternativeConsidered": "Substring matching the marker text in each consumer, rejected because the marker string would exist in two packages.",
       "addedIn": "PRI-1283",
       "expiresAt": "2027-05-22"
@@ -450,9 +449,10 @@
       "kind": "value",
       "consumers": [
         "packages/host-runtime/src/source-revocation-sweep.ts",
-        "packages/host-runtime/src/governance-signal-admission.ts"
+        "packages/host-runtime/src/governance-signal-admission.ts",
+        "packages/pd-console/src/server/models/EvidenceChainConsoleModel.ts"
       ],
-      "whyNotInternal": "Owner manual-vs-agent-derived classification is ONE judgment shared by the revocation sweep, task-payload validation and every read gate; duplicating it per package would fork the Owner's classification ruling.",
+      "whyNotInternal": "Owner manual-vs-agent-derived classification is ONE judgment shared by the revocation sweep, task-payload validation, console redaction and every read gate; duplicating it per package would fork the Owner's classification ruling.",
       "alternativeConsidered": "A narrow subpath export, rejected because the sibling classification helpers already live behind ./runtime and splitting one judgment across two entries invites drift.",
       "addedIn": "PRI-1283",
       "expiresAt": "2027-05-22"

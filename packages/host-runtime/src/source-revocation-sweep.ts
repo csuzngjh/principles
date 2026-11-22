@@ -619,7 +619,11 @@ async function sweepStateDb(args: {
     if (!tableExists('tasks')) {
       notApplicable.push('tasks');
     } else {
-      const taskRows = (db.prepare('SELECT task_id, diagnostic_json FROM tasks WHERE diagnostic_json LIKE ?').all(likePattern)) as { task_id: string; diagnostic_json: string | null }[];
+      // Two candidate sets: (a) rows carrying this host's persisted source
+      // refs; (b) rows carrying ANY correctionEvidence — legacy agent-assisted
+      // submissions can persist the governed statement text with no session
+      // sourceRef at all, and the per-row governed check below decides.
+      const taskRows = (db.prepare("SELECT task_id, diagnostic_json FROM tasks WHERE diagnostic_json LIKE ? OR diagnostic_json LIKE '%correctionEvidence%'").all(likePattern)) as { task_id: string; diagnostic_json: string | null }[];
       for (const row of taskRows) {
         if (typeof row.diagnostic_json !== 'string') continue;
         let payload: unknown;
@@ -663,8 +667,14 @@ async function sweepStateDb(args: {
         const ingress = next.painIngress;
         if (isRecord(ingress) && isRecord(ingress.evidenceClass) && ingress.evidenceClass.status === 'available') {
           const remaining = Array.isArray(next.evidence) ? next.evidence.length : 0;
-          next.painIngress = { ...ingress, evidenceClass: remaining > 0 ? { status: 'available', entryCount: remaining } : { status: 'unavailable', reason: 'source_revoked' } };
-          changed = true;
+          const computed = remaining > 0 ? { status: 'available', entryCount: remaining } : { status: 'unavailable', reason: 'source_revoked' };
+          // Idempotence: only mark changed when the recomputed class differs —
+          // rows retained for their kept Owner evidence would otherwise be
+          // rewritten (and counted) on every rerun.
+          if (JSON.stringify(computed) !== JSON.stringify(ingress.evidenceClass)) {
+            next.painIngress = { ...ingress, evidenceClass: computed };
+            changed = true;
+          }
         }
 
         if (changed) {

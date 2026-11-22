@@ -74,3 +74,5 @@ confirmation never exempts: unverified agent submissions persist as
 Agent-derived and are governed by the consent ledger on every entry point
 (sweep / recall / context assembler / console / admission), consistent under
 one shared `isOwnerManualCorrectionEvidence` judgment.
+
+Round 4 hardening (review threads #14/#19/#20/#21): the console evidence-chain redaction now judges STRUCTURED correction evidence via `isOwnerManualCorrectionEvidence` instead of the spoofable summary reason marker; verbatim confirmation additionally requires an authorized source-material ledger for that host; the admission validator accepts legacy unconfirmed `codex_explicit_agent` payloads (empty evidence array tolerated) as Agent-derived so task reconciliation cannot starve on them; and the sweep task probe also matches rows carrying `correctionEvidence` so statement-only governed tasks are evaluated, with the evidenceClass rewrite made rerun-idempotent.

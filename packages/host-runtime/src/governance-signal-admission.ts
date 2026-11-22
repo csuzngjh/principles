@@ -2230,11 +2230,17 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
       || (correctionChannel === 'codex_explicit_agent' && hostKind === 'codex'
         && isOwnerManualCorrectionEvidence(correctionEvidence))
     );
+  // Agent-derived covers BOTH the current shape (no classification) and the
+  // legacy pre-round-3 shape (`classification:'owner_statement'` written
+  // without a bound confirmation). Those rows are Agent-derived under the
+  // ruling — still valid payloads for task recovery — while a row that
+  // CARRIES an ownerConfirmation the shared judgment cannot verify is a
+  // forged-claim shape and stays rejected.
   const isAgentDerivedStatement = isRecord(correctionEvidence)
     && correctionChannel === 'codex_explicit_agent' && hostKind === 'codex'
     && typeof correctionText === 'string' && correctionText.length > 0
-    && own(correctionEvidence, 'classification') === undefined
-    && own(correctionEvidence, 'ownerConfirmation') === undefined;
+    && own(correctionEvidence, 'ownerConfirmation') === undefined
+    && !isOwnerManualCorrectionEvidence(correctionEvidence);
   if (correctionEvidence !== undefined && !hasOwnerStatement && !isAgentDerivedStatement) return false;
   const evidence = own(value, 'evidence');
   // An explicit submission — owner-confirmed OR agent-derived (CR-02) — is a
