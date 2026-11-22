@@ -66,16 +66,37 @@ export function createCliServiceHostStatusRuntime(): ServiceHostStatusRuntime {
           if (stderr.length < 16 * 1024) stderr += chunk.toString('utf8');
         });
         child.on('close', (code) => {
-          const jsonLine = stdout
-            .split('\n')
-            .map((line) => line.trim())
-            .find((line) => line.startsWith('{'));
-          if (code === 0 && jsonLine !== undefined) {
-            try {
-              settle({ ok: true, document: JSON.parse(jsonLine) as unknown });
-            } catch {
-              settle({ ok: false, reason: 'service_host_status_unparsable', nextAction: 'pd service status produced unparsable JSON; run it in a terminal to inspect.' });
+          // cli-1 (task §1 review): stdout must be EXACTLY ONE JSON
+          // document — the whole trimmed stdout is parsed. A log line
+          // before/after the JSON, an empty stdout, or a truncated document
+          // all fail closed and are never reported as a status document.
+          const stdoutDoc = stdout.trim();
+          if (stdoutDoc === '') {
+            settle({
+              ok: false,
+              reason: `service_host_status_no_json:exit_${code ?? 'null'}${stderr.trim() !== '' ? `:${stderr.trim().slice(0, 160)}` : ''}`,
+              nextAction: 'pd service status produced no machine-readable output. The Console stays read-only — run it in a terminal for the full output.',
+            });
+            return;
+          }
+          let document: unknown;
+          try {
+            document = JSON.parse(stdoutDoc);
+          } catch {
+            settle({ ok: false, reason: 'service_host_status_unparsable', nextAction: 'pd service status stdout was not a single JSON document (log-mixed or truncated output is refused); run it in a terminal to inspect.' });
+            return;
+          }
+          if (typeof document !== 'object' || document === null || Array.isArray(document)) {
+            settle({ ok: false, reason: 'service_host_status_schema_violation', nextAction: 'pd service status emitted JSON that is not a status object; run it in a terminal to inspect.' });
+            return;
+          }
+          if (code === 0) {
+            const { schemaVersion } = document as { schemaVersion?: unknown };
+            if (schemaVersion !== 'pd.service-status.v1') {
+              settle({ ok: false, reason: 'service_host_status_schema_violation:schema_version', nextAction: 'pd service status emitted a document with an unknown schemaVersion; the Console refused it rather than guess its shape.' });
+              return;
             }
+            settle({ ok: true, document });
             return;
           }
           settle({

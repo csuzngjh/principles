@@ -210,7 +210,7 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
     fakeRegistrationArtifact(home);
     const calls: RecordedCall[] = [];
     const spawnFn = fakeSpawn({
-      status: { code: 0, stdout: '{"schemaVersion":"pd.service-status.v1","scheduler":{"registered":true,"enabled":true}}' },
+      status: { code: 0, stdout: '{"schemaVersion":"pd.service-status.v1","scheduler":{"registered":true,"enabled":true,"triggerConfiguration":{"intervalMs":300000}}}' },
       install: { code: 0, stdout: '{"ok":true,"changed":false}' },
     }, calls);
     const infos: string[] = [];
@@ -222,7 +222,33 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
     });
     const subcommands = calls.map((c) => c.args[2]);
     expect(subcommands).toEqual(['status', 'install']); // refresh happened
+    // Refresh preserves the LIVE registered interval (task §15): the CLI is
+    // called with the documented 300s, never a silent default.
+    const installCall = calls.find((c) => c.args[2] === 'install');
+    expect(installCall?.args).toContain('--interval-ms');
+    expect(installCall?.args[installCall.args.indexOf('--interval-ms') + 1]).toBe('300000');
     expect(infos.join(' ')).toContain('refreshed');
+  });
+
+  it('without consent but interval UNREADABLE: refresh fails closed (registration kept, nothing re-installed)', async () => {
+    const home = tempHome();
+    const pdHome = fakeInstalledCli(home);
+    fakeRegistrationArtifact(home);
+    const calls: RecordedCall[] = [];
+    const spawnFn = fakeSpawn({
+      // registered=true but no triggerConfiguration — a silent 120s default
+      // would quietly reset a custom cadence, so the bridge REFUSES (§15).
+      status: { code: 0, stdout: '{"schemaVersion":"pd.service-status.v1","scheduler":{"registered":true,"enabled":true}}' },
+      install: { code: 0, stdout: '{"ok":true,"changed":false}' },
+    }, calls);
+    const warnings: string[] = [];
+    await reconcileServiceHostScheduler({
+      pdHome, registerServiceHost: false, enableServiceHost: false,
+      warn: (m) => warnings.push(m),
+      probes: { spawnFn },
+    });
+    expect(calls.map((c) => c.args[2])).toEqual(['status']); // install was NOT re-run
+    expect(warnings.join(' ')).toContain('trigger interval');
   });
 
   it('--register-service-host: registers DISABLED and does NOT enable', async () => {

@@ -27,6 +27,8 @@ export interface ServiceHostBridgeOutcome {
   readonly nextAction?: string;
   /** From `pd service status`: whether a registration exists (null = unreadable). */
   readonly registered?: boolean | null;
+  /** From `pd service status`: the registered trigger interval (null = unreadable). */
+  readonly triggerIntervalMs?: number | null;
 }
 
 /** Env vars that must never steer the spawned CLI's install identity. */
@@ -142,50 +144,85 @@ export async function runServiceHostCli(pdHome: string, args: readonly string[],
       nextAction: 'The installed pd CLI could not be started; run the pd service command manually later (operations are idempotent).',
     };
   }
-  // cli-1: exactly one JSON document on stdout. `service status` prints the
-  // unified status DOCUMENT (schemaVersion pd.service-status.v1 — success is
-  // the document itself, `registered` lives under `scheduler`); every other
-  // operation prints the op envelope with `ok`.
-  const jsonLine = outcome.stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.startsWith('{'));
-  if (jsonLine === undefined) {
+  // cli-1 (task §1 review): stdout must be EXACTLY ONE JSON document —
+  // the whole trimmed stdout is parsed; a log line before/after the JSON,
+  // a truncated document, or an empty stdout all fail closed and are never
+  // interpreted as "scheduler not registered". Failure classes stay
+  // distinct: process failure (exit/timeout/spawn) vs JSON-parse failure
+  // vs schema violation.
+  const stdoutDoc = outcome.stdout.trim();
+  if (stdoutDoc === '') {
     return {
       ok: false,
       detail: `service_host_cli_no_json:exit_${outcome.code ?? 'null'}`,
       nextAction: `pd service ${op} produced no machine-readable output (exit ${outcome.code ?? 'n/a'}${outcome.stderr.trim() !== '' ? `; ${outcome.stderr.trim().slice(0, 160)}` : ''}); inspect it manually.`,
     };
   }
-  let parsed: { ok?: boolean; reason?: string; schemaVersion?: string; scheduler?: { registered?: boolean | null } };
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(jsonLine) as { ok?: boolean; reason?: string; schemaVersion?: string; scheduler?: { registered?: boolean | null } };
+    parsed = JSON.parse(stdoutDoc);
   } catch {
     return {
       ok: false,
-      detail: 'service_host_cli_unparsable_json',
-      nextAction: `pd service ${op} emitted unparsable JSON; run it manually to see the full output.`,
+      detail: `service_host_cli_unparsable_json:exit_${outcome.code ?? 'null'}`,
+      nextAction: `pd service ${op} stdout was not a single JSON document (log-mixed or truncated output is refused, exit ${outcome.code ?? 'n/a'}); run it manually to see the full output.`,
     };
   }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return {
+      ok: false,
+      detail: 'service_host_cli_schema_violation:top_level',
+      nextAction: `pd service ${op} emitted JSON that is not an object; run it manually to see the full output.`,
+    };
+  }
+  const doc = parsed as Record<string, unknown>;
   if (op === 'status') {
-    const registered = parsed.scheduler?.registered ?? null;
-    if (outcome.code === 0 && parsed.schemaVersion === 'pd.service-status.v1') {
-      return { ok: true, detail: 'ok', registered };
+    const { scheduler } = doc;
+    const registered =
+      typeof scheduler === 'object' && scheduler !== null && Object.hasOwn(scheduler, 'registered') &&
+      (typeof (scheduler as { registered?: unknown }).registered === 'boolean' || (scheduler as { registered?: unknown }).registered === null)
+        ? (scheduler as { registered: boolean | null }).registered
+        : null;
+    const intervalMs =
+      typeof scheduler === 'object' && scheduler !== null &&
+      typeof (scheduler as { triggerConfiguration?: unknown }).triggerConfiguration === 'object' &&
+      (scheduler as { triggerConfiguration: unknown }).triggerConfiguration !== null
+        ? ((scheduler as { triggerConfiguration: { intervalMs?: unknown } }).triggerConfiguration.intervalMs ?? null) as number | null
+        : null;
+    if (outcome.code === 0 && doc.schemaVersion === 'pd.service-status.v1') {
+      return { ok: true, detail: 'ok', registered, triggerIntervalMs: typeof intervalMs === 'number' ? intervalMs : null };
+    }
+    const reason = typeof doc.reason === 'string' ? doc.reason : `exit_${outcome.code ?? 'null'}`;
+    if (outcome.code === 0 && doc.schemaVersion !== 'pd.service-status.v1') {
+      return {
+        ok: false,
+        detail: `service_host_cli_schema_violation:schema_version`,
+        nextAction: `pd service status emitted a document with an unknown schemaVersion (${typeof doc.schemaVersion === 'string' ? doc.schemaVersion : 'missing'}); the scheduler state is unknown — nothing was changed. Inspect it manually.`,
+        registered,
+      };
     }
     return {
       ok: false,
-      detail: `service_host_status_failed:${parsed.reason ?? `exit_${outcome.code ?? 'null'}`}`,
+      detail: `service_host_status_failed:${reason}`,
       nextAction: 'pd service status did not succeed; the scheduler registration state is unknown — nothing was changed. Inspect it manually.',
       registered,
     };
   }
-  if (outcome.code === 0 && parsed.ok === true) {
+  if (typeof doc.ok !== 'boolean') {
+    return {
+      ok: false,
+      detail: 'service_host_cli_schema_violation:ok_field',
+      nextAction: `pd service ${op} emitted a document without a boolean \`ok\` field; the operation state is unknown — inspect it manually.`,
+    };
+  }
+  if (outcome.code === 0 && doc.ok === true) {
     return { ok: true, detail: 'ok' };
   }
+  const reason = typeof doc.reason === 'string' ? doc.reason : `exit_${outcome.code ?? 'null'}`;
   return {
     ok: false,
-    detail: `service_host_cli_refused:${parsed.reason ?? `exit_${outcome.code ?? 'null'}`}`,
-    nextAction: `pd service ${op} did not succeed (${parsed.reason ?? `exit ${outcome.code ?? 'n/a'}`}); nothing was silently skipped — retry it manually after fixing the cause.`,
+    detail: `service_host_cli_refused:${reason}`,
+    nextAction: `pd service ${op} did not succeed (${reason}); nothing was silently skipped — retry it manually after fixing the cause.`,
   };
 }
 
@@ -275,11 +312,18 @@ export async function reconcileServiceHostScheduler(input: SchedulerReconcileInp
     return;
   }
   if (status.registered === true) {
-    const refresh = await runServiceHostCli(input.pdHome, ['service', 'install'], input.probes ?? {});
+    // Refresh preserves the existing registration config (task §15): the
+    // interval comes from the live status document — an UNREADABLE interval
+    // fails closed (a silent default would quietly reset a custom cadence).
+    if (status.triggerIntervalMs === undefined || status.triggerIntervalMs === null) {
+      input.warn('Service Host scheduler refresh refused: the registered trigger interval could not be read from pd service status — the existing registration was KEPT unchanged. Re-run pd service status and repair the registration first.');
+      return;
+    }
+    const refresh = await runServiceHostCli(input.pdHome, ['service', 'install', '--interval-ms', String(status.triggerIntervalMs)], input.probes ?? {});
     if (!refresh.ok) {
       input.warn(`Service Host scheduler refresh failed (${refresh.detail}) — the last valid registration was KEPT. ${refresh.nextAction ?? ''}`.trim());
       return;
     }
-    input.info?.('Service Host scheduler registration refreshed to the active release (enabled state preserved).');
+    input.info?.(`Service Host scheduler registration refreshed to the active release (interval ${status.triggerIntervalMs}ms and enabled state preserved).`);
   }
 }
