@@ -58,8 +58,10 @@ describe('PRI-1198 — packages/principles-core/tests is linted', () => {
 
 describe('PRI-1167 — core job caps test workers instead of raising the timeout', () => {
   function coverageStep(): StepDef {
-    const step = coreJobSteps().find((s) => s.name === 'Test with coverage');
-    if (!step) throw new Error('ci.yml core job has no "Test with coverage" step');
+    // The core test step is located by its vitest command, not its display
+    // name — #2746 renamed the step when dropping the coverage upload.
+    const step = coreJobSteps().find((s) => (s.run ?? '').includes('npm run test'));
+    if (!step) throw new Error('ci.yml core job has no step running `npm run test`');
     return step;
   }
 
