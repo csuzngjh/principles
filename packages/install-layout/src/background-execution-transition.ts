@@ -295,6 +295,71 @@ export function acquireBackgroundExecutionCasLock(options: CasLockAcquireOptions
   return { ok: false, reason: 'lock_invalid', message: `could not acquire CAS lock ${lockDir} after bounded retries` };
 }
 
+// ─── Manifest write lock for non-transition writers (ERR-168) ───────────────
+
+export interface WithManifestWriteLockOptions {
+  manifestPath: string;
+  /** Attribution label, e.g. 'installer.writeInstallManifest'. */
+  operation: string;
+  /** Attribution context — install-level writers pass the PD home. */
+  context: string;
+  /** Bounded busy-wait retries; the critical section is millisecond-scale. */
+  retries?: number;
+  retryDelayMs?: number;
+  fsOps?: CasFsOps;
+  now?: () => Date;
+}
+
+export type WithManifestWriteLockResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: 'lock_busy' | 'lock_invalid' | 'lock_io_error'; message: string };
+
+function busyWaitMs(ms: number): void {
+  // Sync context: a bounded spin over Date.now(). Callers only reach here on
+  // contention, which is a millisecond-window event.
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    /* spin */
+  }
+}
+
+/**
+ * Run a manifest read-modify-write under the SAME physical lock the §8.4
+ * transition path takes (ERR-168: a whole-object load→modify→save writer that
+ * ignores the locked single-writer mutator can clobber its sub-section). The
+ * installer and update-side config writers wrap their writes with this; the
+ * transition primitive uses the lock directly. Lock failure is LOUD — a
+ * writer must never fall back to an unlocked write.
+ */
+export function withInstallManifestWriteLock<T>(
+  options: WithManifestWriteLockOptions,
+  fn: () => T,
+): WithManifestWriteLockResult<T> {
+  const retries = options.retries ?? 5;
+  const retryDelayMs = options.retryDelayMs ?? 50;
+  let lastFailure: { reason: 'lock_busy' | 'lock_invalid' | 'lock_io_error'; message: string } | undefined;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const lock = acquireBackgroundExecutionCasLock({
+      manifestPath: options.manifestPath,
+      operation: options.operation,
+      workspaceDir: options.context,
+      now: options.now,
+      fsOps: options.fsOps,
+    });
+    if (lock.ok) {
+      try {
+        return { ok: true, value: fn() };
+      } finally {
+        lock.handle.release();
+      }
+    }
+    lastFailure = { reason: lock.reason, message: lock.message };
+    if (lock.reason !== 'lock_busy') break; // invalid/io failures never improve by retrying
+    if (attempt < retries) busyWaitMs(retryDelayMs);
+  }
+  return { ok: false, reason: lastFailure?.reason ?? 'lock_busy', message: lastFailure?.message ?? 'lock acquisition failed' };
+}
+
 // ─── Read-side projection ───────────────────────────────────────────────────
 
 export type WorkspaceBackgroundOwnership =

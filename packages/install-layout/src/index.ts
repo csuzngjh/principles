@@ -858,6 +858,7 @@ export {
   defaultCasFsOps,
   readWorkspaceBackgroundOwnership,
   transitionWorkspaceBackgroundExecution,
+  withInstallManifestWriteLock,
   type BackgroundExecutionTransitionKind,
   type TransitionBackgroundExecutionFailure,
   type TransitionBackgroundExecutionSuccess,
@@ -868,5 +869,7 @@ export {
   type CasLockOwner,
   type ReadOwnershipOptions,
   type TransitionBackgroundExecutionInput,
+  type WithManifestWriteLockOptions,
+  type WithManifestWriteLockResult,
   type WorkspaceBackgroundOwnership,
 } from './background-execution-transition.js';

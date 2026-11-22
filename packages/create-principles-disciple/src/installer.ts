@@ -44,7 +44,7 @@ import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installe
 import { findForeignWorkspaceOwner } from './utils/host-workspace-ownership.js';
 import type { HostWorkspaceOwnershipOptions } from './utils/host-workspace-ownership.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, resolvePdHome } from '@principles/install-layout';
+import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, resolvePdHome, withInstallManifestWriteLock } from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { reconcileServiceHostScheduler } from './service-host-bridge.js';
@@ -386,15 +386,26 @@ function writeInstallManifest(hosts: string[], workspaces: string[]): void {
   // PRI-709 P0-1: merge into the existing record. This file has more than one
   // writer (the update side owns `channel` / `autoCheck` / `releaseMetadataUrl`);
   // a wholesale replace silently deleted those fields.
-  const existing = readInstallJsonRecord(getInstallManifestPath());
-  const payload: Record<string, unknown> = {
-    ...(existing ?? {}),
-    layoutVersion: 1,
-    mode: 'canonical',
-    hosts,
-    workspaces,
-  };
-  writeFileSync(getInstallManifestPath(), JSON.stringify(payload, null, 2) + '\n', 'utf8');
+  // PRI-1282 (ERR-168): also take the §8.4 CAS lock — the same file carries
+  // per-Workspace ownership records whose locked single-writer mutator must
+  // not be clobbered by an interleaved installer read-modify-write.
+  const locked = withInstallManifestWriteLock(
+    { manifestPath: getInstallManifestPath(), operation: 'installer.writeInstallManifest', context: getPdDir() },
+    () => {
+      const existing = readInstallJsonRecord(getInstallManifestPath());
+      const payload: Record<string, unknown> = {
+        ...(existing ?? {}),
+        layoutVersion: 1,
+        mode: 'canonical',
+        hosts,
+        workspaces,
+      };
+      writeFileSync(getInstallManifestPath(), JSON.stringify(payload, null, 2) + '\n', 'utf8');
+    },
+  );
+  if (!locked.ok) {
+    throw new Error(`could not acquire the install manifest write lock (installer.writeInstallManifest): ${locked.message}`);
+  }
 }
 
 /**
