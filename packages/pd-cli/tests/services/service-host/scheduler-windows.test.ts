@@ -33,7 +33,17 @@ interface RecordedCall {
   readonly extraEnv: Readonly<Record<string, string>> | undefined;
 }
 
+/** The SID the fake PowerShell query reports for the current account. */
+const TEST_CURRENT_USER_SID = 'S-1-5-21-TEST-RUNAS';
+
 function psResult(body: unknown): SchedulerCommandResult {
+  // Mirror the real queryScript: every found=true response carries the
+  // SID of the account the query ran under. Tests that need a different
+  // or missing SID pass currentUserSid explicitly.
+  if (typeof body === 'object' && body !== null && (body as { found?: unknown }).found === true
+    && !Object.hasOwn(body, 'currentUserSid')) {
+    body = { ...(body as object), currentUserSid: TEST_CURRENT_USER_SID };
+  }
   return { code: 0, stdout: JSON.stringify(body), stderr: '' };
 }
 
@@ -130,7 +140,9 @@ function escapeXml(value: string): string {
 function oursXml(registration: SchedulerRegistration, triggers = ''): string {
   const args = windowsSerializeCommandLine(schedulerInvocationArgs(registration));
   return (
-    `<Task><Triggers><LogonTrigger><UserId>TESTDOMAIN\\testuser</UserId></LogonTrigger>${triggers}</Triggers>` +
+    `<Task><Principals><Principal id="Author"><UserId>${TEST_CURRENT_USER_SID}</UserId>` +
+    `<LogonType>InteractiveToken</LogonType></Principal></Principals>` +
+    `<Triggers><LogonTrigger><UserId>TESTDOMAIN\\testuser</UserId></LogonTrigger>${triggers}</Triggers>` +
     `<Actions><Exec><Command>${escapeXml(registration.nodePath)}</Command>` +
     `<Arguments>${escapeXml(args)}</Arguments>` +
     `<WorkingDirectory>${escapeXml(registration.pdHome)}</WorkingDirectory>` +
@@ -516,12 +528,7 @@ describe('createWindowsSchedulerAdapter', () => {
       intervalMs: 120_000,
       identity: schedulerIdentityFor(pdHome),
     };
-    const escapedXml =
-      `<Task><Triggers><LogonTrigger><UserId>TESTDOMAIN\\testuser</UserId></LogonTrigger></Triggers>` +
-      `<Actions><Exec><Command>${escapeXml(registration.nodePath)}</Command>` +
-      `<Arguments>${escapeXml(windowsSerializeCommandLine(schedulerInvocationArgs(registration)))}</Arguments>` +
-      `<WorkingDirectory>${escapeXml(registration.pdHome)}</WorkingDirectory>` +
-      `</Exec></Actions></Task>`;
+    const escapedXml = oursXml(registration);
     const { runner } = sequentialRunner([
       psResult({ found: true, state: 'Ready', xml: escapedXml, lastResult: 0 }),
       psResult({ done: true }),
@@ -594,5 +601,32 @@ describe('lifecycle reliability round 3 (LastTaskResult int64 + Actions complete
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.kind).toBe('external_conflict');
+  });
+
+  it('uninstall refuses a task whose run-as Principal was retargeted to a different account', async () => {
+    // Real-review finding: an admin may retarget a same-named task to a
+    // foreign run-as account while Exec/WorkingDirectory/LogonTrigger
+    // still match PD's registration — deleting it would destroy a
+    // foreign OS registration.
+    const registration = makeRegistration();
+    const xml = oursXml(registration).replace(TEST_CURRENT_USER_SID, 'S-1-5-21-FOREIGN-ACCOUNT');
+    const { runner } = sequentialRunner([psResult({ found: true, state: 'Ready', xml })]);
+    const adapter = createWindowsSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
+    const result = await adapter.uninstall(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+    expect(result.nextAction).toContain('runas_mismatch');
+  });
+
+  it('uninstall refuses when the current-user SID cannot be resolved', async () => {
+    const registration = makeRegistration();
+    const { runner } = sequentialRunner([psResult({ found: true, state: 'Ready', xml: oursXml(registration), currentUserSid: null })]);
+    const adapter = createWindowsSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
+    const result = await adapter.uninstall(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+    expect(result.nextAction).toContain('sid_unresolved');
   });
 });

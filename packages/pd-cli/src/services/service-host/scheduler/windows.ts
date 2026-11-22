@@ -293,6 +293,26 @@ function taskPrincipalUsers(xml: string): string[] {
   return users;
 }
 
+/**
+ * `<UserId>` values inside `<Principal>` blocks — the task's RUN-AS
+ * account (exported in SID form). PD registers with
+ * TASK_LOGON_INTERACTIVE_TOKEN for the registering user, so our own task
+ * declares exactly ONE Principal whose UserId is that user's SID. An
+ * admin may retarget a same-named task to another account while leaving
+ * the Exec/WorkingDirectory/LogonTrigger intact (real-review evidence):
+ * such a task is FOREIGN and must never be modified or deleted. Zero or
+ * several Principal UserIds is likewise a definition PD did not write.
+ */
+function taskRunAsUsers(xml: string): string[] {
+  const users: string[] = [];
+  for (const principal of xml.matchAll(/<Principal\b[^>]*>([\s\S]*?)<\/Principal>/gi)) {
+    for (const user of (principal[1] ?? '').matchAll(/<UserId>([\s\S]*?)<\/UserId>/gi)) {
+      users.push(unescapeXml(user[1] ?? '').trim());
+    }
+  }
+  return users;
+}
+
 interface PowerShellQueryBody {
   readonly found: boolean;
   readonly state?: string;
@@ -300,6 +320,8 @@ interface PowerShellQueryBody {
   readonly lastRunAt?: string;
   readonly lastResult?: number | string;
   readonly nextRunTime?: string;
+  /** SID of the account the query ran under — run-as ownership witness. */
+  readonly currentUserSid?: string | null;
 }
 
 interface PowerShellErrorBody {
@@ -414,7 +436,11 @@ try {
     if ($null -ne $info.LastTaskResult) { $lastResult = [int64]$info.LastTaskResult }
     $nextRun = $null
     if ($info.NextRunTime -and $info.NextRunTime.Year -gt 1899) { $nextRun = $info.NextRunTime.ToString('o') }
-    [PSCustomObject]@{ found = $true; state = [string]$task.State; xml = [string]$xml; lastRunAt = $lastRun; lastResult = $lastResult; nextRunTime = $nextRun } | ConvertTo-Json -Compress
+    # The run-as ownership witness: the SID of the account this query
+    # runs under, compared against the task's <Principal><UserId>.
+    $currentUserSid = $null
+    try { $currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { $currentUserSid = $null }
+    [PSCustomObject]@{ found = $true; state = [string]$task.State; xml = [string]$xml; lastRunAt = $lastRun; lastResult = $lastResult; nextRunTime = $nextRun; currentUserSid = $currentUserSid } | ConvertTo-Json -Compress
   }
 } catch {
   [PSCustomObject]@{ ok = $false; errorId = $_.FullyQualifiedErrorId; message = $_.Exception.Message } | ConvertTo-Json -Compress
@@ -505,11 +531,20 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
     // principal on its logon trigger — zero or several inside the
     // trigger means a definition PD did not write.
     const principalMatches = principals.length === 1 && (principals[0] ?? '') !== '';
-    if (execMatches && workDirMatches && principalMatches) return { ours: true };
+    // The run-as principal must be exactly ONE <Principal><UserId> and
+    // equal the SID of the account this process runs under — otherwise
+    // the task was retargeted to a foreign account (or the SID could not
+    // be resolved) and the registration is not provably PD's.
+    const runAs = taskRunAsUsers(body.xml);
+    const sid = typeof body.currentUserSid === 'string' && body.currentUserSid !== '' ? body.currentUserSid : null;
+    const runAsMatches = runAs.length === 1 && (runAs[0] ?? '') !== ''
+      && sid !== null && (runAs[0] ?? '').toLowerCase() === sid.toLowerCase();
+    if (execMatches && workDirMatches && principalMatches && runAsMatches) return { ours: true };
     const detail = [
       execMatches ? '' : `argv_mismatch(expected ${expectedArgv.length} got ${execArgv.length})`,
       workDirMatches ? '' : 'workdir_mismatch',
       principalMatches ? '' : `principal_mismatch(count=${principals.length})`,
+      runAsMatches ? '' : `runas_mismatch(count=${runAs.length}${sid === null ? ',sid_unresolved' : ''})`,
     ].filter(Boolean).join('+');
     return { ours: false, conflict: 'external', detail };
   }
