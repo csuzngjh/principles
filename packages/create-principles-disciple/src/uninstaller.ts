@@ -30,6 +30,7 @@ import { readActiveRecord, type ActiveRecord } from './update/transaction-journa
 import { setLanguage, t, getLanguage } from './i18n.js';
 import { getHostInstallers, WorkBuddyHostInstaller, type HostTarget } from './installers/index.js';
 import type { HostUninstallContext, HostUninstallResult } from '@principles/core/host';
+import { runServiceHostCli } from './service-host-bridge.js';
 
 export interface UninstallResult {
   success: boolean;
@@ -807,6 +808,33 @@ export async function uninstall(
         }
         deleteErrors.push({ name: p.name, error: errMsg });
       }
+    }
+
+    // 5.5. PRI-1281 Phase 3 (task §5/§6): revoke the install-level OS
+    // scheduler registration BEFORE the shared runtime goes away (the pd CLI
+    // entry it invokes lives there). ONLY when the shared runtime is being
+    // removed — a host-scoped uninstall keeps the scheduler because other
+    // hosts still use the runtime. Workspace data / .pd/state.db / Ledger /
+    // Trajectory are never touched by this step. A failure is a warning with
+    // manual removal instructions (the uninstall continues).
+    if (runtimePlan.removeSharedRuntime) {
+      try {
+        const schedulerResult = await runServiceHostCli(getPdDir(), ['service', 'uninstall']);
+        if (schedulerResult.ok) {
+          logger.info('Service Host OS scheduler registration removed (Workspace data untouched).');
+        } else {
+          logger.warn(
+            `Service Host scheduler uninstall did not complete (${schedulerResult.detail}). ` +
+            `${schedulerResult.nextAction ?? `Remove it manually with: schtasks /Delete /TN "<PD task>" (Windows), or launchctl bootout + delete the plist (macOS), or systemctl --user disable --now + delete the units (Linux).`}`
+          );
+        }
+      } catch (schedulerError) {
+        logger.warn(
+          `Service Host scheduler uninstall threw (${schedulerError instanceof Error ? schedulerError.message : String(schedulerError)}); remove it manually — the uninstall continues.`
+        );
+      }
+    } else {
+      logger.info('Keeping the Service Host scheduler: another host still uses the shared runtime.');
     }
 
     // 6. The pd shim belongs to the shared runtime. Keep it while another host
