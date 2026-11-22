@@ -158,6 +158,18 @@ export const PainCorrectionEvidenceSchema = Type.Object({
     Type.Literal('workbuddy_explicit_prefix'),
     Type.Literal('openclaw_manual_pain'),
   ])),
+  /**
+   * PRI-1283 round 3 (owner_manual ruling): the trusted Owner confirmation
+   * record for an agent-assisted (`codex_explicit_agent`) statement. Written
+   * ONLY by the registration path after the submitted text was verified
+   * verbatim against the current turn's host transcript — never accepted
+   * from a submission payload. `statementFingerprint` is sha256 of the
+   * persisted text, binding the confirmation to the final submitted content.
+   */
+  ownerConfirmation: Type.Optional(Type.Object({
+    kind: Type.Literal('owner_verbatim_turn_match'),
+    statementFingerprint: Type.String({ minLength: 1 }),
+  })),
 });
 
 export type PainCorrectionEvidence = Static<typeof PainCorrectionEvidenceSchema>;

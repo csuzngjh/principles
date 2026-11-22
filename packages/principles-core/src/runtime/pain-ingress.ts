@@ -231,6 +231,35 @@ export function evaluatePainIngress(report: PainIngressReport): PainIngressDecis
     return { action: 'submit', legacy, painIngress: legacy.painIngress, warnings: [] };
   }
 
+  // Explicit Codex agent-assisted registration is Owner-authorized as an
+  // action, while its wording remains Agent-derived unless a separate
+  // transcript-bound confirmation promoted it to owner_manual. It may submit
+  // with honest empty evidence (degrade), but it is never an automatic hook
+  // and never inherits the owner_manual source-consent exemption.
+  if (origin.kind === 'agent_assisted') {
+    if (correlation.status !== 'bound' || correlation.hostKind !== 'codex') {
+      return {
+        action: 'refuse',
+        reasonCode: 'origin_correlation_mismatch',
+        warning: 'Agent-assisted explicit registration requires a trusted Codex session.',
+        nextAction: 'Retry from the active Codex session that supplied the explicit request.',
+      };
+    }
+    if (evidence.status === 'available') {
+      const legacy = buildLegacy(report, [...evidence.entries]);
+      return { action: 'submit', legacy, painIngress: legacy.painIngress, warnings: [] };
+    }
+    const legacy = buildLegacy(report, []);
+    return {
+      action: 'degrade',
+      reasonCode: evidence.reason,
+      warning: 'The Owner explicitly authorized this agent-assisted submission, but transcript evidence is unavailable (' + evidence.reason + '); the text remains Agent-derived and is recorded with empty evidence.',
+      nextAction: 'If transcript evidence is wanted, enable Codex conversation ingestion and grant its consent; otherwise the agent-reported submission can proceed as recorded.',
+      legacy,
+      painIngress: legacy.painIngress,
+    };
+  }
+
   // Owner manual, bound (openclaw_command / cli_explicit_session).
   if (correlation.status === 'bound') {
     if (evidence.status === 'available') {

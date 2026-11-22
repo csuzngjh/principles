@@ -22,6 +22,7 @@ import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { readLedgerFileState } from '../principle-tree-ledger.js';
 import {
   createDiagnosticianTaskId,
+  type PainDetectedData,
   type PainEvidenceEntry,
 } from './pain-signal-bridge.js';
 import { evaluatePainIngress } from './pain-ingress.js';
@@ -30,8 +31,12 @@ import {
   type PainIngressReport,
   type PainDeviationAnchor,
 } from './pain-ingress-payload.js';
-import { deriveProvenanceFromIngressFacts } from './pain-ingress-payload.js';
+import { deriveProvenanceFromIngressFacts, normalizeRequestedTargetTurnId } from './pain-ingress-payload.js';
+// PRI-1274: leaf import — the disposition schema version lives beside its
+// types, with no cycle back into this module.
+import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, targetEvidenceWaitRequired } from './pain-admission-disposition.js';
 import type { GovernanceHostKind } from './pain-signal-bridge.js';
+import type { SourceMaterialDenialReason } from './source-material-authorization.js';
 import type { PainAnchor, PainAnchorType } from './context-payload.js';
 
 export const SUBMIT_PAIN_CAPABILITY_ID = 'pd_submit_pain' as const;
@@ -52,6 +57,15 @@ export interface PainSubmitInput {
   readonly anchorType: PainSubmitAnchorType;
   readonly anchorRef: string;
   readonly painType?: PainSubmitPainType;
+  /**
+   * PRI-1274 r2b: the caller's EXPLICIT target turn, if named. Model-visible
+   * input — shape-validated only, NEVER trusted for binding. On the verified
+   * path the assembly resolves it into the trusted verification; on an
+   * UNBOUND submission it is persisted as the `requestedTargetTurnId` hint
+   * so the receipt recovery can honor the explicit earlier turn instead of
+   * defaulting to the submission turn.
+   */
+  readonly targetTurnId?: string;
 }
 
 export interface PainSubmitCapabilityOptions {
@@ -108,7 +122,8 @@ export interface HostSessionClaim {
  */
 export type HostSessionVerification =
   | { readonly status: 'verified'; readonly sessionId: string; readonly submissionTurnId?: string;
-    readonly targetTurnId?: string; readonly inputEvidence?: PainEvidenceEntry[] }
+    readonly targetTurnId?: string; readonly inputEvidence?: PainEvidenceEntry[];
+    readonly targetEvidenceBlockedReason?: SourceMaterialDenialReason }
   | { readonly status: 'unverified'; readonly detail: string };
 
 /** PRI-1260: the association outcome surfaced on every submit receipt (internal; inlined into the receipt surface). */
@@ -489,6 +504,62 @@ export async function submitPainCapability(
     }
     : verification ?? { status: 'absent' };
 
+  // PRI-1274 / PRI-1283: one target-evidence rule shared with receipt
+  // recovery. Missing-but-collectable text waits; consent-denied text becomes
+  // blocked_by_source_material_consent and cannot enter the diagnostician queue. An explicit
+  // Owner statement anchor remains independently admissible and never waits
+  // for optional target-turn enrichment.
+  const submittedTurnEvidenceCount = verification?.status === 'verified' && verification.inputEvidence !== undefined
+    ? verification.inputEvidence.length
+    : 0;
+  const targetEvidenceRequired = targetEvidenceWaitRequired({
+    hasVerifiedSession: sessionAssociation.status === 'verified',
+    targetTurnId: sessionAssociation.status === 'verified' ? sessionAssociation.targetTurnId : undefined,
+    submittedEvidenceCount: submittedTurnEvidenceCount,
+    hasOwnerStatement: input.anchorType === 'owner_expectation',
+  });
+  const targetEvidenceBlockedReason = verification?.status === 'verified'
+    ? verification.targetEvidenceBlockedReason
+    : undefined;
+  const blockedByTargetEvidenceConsent = targetEvidenceRequired && targetEvidenceBlockedReason !== undefined;
+  const waitingForTargetEvidence = targetEvidenceRequired && !blockedByTargetEvidenceConsent;
+  const admissionDisposition: PainDetectedData['admissionDisposition'] = blockedByTargetEvidenceConsent
+    ? {
+      schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
+      state: 'blocked_by_source_material_consent',
+      reasonCode: 'target_turn_source_material_' + targetEvidenceBlockedReason,
+      attemptCount: 1,
+      lastCheckedAt: new Date().toISOString(),
+    }
+    : waitingForTargetEvidence
+      ? {
+        schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
+        state: 'waiting_for_target_evidence',
+        reasonCode: 'target_turn_text_pending',
+        attemptCount: 1,
+        lastCheckedAt: new Date().toISOString(),
+      }
+      : undefined;
+  // PRI-1274 r2b (devin finding 0001) + review round 2 (directives I2/J2):
+  // an UNBOUND submission keeps its explicit target as a NORMALIZED,
+  // explicitly-UNVERIFIED hint inside the versioned ingress block — the
+  // shared normalizeRequestedTargetTurnId rule (trim/empty/length/control
+  // chars; never case-munged) applies at PERSIST time so ` turn-10 ` cannot
+  // be stored as a different identifier than `turn-10`. Two hard exclusions:
+  //   - a CONSENT-BLOCKED submission (blocked_by_consent) persists NO host
+  //     identity metadata at all — the model-named turn id is not Owner
+  //     business input and must not survive into the task (J2);
+  //   - the verified path never writes the hint (the trusted
+  //     verifiedHostSession.targetTurnId is the authority there).
+  const consentBlocked = sessionAssociation.status === 'unverified' && sessionAssociation.detail === 'blocked_by_consent';
+  const requestedTargetTurnId = sessionAssociation.status !== 'verified' && !consentBlocked
+    && input.targetTurnId !== undefined
+    ? (() => {
+      const normalized = normalizeRequestedTargetTurnId(input.targetTurnId);
+      return normalized.ok ? normalized.value : undefined;
+    })()
+    : undefined;
+
   const anchorCheck = validateSubmissionAnchor({
     stateDir,
     anchorType: input.anchorType,
@@ -581,7 +652,10 @@ export async function submitPainCapability(
         ...(verification?.status === 'verified' && verification.inputEvidence !== undefined && verification.inputEvidence.length > 0
           ? { evidenceClass: { status: 'available' as const, entryCount: verification.inputEvidence.length } }
           : {}) }
-        : decision.painIngress,
+        : {
+          ...decision.painIngress,
+          ...(requestedTargetTurnId !== undefined ? { requestedTargetTurnId } : {}),
+        },
       // §6.7: keep observability ON so Console and Recall see this pain.
       recordObservability: true,
       ...(deviationAnchor ? { deviationAnchor } : {}),
@@ -597,6 +671,9 @@ export async function submitPainCapability(
       ...(verification?.status === 'verified' && verification.inputEvidence !== undefined && verification.inputEvidence.length > 0
         ? { evidence: verification.inputEvidence }
         : {}),
+      // PRI-1274 (B1 / P1-3): the waiting marker rides the SAME write that
+      // creates the task — no second write, no post-creation patch.
+      ...(admissionDisposition !== undefined ? { admissionDisposition } : {}),
     });
     if (result.status === 'failed') {
       // §5.7 / T06: a duplicate is an idempotency outcome the Owner can
@@ -649,6 +726,14 @@ export async function submitPainCapability(
       // cause so "registered without association" is never silent (rc-9).
       warnings.push(`host_session_unverified:${sessionAssociation.detail}`);
     }
+    if (waitingForTargetEvidence) {
+      // rc-9: the wait is disclosed on the receipt, never silent — the task
+      // is admitted only after its exact target turn text becomes available.
+      warnings.push(`target_evidence_pending:${sessionAssociation.status === 'verified' ? sessionAssociation.targetTurnId : ''}`);
+    }
+    if (blockedByTargetEvidenceConsent && targetEvidenceBlockedReason !== undefined) {
+      warnings.push('target_evidence_blocked:' + targetEvidenceBlockedReason);
+    }
     return {
       schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
       capability: SUBMIT_PAIN_CAPABILITY_ID,
@@ -664,7 +749,9 @@ export async function submitPainCapability(
       provenance,
       warnings,
       error: null,
-      nextAction: result.nextAction ?? null,
+      nextAction: blockedByTargetEvidenceConsent
+        ? 'The named target turn is blocked by source-material authorization (' + targetEvidenceBlockedReason + '); this task will remain blocked and will not be diagnosed without that evidence. Re-submit with a newly authorized target turn. Re-granting consent does not restore text already cleared by revocation.'
+        : result.nextAction ?? null,
       sessionAssociation,
     };
   } catch (err: unknown) {

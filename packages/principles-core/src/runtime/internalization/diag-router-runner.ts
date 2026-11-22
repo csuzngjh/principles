@@ -58,6 +58,11 @@ import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
 import { isValidIntentSnapshot } from '../intent/intent-snapshot.js';
 import { validateDiagnosticianAssociations } from '../diagnostician-association-validation.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
+import {
+  denyAllSourceMaterialAuthorization,
+  type SourceMaterialAuthorizationPort,
+} from '../source-material-authorization.js';
+import { assertArtifactEvidenceAuthorized } from './source-authorization-boundary.js';
 import type {
   PeerRunnerOptions,
   PeerRunnerDeps,
@@ -129,6 +134,13 @@ export interface DiagRouterRunnerDeps extends PeerRunnerDeps {
    * inject deterministic doubles.
    */
   readonly trustedPrincipleSource: RouterTrustedPrincipleSource;
+  /**
+   * PRI-1283 R2: latest-consent gate re-checked at the MODEL-CALL boundary —
+   * the router prompt embeds the root-cause artifact's evidence notes, so a
+   * revocation landing after Stage A must block Stage C. ABSENT = fail-closed
+   * (deny-all).
+   */
+  readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
 }
 
 // ── Options ──────────────────────────────────────────────────────────────────
@@ -182,6 +194,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
   private readonly committer: DiagnosticianCommitter;
   private readonly defaultValidator: DefaultDiagnosticianValidator;
   private readonly trustedPrincipleSource: RouterTrustedPrincipleSource;
+  private readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
 
   constructor(deps: DiagRouterRunnerDeps, options: DiagRouterRunnerOptions) {
     super(deps, options, {
@@ -199,6 +212,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     this.committer = deps.committer;
     this.defaultValidator = new DefaultDiagnosticianValidator();
     this.trustedPrincipleSource = deps.trustedPrincipleSource;
+    this.sourceMaterialAuthorization = deps.sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization;
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
@@ -363,6 +377,16 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
   }
 
   async invokeRuntime(taskId: string, context: DiagRouterContext): Promise<RunHandle> {
+    // PRI-1283 R2 — the LAST authorization check before the Stage C model
+    // call: the prompt embeds the root-cause artifact's evidence notes, so a
+    // post-Stage-A revocation of any contributing source blocks here.
+    assertArtifactEvidenceAuthorized({
+      stage: 'diag_router',
+      taskId,
+      evidenceSourceRefs: context.rootCauseOutput.evidence.map((entry) => entry.sourceRef),
+      port: this.sourceMaterialAuthorization,
+    });
+
     const builder = new RouterPromptBuilder();
     // PRI-1146 P1-02 / §5.3: the exposure state travels as structured
     // low-trust data in the message — available (possibly empty) vs typed

@@ -155,6 +155,14 @@ describe.skipIf(REAL_ENGINE === undefined)('WorkBuddy installer ↔ REAL engine 
     try {
       expect(REAL_ENGINE).toBeDefined();
 
+      // Deploy the REAL built pd-mcp-server component into the sandbox runtime
+      // layout: the pd-recall availability check below needs a binding that
+      // resolves to an existing server entry, not a skipped write.
+      const runtimeMcpDir = path.join(lab.sandbox, '.pd', 'runtime', 'pd-mcp-server');
+      fs.mkdirSync(runtimeMcpDir, { recursive: true });
+      fs.cpSync(path.join(REPO_PACKAGES, 'pd-mcp-server', 'dist'), path.join(runtimeMcpDir, 'dist'), { recursive: true });
+      fs.copyFileSync(path.join(REPO_PACKAGES, 'pd-mcp-server', 'package.json'), path.join(runtimeMcpDir, 'package.json'));
+
       const installResult = await lab.installer.install({
         workspaceDir: path.join(lab.sandbox, 'proj'),
         pluginDir: REPO_PACKAGES, // real bundled payload: packages/workbuddy-adapter/plugin
@@ -168,12 +176,31 @@ describe.skipIf(REAL_ENGINE === undefined)('WorkBuddy installer ↔ REAL engine 
 
       // Declared WorkBuddy root carries the frozen-format registration.
       const settings = JSON.parse(fs.readFileSync(path.join(lab.wbConfigDir, 'settings.json'), 'utf8')) as { enabledPlugins: Record<string, unknown> };
-      // install ≠ enable: the real engine honors the manifest defaultEnabled=false.
-      expect(settings.enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+      // Out of the box: the real engine honors the manifest defaultEnabled=true,
+      // so a fresh install is enabled (its hooks and bundled pd-recall MCP server
+      // load on the next session) without a manual plugin-manager step.
+      expect(settings.enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(true);
       const registry = JSON.parse(fs.readFileSync(path.join(lab.wbConfigDir, 'plugins', 'installed_plugins.json'), 'utf8')) as { plugins: Record<string, unknown> };
       expect(registry.plugins[WORKBUDDY_PLUGIN_KEY]).toBeDefined();
       // Versioned cache copy landed under the declared root too.
-      expect(fs.readdirSync(path.join(lab.wbConfigDir, 'plugins', 'cache', 'principles-disciple-market', 'principles-disciple')).length).toBeGreaterThan(0);
+      const cachePluginRoot = path.join(lab.wbConfigDir, 'plugins', 'cache', 'principles-disciple-market', 'principles-disciple');
+      expect(fs.readdirSync(cachePluginRoot).length).toBeGreaterThan(0);
+
+      // The pd-recall chain is verifiable WITHOUT a live session (review
+      // 2026-11-22): the installed payload's .mcp.json declares the server, the
+      // launcher it points at exists, and the written binding resolves to a
+      // real server entry. Check BOTH copies — the marketplace payload PD fed
+      // the engine AND the versioned cache the engine actually loads.
+      const marketplacePlugin = path.join(lab.sandbox, '.pd', 'workbuddy-marketplace', 'principles-disciple');
+      for (const pluginDir of [marketplacePlugin, path.join(cachePluginRoot, fs.readdirSync(cachePluginRoot)[0] as string)]) {
+        const mcpManifest = JSON.parse(fs.readFileSync(path.join(pluginDir, '.mcp.json'), 'utf8')) as { mcpServers?: Record<string, unknown> };
+        expect(mcpManifest.mcpServers?.['pd-recall'], `installed payload at ${pluginDir} must declare pd-recall`).toBeDefined();
+        expect(fs.existsSync(path.join(pluginDir, 'mcp', 'launcher.cjs'))).toBe(true);
+        const binding = JSON.parse(fs.readFileSync(path.join(pluginDir, 'mcp-binding.json'), 'utf8')) as { schemaVersion?: string; serverEntry?: string };
+        expect(binding.schemaVersion).toBe('pd.mcp-binding.v1');
+        expect(typeof binding.serverEntry).toBe('string');
+        expect(fs.existsSync(binding.serverEntry as string), 'launcher binding must resolve to an existing server entry').toBe(true);
+      }
 
       // THE S2 PIN: the engine never wrote into the CodeBuddy root.
       expect(fs.existsSync(lab.cbConfigDir), 'CODEBUDDY_CONFIG_DIR target must stay untouched (engine must run against the declared WorkBuddy root)').toBe(false);

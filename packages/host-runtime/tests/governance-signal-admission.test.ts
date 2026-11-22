@@ -15,6 +15,8 @@ import {
   type GovernanceCorrectionCandidate,
 } from '../src/governance-signal-admission.js';
 import { ingestGovernanceObservations } from '../src/governance-observation-store.js';
+import { recordConversationIngestionConsent } from '../src/conversation-ingestion/consent.js';
+import { CODEX_INGESTION_DISCLOSURE_VERSION } from '../src/codex-disclosure.js';
 import { deriveProductionCorrectionPainIdentity } from '../src/production-pain-evidence.js';
 import { getDefaultPdConfig, invalidatePainSignalBridge, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime';
 
@@ -57,6 +59,17 @@ beforeEach(() => {
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
   // JSON is valid YAML — same trick the sibling cycle tests use.
   fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+  // PRI-1283 R2: continuation/reconciliation promotion additionally requires a
+  // GRANTED consent-ledger record (flag alone no longer authorizes reading
+  // governance observations). These suites exercise the legitimate
+  // consent-on production state; the revocation behaviors live in
+  // source-revocation-safety.test.ts.
+  recordConversationIngestionConsent(workspaceDir, 'codex', {
+    decision: 'granted',
+    decidedVia: 'pd_codex_setup',
+    decidedAt: NOW.toISOString(),
+    disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
+  });
   process.env.GOV_ADMISSION_KEY = 'test-key';
 });
 

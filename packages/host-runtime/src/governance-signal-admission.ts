@@ -45,6 +45,8 @@ import {
   createDiagnosticianTaskId,
   sanitizeString,
   boundCorrectionEvidenceText,
+  fingerprintStatement,
+  isOwnerManualCorrectionEvidence,
   MAX_EVIDENCE_VALUE_CHARS,
   evaluateStage2ConfidenceGate,
   evaluatePainIngress,
@@ -66,6 +68,8 @@ import {
   hasProductionPainSchema,
 } from './production-pain-evidence.js';
 import { promoteGovernanceEvidence, ensureGovernanceSchema, type ObservationDatabaseFactory } from './governance-observation-store.js';
+import { readSourceMaterialAuthorization } from './source-material-authorization.js';
+import { readConversationIngestionConsent } from './conversation-ingestion/consent.js';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { isAutomaticPainSubmissionAuthorized } from './auto-pain-authorization.js';
 import { createHostIntentDocReader } from './intent-doc-reader.js';
@@ -486,6 +490,16 @@ export interface GovernanceCorrectionCandidate {
    * admission, rate limit and idempotency are identical either way.
    */
   readonly explicitChannel?: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix';
+  /**
+   * PRI-1283 round 3 (owner_manual ruling): set ONLY by the registration
+   * path after the submitted statement was verified VERBATIM against the
+   * current turn's host transcript — the trusted Owner interaction record.
+   * Never accepted from a submission payload: an agent cannot self-declare
+   * Owner confirmation (a payload claim is not a confirmation record).
+   * Agent-assisted statements without this flag persist as Agent-derived
+   * (no `owner_statement` classification, no ownerConfirmation block).
+   */
+  readonly ownerVerbatimConfirmed?: boolean;
 }
 
 export type GovernanceSignalCandidate = GovernanceCorrectionCandidate;
@@ -562,9 +576,15 @@ interface CorrectionPainArgs {
 /** ONE reason builder for inline admission and the pending→admitted transition. */
 function correctionReason(candidate: GovernanceCorrectionCandidate, matchedTerms: readonly string[]): string {
   if (candidate.explicitOwnerStatement === true) {
-    return candidate.explicitChannel === 'codex_explicit_agent'
-      ? 'Codex explicit owner statement (agent-assisted, no prefix)'
-      : `${candidate.hostKind === 'workbuddy' ? 'WorkBuddy' : 'Codex'} explicit owner statement (PD记录痛苦 prefix)`;
+    if (candidate.explicitChannel === 'codex_explicit_agent') {
+      // PRI-1283 round 3: only a transcript-verified agent submission may
+      // carry the owner-explicit reason marker; an unverified one is
+      // Agent-derived and must NOT match `isOwnerExplicitStatementReason`.
+      return candidate.ownerVerbatimConfirmed === true
+        ? 'Codex explicit owner statement (agent-assisted, owner confirmed)'
+        : 'Codex agent-reported pain statement (owner confirmation unverified)';
+    }
+    return `${candidate.hostKind === 'workbuddy' ? 'WorkBuddy' : 'Codex'} explicit owner statement (PD记录痛苦 prefix)`;
   }
   return matchedTerms.length > 0
     ? `User correction detected: ${matchedTerms.join(', ')}`
@@ -600,7 +620,18 @@ interface GovernanceTaskSubmissionPayload {
    * correction evidence (verbatim, classified) — never inside evidence[]
    * pseudo-trace entries and never summarized by an AI.
    */
-  readonly correctionEvidence?: { text: string; classification: 'owner_statement'; channel: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix' };
+  readonly correctionEvidence?: {
+    text: string;
+    /**
+     * Absent for Agent-derived submissions (PRI-1283 round 3): an
+     * unverified `codex_explicit_agent` statement keeps channel disclosure
+     * but must NOT carry the owner_statement classification.
+     */
+    classification?: 'owner_statement';
+    channel: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix';
+    /** Bound Owner confirmation — registration-written only, never payload-supplied. */
+    ownerConfirmation?: { kind: 'owner_verbatim_turn_match'; statementFingerprint: string };
+  };
 }
 
 /**
@@ -662,7 +693,21 @@ function buildTaskSubmissionPayload(candidate: GovernanceCorrectionCandidate, wo
     ...(candidate.explicitOwnerStatement === true
       ? { correctionEvidence: candidate.hostKind === 'workbuddy'
         ? { text: boundCorrectionEvidenceText({ text: candidate.text, classification: 'owner_statement', channel: 'workbuddy_explicit_prefix' }, workspaceDir).text, classification: 'owner_statement' as const, channel: 'workbuddy_explicit_prefix' as const }
-        : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: candidate.explicitChannel === 'codex_explicit_agent' ? 'codex_explicit_agent' as const : 'codex_explicit_prefix' as const } }
+        : candidate.explicitChannel === 'codex_explicit_agent'
+          ? (candidate.ownerVerbatimConfirmed === true
+            ? (() => {
+              // PRI-1283 round 3: the bound confirmation fingerprint covers
+              // the PERSISTED (sanitized) text — the final submitted content.
+              const text = sanitizeString(candidate.text, workspaceDir);
+              return {
+                text,
+                classification: 'owner_statement' as const,
+                channel: 'codex_explicit_agent' as const,
+                ownerConfirmation: { kind: 'owner_verbatim_turn_match' as const, statementFingerprint: fingerprintStatement(text) },
+              };
+            })()
+            : { text: sanitizeString(candidate.text, workspaceDir), channel: 'codex_explicit_agent' as const })
+          : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: 'codex_explicit_prefix' as const } }
       : {}),
   };
   return payload;
@@ -999,6 +1044,38 @@ function buildOwnerCorrectionIngressReport(facts: OwnerCorrectionIngressFacts): 
   };
 }
 
+function buildAgentAssistedCorrectionIngressReport(facts: {
+  readonly logicalObservationKey: string;
+  readonly rolloutIdentity: string;
+  readonly rootSessionId: string;
+  readonly hostTurnId: string;
+  readonly painId: string;
+  readonly reason: string;
+  readonly evidence: readonly IngressEvidenceEntry[];
+}): PainIngressReport {
+  const [first, ...rest] = facts.evidence;
+  const bundle: PainIngressReport['evidence'] = first === undefined
+    ? { status: 'unavailable', reason: 'trajectory_unavailable' }
+    : { status: 'available', entries: [first, ...rest] };
+  return {
+    identity: { kind: 'manual_pain_id', painId: facts.painId },
+    painType: 'user_frustration',
+    source: 'user_correction',
+    reason: facts.reason,
+    score: GOVERNANCE_STRONG_PAIN_SCORE,
+    origin: { kind: 'agent_assisted', channel: 'codex_explicit_agent' },
+    correlation: {
+      status: 'bound',
+      hostKind: 'codex',
+      rootSessionId: facts.rootSessionId,
+      rolloutIdentity: facts.rolloutIdentity,
+      logicalObservationKey: facts.logicalObservationKey,
+      hostTurnId: facts.hostTurnId,
+    },
+    evidence: bundle,
+  };
+}
+
 function ownerExplicitChannel(candidate: GovernanceCorrectionCandidate): 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix' {
   if (candidate.explicitChannel !== undefined) return candidate.explicitChannel;
   return candidate.hostKind === 'workbuddy' ? 'workbuddy_explicit_prefix' : 'codex_explicit_prefix';
@@ -1151,50 +1228,46 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
       text: candidate.text,
     });
     const ingressReasonValue = correctionReason(candidate, detection?.output.matchedTerms ?? []);
-    const ingressDecision = isExplicit
-      ? evaluatePainIngress(buildOwnerCorrectionIngressReport({
-        hostKind: candidate.hostKind,
-        channel: ownerExplicitChannel(candidate),
-        logicalObservationKey: candidate.logicalObservationKey,
-        rolloutIdentity: candidate.rolloutIdentity,
-        rootSessionId: candidate.rootSessionId,
-        hostTurnId: candidate.hostTurnId,
-        painId,
-        reason: ingressReasonValue,
-        // Codex has a real governance observation anchor when ingestion
-        // persisted one; otherwise (ingestion disabled) the statement degrades
-        // to the Owner Manual path instead of fabricating a trace. WorkBuddy
-        // explicit intake has no transcript evidence and degrades honestly.
-        evidence: correctionIngressEvidence({
-          db,
-          hostKind: candidate.hostKind,
-          logicalObservationKey: candidate.logicalObservationKey,
-          rolloutIdentity: candidate.rolloutIdentity,
-          rootSessionId: candidate.rootSessionId,
-          hostTurnId: candidate.hostTurnId,
-          text: candidate.text,
-          workspaceDir,
-        }),
+    const ingressEvidence = correctionIngressEvidence({
+      db,
+      hostKind: candidate.hostKind,
+      logicalObservationKey: candidate.logicalObservationKey,
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+      hostTurnId: candidate.hostTurnId,
+      text: candidate.text,
+      workspaceDir,
+    });
+    const correctionFacts: CorrectionIngressFacts = {
+      hostKind: candidate.hostKind,
+      logicalObservationKey: candidate.logicalObservationKey,
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+      hostTurnId: candidate.hostTurnId,
+      painId,
+      reason: ingressReasonValue,
+      evidence: ingressEvidence,
+    };
+    const agentAssistedExplicit = isExplicit
+      && candidate.hostKind === 'codex'
+      && candidate.explicitChannel === 'codex_explicit_agent'
+      && candidate.ownerVerbatimConfirmed !== true;
+    const ingressDecision = agentAssistedExplicit
+      ? evaluatePainIngress(buildAgentAssistedCorrectionIngressReport({
+        logicalObservationKey: correctionFacts.logicalObservationKey,
+        rolloutIdentity: correctionFacts.rolloutIdentity,
+        rootSessionId: correctionFacts.rootSessionId,
+        hostTurnId: correctionFacts.hostTurnId,
+        painId: correctionFacts.painId,
+        reason: correctionFacts.reason,
+        evidence: correctionFacts.evidence,
       }))
-      : evaluatePainIngress(buildCorrectionIngressReport({
-        hostKind: candidate.hostKind,
-        logicalObservationKey: candidate.logicalObservationKey,
-        rolloutIdentity: candidate.rolloutIdentity,
-        rootSessionId: candidate.rootSessionId,
-        hostTurnId: candidate.hostTurnId,
-        painId,
-        reason: ingressReasonValue,
-        evidence: correctionIngressEvidence({
-          db,
-          hostKind: candidate.hostKind,
-          logicalObservationKey: candidate.logicalObservationKey,
-          rolloutIdentity: candidate.rolloutIdentity,
-          rootSessionId: candidate.rootSessionId,
-          hostTurnId: candidate.hostTurnId,
-          text: candidate.text,
-          workspaceDir,
-        }),
-      }));
+      : isExplicit
+        ? evaluatePainIngress(buildOwnerCorrectionIngressReport({
+          ...correctionFacts,
+          channel: ownerExplicitChannel(candidate),
+        }))
+        : evaluatePainIngress(buildCorrectionIngressReport(correctionFacts));
     const ingressReason = ingressDecision.action === 'refuse' || ingressDecision.action === 'observation_only'
       ? ingressDecision.reasonCode
       : null;
@@ -1459,7 +1532,7 @@ export interface ClaimPendingCandidatesInput {
 }
 
 export type ClaimPendingCandidatesResult =
-  | { ok: true; candidates: readonly PendingCorrectionCandidate[]; expired: number }
+  | { ok: true; candidates: readonly PendingCorrectionCandidate[]; expired: number; revoked: number }
   | Degradation;
 
 
@@ -1493,6 +1566,17 @@ function parsePendingRow(row: Record<string, unknown>): { payloadText: string; p
  * text. Rows whose claim is younger than PENDING_REVIEW_CLAIM_TTL_MS are
  * skipped (another worker is reviewing them); TTL-expired rows become
  * `abandoned(ttl_expired)` here, before any LLM work.
+ *
+ * PRI-1283 review round 2 (directive A4): every claim re-reads the LATEST
+ * conversation-ingestion consent for the row's host. A host whose consent is
+ * no longer granted never yields a claimable candidate — the pending row is
+ * terminated as `abandoned('source_revoked')` right here (CAS on the exact
+ * payload text; the D6 terminal field set drops trigger.text /
+ * trigger.matchedTerms / hostTurnId / task_payload), so the revoked excerpt
+ * can neither be claimed nor keep living in the payload. Revocation is the
+ * linearization point: claims after it see the terminal row, and an
+ * in-flight claim is fenced by `recordPendingCorrectionReview` /
+ * `settlePendingCorrection` (both CAS on `decision='pending_llm_review'`).
  */
 export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesInput): ClaimPendingCandidatesResult {
   const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
@@ -1503,6 +1587,7 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
   const limit = Math.min(Math.max(input.limit ?? 2, 1), 8);
   const candidates: PendingCorrectionCandidate[] = [];
   let expired = 0;
+  let revoked = 0;
   try {
     const rows = db.prepare(`SELECT * FROM governance_signal_admissions
       WHERE decision = 'pending_llm_review' ORDER BY id LIMIT ?`).all(limit * 3);
@@ -1520,6 +1605,30 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
           WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
           .run('invalid_pending_payload', pendingTerminalPayload({ decision: 'abandoned', reason: 'invalid_pending_payload', attempts: 0, confidence: null, nowIso }), nowIso, key);
         expired += 1;
+        continue;
+      }
+      // Directive A4: latest-consent re-validation at claim time. The row's
+      // own host attribution (host_kind column) is the authority — never the
+      // caller's assumption. The three ledger states mirror the R3 sweep
+      // EXACTLY (one authorization judgment, directive B2):
+      //   - a RECORDED non-granted decision (revoked/pending/failed) is a
+      //     revocation: the pending row is TERMINATED here (CAS on the exact
+      //     payload) instead of yielding a candidate whose text would flow
+      //     into a model call;
+      //   - a MISSING record is NOT a revocation (the sweep skips it too) —
+      //     the lifecycle proceeds; pending rows on ledger-less workspaces
+      //     are historical admission-chain output, not revoked material;
+      //   - an UNREADABLE ledger fails closed: no claim, no termination.
+      const consentRead = readConversationIngestionConsent(path.resolve(input.workspaceDir), parsed.hostKind === 'workbuddy' ? 'workbuddy' : 'codex');
+      if (!consentRead.ok) {
+        return { ok: false, reason: `pending_claim_consent_unreadable:${consentRead.reason}`, nextAction: `${consentRead.nextAction} — pending rows stay durable and unclaimed until the ledger is readable.` };
+      }
+      if (consentRead.record !== null && consentRead.record.decision !== 'granted') {
+        const { changes } = db.prepare(`UPDATE governance_signal_admissions
+          SET decision = 'abandoned', reason = 'source_revoked', task_payload_json = ?, updated_at = ?
+          WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+          .run(pendingTerminalPayload({ decision: 'abandoned', reason: 'source_revoked', attempts: parsed.payload.review.attempts, confidence: null, nowIso }), nowIso, key, parsed.payloadText);
+        if (changes === 1) revoked += 1;
         continue;
       }
       const ageMs = Date.parse(parsed.createdAt);
@@ -1562,10 +1671,69 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
         createdAt: parsed.createdAt,
       });
     }
-    return { ok: true, candidates, expired };
+    return { ok: true, candidates, expired, revoked };
   } catch (error) {
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { ok: false, reason: `pending_claim_failed:${detail}`, nextAction: 'inspect the workspace trajectory database; pending rows remain durable' };
+  } finally {
+    close();
+  }
+}
+
+// ─── Pre-classification claim verification (directive A5) ───────────────────
+
+export interface VerifyPendingClaimInput {
+  readonly workspaceDir: string;
+  readonly logicalObservationKey: string;
+  /** The fencing token this worker received from the claim. */
+  readonly claimToken: string;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type VerifyPendingClaimResult =
+  | { ok: true; allowed: true }
+  | { ok: true; allowed: false; reason: 'source_revoked' | 'consent_not_granted' | 'claim_not_owned' | 'not_pending' | 'payload_invalid' }
+  | Degradation;
+
+/**
+ * PRI-1283 review round 2 (directive A5): the LAST authorization gate before
+ * `classifier(candidate.text, …)` starts a model request. Verifies, in one
+ * fresh read, that (a) the row is STILL `pending_llm_review`, (b) this
+ * worker's fencing token still owns the claim, and (c) the row's host still
+ * has granted consent. This is the revocation linearization boundary for NEW
+ * model requests: after a revocation completes (ledger decision or sweep
+ * termination), no fresh classifier call may start on the old source's text.
+ * A request already in flight cannot be recalled — its RESULT is fenced
+ * instead by `recordPendingCorrectionReview` (decision + claimToken CAS).
+ */
+export function verifyPendingClaimForClassification(input: VerifyPendingClaimInput): VerifyPendingClaimResult {
+  const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const row = pendingReviewMarkerRow(db, input.logicalObservationKey);
+    if (row === null || rowField(row, 'decision') !== 'pending_llm_review') {
+      return { ok: true, allowed: false, reason: 'not_pending' };
+    }
+    const parsed = parsePendingRow(row);
+    if (parsed === null) return { ok: true, allowed: false, reason: 'payload_invalid' };
+    const currentClaimToken = parsed.payload.review.claimToken;
+    if (currentClaimToken === undefined || currentClaimToken !== input.claimToken) {
+      return { ok: true, allowed: false, reason: 'claim_not_owned' };
+    }
+    // Same three-state ledger semantics as the claim path and the R3 sweep
+    // (one authorization judgment): a RECORDED non-granted decision blocks
+    // the model request; a MISSING record is not a revocation (the claim
+    // path let it through, and so must the pre-classifier gate); an
+    // UNREADABLE ledger fails closed.
+    const consentRead = readConversationIngestionConsent(path.resolve(input.workspaceDir), parsed.hostKind === 'workbuddy' ? 'workbuddy' : 'codex');
+    if (!consentRead.ok) {
+      return { ok: false, reason: `pending_claim_consent_unreadable:${consentRead.reason}`, nextAction: consentRead.nextAction };
+    }
+    if (consentRead.record !== null && consentRead.record.decision !== 'granted') {
+      return { ok: true, allowed: false, reason: consentRead.record.decision === 'revoked' ? 'source_revoked' : 'consent_not_granted' };
+    }
+    return { ok: true, allowed: true };
   } finally {
     close();
   }
@@ -2075,15 +2243,38 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
   // such submissions (the statement itself satisfies the empty-input-evidence
   // admission condition).
   const correctionEvidence = own(value, 'correctionEvidence');
+  const correctionChannel = isRecord(correctionEvidence) ? own(correctionEvidence, 'channel') : undefined;
+  const correctionText = isRecord(correctionEvidence) ? own(correctionEvidence, 'text') : undefined;
   const hasOwnerStatement = isRecord(correctionEvidence)
     && own(correctionEvidence, 'classification') === 'owner_statement'
-    && ((own(correctionEvidence, 'channel') === 'codex_explicit_prefix' || own(correctionEvidence, 'channel') === 'codex_explicit_agent') && hostKind === 'codex'
-      || own(correctionEvidence, 'channel') === 'workbuddy_explicit_prefix' && hostKind === 'workbuddy')
-    && typeof own(correctionEvidence, 'text') === 'string'
-    && (own(correctionEvidence, 'text') as string).length > 0;
-  if (correctionEvidence !== undefined && !hasOwnerStatement) return false;
+    && typeof correctionText === 'string' && correctionText.length > 0
+    && (
+      // Direct Owner channels: the channel itself is the credible record.
+      (correctionChannel === 'codex_explicit_prefix' && hostKind === 'codex')
+      || (correctionChannel === 'workbuddy_explicit_prefix' && hostKind === 'workbuddy')
+      // Agent-assisted: owner_manual ONLY with a bound Owner confirmation
+      // record — kind + fingerprint re-verified against the persisted text
+      // (PRI-1283 round 3; a bare payload claim is never sufficient).
+      || (correctionChannel === 'codex_explicit_agent' && hostKind === 'codex'
+        && isOwnerManualCorrectionEvidence(correctionEvidence))
+    );
+  // Agent-derived covers BOTH the current shape (no classification) and the
+  // legacy pre-round-3 shape (`classification:'owner_statement'` written
+  // without a bound confirmation). Those rows are Agent-derived under the
+  // ruling — still valid payloads for task recovery — while a row that
+  // CARRIES an ownerConfirmation the shared judgment cannot verify is a
+  // forged-claim shape and stays rejected.
+  const isAgentDerivedStatement = isRecord(correctionEvidence)
+    && correctionChannel === 'codex_explicit_agent' && hostKind === 'codex'
+    && typeof correctionText === 'string' && correctionText.length > 0
+    && own(correctionEvidence, 'ownerConfirmation') === undefined
+    && !isOwnerManualCorrectionEvidence(correctionEvidence);
+  if (correctionEvidence !== undefined && !hasOwnerStatement && !isAgentDerivedStatement) return false;
   const evidence = own(value, 'evidence');
-  if (!Array.isArray(evidence) || (evidence.length === 0 && !hasOwnerStatement) || evidence.length > 8) return false;
+  // An explicit submission — owner-confirmed OR agent-derived (CR-02) — is a
+  // first-class input basis, so the evidence array may legitimately be empty
+  // (e.g. conversation-ingestion off → no persisted observation to bind).
+  if (!Array.isArray(evidence) || (evidence.length === 0 && !hasOwnerStatement && !isAgentDerivedStatement) || evidence.length > 8) return false;
   for (const entry of evidence) {
     if (!isRecord(entry)) return false;
     const sourceRef = own(entry, 'sourceRef');
@@ -2098,6 +2289,26 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
     if (typeof note !== 'string' || note.length > MAX_SANITIZED_NOTE_CHARS) return false;
   }
   return true;
+}
+
+/**
+ * PRI-1283 round 5 (review): the correction evidence a recovery re-persists
+ * must carry the SAME classification judgment the validator applied — never
+ * the marker's stale label. A legacy pre-round-3 agent-relayed row may still
+ * claim `classification:'owner_statement'` without a bound confirmation; the
+ * shared ruling treats it as Agent-derived, and the current writer shape
+ * carries no classification for agent-derived text. Persisting the stale
+ * claim would let Recall re-serve a false `owner_statement` classification.
+ */
+function recoveryCorrectionEvidence(
+  persisted: NonNullable<GovernanceTaskSubmissionPayload['correctionEvidence']>,
+  sessionId: string,
+): NonNullable<GovernanceTaskSubmissionPayload['correctionEvidence']> {
+  const next = { ...persisted, sessionId };
+  if (!isOwnerManualCorrectionEvidence(next)) {
+    delete (next as { classification?: 'owner_statement' }).classification;
+  }
+  return next;
 }
 
 export interface EnsureGovernanceTaskInput {
@@ -2160,6 +2371,63 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       return { ok: false, reason: 'admission_task_payload_invalid', nextAction: 're-admit the signal or run reconciliation after repairing the workspace state' };
     }
 
+    const hasExistingTaskLink = typeof existingTaskId === 'string' && existingTaskId.length > 0;
+    const markerHostKind = payloadParsed.hostKind;
+    const { correctionEvidence } = payloadParsed;
+    const ownerManual = isOwnerManualCorrectionEvidence(correctionEvidence);
+    const agentAssistedExplicit = isRecord(correctionEvidence)
+      && correctionEvidence.channel === 'codex_explicit_agent'
+      && !ownerManual;
+    const sourceAuthorization = markerHostKind === 'codex' || markerHostKind === 'workbuddy'
+      ? readSourceMaterialAuthorization({ workspaceDir, hostKind: markerHostKind })
+      : undefined;
+    // Every blocked authorization state (including a missing ledger) forbids
+    // historical observation reads. A missing ledger is not a revocation, so
+    // it is handled by the ingress evidence gate below rather than the sweep
+    // remediation branch.
+    const sourceMaterialReadable = sourceAuthorization === undefined
+      || sourceAuthorization.status !== 'blocked';
+
+    // A linked task remains idempotently reportable after revocation, but the
+    // marker must not trigger a historical observation read on that path.
+    if (hasExistingTaskLink && !sourceMaterialReadable) {
+      return { ok: true, taskId: existingTaskId, created: false, duplicate: true, linkRepaired: false };
+    }
+
+    // After revocation, repair a crash-after-create task link without reading
+    // the historical observation. An agent-assisted explicit statement is
+    // still Agent-derived: even a missing ledger cannot authorize re-persisting
+    // it into a NEW task. A direct Owner channel remains independently allowed.
+    if (!ownerManual && sourceAuthorization?.status === 'blocked'
+      && (sourceAuthorization.reason !== 'consent_missing' || agentAssistedExplicit)) {
+      const taskId = createDiagnosticianTaskId(input.canonicalPainId);
+      const stateManager = new RuntimeStateManager({ workspaceDir });
+      try {
+        await stateManager.initialize();
+        const existing = await stateManager.getTask(taskId);
+        if (existing !== null) {
+          db.prepare('UPDATE governance_signal_admissions SET diagnostician_task_id = ?, updated_at = ? WHERE logical_observation_key = ?')
+            .run(taskId, new Date().toISOString(), input.logicalObservationKey);
+          return { ok: true, taskId, created: false, duplicate: true, linkRepaired: true };
+        }
+      } finally {
+        await stateManager.close().catch(() => undefined);
+      }
+      return {
+        ok: false,
+        reason: sourceAuthorization.reason === 'consent_missing'
+          ? 'pain_ingress_agent_assisted_consent_required'
+          : 'source_authorization_revoked',
+        nextAction: sourceAuthorization.reason === 'consent_missing'
+          ? 'The Codex agent-assisted wording is Agent-derived; record a Codex conversation-ingestion consent grant before creating a diagnostic task, or use the direct Owner explicit prefix for Owner-authored words.'
+          : sourceAuthorization.reason === 'consent_unreadable'
+            ? 'repair the consent ledger first (<workspace>/.state/conversation-ingestion-consent.json is unreadable); the sweep refuses to run until the authority is readable'
+            : sourceAuthorization.reason === 'consent_revoked'
+              ? `purge persisted copies first: pd consent sweep-revoked --workspace "${workspaceDir}" --apply (host: ${markerHostKind})`
+              : `resolve the pending or failed conversation-ingestion consent decision for ${markerHostKind} in "${workspaceDir}" before retrying; a revocation sweep is only appropriate after the ledger records a revocation`,
+      };
+    }
+
     // SPEC v0.3.1 §1.2: provenance is DERIVED from the marker's ingress facts,
     // never hardcoded. The marker is host-context-bound by construction, and
     // its payload carries the evidence entries that make this a `submit`.
@@ -2168,7 +2436,6 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
     const hostTurnId = payloadParsed.hostKind === 'codex'
       ? (markerKey.split('|')[2] ?? markerKey)
       : (markerKey.lastIndexOf('|') > 0 ? markerKey.slice(0, markerKey.lastIndexOf('|')) : markerKey);
-    const markerHostKind = payloadParsed.hostKind;
     // P1 review round 3: never trust the payload's evidence list — re-derive it
     // from trajectory.db with the full lineage tuple. A marker that references a
     // non-existent observation (or a WorkBuddy automatic correction) evaluates
@@ -2178,16 +2445,18 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
     // run for it. Only corrections are gated on a real observation.
     const isCorrectionPayload = payloadParsed.painType !== 'tool_failure';
     const ingressEvidence: IngressEvidenceEntry[] = isCorrectionPayload && (markerHostKind === 'codex' || markerHostKind === 'workbuddy')
-      ? correctionIngressEvidence({
-        db,
-        hostKind: markerHostKind,
-        logicalObservationKey: markerKey,
-        rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
-        rootSessionId: payloadParsed.sessionId,
-        hostTurnId,
-        text: payloadParsed.reason,
-        workspaceDir,
-      })
+      ? (sourceMaterialReadable
+        ? correctionIngressEvidence({
+          db,
+          hostKind: markerHostKind,
+          logicalObservationKey: markerKey,
+          rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
+          rootSessionId: payloadParsed.sessionId,
+          hostTurnId,
+          text: payloadParsed.reason,
+          workspaceDir,
+        })
+        : [])
       : payloadParsed.evidence.map((entry) => ({
         kind: 'behavior_trace' as const,
         sourceRef: entry.sourceRef,
@@ -2200,31 +2469,32 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       // source. An explicit Owner statement is owner_manual (manual_pain_id,
       // correctionEvidence channel); everything else is the automatic hook.
       const ownerChannel = payloadParsed.correctionEvidence?.channel;
-      const ingressDecision = ownerChannel !== undefined
+      const ingressFacts: CorrectionIngressFacts = {
+        hostKind: markerHostKind,
+        logicalObservationKey: markerKey,
+        rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
+        rootSessionId: payloadParsed.sessionId,
+        hostTurnId,
+        painId: input.canonicalPainId,
+        reason: payloadParsed.reason,
+        evidence: ingressEvidence,
+      };
+      const ingressDecision = ownerManual && ownerChannel !== undefined
         ? evaluatePainIngress(buildOwnerCorrectionIngressReport({
-          hostKind: markerHostKind,
+          ...ingressFacts,
           channel: ownerChannel,
-          logicalObservationKey: markerKey,
-          rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
-          rootSessionId: payloadParsed.sessionId,
-          hostTurnId,
-          painId: input.canonicalPainId,
-          reason: payloadParsed.reason,
-          // CR-02: never fabricate transcript evidence for an Owner statement;
-          // an empty list is the honest basis and bound explicit reports
-          // legitimately degrade.
-          evidence: ingressEvidence,
         }))
-        : evaluatePainIngress(buildCorrectionIngressReport({
-          hostKind: markerHostKind,
-          logicalObservationKey: markerKey,
-          rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
-          rootSessionId: payloadParsed.sessionId,
-          hostTurnId,
-          painId: input.canonicalPainId,
-          reason: payloadParsed.reason,
-          evidence: ingressEvidence,
-        }));
+        : agentAssistedExplicit && markerHostKind === 'codex'
+          ? evaluatePainIngress(buildAgentAssistedCorrectionIngressReport({
+            logicalObservationKey: ingressFacts.logicalObservationKey,
+            rolloutIdentity: ingressFacts.rolloutIdentity,
+            rootSessionId: ingressFacts.rootSessionId,
+            hostTurnId: ingressFacts.hostTurnId,
+            painId: ingressFacts.painId,
+            reason: ingressFacts.reason,
+            evidence: ingressFacts.evidence,
+          }))
+          : evaluatePainIngress(buildCorrectionIngressReport(ingressFacts));
       if (ingressDecision.action === 'refuse' || ingressDecision.action === 'observation_only') {
         // Fail closed: an inconsistent/evidence-less admitted marker must not
         // silently become a task (and must never be relabelled automatic_hook).
@@ -2243,9 +2513,9 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       provenance = 'host_context_bound';
     }
 
-    // Recovery path: a task link already exists. The ingress decision above
-    // still ran, so an inconsistent admitted marker fails closed instead of
-    // being reported as a healthy duplicate.
+    // Preserve the existing fail-closed validation for linked tasks while
+    // consent is readable. The revoked path above returns without transcript
+    // access because the already-linked task is durable.
     if (typeof existingTaskId === 'string' && existingTaskId.length > 0) {
       return {
         ok: true,
@@ -2282,6 +2552,35 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       await stateManager.initialize();
       let existing = await stateManager.getTask(taskId);
       if (existing === null) {
+        // PRI-1283 round 4 (SEC finding): after the host's ingestion consent
+        // left granted, recovering this marker must not re-persist governed
+        // conversation material into a NEW diagnostic task — the copy would
+        // outlive the pending sweep. An owner-manual statement is exempt (an
+        // explicit submission is not conversation ingestion). The check runs
+        // only on the create path: a task already persisted before the
+        // crash still gets its link repaired above/below.
+        if ((markerHostKind === 'codex' || markerHostKind === 'workbuddy')
+          && !ownerManual) {
+          // A MISSING ledger is not a revocation (the sweep treats it the
+          // same); refuse only on a recorded non-granted decision or an
+          // unreadable one.
+          const authz = readSourceMaterialAuthorization({ workspaceDir, hostKind: markerHostKind });
+          if (authz.status === 'blocked'
+            && authz.reason !== 'consent_missing') {
+            return {
+              ok: false,
+              reason: 'source_authorization_revoked',
+              // An unreadable ledger cannot be swept (the sweep refuses to
+              // purge against an unreadable authority) — point at the ledger
+              // repair FIRST instead of a command that cannot run.
+              nextAction: authz.reason === 'consent_unreadable'
+                ? `repair the consent ledger first (<workspace>/.state/conversation-ingestion-consent.json is unreadable); the sweep refuses to run until the authority is readable`
+                : authz.reason === 'consent_revoked'
+                  ? `purge persisted copies first: pd consent sweep-revoked --workspace "${workspaceDir}" --apply (host: ${markerHostKind})`
+                  : `resolve the pending or failed conversation-ingestion consent decision for ${markerHostKind} in "${workspaceDir}" before retrying; a revocation sweep is only appropriate after the ledger records a revocation`,
+            };
+          }
+        }
         const stateDir = path.join(workspaceDir, '.state');
         const config = loadPdConfigForPlugin(workspaceDir);
         if (!config.ok) {
@@ -2321,7 +2620,12 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
           // CR-02: replay the explicit Owner statement verbatim (classified,
           // channel-disclosed) so re-created tasks keep the same input basis.
           ...(payloadParsed.correctionEvidence !== undefined
-            ? { correctionEvidence: { ...payloadParsed.correctionEvidence, sessionId: payloadParsed.sessionId } }
+            ? {
+              correctionEvidence: recoveryCorrectionEvidence(
+                payloadParsed.correctionEvidence,
+                payloadParsed.sessionId,
+              ),
+            }
             : {}),
           recordObservability: true,
         });
@@ -2441,9 +2745,15 @@ export async function ensureGovernanceContinuation(input: EnsureGovernanceContin
     // continuation cannot begin diagnosis before the eligible evidence window
     // has been promoted. A promotion failure is retained as a degradation,
     // but never prevents the task from being durably ensured.
-    const codexConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
+    // PRI-1283 R2: the caller-supplied flag is necessary but NOT sufficient —
+    // the consent LEDGER is re-read here so a revocation recorded against a
+    // still-enabled flag cannot keep promoting old observations (the flag is
+    // runtime authority for ingestion; the ledger is the governance record).
+    const codexFlagConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
       ? input.codexConversationIngestionEnabled
       : input.conversationIngestionEnabled === true;
+    const codexLedgerConsent = readSourceMaterialAuthorization({ workspaceDir, hostKind: 'codex' });
+    const codexConsent = codexFlagConsent && codexLedgerConsent.status === 'authorized';
     const promoted = codexConsent
       ? promoteAdmittedGovernanceEvidence({
         workspaceDir,
@@ -2513,9 +2823,14 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
   const workspaceDir = path.resolve(input.workspaceDir);
   // Accept the pre-rename field too: an older caller paired with this runtime
   // must not silently lose Codex evidence promotion (P2 review).
-  const codexConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
+  // PRI-1283 R2: the flag input is ANDed with a LIVE consent-ledger read —
+  // reconciliation must stop promoting observations the moment the ledger
+  // records a revocation, even if the runtime flag lags behind.
+  const codexFlagConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
     ? input.codexConversationIngestionEnabled
     : input.conversationIngestionEnabled === true;
+  const codexLedgerConsent = readSourceMaterialAuthorization({ workspaceDir, hostKind: 'codex' });
+  const codexConsent = codexFlagConsent && codexLedgerConsent.status === 'authorized';
   const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
   if (!('db' in opened)) {
     return { ok: false, reason: opened.reason, nextAction: opened.nextAction, tasksEnsured: 0, linksRepaired: 0, pendingTails: 0, completedTails: 0, staleTails: 0, degradations: [opened.reason] };

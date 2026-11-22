@@ -1084,6 +1084,13 @@ export interface ListGovernanceTurnTextsInput {
   readonly sessionId: string;
   /** Restrict to ONE host's observations — session ids are only unique per `(host_kind, rollout_identity)`. */
   readonly hostKind?: 'codex' | 'openclaw' | 'workbuddy';
+  /**
+   * PRI-1283 R2: restrict to this SET of hosts' observations (empty = no
+   * rows). Mutually exclusive with `hostKind`; used by the turn-reader gate to
+   * exclude hosts whose conversation-ingestion consent is no longer granted
+   * AT THE QUERY BOUNDARY.
+   */
+  readonly authorizedHostKinds?: readonly ('codex' | 'openclaw' | 'workbuddy')[];
   readonly limit?: number;
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
@@ -1115,18 +1122,29 @@ export function listGovernanceTurnTexts(input: ListGovernanceTurnTextsInput): Li
   const { db, close } = opened;
   try {
     const limit = Math.min(Math.max(input.limit ?? 200, 1), 2000);
+    // PRI-1283 R2: host predicate — one host (hostKind) or an authorized SET
+    // (authorizedHostKinds; an explicitly EMPTY set matches nothing, which is
+    // the correct "every host revoked" outcome, not invalid SQL).
+    if (input.hostKind !== undefined && input.authorizedHostKinds !== undefined) {
+      return { ok: false, reason: 'governance_turn_texts_invalid_input:host_kind_and_authorized_host_kinds_exclusive', nextAction: 'Pass exactly one of hostKind / authorizedHostKinds.' };
+    }
+    const hostPredicate = input.hostKind !== undefined
+      ? { sql: ' AND host_kind = ?', params: [input.hostKind] as unknown[] }
+      : input.authorizedHostKinds !== undefined
+        ? input.authorizedHostKinds.length === 0
+          ? { sql: ' AND 1 = 0', params: [] as unknown[] }
+          : { sql: ` AND host_kind IN (${input.authorizedHostKinds.map(() => '?').join(',')})`, params: [...input.authorizedHostKinds] as unknown[] }
+        : { sql: '', params: [] as unknown[] };
     const newestThenAsc = (identityColumn: 'rollout_identity' | 'root_session_id'): readonly unknown[] =>
       db.prepare(
         'SELECT id, source_ordinal, visible_text, observed_at FROM ('
         + `SELECT id, source_ordinal, visible_text, observed_at, source_order FROM governance_observations `
         + `WHERE kind = ? AND ${identityColumn} = ? AND visible_text IS NOT NULL `
         + `AND retention_class IN ('operational', 'promoted')`
-        + `${input.hostKind !== undefined ? ' AND host_kind = ?' : ''} `
+        + `${hostPredicate.sql} `
         + 'ORDER BY observed_at DESC, source_order DESC, id DESC LIMIT ?'
         + ') ORDER BY observed_at ASC, source_order ASC, id ASC',
-      ).all(...(input.hostKind !== undefined
-        ? [input.kind, input.sessionId, input.hostKind, limit]
-        : [input.kind, input.sessionId, limit]));
+      ).all(input.kind, input.sessionId, ...hostPredicate.params, limit);
     // Exact session rows first; the root_session_id fallback keeps historical
     // (pre-rollout-identity) rows readable but can no longer drag another
     // rollout's turns (e.g. a subagent's) into this session's context.

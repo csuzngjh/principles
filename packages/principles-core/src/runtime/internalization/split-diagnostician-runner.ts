@@ -94,6 +94,26 @@ function parseDiagnosticJsonObject(raw: string | null | undefined): Record<strin
   return candidate as Record<string, unknown>;
 }
 
+/**
+ * Admission disposition gate for diagnostician tasks. Waiting tasks may be
+ * released by the target-evidence reconcile; consent-blocked tasks require a
+ * new authorized target turn and must never run on stale/empty evidence.
+ */
+function diagnosisAdmissionBlockReason(diagnosticJson: string | null | undefined): string | null {
+  const {recovery} = parseDiagnosticJsonObject(diagnosticJson);
+  if (typeof recovery !== 'object' || recovery === null || Array.isArray(recovery)) return null;
+  // runtime-contract-exempt: ERR-001 the guards above narrow recovery to a
+  // non-null non-array object; the single field read below is typeof-checked.
+  const {state, reasonCode} = (recovery as Record<string, unknown>);
+  if (state === 'waiting_for_target_evidence') {
+    return 'target_evidence_pending: the task waits for its named target turn text; the workspace worker reconcile flips it once the evidence exists';
+  }
+  if (state === 'blocked_by_source_material_consent') {
+    const reason = typeof reasonCode === 'string' ? reasonCode : 'source_material_consent_blocked';
+    return 'target_evidence_blocked_by_consent: ' + reason + '; re-submit with a newly authorized target turn';
+  }
+  return null;
+}
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === 'string');
@@ -254,10 +274,46 @@ export class SplitDiagnosticianRunner {
       return this.budgetExhaustedBeforeLeaseFailure(parentTaskId);
     }
 
+    // PRI-1274 / PRI-1283: waiting and consent-blocked tasks are not
+    // admissible on ANY execution path. The bridge's automatic cycle and this
+    // manual/split entry both enforce the persisted admission disposition.
+    // The check below is a fast-path refusal only; the authoritative judgment
+    // also rides the lease acquisition transaction to close the race.
+    try {
+      const task = await this.stateManager.getTask(parentTaskId);
+      // `undefined` is a test-double shape for "no row"; production reads
+      // null — both mean "not waiting" here (the lease acquisition owns the
+      // authoritative not-found path).
+      const admissionBlockReason = task === null || task === undefined
+        ? null
+        : diagnosisAdmissionBlockReason(task.diagnosticJson);
+      if (admissionBlockReason !== null) {
+        return {
+          status: 'failed',
+          taskId: parentTaskId,
+          errorCategory: 'input_invalid',
+          failureReason: admissionBlockReason,
+          attemptCount: 0,
+        };
+      }
+    } catch (error) {
+      // Directive H4: an unreadable authoritative task state must never
+      // default to "allowed". The store message is bounded and structured;
+      // it carries no submission content.
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'failed',
+        taskId: parentTaskId,
+        errorCategory: 'storage_unavailable',
+        failureReason: `target_evidence_gate_unreadable: the authoritative task state could not be read before diagnosis; refusing to execute (fail closed): ${message.slice(0, 160)}`,
+        attemptCount: 0,
+      };
+    }
+
     // Bug-N fix: acquire lease on the parent task so markTaskSucceeded (called
     // at the end of run()) has a run record to update. Without this, the
-    // parent task is marked succeeded in the tasks table but no run record
-    // is created, leaving runs/tasks truth out of sync (8 diagnosis_manual_*
+    // parent task is marked succeeded in the tasks table but no run record is
+    // created, leaving runs/tasks truth out of sync (8 diagnosis_manual_*
     // tasks hit this in production). The parent task is created by
     // PainSignalBridge but never lease-acquired — this runner must do it.
     try {
@@ -268,20 +324,30 @@ export class SplitDiagnosticianRunner {
         // resolved kind the stage runners also use), not a hardcoded label.
         runtimeKind: this.runtimeKind ?? 'openclaw',
         durationMs: this.executionTiming.leaseTtlMs,
+        // Directive H2: the FINAL admission judgment, atomically inside the
+        // lease acquisition transaction (before the lease/generation/run).
+        refuseIf: (row) => diagnosisAdmissionBlockReason(row.diagnosticJson),
       });
       this.parentRunId = acquisition.runId;
       this.parentFence = leaseFenceOf(acquisition.task);
     } catch (error) {
       // lease_conflict = another worker is already running this task.
       // Non-mutating: do not call markTaskFailed/markTaskRetryWait (rc-3 fail-loud).
-      const isLeaseConflict = error instanceof PDRuntimeError && error.category === 'lease_conflict';
+      // input_invalid = the in-transaction waiting gate (H2) refused the
+      // acquisition — same zero-mutation contract, the task stays pending.
+      const pdError = error instanceof PDRuntimeError ? error : null;
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const category = pdError?.category === 'lease_conflict'
+        ? 'lease_conflict'
+        : pdError?.category === 'input_invalid'
+          ? 'input_invalid'
+          : 'execution_failed';
       return {
         status: 'failed',
         taskId: parentTaskId,
-        errorCategory: isLeaseConflict ? 'lease_conflict' : 'execution_failed',
+        errorCategory: category,
         failureReason: `Parent task ${parentTaskId} lease acquisition failed: ${errorMessage}`,
-        attemptCount: 1,
+        attemptCount: category === 'input_invalid' ? 0 : 1,
       };
     }
 

@@ -443,6 +443,29 @@ export type {
 } from './pain-signal-bridge.js';
 export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
 export { evaluateAndPersistAdmissionFromStore } from './pain-signal-bridge.js';
+// PRI-1283 R2: source-material authorization port + pure shared gate helpers.
+// Barrel surface is limited to symbols with cross-package PRODUCTION
+// consumers (review round 2, directive F1 — test-only usage does not justify
+// a public export): the port types, the fail-closed default, the sourceRef
+// prefix constant, and the owner-explicit provenance classifiers. All other
+// helpers (authorizeSourceRef, filterEvidenceByAuthorization,
+// findUnauthorizedSourceRef, hostKindFromGovernanceSourceRef,
+// isGovernanceSourceRef, their result types, and
+// OWNER_EXPLICIT_CORRECTION_CHANNELS) stay core-internal relative imports —
+// core-side tests and the production consumers inside this package import
+// them directly.
+export {
+  GOVERNANCE_OBSERVATION_SOURCE_REF_PREFIX,
+  denyAllSourceMaterialAuthorization,
+  isOwnerExplicitStatementReason,
+  isOwnerManualCorrectionEvidence,
+} from './source-material-authorization.js';
+export type {
+  SourceMaterialHostKind,
+  SourceMaterialDenialReason,
+  SourceAuthorizationState,
+  SourceMaterialAuthorizationPort,
+} from './source-material-authorization.js';
 /** Deterministic diagnostician task id (`diagnosis_<painId>`) — the pain→task dedup key (Codex Governance Closure §13). */
 export { createDiagnosticianTaskId } from './pain-signal-bridge.js';
 /**
@@ -466,6 +489,29 @@ export type {
   PainIngressEvidenceClassV1,
   PainIngressV1ParseResult,
 } from './pain-ingress-payload.js';
+// PRI-1274 (B1): the unified host-generated MCP request submission context —
+// the trusted identity normalizer shared by the pd-mcp-server prebind path
+// and (via PRI-1275/1276) the other hosts' _meta producers.
+export {
+  resolveHostSubmissionContext,
+  hostSessionClaimConflictsWithContext,
+} from './host-submission-context.js';
+// PRI-1274 (B1): structured-receipt fallback — restores the SAME original
+// task's submission identity via the expected-value CAS (with full
+// status/lease preconditions); never a second Pain/Task, queue, lease or
+// evidence store. The barrel carries ONLY the symbols with cross-package
+// production consumers (each recorded in export-admissions); the rest stay
+// core-internal on their module paths.
+export {
+  validatePainSubmitReceipt,
+  recoverTaskIdentityFromReceipt,
+} from './pain-receipt-recovery.js';
+export type { PainReceiptRecoveryOutcome } from './pain-receipt-recovery.js';
+// PRI-1274 (B1 / P1-3): the workspace worker's bounded reconcile for tasks
+// waiting on their named target turn's text (the only exit from
+// `waiting_for_target_evidence`).
+export { reconcileWaitingTargetEvidenceTasks } from './pain-target-evidence-reconcile.js';
+export type { TargetEvidenceReconcileReport } from './pain-target-evidence-reconcile.js';
 // PRI-642 SPEC §8: THE shared ingress semantic evaluator — one authority
 // for every adapter (OpenClaw funnel, pd-cli, Codex).
 export {
@@ -514,6 +560,7 @@ export {
   pendingOwnerDecision,
   appliedOwnerDecision,
   fingerprintMaterial as fingerprintAdmissionMaterial,
+  fingerprintStatement,
 } from './store/candidate/admission-document.js';
 export type {
   AdmissionEvaluationRecord,

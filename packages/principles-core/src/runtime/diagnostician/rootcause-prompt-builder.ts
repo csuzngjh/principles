@@ -24,6 +24,7 @@ import type { SchemaPromptAdapter } from '../adapter/schema-prompt-adapter.js';
 import { DefaultSchemaPromptAdapter } from '../adapter/schema-prompt-adapter.js';
 import { DiagRootCauseOutputV1Schema } from './diag-rootcause-output.js';
 import type { DiagnosticianContextPayload, PainAnchor, PainCorrectionEvidence } from '../context-payload.js';
+import { isOwnerManualCorrectionEvidence } from '../source-material-authorization.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
@@ -199,6 +200,23 @@ function buildOwnerCorrectionBlock(correctionEvidence?: PainCorrectionEvidence):
       : undefined,
     correctionEvidence.occurredAt ? `occurredAt=${correctionEvidence.occurredAt}` : undefined,
   ].filter((v): v is string => v !== undefined);
+  // PRI-1283 round 4 (owner_manual ruling): an agent-assisted submission that
+  // was NOT verified against the Owner's own transcript turn is Agent-derived
+  // — the prompt must say so instead of claiming verbatim Owner words.
+  if (correctionEvidence.channel === 'codex_explicit_agent' && !isOwnerManualCorrectionEvidence(correctionEvidence)) {
+    return `
+PHASE 1.5 — Owner Correction (agent-relayed, unverified):
+The following text was submitted through an agent channel and was NOT verified
+as the Owner's own words — it may be a paraphrase or summary:
+"${correctionEvidence.text}"
+${refs.length > 0 ? `Turn provenance: ${refs.join('; ')}` : ''}
+Treat it as a reported correction signal with unverified provenance:
+- do NOT present or quote it as the Owner's own words;
+- corroborate it against the other evidence before relying on it;
+- if you use it, cite it with sourceRef "owner_correction" and note its
+  unverified agent-relayed provenance in the note field.
+`;
+  }
   return `
 PHASE 1.5 — Owner Correction (authoritative evidence):
 The following are the Owner's OWN WORDS, quoted verbatim — this is not a paraphrase:

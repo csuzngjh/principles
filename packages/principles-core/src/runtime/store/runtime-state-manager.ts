@@ -586,6 +586,8 @@ export class RuntimeStateManager {
       readonly expectedMaxAttempts?: number;
       readonly expectedLeaseOwner?: string | null;
       readonly expectedLeaseExpiresAt?: string | null;
+      /** PRI-1274 review round 2 (directive G1): lease generation fencing. */
+      readonly expectedLeaseGeneration?: number;
     },
   ): Promise<TaskRecord | null> {
     this.assertInitialized();

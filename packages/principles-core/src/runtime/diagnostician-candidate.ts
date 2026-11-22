@@ -40,10 +40,26 @@ export async function pickDiagnosticianCandidate(
   limit: number,
   nowIso: string,
 ): Promise<TaskRecord | null> {
-  const pending = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', orderBy: 'updated_at_asc', limit });
+  // PRI-1274 / PRI-1283: waiting tasks and consent-blocked tasks are excluded
+  // INSIDE the store query (before ORDER BY + LIMIT). A blocked task must not
+  // consume the bounded candidate window or be diagnosed without authorized
+  // target evidence; only the explicit waiting state is worker-reconciled.
+  const pending = await stateManager.listTasks({
+    taskKind: 'diagnostician',
+    status: 'pending',
+    orderBy: 'updated_at_asc',
+    limit,
+    excludeRecoveryStates: ['waiting_for_target_evidence', 'blocked_by_source_material_consent'],
+  });
   const [pendingTask] = pending;
   let retryTask: TaskRecord | null = null;
-  const retrying = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'retry_wait', orderBy: 'updated_at_asc', limit });
+  const retrying = await stateManager.listTasks({
+    taskKind: 'diagnostician',
+    status: 'retry_wait',
+    orderBy: 'updated_at_asc',
+    limit,
+    excludeRecoveryStates: ['waiting_for_target_evidence', 'blocked_by_source_material_consent'],
+  });
   for (const candidate of retrying) {
     if (isRetryWaitBackoffElapsed(candidate.status, candidate.leaseExpiresAt)) {
       retryTask = candidate;

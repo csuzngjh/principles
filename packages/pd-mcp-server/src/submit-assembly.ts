@@ -20,11 +20,31 @@
  * observability-only in Core (never used for admission or mode), but it is
  * taken from the validated startup binding rather than hard-coded so each
  * host's records remain attributable.
+ *
+ * PRI-1274 (B1) — submission identity resolution, in priority order:
+ *  1. TRUSTED `tools/call` `_meta` injected by the host that started this
+ *     server against the startup workspace binding (never model parameters):
+ *     pre-bound at the ORIGINAL Pain/Task write, with NO requirement that the
+ *     target turn text has been collected. A model-supplied `hostSession`
+ *     conflicting with the trusted context fails closed (unbound, conflict
+ *     reason). Gated by the `host_identity_minimal_metadata` Workspace
+ *     authorization (off → unbound `blocked_by_consent`).
+ *  2. Metadata missing → the legal unbound save with an explicit reason
+ *     (`codex_host_metadata_missing` on Codex — the receipt-fallback
+ *     territory); non-Codex hosts keep the PRI-1260 legacy path (model claim
+ *     verified against this workspace's own authorized trajectory).
  */
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from '@principles/host-runtime/pd-config';
-import { listGovernanceObservations, listGovernanceTurnTexts } from '@principles/host-runtime';
-import { isSentinelSessionId } from '@principles/core/runtime';
+import { listGovernanceObservations, listGovernanceTurnTexts, readSourceMaterialAuthorization } from '@principles/host-runtime';
+import {
+  computeFeatureFlagsFromConfig,
+  hostSessionClaimConflictsWithContext,
+  isSentinelSessionId,
+  resolveHostSubmissionContext,
+  type PainEvidenceEntry,
+  type SourceMaterialDenialReason,
+} from '@principles/core/runtime';
 import { submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
 import type { PdMcpHost } from './workspace.js';
@@ -49,42 +69,77 @@ function readHostId(value: unknown): string | undefined {
   return id.length > 0 && id.length <= 200 && !isSentinelSessionId(id) ? id : undefined;
 }
 
-function verifyCodexTarget(
-  workspaceDir: string,
-  meta: Readonly<Record<string, unknown>> | undefined,
-  requestedTurnId: string | undefined,
-): HostSessionVerification {
-  // These fields travel alongside tools/call arguments in the Codex stdio
-  // request. Model-supplied hostSession cannot stand in for them.
-  const sessionId = readHostId(meta?.threadId) ?? readHostId(meta?.sessionId);
-  const turnMeta = meta?.['x-codex-turn-metadata'];
-  const parsedTurnMeta = turnMeta as { turn_id?: unknown } | null | undefined;
-  const submissionTurnId = readHostId(
-    typeof parsedTurnMeta === 'object' && parsedTurnMeta !== null && Object.hasOwn(parsedTurnMeta, 'turn_id')
-      ? parsedTurnMeta.turn_id
-      : undefined,
-  );
-  if (sessionId === undefined || submissionTurnId === undefined) {
-    return { status: 'unverified', detail: 'codex_host_metadata_missing' };
-  }
-  const targetTurnId = requestedTurnId === undefined ? submissionTurnId : readHostId(requestedTurnId);
-  if (targetTurnId === undefined) return { status: 'unverified', detail: 'codex_target_turn_invalid' };
+/**
+ * PRI-1274 review round 2 (directive K1): the target-turn evidence read is
+ * STRUCTURED, not a silent empty array. The classification rides the existing
+ * evidence-availability vocabulary of the ingress contract (`available` /
+ * `unavailable` with a reason code); causes:
+ *   - available: turn rows with readable text were collected;
+ *   - not_found: the store read succeeded but has no readable text for the
+ *                requested (session, turn); this is an honest "not yet there";
+ *   - blocked_by_consent: the latest source-material decision denies the read;
+ *                preserve minimal identity, but block diagnosis;
+ *   - read_failed: the store read itself failed (structured stderr note);
+ *                submission remains legal; enrichment is optional.
+*/
+type TargetTurnEvidenceRead =
+  | { readonly status: 'available'; readonly entries: PainEvidenceEntry[] }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'blocked_by_consent'; readonly reason: SourceMaterialDenialReason }
+  | { readonly status: 'read_failed'; readonly reason: string };
 
-  const result = listGovernanceObservations({
-    workspaceDir, hostKind: 'codex', rolloutIdentity: sessionId, hostTurnId: targetTurnId, limit: 64,
+/**
+ * PRI-1274: opportunistic target-turn evidence. Bounded read of this
+ * workspace's authorized governance observations for the target turn, used
+ * only as enrichment when the turn text already exists. Its absence never
+ * blocks session binding; target-evidence completion is independent.
+ *
+ * PRI-1283 R2: check the current consent-ledger decision immediately before
+ * the read. Missing, pending, failed, revoked or unreadable consent produces
+ * no query and no transcript text; the original submission remains legal
+ * with empty enrichment evidence.
+ */
+function readTargetTurnEvidence(input: {
+  readonly workspaceDir: string;
+  readonly host: PdMcpHost;
+  readonly sessionId: string;
+  readonly targetTurnId: string;
+}): TargetTurnEvidenceRead {
+  const authorization = readSourceMaterialAuthorization({
+    workspaceDir: input.workspaceDir,
+    hostKind: input.host,
   });
-  if (!result.ok) return { status: 'unverified', detail: 'codex_target_evidence_unreadable' };
-  const inputEvidence = result.observations.flatMap((row) =>
-    (row.kind === 'user_turn' || row.kind === 'assistant_turn')
-      && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
-      && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
-      ? [{ sourceRef: `governance_observation:${row.logicalKey}`, note: row.visibleText.slice(0, 2000) }]
-      : [],
-    // Rows come back in id (capture) order: slice(0, 12) keeps the EARLIEST
-    // texts and drops the turn's final answer on long turns — keep the last.
-  ).slice(-12);
-  if (inputEvidence.length === 0) return { status: 'unverified', detail: 'codex_target_evidence_unavailable' };
-  return { status: 'verified', sessionId, submissionTurnId, targetTurnId, inputEvidence };
+  if (authorization.status === 'blocked') {
+    console.error('[pd-submit] target-turn evidence read blocked: ' + authorization.reason + '; submission continues without turn evidence');
+    return { status: 'blocked_by_consent', reason: authorization.reason };
+  }
+  try {
+    const result = listGovernanceObservations({
+      workspaceDir: input.workspaceDir,
+      hostKind: input.host,
+      rolloutIdentity: input.sessionId,
+      hostTurnId: input.targetTurnId,
+      limit: 64,
+    });
+    if (!result.ok) {
+      console.error('[pd-submit] target-turn evidence read degraded: read_failed (' + result.reason + '); submission continues without turn evidence');
+      return { status: 'read_failed', reason: result.reason };
+    }
+    const entries = result.observations.flatMap((row) =>
+      (row.kind === 'user_turn' || row.kind === 'assistant_turn')
+        && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
+        && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
+        ? [{ sourceRef: 'governance_observation:' + row.logicalKey, note: row.visibleText.slice(0, 2000) }]
+        : [],
+      // Rows are capture-ordered; retain the final turns on long conversations.
+    ).slice(-12);
+    return entries.length > 0
+      ? { status: 'available', entries }
+      : { status: 'not_found' };
+  } catch (error) {
+    console.error('[pd-submit] target-turn evidence read degraded: read_failed (store exception); submission continues without turn evidence');
+    return { status: 'read_failed', reason: error instanceof Error ? error.message.slice(0, 120) : 'store_exception' };
+  }
 }
 
 /**
@@ -111,16 +166,25 @@ export function assembleSubmitCapability(
 
   const stateDir = path.join(workspaceDir, '.state');
   const effectiveConfig = config.effective;
+  // PRI-1274: the Workspace-level minimal identity-metadata authorization,
+  // resolved ONCE at startup from the same effective config every consumer
+  // reads. Off (the default) keeps every submission legally unbound with
+  // `blocked_by_consent` — identity metadata is never persisted from the
+  // trusted `_meta` path while the disclosure authorization is absent.
+  const { flags } = computeFeatureFlagsFromConfig(effectiveConfig);
+  const minimalMetadataGranted = flags.host_identity_minimal_metadata?.enabled === true;
 
   /**
-   * PRI-1260: verify a host-provided session claim against THIS workspace's
-   * own authorized trajectory store (the same consent-tiered store ingestion
-   * writes). A claimed session that exists there — with retained turns — is
-   * the strongest association PD can verify on its own authority; a session
-   * that does not is a claim we do not bind (the submission stays legal and
-   * unbound, with the specific cause surfaced on the receipt).
+   * PRI-1260 legacy path (non-Codex hosts without `_meta` producers yet —
+   * PRI-1275/1276 wire those): verify a host-provided session claim against
+   * THIS workspace's own authorized trajectory store (the same consent-tiered
+   * store ingestion writes). A claimed session that exists there — with
+   * retained turns — is the strongest association PD can verify on its own
+   * authority; a session that does not is a claim we do not bind (the
+   * submission stays legal and unbound, with the specific cause surfaced on
+   * the receipt).
    */
-  const verifyHostSession = (claim: HostSessionClaim): HostSessionVerification => {
+  const verifyHostSessionClaim = (claim: HostSessionClaim): HostSessionVerification => {
     // Review fix (2026-11-18): sentinel spellings (`cli` / `unknown`) are
     // rejected by the read-back ingress parser (`ingress_verified_session_invalid`)
     // — a claim that only carries a sentinel must stay UNBOUND here, or the
@@ -133,6 +197,13 @@ export function assembleSubmitCapability(
     if (candidates.length === 0) {
       return { status: 'unverified', detail: 'host_session_claim_empty' };
     }
+    // PRI-1283 R2: the probe READS retained conversation text — the latest
+    // consent must be granted. Blocked consent leaves the submission legal
+    // but unbound (no conversation read happens at all).
+    const hostAuthorization = readSourceMaterialAuthorization({ workspaceDir, hostKind: host });
+    if (hostAuthorization.status === 'blocked') {
+      return { status: 'unverified', detail: `host_consent_${hostAuthorization.reason}` };
+    }
     for (const candidate of candidates) {
       const userTurns = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: candidate, hostKind: host, limit: 1 });
       if (userTurns.ok && userTurns.turns.length > 0) {
@@ -142,10 +213,93 @@ export function assembleSubmitCapability(
     return { status: 'unverified', detail: 'host_session_not_in_workspace_trajectory' };
   };
 
+  /**
+   * PRI-1274 (B1): per-request submission-identity resolution. The trusted
+   * `_meta` context (host-injected on the `tools/call` request this server
+   * serves over its startup binding) pre-binds the session BEFORE the write;
+   * target-turn text availability is NOT a precondition (the decoupling this
+   * ticket exists for). Every negative outcome keeps the submission legal
+   * and unbound with a specific cause on the receipt (rc-9).
+   */
+  const resolveSessionVerification = (
+    requestMeta: Readonly<Record<string, unknown>> | undefined,
+    submission: { readonly targetTurnId?: string; readonly hostSession?: HostSessionClaim },
+  ): HostSessionVerification => {
+    const metaResolution = resolveHostSubmissionContext(host, requestMeta);
+
+    if (metaResolution.status === 'invalid') {
+      // Malformed host metadata never silently degrades into a trusted
+      // identity and never falls back to model parameters (fail closed).
+      return { status: 'unverified', detail: `host_context_invalid:${metaResolution.reasonCode}` };
+    }
+
+    if (metaResolution.status === 'missing') {
+      if (host === 'codex') {
+        // Codex identity comes from host meta only — a model-supplied claim
+        // never stands in. Unbound with the explicit cause; the PostToolUse
+        // structured receipt (codex-adapter) is the designated fallback.
+        return { status: 'unverified', detail: 'codex_host_metadata_missing' };
+      }
+      const claim = submission.hostSession;
+      if (claim === undefined) return { status: 'unverified', detail: 'host_session_claim_empty' };
+      return verifyHostSessionClaim(claim);
+    }
+
+    const { context } = metaResolution;
+    // Model-visible parameters conflicting with the trusted context fail
+    // closed: never bind from either side of a disagreement.
+    if (hostSessionClaimConflictsWithContext(submission.hostSession, context)) {
+      return { status: 'unverified', detail: 'host_context_conflict' };
+    }
+    if (!minimalMetadataGranted) {
+      return { status: 'unverified', detail: 'blocked_by_consent' };
+    }
+
+    // Explicit target-turn request (validated shape; an invalid explicit
+    // target stays unverified — the caller named something unusable).
+    const requestedTurnId = submission.targetTurnId === undefined
+      ? undefined
+      : readHostId(submission.targetTurnId);
+    if (submission.targetTurnId !== undefined && requestedTurnId === undefined) {
+      return { status: 'unverified', detail: 'codex_target_turn_invalid' };
+    }
+    // Existing current-turn semantics (tool description: "省略时以提交轮为
+    // 目标"): when the host supplied a submission turn and the caller named
+    // no explicit target, the submission turn IS the target. Without a
+    // submission turn and without an explicit target the target stays
+    // unknown — the session binding survives (SPEC §G2).
+    const targetTurnId = requestedTurnId ?? context.submissionTurnId;
+    // Directive K2: only available carries entries. not_found keeps the
+    // exact-target wait semantics; blocked_by_consent preserves the separately
+    // authorized identity but marks the task blocked (not waiting); read_failed
+    // remains an observable enrichment failure, distinct from both outcomes.
+    const evidenceRead = targetTurnId === undefined
+      ? undefined
+      : readTargetTurnEvidence({ workspaceDir, host, sessionId: context.sessionId, targetTurnId });
+    const inputEvidence = evidenceRead !== undefined && evidenceRead.status === 'available'
+      ? evidenceRead.entries
+      : [];
+    const targetEvidenceBlockedReason = evidenceRead?.status === 'blocked_by_consent'
+      ? evidenceRead.reason
+      : undefined;
+
+    return {
+      status: 'verified',
+      sessionId: context.sessionId,
+      ...(context.submissionTurnId === undefined ? {} : { submissionTurnId: context.submissionTurnId }),
+      ...(targetTurnId === undefined ? {} : { targetTurnId }),
+      ...(inputEvidence.length > 0 ? { inputEvidence } : {}),
+      ...(targetEvidenceBlockedReason === undefined ? {} : { targetEvidenceBlockedReason }),
+    };
+  };
+
   return {
     ok: true,
     call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission, requestMeta }) => {
-      const claim = submission.hostSession;
+      // One resolution seam for every host: the trusted `_meta` context when
+      // present, the legal unbound reason when not. Codex never consults
+      // model-supplied claims (its identity is host meta or unbound).
+      const verification = resolveSessionVerification(requestMeta, submission);
       return submitPainCapability(
         {
           workspaceDir: boundWorkspaceDir,
@@ -158,11 +312,7 @@ export function assembleSubmitCapability(
             const value = env[name];
             return typeof value === 'string' ? value : undefined;
           },
-          ...(host === 'codex'
-            ? { verifyHostSession: () => verifyCodexTarget(workspaceDir, requestMeta, submission.targetTurnId) }
-            : claim !== undefined
-              ? { hostSessionClaim: claim, verifyHostSession: () => verifyHostSession(claim) }
-              : {}),
+          verifyHostSession: () => verification,
         },
         submission,
       );

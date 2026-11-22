@@ -13,15 +13,17 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createConsentLedgerSourceMaterialAuthorization } from '@principles/host-runtime';
 import {
   recallPains,
   PAIN_RECALL_DEFAULT_LIMIT,
   PAIN_RECALL_MIN_LIMIT,
   PAIN_RECALL_MAX_LIMIT,
+  type PainRecallOptions,
   type PainRecallResult,
 } from '@principles/core/runtime/pain-recall';
 
-export interface PainRecallOptions {
+export interface PainRecallCommandOptions {
   principleId?: string;
   painId?: string;
   context?: string;
@@ -81,7 +83,7 @@ function printHuman(result: PainRecallResult): void {
   }
 }
 
-export async function handlePainRecall(opts: PainRecallOptions): Promise<void> {
+export async function handlePainRecall(opts: PainRecallCommandOptions): Promise<void> {
   const json = opts.json === true;
 
   const principleId = typeof opts.principleId === 'string' ? opts.principleId.trim() : '';
@@ -143,12 +145,17 @@ export async function handlePainRecall(opts: PainRecallOptions): Promise<void> {
 
   let result: PainRecallResult;
   try {
+    // PRI-1283 R2: recall withholds governance-sourced excerpts whose
+    // host consent is not granted (read-path gate on top of the R3 sweep).
+    const recallOptions: PainRecallOptions = {
+      sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+    };
     result = await recallPains(workspaceDir, {
       requestedPrincipleId: principleId,
       ...(painId !== undefined ? { painId } : {}),
       ...(typeof opts.context === 'string' && opts.context.trim().length > 0 ? { context: opts.context } : {}),
       limit,
-    });
+    }, recallOptions);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     fail({

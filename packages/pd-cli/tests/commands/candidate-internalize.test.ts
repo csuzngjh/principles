@@ -194,7 +194,9 @@ describe('handleCandidateInternalize (PRI-89)', () => {
     expect(enforceFullAdmissionForWrite).toHaveBeenCalledWith(
       mockStateManager,
       'cand-001',
-      { persistReevaluation: false },
+      // PRI-1283 R2: the admission re-verification now also carries the
+      // latest-consent source-material gate.
+      expect.objectContaining({ persistReevaluation: false }),
     );
 
     consoleSpy.mockRestore();
@@ -220,7 +222,7 @@ describe('handleCandidateInternalize (PRI-89)', () => {
     expect(enforceFullAdmissionForWrite).toHaveBeenCalledWith(
       mockStateManager,
       'cand-001',
-      { persistReevaluation: true },
+      expect.objectContaining({ persistReevaluation: true }),
     );
 
     consoleSpy.mockRestore();

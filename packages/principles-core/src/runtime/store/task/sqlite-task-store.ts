@@ -138,6 +138,16 @@ export class SqliteTaskStore implements TaskStore {
       readonly expectedMaxAttempts?: number;
       readonly expectedLeaseOwner?: string | null;
       readonly expectedLeaseExpiresAt?: string | null;
+      /**
+       * PRI-1274 review round 2 (directive G1): the lease GENERATION fencing
+       * token joins the same conditional UPDATE. A recovery snapshot taken
+       * before a worker took over (and minted a new generation) is defeated
+       * even when status/owner/expiresAt happen to cycle back to the same
+       * values (the ABA shape). Legacy rows read generation 0 through the
+       * TaskRecord mapping — asserting 0 there is exactly the pre-takeover
+       * state.
+       */
+      readonly expectedLeaseGeneration?: number;
     },
   ): Promise<TaskRecord | null> {
     return this.updateTaskWithPreconditions({
@@ -150,6 +160,7 @@ export class SqliteTaskStore implements TaskStore {
       expectedMaxAttempts: options?.expectedMaxAttempts,
       expectedLeaseOwner: options?.expectedLeaseOwner,
       expectedLeaseExpiresAt: options?.expectedLeaseExpiresAt,
+      expectedLeaseGeneration: options?.expectedLeaseGeneration,
     });
   }
 
@@ -173,11 +184,17 @@ export class SqliteTaskStore implements TaskStore {
        * concurrent writer that touches ANY of them (budget, lease) defeats the
        * write even when status/diagnostic_json are unchanged. All optional and
        * ANDed; `IS` gives NULL-safe equality for the lease columns.
+       *
+       * PRI-1274 review round 2 (directive G1): `expectedLeaseGeneration` is
+       * the fencing token — a lease takeover ALWAYS mints a new generation, so
+       * asserting it defeats the ABA shape where status/owner/expiresAt cycle
+       * back but a different worker owns the task.
        */
       readonly expectedAttemptCount?: number;
       readonly expectedMaxAttempts?: number;
       readonly expectedLeaseOwner?: string | null;
       readonly expectedLeaseExpiresAt?: string | null;
+      readonly expectedLeaseGeneration?: number;
     },
   ): Promise<TaskRecord | null> {
     const { taskId, expectedDiagnosticJson, artifacts, patch } = input;
@@ -212,6 +229,8 @@ export class SqliteTaskStore implements TaskStore {
     if (input.expectedLeaseOwner !== undefined) values.push(input.expectedLeaseOwner);
     const leaseExpiresCondition = input.expectedLeaseExpiresAt !== undefined ? 'AND lease_expires_at IS ?' : '';
     if (input.expectedLeaseExpiresAt !== undefined) values.push(input.expectedLeaseExpiresAt);
+    const leaseGenerationCondition = input.expectedLeaseGeneration !== undefined ? 'AND lease_generation IS ?' : '';
+    if (input.expectedLeaseGeneration !== undefined) values.push(input.expectedLeaseGeneration);
     const artifactConditions = artifacts.map(() => `EXISTS (
       SELECT 1 FROM pi_artifacts
       WHERE artifact_id = ?
@@ -237,6 +256,7 @@ export class SqliteTaskStore implements TaskStore {
         ${maxAttemptsCondition}
         ${leaseOwnerCondition}
         ${leaseExpiresCondition}
+        ${leaseGenerationCondition}
         ${artifactConditions.map((condition) => `AND ${condition}`).join('\n')}`)
       .run(...values);
 
@@ -269,6 +289,21 @@ export class SqliteTaskStore implements TaskStore {
         throw new PDRuntimeError('input_invalid', 'afterCursor requires orderBy updated_at_asc|desc');
       }
       values.push(filter.afterCursor.updatedAt, filter.afterCursor.updatedAt, filter.afterCursor.taskId);
+    }
+    // PRI-1274 (B1 / P1-3): admission-disposition gating INSIDE the WHERE
+    // clause, parameter-bound — deliberately before the ORDER BY/LIMIT so a
+    // waiting task can never displace an admissible one inside a bounded
+    // candidate window. `json_extract` returns NULL when the JSON has no
+    // such key (or is not valid JSON), which COALESCEs to the empty string
+    // and therefore never matches a named state.
+    if (filter?.recoveryState !== undefined) {
+      conditions.push("COALESCE(json_extract(diagnostic_json, '$.recovery.state'), '') = ?");
+      values.push(filter.recoveryState);
+    }
+    if (filter?.excludeRecoveryStates !== undefined && filter.excludeRecoveryStates.length > 0) {
+      const placeholders = filter.excludeRecoveryStates.map(() => '?').join(', ');
+      conditions.push(`COALESCE(json_extract(diagnostic_json, '$.recovery.state'), '') NOT IN (${placeholders})`);
+      values.push(...filter.excludeRecoveryStates);
     }
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
     if (filter?.orderBy === 'updated_at_asc') { sql += ' ORDER BY updated_at ASC, task_id ASC'; }

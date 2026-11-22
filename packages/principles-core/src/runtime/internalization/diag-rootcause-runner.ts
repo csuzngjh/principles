@@ -24,6 +24,11 @@ import type { RunHandle } from '../runtime-protocol.js';
 import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { DiagRootCauseOutputV1, DiagRootCauseValidator, IntentRelatedField } from '../diagnostician/diag-rootcause-output.js';
 import type { DiagnosticianContextPayload } from '../context-payload.js';
+import {
+  denyAllSourceMaterialAuthorization,
+  type SourceMaterialAuthorizationPort,
+} from '../source-material-authorization.js';
+import { assertPayloadSourceAuthorization } from './source-authorization-boundary.js';
 import type { ContextAssembler } from '../store/context/context-assembler.js';
 import type { TaskRecord } from '../task-status.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
@@ -109,6 +114,15 @@ export interface DiagRootCauseRunnerDeps extends PeerRunnerDeps {
    * prompt — EP-03: no silent fallback).
    */
   readonly intentDocReader?: IntentDocReader;
+  /**
+   * PRI-1283 R2: latest-consent gate re-checked at the MODEL-CALL boundary
+   * (SPEC-PD-FEEDBACK-RESILIENCE-001 TECH §2.2 ruling 5: a revocation landing
+   * between assembly and the model call must block the model input). ABSENT =
+   * fail-closed for governance-sourced material (deny-all): invoking a model
+   * over consent-gated excerpts without an authorization check is the exact
+   * R2 gap.
+   */
+  readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
 }
 
 // ── Options ──────────────────────────────────────────────────────────────────
@@ -134,6 +148,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
   private readonly contextAssembler: ContextAssembler;
   private readonly effectiveConfig?: EffectivePdConfig;
   private readonly intentDocReader?: IntentDocReader;
+  private readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
 
   constructor(deps: DiagRootCauseRunnerDeps, options: DiagRootCauseRunnerOptions) {
     super(deps, options, {
@@ -155,6 +170,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     this.contextAssembler = deps.contextAssembler;
     this.effectiveConfig = options.effectiveConfig;
     this.intentDocReader = deps.intentDocReader;
+    this.sourceMaterialAuthorization = deps.sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization;
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
@@ -382,6 +398,13 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
   }
 
   async invokeRuntime(taskId: string, context: DiagRootCauseContext): Promise<RunHandle> {
+    // PRI-1283 R2 — the LAST authorization check before the model call (TECH
+    // §2.2 ruling 5). The payload was assembled moments earlier; a consent
+    // revocation landing in that window must BLOCK the model input here, not
+    // silently ship pre-revocation material. Re-reads the port live, never a
+    // cached verdict.
+    assertPayloadSourceAuthorization(context.painPayload, this.sourceMaterialAuthorization, taskId);
+
     // T-E (PRI-371): Read diagnostician_core_grounding flag from effective config.
     let coreGrounding = false;
     // Pain Diagnosis Persistence: Evidence First Attribution rules in the

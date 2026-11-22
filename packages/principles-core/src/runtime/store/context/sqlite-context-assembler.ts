@@ -36,6 +36,13 @@ import { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '../../pain-signal
 import { sanitizeString } from '../../evidence-sanitizer.js';
 import { DEFAULT_PROMPT_BUILDER_LIMITS } from '../../diagnostician-prompt-builder.js';
 import { readPromotedEvidenceWindow } from './promoted-evidence-reader.js';
+import {
+  denyAllSourceMaterialAuthorization,
+  filterEvidenceByAuthorization,
+  isOwnerManualCorrectionEvidence,
+  type SourceMaterialAuthorizationPort,
+  type SourceMaterialHostKind,
+} from '../../source-material-authorization.js';
 
 const PAIN_PROVENANCE_VALUES = ['host_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const;
 
@@ -45,6 +52,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isPainProvenance(value: unknown): value is (typeof PAIN_PROVENANCE_VALUES)[number] {
   return typeof value === 'string' && (PAIN_PROVENANCE_VALUES as readonly string[]).includes(value);
+}
+
+/**
+ * PRI-1283 R2 (review round 2, directive B): correction evidence channel →
+ * the host whose consent governs the statement. Owner-authored statements
+ * (owner_manual — a direct Owner channel, or an agent-assisted channel with
+ * a bound Owner confirmation record) are Owner acts, not conversation
+ * ingestion — they are NOT governed by the conversation-ingestion ledger and
+ * survive a revocation (classification via the shared core helper so sweep /
+ * recall / assembler / console / admission apply ONE judgment). A
+ * `codex_explicit_agent` record WITHOUT a bound confirmation is
+ * Agent-derived and stays governed (it maps back to the codex host below).
+ * Channel-less legacy records of a codex/workbuddy task remain governed
+ * (their correction text came from that host's consent-gated ingestion);
+ * OpenClaw / CLI corrections return null.
+ */
+function correctionEvidenceHost(
+  correction: NonNullable<DiagnosticianTaskRecord['correctionEvidence']>,
+  taskHostKind: string | undefined,
+): SourceMaterialHostKind | null {
+  const channel = typeof (correction as { channel?: unknown }).channel === 'string'
+    ? (correction as { channel: string }).channel
+    : '';
+  if (isOwnerManualCorrectionEvidence(correction)) return null;
+  if (channel.startsWith('codex')) return 'codex';
+  if (channel.startsWith('workbuddy')) return 'workbuddy';
+  if (taskHostKind === 'codex') return 'codex';
+  if (taskHostKind === 'workbuddy') return 'workbuddy';
+  return null;
+}
+
+/**
+ * PRI-1283 R2: the governance-observation host kinds whose consent is
+ * currently granted — passed to the promoted-window read so unauthorized
+ * rows are excluded inside the query. An empty array excludes every host's
+ * rows; `undefined` (pre-R2 behavior) is never produced here because the
+ * assembler always resolves the port (deny-all when unwired).
+ */
+function authorizedGovernanceHostKinds(port: SourceMaterialAuthorizationPort): readonly SourceMaterialHostKind[] {
+  const hosts: SourceMaterialHostKind[] = [];
+  for (const host of ['codex', 'workbuddy', 'openclaw'] as const) {
+    if (port.isHostSourceMaterialAuthorized(host).authorized) hosts.push(host);
+  }
+  return hosts;
 }
 
 /**
@@ -74,14 +125,27 @@ export class SqliteContextAssembler implements ContextAssembler {
     private readonly taskStore: TaskStore,
     private readonly historyQuery: HistoryQuery,
     private readonly runStore: RunStore,
-    options?: { sourceTraceLocator?: SourceTraceLocator; trajectoryTurnReader?: TrajectoryTurnReader },
+    options?: {
+      sourceTraceLocator?: SourceTraceLocator;
+      trajectoryTurnReader?: TrajectoryTurnReader;
+      /**
+       * PRI-1283 R2: latest-consent gate for governance-sourced material.
+       * Consulted per assemble() call. ABSENT = fail-closed for
+       * governance-sourced evidence/conversation material (deny-all default):
+       * consuming consent-gated excerpts without an authorization check is the
+       * exact R2 gap this option exists to close.
+       */
+      sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+    },
   ) {
     this.sourceTraceLocator = options?.sourceTraceLocator;
     this.trajectoryTurnReader = options?.trajectoryTurnReader;
+    this.sourceMaterialAuthorization = options?.sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization;
   }
 
   private readonly sourceTraceLocator?: SourceTraceLocator;
   private readonly trajectoryTurnReader?: TrajectoryTurnReader;
+  private readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
 
   async assemble(taskId: string): Promise<DiagnosticianContextPayload> {
     const task = await this.taskStore.getTask(taskId);
@@ -129,6 +193,36 @@ export class SqliteContextAssembler implements ContextAssembler {
       correctionEvidence: dt.correctionEvidence,
     };
 
+    // PRI-1283 R2: enforce the LATEST source-material authorization on the
+    // persisted evidence excerpts and the correction evidence. Governance-
+    // sourced entries whose host consent is no longer granted are withheld
+    // here — BEFORE they can reach any downstream prompt or model input. The
+    // ambiguity note records counts and reasons only, never excerpt text.
+    {
+      const auth = this.sourceMaterialAuthorization;
+      const evidenceInput = Array.isArray(diagnosisTarget.evidence) ? diagnosisTarget.evidence : [];
+      const filtered = filterEvidenceByAuthorization(evidenceInput, auth);
+      if (filtered.removed.length > 0) {
+        diagnosisTarget.evidence = Array.from(filtered.kept);
+        ambiguityNotes.push(
+          `source-material authorization: ${filtered.removed.length} evidence entr${filtered.removed.length === 1 ? 'y is' : 'ies are'} withheld (host consent not granted; reasons: ${filtered.denialReasons.join(', ')}) — the entries are not valid diagnosis input (PRI-1283 R2)`,
+        );
+      }
+      const correction = diagnosisTarget.correctionEvidence;
+      if (correction !== undefined) {
+        const governingHost = correctionEvidenceHost(correction, diagnosisTarget.hostKind);
+        if (governingHost !== null) {
+          const decision = auth.isHostSourceMaterialAuthorized(governingHost);
+          if (!decision.authorized) {
+            diagnosisTarget.correctionEvidence = undefined;
+            ambiguityNotes.push(
+              `source-material authorization: correction evidence withheld (host=${governingHost}, reason=${decision.reason}) — the conversation-sourced statement is not valid diagnosis input (PRI-1283 R2)`,
+            );
+          }
+        }
+      }
+    }
+
     const convAmbiguityNotes = SqliteContextAssembler.buildAmbiguityNotes(
       taskId,
       historyResult.entries,
@@ -140,11 +234,15 @@ export class SqliteContextAssembler implements ContextAssembler {
     // the only conversation evidence available on hosts whose run history and
     // user_turns/assistant_turns tables are empty (Codex). Absent it, every
     // existing fallback below behaves exactly as before.
+    // PRI-1283 R2: rows of a host whose consent is no longer granted are
+    // excluded at the query boundary — revoked conversation material must not
+    // enter the window at all, not be filtered after reading.
     const promotedWindow = typeof dt.sourcePainId === 'string' && dt.sourcePainId.length > 0 && dt.workspaceDir !== '<unknown>'
       ? readPromotedEvidenceWindow({
         workspaceDir: dt.workspaceDir,
         painId: dt.sourcePainId,
         maxEntries: DEFAULT_PROMPT_BUILDER_LIMITS.maxConversationEntries,
+        authorizedHostKinds: authorizedGovernanceHostKinds(this.sourceMaterialAuthorization),
       })
       : null;
 
@@ -194,7 +292,10 @@ export class SqliteContextAssembler implements ContextAssembler {
     // starve the diagnosis of the session's original turns.
     const historyHasUsableText = conversationEntries.some((entry) => typeof entry.text === 'string' && entry.text.trim().length > 0);
     if (!usedPromotedWindow && !historyHasUsableText && dt.sessionIdHint && dt.workspaceDir !== '<unknown>' && this.trajectoryTurnReader) {
-      const trajectoryEntries = this.readTrajectoryTurns(dt.sessionIdHint, ambiguityNotes);
+      // PRI-1274 (B1 / P1-3): a NAMED target turn narrows the read to that
+      // exact (session, turn) — never the whole session (the other turns
+      // must not substitute the target), and never a guessed "latest" turn.
+      const trajectoryEntries = this.readTrajectoryTurns(dt.sessionIdHint, ambiguityNotes, { targetTurnId: dt.targetTurnId, hostKind: dt.hostKind });
       if (trajectoryEntries.length > 0) {
         if (conversationEntries.length > 0) {
           ambiguityNotes.push(
@@ -259,7 +360,9 @@ export class SqliteContextAssembler implements ContextAssembler {
       }
     }
 
-    const evidenceSourceRefs = dt.evidence?.map(e => e.sourceRef) ?? [];
+    // PRI-1283 R2: sourceRefs mirror the (already filtered) diagnosisTarget
+    // evidence — a revoked source's ref must not survive as a payload ref.
+    const evidenceSourceRefs = (diagnosisTarget.evidence ?? []).map(e => e.sourceRef);
 
     const payload: DiagnosticianContextPayload = {
       contextId,
@@ -403,11 +506,45 @@ export class SqliteContextAssembler implements ContextAssembler {
   /**
    * PRI-350: Read turns from TrajectoryDB and convert to HistoryQueryEntry[].
    * Returns empty array if no turns found, with ambiguityNote added (ERR-002).
+   *
+   * PRI-1274 (B1 / P1-3): when `targetTurnId` is known, the read is EXACT —
+   * only that (session, host turn id) may enter the window. The session's
+   * other turns never substitute a named target, and an unreadable target
+   * stays unreadable (observable note) instead of being replaced.
    */
-  private readTrajectoryTurns(sessionId: string, ambiguityNotes: string[]): HistoryQueryEntry[] {
+  private readTrajectoryTurns(
+    sessionId: string,
+    ambiguityNotes: string[],
+    target?: { readonly targetTurnId?: string; readonly hostKind?: 'openclaw' | 'codex' | 'workbuddy' },
+  ): HistoryQueryEntry[] {
+    const { targetTurnId } = target ?? {};
     const reader = this.trajectoryTurnReader;
     // Caller guarantees reader is defined; guard for type safety
     if (!reader) return [];
+
+    if (targetTurnId !== undefined) {
+      if (reader.listTurnTextsForHostTurnId === undefined) {
+        ambiguityNotes.push(
+          `Target turn ${targetTurnId} named for sessionId=${sessionId} but the trajectory reader cannot read by host turn id; session-wide substitution skipped`,
+        );
+        return [];
+      }
+      const exact = reader.listTurnTextsForHostTurnId(sessionId, targetTurnId, target?.hostKind);
+      const entries: HistoryQueryEntry[] = [];
+      for (const turn of exact.userTurns) {
+        entries.push({ ts: turn.createdAt, role: 'user', text: turn.rawExcerpt });
+      }
+      for (const turn of exact.assistantTurns) {
+        entries.push({ ts: turn.createdAt, role: 'assistant', text: sanitizeString(turn.sanitizedText) });
+      }
+      entries.sort((a, b) => a.ts.localeCompare(b.ts));
+      if (entries.length === 0) {
+        ambiguityNotes.push(
+          `Target turn ${targetTurnId} for sessionId=${sessionId} has no readable text in the authorized trajectory store; session-wide substitution skipped`,
+        );
+      }
+      return entries;
+    }
 
     const userTurns = reader.listUserTurnsForSession(sessionId);
     const assistantTurns = reader.listAssistantTurns(sessionId);
@@ -491,6 +628,18 @@ export class SqliteContextAssembler implements ContextAssembler {
       turnIndex: num(obj.turnIndex),
       referencesAssistantTurnId: num(obj.referencesAssistantTurnId),
       occurredAt: str(obj.occurredAt),
+      // PRI-1283 review round 2 (directive B): the classification/channel are
+      // PROVENANCE the writer persists (PainCorrectionEvidenceSchema) — the
+      // explicit Owner-submission channels decide whether a correction is an
+      // Owner act that survives a consent revocation. Dropping them here made
+      // every correction fall back to task-host attribution (mis-withheld).
+      ...(obj.classification === 'owner_statement' ? { classification: 'owner_statement' as const } : {}),
+      ...(typeof obj.channel === 'string' && obj.channel.length > 0 ? { channel: obj.channel as PainCorrectionEvidence['channel'] } : {}),
+      // PRI-1283 round 3: carry the bound Owner confirmation record through so
+      // the shared owner_manual judgment can verify agent-assisted statements.
+      ...(typeof obj.ownerConfirmation === 'object' && obj.ownerConfirmation !== null && !Array.isArray(obj.ownerConfirmation)
+        ? { ownerConfirmation: obj.ownerConfirmation as PainCorrectionEvidence['ownerConfirmation'] }
+        : {}),
     };
   }
 
@@ -526,6 +675,11 @@ export class SqliteContextAssembler implements ContextAssembler {
             sessionIdHint: SqliteContextAssembler.extractStringField(parsed, 'sessionIdHint'),
             agentIdHint: SqliteContextAssembler.extractStringField(parsed, 'agentIdHint'),
             workspaceDir: SqliteContextAssembler.extractStringField(parsed, 'workspaceDir'),
+            // PRI-1274 (B1 / P1-3): the verified submission/target turn ids —
+            // read-only pointers into painIngress.verifiedHostSession; a
+            // malformed block degrades to absence (session-level policy),
+            // never to a guessed turn.
+            ...SqliteContextAssembler.extractVerifiedTurnIds(parsed),
             anchor,
             provenance: Object.hasOwn(parsed, 'provenance') && (isPainProvenance(parsed.provenance) || parsed.provenance === 'openclaw_context_bound')
               ? (isPainProvenance(parsed.provenance) ? parsed.provenance : 'host_context_bound')
@@ -563,6 +717,31 @@ export class SqliteContextAssembler implements ContextAssembler {
       provenanceReason: extra.provenanceReason,
       evidence: extra.evidence,
       correctionEvidence: extra.correctionEvidence,
+      submissionTurnId: extra.submissionTurnId,
+      targetTurnId: extra.targetTurnId,
+    };
+  }
+
+  /**
+   * PRI-1274 (B1 / P1-3): read the verified submission/target turn ids from
+   * `painIngress.verifiedHostSession`. Strictly guarded — a malformed block
+   * yields neither id (the diagnosis then stays on session-level policy
+   * rather than reading a guessed turn).
+   */
+  private static extractVerifiedTurnIds(parsed: Record<string, unknown>): { submissionTurnId?: string; targetTurnId?: string } {
+    const {painIngress} = parsed;
+    if (!isRecord(painIngress)) return {};
+    const verified = painIngress.verifiedHostSession;
+    if (!isRecord(verified) || verified.status !== 'verified') return {};
+    const submissionTurnId = typeof verified.submissionTurnId === 'string' && verified.submissionTurnId.length > 0
+      ? verified.submissionTurnId
+      : undefined;
+    const targetTurnId = typeof verified.targetTurnId === 'string' && verified.targetTurnId.length > 0
+      ? verified.targetTurnId
+      : undefined;
+    return {
+      ...(submissionTurnId === undefined ? {} : { submissionTurnId }),
+      ...(targetTurnId === undefined ? {} : { targetTurnId }),
     };
   }
 }

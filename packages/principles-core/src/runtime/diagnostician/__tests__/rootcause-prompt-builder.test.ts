@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RootCausePromptBuilder, buildRootCauseProtocolInstruction } from '../rootcause-prompt-builder.js';
+import { fingerprintStatement } from '../../store/candidate/admission-document.js';
 import type { DiagnosticianContextPayload } from '../../context-payload.js';
 
 describe('RootCausePromptBuilder', () => {
@@ -192,6 +193,33 @@ describe('RootCausePromptBuilder — PHASE 1.5 Owner Correction (PRI-844)', () =
     expect(instruction).toContain('preserve the exact quote');
     expect(instruction).toContain('sourceRef "owner_correction"');
     expect(instruction).toContain('previous action');
+  });
+
+  it('PRI-1283 round 4: unverified agent-relayed evidence is NOT presented as the Owner\'s own words', () => {
+    const instruction = buildRootCauseProtocolInstruction({
+      coreGrounding: false,
+      correctionEvidence: { text: 'agent paraphrase of owner intent', channel: 'codex_explicit_agent' },
+    });
+    expect(instruction).toContain('agent-relayed, unverified');
+    expect(instruction).not.toContain("the Owner's OWN WORDS");
+    expect(instruction).toContain('agent paraphrase of owner intent');
+  });
+
+  it('PRI-1283 round 4: bound-confirmed agent evidence keeps the verbatim Owner block', () => {
+    const instruction = buildRootCauseProtocolInstruction({
+      coreGrounding: false,
+      correctionEvidence: {
+        text: 'owner confirmed words',
+        channel: 'codex_explicit_agent',
+        classification: 'owner_statement',
+        ownerConfirmation: {
+          kind: 'owner_verbatim_turn_match',
+          statementFingerprint: fingerprintStatement('owner confirmed words'),
+        },
+      },
+    });
+    expect(instruction).toContain("the Owner's OWN WORDS");
+    expect(instruction).not.toContain('agent-relayed');
   });
 
   it('correctionEvidence absent → no correction content in the prompt (Case B/D)', () => {

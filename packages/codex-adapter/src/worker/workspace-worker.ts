@@ -33,6 +33,8 @@ import {
   createPainSignalBridge,
   isRetryWaitBackoffElapsed,
   pickDiagnosticianCandidate,
+  reconcileWaitingTargetEvidenceTasks,
+  type TargetEvidenceReconcileReport,
   PrincipleTreeLedgerAdapter,
   resolveDiagnosticianCapability,
 } from '@principles/core/runtime';
@@ -46,6 +48,7 @@ import {
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
   createGovernanceTrajectoryTurnReader,
+  createConsentLedgerSourceMaterialAuthorization,
   createHostIntentDocReader,
   isAutomaticPainSubmissionAuthorized,
   saveHostToolDeclaration,
@@ -58,6 +61,7 @@ import {
 } from '@principles/host-runtime';
 import { catchUpCodexIngestion, type CodexCatchUpResult } from '../ingestion/catch-up.js';
 import type { TranscriptPort } from '../ingestion/transcript-decoder.js';
+import { codexTargetTurnTextAvailable } from '../ingestion/pain-receipt-fallback.js';
 import { CODEX_TOOL_SEMANTIC_MAPPINGS, CODEX_TOOL_SEMANTICS } from '../tool-semantics.js';
 
 export type CodexWorkerMode = 'ready' | 'manual_action_required' | 'paused' | 'degraded';
@@ -92,6 +96,13 @@ export interface CodexWorkerCycleStepReport {
     readonly reuseReviewRequiredCandidateIds?: readonly string[];
   } | null;
   readonly downstream: InternalizationConsumerCycleOutcome | null;
+  /**
+   * PRI-1274 (B1 / P1-3): bounded waiting-task reconcile — flips
+   * `waiting_for_target_evidence` dispositions to `ready_for_diagnosis`
+   * once the authorized store holds the exact target turn's text. Present
+   * only on cycles that reached the diagnostician step.
+   */
+  readonly targetEvidenceReconcile?: TargetEvidenceReconcileReport;
   /**
    * Phase B Stage-2 review step. Always the LAST step so it can never starve
    * the Diagnostician (bounded to ≤2 candidates / ≤60s aggregate).
@@ -359,6 +370,8 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
 
   // Steps 4–6 — execution authority: internalization_auto_consumer.
   let diagnostician: CodexWorkerCycleStepReport['diagnostician'] = null;
+  // PRI-1274 (B1 / P1-3): filled by the waiting-task reconcile below.
+  let targetEvidenceReconcile: TargetEvidenceReconcileReport | null = null;
   if (diagnosticianDisabled) {
     // PRI-638 P1-C: intentional governance pause. No candidate picking, no
     // provider call, no degraded mode. The rest of the cycle (downstream)
@@ -395,6 +408,19 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
         if (sweep.recovered > 0 || sweep.errors.length > 0) {
           emitEvent('CODEX_WORKER_RECOVERY_SWEEP', JSON.stringify({ recovered: sweep.recovered, failed: sweep.errors.length }));
         }
+        // PRI-1274 (B1 / P1-3): bounded waiting-task reconcile BEFORE picking
+        // — catch-up (step 2) may have just delivered the target turn text,
+        // and the picker's SQL excludes anything still waiting. Bounded work
+        // over the existing task rows + the shared authorized-store probe;
+        // no new queue, no scheduler, no scanning of general history.
+        targetEvidenceReconcile = await reconcileWaitingTargetEvidenceTasks({
+          stateManager: handle.stateManager,
+          targetTurnTextAvailable: (sessionId, turnId) => codexTargetTurnTextAvailable(path.resolve(workspaceDir), sessionId, turnId),
+          nowIso: new Date().toISOString(),
+        });
+        if (targetEvidenceReconcile.flipped > 0 || targetEvidenceReconcile.errors.length > 0) {
+          emitEvent('CODEX_WORKER_TARGET_EVIDENCE_RECONCILE', JSON.stringify(targetEvidenceReconcile));
+        }
         const candidate = await pickDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT, new Date().toISOString());
         if (candidate !== null) {
           const stateDir = path.join(workspaceDir, '.state');
@@ -411,7 +437,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
             // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
             // turns from the workspace's own consent-tiered governance store.
-            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
+            // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
+            sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
             // SPEC §9.6: lazy probe — a revoked flag stops persisted
             // automatic_hook tasks at the bridge's execution boundary.
             isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
@@ -498,7 +526,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             getEnvVar: (name: string) => process.env[name],
             // PRI-1265: post-processing resumes see the same authorized
             // trajectory context as the initial diagnosis run.
-            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
+            // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
+            sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
             // SPEC §9.6: lazy probe — automatic_hook backlog resumes honor
             // the Workspace authorization too.
             isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
@@ -538,7 +568,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
         mode: 'degraded',
         reason,
         nextAction: 'Inspect the workspace state.db principle_candidates/tasks; the worker retries automatically on the next cycle.',
-        report: { catchUp, reconcile, postProcessing: null, diagnostician, downstream: null },
+        report: { catchUp, reconcile, postProcessing: null, diagnostician, downstream: null, ...(targetEvidenceReconcile !== null ? { targetEvidenceReconcile } : {}) },
       };
     }
   }
@@ -639,7 +669,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     ...base,
     mode: degradedReason !== undefined ? 'degraded' : 'ready',
     ...(degradedReason !== undefined ? { reason: degradedReason, nextAction: 'Inspect the Workspace .pd/config.yaml runtime profile and the per-step report above; the worker retries automatically on the next cycle.' } : {}),
-    report: { catchUp, reconcile, postProcessing, diagnostician, downstream, stage2 },
+    report: { catchUp, reconcile, postProcessing, diagnostician, downstream, ...(targetEvidenceReconcile !== null ? { targetEvidenceReconcile } : {}), stage2 },
   };
 }
 

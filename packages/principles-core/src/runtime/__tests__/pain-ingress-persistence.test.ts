@@ -96,6 +96,48 @@ describe('painIngress.v1 dual-write round trip (PRI-642 §9, §13)', () => {
     expect(executed.message).not.toContain('ingress_payload_mismatch');
   });
 
+  it('round-trips a bound agent-assisted Codex submission with honest empty evidence', async () => {
+    const bridge = makeBridge();
+    const { taskId } = await bridge.submitPainSignal({
+      painId: 'codex_agent_rt_1',
+      painType: 'user_frustration',
+      source: 'user_correction',
+      reason: 'Owner explicitly requested an agent-assisted registration; wording is not transcript-verified.',
+      sessionId: 'codex-root-session',
+      provenance: 'agent_reported_owner_approved',
+      hostKind: 'codex',
+      evidence: [],
+      painIngress: {
+        version: 'v1',
+        origin: { kind: 'agent_assisted', channel: 'codex_explicit_agent' },
+        correlation: {
+          status: 'bound',
+          hostKind: 'codex',
+          rootSessionId: 'codex-root-session',
+          rolloutIdentity: 'codex-rollout',
+          logicalObservationKey: 'codex|codex-rollout|turn-agent|user',
+          hostTurnId: 'turn-agent',
+        },
+        evidenceClass: { status: 'unavailable', reason: 'trajectory_unavailable' },
+      },
+    });
+    const task = await stateManager.getTask(taskId);
+    if (task === null) throw new Error('agent-assisted task missing after submit');
+    const parsed = JSON.parse(task.diagnosticJson as string) as Record<string, unknown>;
+    expect(parsed.provenance).toBe('agent_reported_owner_approved');
+    expect(parsed.evidence).toEqual([]);
+    const ingress = parsePainIngressV1Payload(parsed.painIngress);
+    expect(ingress.ok).toBe(true);
+    if (!ingress.ok) return;
+    expect(ingress.payload.origin).toEqual({ kind: 'agent_assisted', channel: 'codex_explicit_agent' });
+    expect(checkIngressTopLevelConsistency({
+      payload: ingress.payload,
+      topLevelProvenance: parsed.provenance,
+      topLevelSessionIdHint: parsed.sessionIdHint,
+      topLevelEvidenceCount: 0,
+    })).toBeNull();
+  });
+
   it('a submission without ingress facts keeps the legacy-only payload (compatibility window)', async () => {
     const bridge = makeBridge();
     const { taskId } = await bridge.submitPainSignal({
@@ -308,6 +350,49 @@ describe('checkIngressTopLevelConsistency (review blocker 2 closure)', () => {
     });
     expect(malformed.ok).toBe(false);
     if (!malformed.ok) expect(malformed.reasonCode).toBe('ingress_verified_session_invalid');
+  });
+
+  // ── PRI-1274 (B1): submission/target turn fields are validated INDEPENDENTLY —
+  // a trusted session may carry only the submission turn (target evidence is a
+  // separate later concern). Historical rows always carry both or neither, so
+  // this widening accepts strictly more of what the writer produces.
+
+  it('PRI-1274: a verified association with submissionTurnId but no targetTurnId parses', () => {
+    const parsed = parsePainIngressV1Payload({
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
+      correlation: { status: 'unbound', reason: 'missing_host_session' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      verifiedHostSession: { status: 'verified', sessionId: 'sess-verified', submissionTurnId: 'turn-7' },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.payload.verifiedHostSession).toEqual({ status: 'verified', sessionId: 'sess-verified', submissionTurnId: 'turn-7' });
+  });
+
+  it('PRI-1274: a session-only verified association (no turns) still parses', () => {
+    const parsed = parsePainIngressV1Payload({
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
+      correlation: { status: 'unbound', reason: 'missing_host_session' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      verifiedHostSession: { status: 'verified', sessionId: 'sess-verified' },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.payload.verifiedHostSession).toEqual({ status: 'verified', sessionId: 'sess-verified' });
+  });
+
+  it('PRI-1274: an empty-string turn id still fails closed (rc-3)', () => {
+    const parsed = parsePainIngressV1Payload({
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
+      correlation: { status: 'unbound', reason: 'missing_host_session' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      verifiedHostSession: { status: 'verified', sessionId: 'sess-verified', submissionTurnId: '   ' },
+    });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.reasonCode).toBe('ingress_verified_session_invalid');
   });
 
   it('accepts a consistent bound OpenClaw v1 with matching evidence count', () => {
