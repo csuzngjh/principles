@@ -183,6 +183,7 @@ export async function runSchedulerLifecycle(
       cliEntry: entry.entry,
       nodePath: probes?.nodePath ?? process.execPath,
       intervalMs: interval.intervalMs,
+      intervalExplicit: options.intervalMs !== undefined,
       identity: schedulerIdentityFor(identity.pdHome),
     };
     const result = await adapterResolution.adapter.install(registration);

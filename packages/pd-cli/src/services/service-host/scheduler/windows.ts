@@ -524,6 +524,7 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
   async function writeAndRegisterXml(
     registration: SchedulerRegistration,
     xml: string,
+    mode: 'create' | 'update',
   ): Promise<SchedulerOperationResult> {
     const xmlDir = path.join(registration.pdHome, 'service');
     const xmlFile = path.join(xmlDir, 'scheduler-registration-win.xml');
@@ -535,6 +536,13 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
     if (!written.ok) {
       return { ok: false, kind: 'command_failed', reason: `scheduler_xml_write_failed:${written.reason.slice(0, 80)}`, nextAction: `Could not write the task definition to ${xmlFile}; retry pd service install after fixing the filesystem issue.` };
     }
+    // ITaskFolder::RegisterTask flags: TASK_CREATE(2) refuses an existing
+    // task; TASK_UPDATE(4) rewrites the registration IN PLACE — a failed
+    // update leaves the old task and its enabled state intact, unlike
+    // Unregister→Register which deletes first (Register-ScheduledTask has
+    // no overwrite flag — it fails with HRESULT 0x800700b7, and the
+    // delete-first workaround risked losing the registration on failure).
+    const taskFlags = mode === 'update' ? 4 : 2;
     const body = (name: string) => `
   # -Encoding UTF8: the definition is written UTF-8 without BOM; Windows
   # PowerShell 5.1 would otherwise decode it with the ANSI codepage and
@@ -542,13 +550,11 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
   $xmlText = Get-Content -LiteralPath $env:PD_TASK_XML -Raw -Encoding UTF8
   $user = "$env:USERDOMAIN\\$env:USERNAME" -replace '&','&amp;'
   $xmlText = $xmlText.Replace('__PD_TASK_USER__', $user)
-  # Register-ScheduledTask does NOT overwrite an existing task — it fails
-  # with HRESULT 0x800700b7 "Cannot create a file when that file already
-  # exists" (real Windows Server 2025 CI evidence). Drop our own
-  # registration first so the rewrite is idempotent on refresh (the task
-  # is provably ours — the ownership check ran before this script).
-  Unregister-ScheduledTask -TaskName '${name}' -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-  Register-ScheduledTask -TaskName '${name}' -Xml $xmlText | Out-Null
+  $ts = New-Object -ComObject Schedule.Service
+  $ts.Connect()
+  # LogonType 3 = TASK_LOGON_INTERACTIVE_TOKEN (run as the registering
+  # user, matching the XML's LogonTrigger principal).
+  $ts.GetFolder('\\').RegisterTask('${name}', $xmlText, ${taskFlags}, $null, $null, 3, $null) | Out-Null
   [PSCustomObject]@{ done = $true } | ConvertTo-Json -Compress`;
     return runMutation(registration, body, { extraEnv: { PD_TASK_XML: xmlFile } });
   }
@@ -575,18 +581,19 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
         }
         // Refresh our own registration (task §15 review): rewrite the
         // definition from the CURRENT OS state — interval + enabled
-        // preserved, only the CLI entry/node path move forward.
-        const preservedInterval = typeof query.body.xml === 'string'
+        // preserved, only the CLI entry/node path move forward — unless
+        // the caller explicitly passed a new --interval-ms.
+        const preservedInterval = typeof query.body.xml === 'string' && registration.intervalExplicit !== true
           ? parseWindowsIntervalMs(query.body.xml)
           : null;
         const effective: SchedulerRegistration = preservedInterval !== null
           ? { ...registration, intervalMs: preservedInterval }
           : registration;
         const wasEnabled = query.body.state !== '' && query.body.state !== 'Disabled';
-        return writeAndRegisterXml(registration, buildWindowsTaskXml(effective, new Date(), wasEnabled));
+        return writeAndRegisterXml(registration, buildWindowsTaskXml(effective, new Date(), wasEnabled), 'update');
       }
 
-      return writeAndRegisterXml(registration, buildWindowsTaskXml(registration));
+      return writeAndRegisterXml(registration, buildWindowsTaskXml(registration), 'create');
     },
 
     async enable(registration) {

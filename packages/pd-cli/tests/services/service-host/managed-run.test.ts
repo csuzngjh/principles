@@ -426,6 +426,40 @@ describe('status contract + progress projection', () => {
   });
 });
 
+describe('crash path — failure persistence', () => {
+  it('persists outcome=failed when the run throws mid-flight — the status file must not keep the previous result', async () => {
+    // Review regression: the exception path used to release the run lock
+    // BEFORE checking holdsServiceRunLock, so the "still ours" check always
+    // failed and outcome=failed never reached the status file.
+    const home = tempHome();
+    const ws = codexWorkspace(home, 'sh-owned');
+    const pdDir = installSandbox(home, [ws], { [ws]: { state: 'service_host_owned' } });
+    // supports() is outside the per-adapter try boundary — a throwing probe
+    // crashes the coordinator the same way an internal error would.
+    const exploding: WorkerAdapter = {
+      ...fakeAdapter('codex'),
+      supports: () => {
+        throw new Error('supports kaboom');
+      },
+    };
+
+    await expect(runServiceManagedOnce({
+      triggerSource: 'scheduler',
+      trustedHomeDir: home,
+      probes: { adapters: { codex: exploding, workbuddy: fakeAdapter('workbuddy') } },
+    })).rejects.toThrow('supports kaboom');
+
+    const persisted = JSON.parse(readFileSync(serviceRunStatusPath(pdDir), 'utf8')) as {
+      schemaVersion: string;
+      outcome: string;
+      managed: { triggerSource: string };
+    };
+    expect(persisted.schemaVersion).toBe('pd.service-run-status.v1');
+    expect(persisted.outcome).toBe('failed');
+    expect(persisted.managed.triggerSource).toBe('scheduler');
+  });
+});
+
 describe('manifest immutability (no handover side effects)', () => {
   it('leaves the install manifest byte-identical after a managed run', async () => {
     const home = tempHome();

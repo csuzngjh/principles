@@ -197,6 +197,8 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
   interface LoadState {
     /** launchctl print found the job loaded in the domain. */
     readonly loaded: boolean;
+    /** False when `launchctl print` failed WITHOUT a definitive not-loaded answer — callers must fail closed, never treat it as unloaded. */
+    readonly loadedKnown: boolean;
     /** print-disabled produced a verdict for the label. */
     readonly disabledKnown: boolean;
     /** launchd persistent disabled flag (null = unreadable). */
@@ -209,11 +211,23 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
   async function loadState(label: string): Promise<LoadState> {
     const domain = guiDomain();
     if (!domain.ok) {
-      return { loaded: false, disabledKnown: false, disabled: null, lastResult: null, unreadableReasons: [domain.reason] };
+      return { loaded: false, loadedKnown: false, disabledKnown: false, disabled: null, lastResult: null, unreadableReasons: [domain.reason] };
     }
     const reasons: string[] = [];
     const print = await run('launchctl', ['print', `${domain.domain}/${label}`]);
     const loaded = print.code === 0;
+    // A failed print is only proof of "not loaded" when launchd says so;
+    // any other failure (spawn, permission, timeout) leaves the loaded
+    // state UNKNOWN — an unknown state must not drive bootout/delete.
+    const notFound = /could not find|no such|not loaded|can't find|cannot find|does not exist/i.test(
+      `${print.stderr}\n${print.stdout}`,
+    );
+    const loadedKnown = loaded || notFound;
+    if (!loaded && !notFound) {
+      reasons.push(
+        `launchctl_print_failed:${print.code ?? 'spawn'}:${(print.spawnError ?? print.stderr.trim() ?? print.stdout.trim()).slice(0, 100)}`,
+      );
+    }
     let lastResult: string | null = null;
     if (loaded) {
       const match = /last exit code\s*=\s*(\d+)/.exec(print.stdout);
@@ -233,7 +247,7 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
         `launchctl_print_disabled_failed:${disabledList.code ?? 'spawn'}:${(disabledList.spawnError ?? disabledList.stderr).trim().slice(0, 100)}`,
       );
     }
-    return { loaded, disabledKnown: disabled !== null, disabled, lastResult, unreadableReasons: reasons };
+    return { loaded, loadedKnown, disabledKnown: disabled !== null, disabled, lastResult, unreadableReasons: reasons };
   }
 
   /** launchctl print confirms the job is no longer loaded. */
@@ -301,13 +315,14 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
     // enabled (will fire) = the launchd disabled flag is clear; unreadable
     // flag = null, never folded into loaded/unloaded or guessed (task §9).
     const enabled = state.disabled === null ? null : !state.disabled;
+    const active = state.loadedKnown ? state.loaded : null;
     return {
       ok: true,
       changed: false,
       facts: baseFacts(registration, {
         registered: true,
         enabled,
-        active: state.loaded,
+        active,
         triggerIntervalMs: parseMacosStartIntervalMs(existing.content),
         lastResult: state.lastResult,
         ...(state.unreadableReasons.length > 0 ? { degradedReasons: state.unreadableReasons } : {}),
@@ -375,7 +390,7 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
 
       // Refresh semantics (task §15): an existing OWN registration keeps its
       // interval — only the node/CLI entry and args move forward.
-      const preservedInterval = refreshOnly
+      const preservedInterval = refreshOnly && registration.intervalExplicit !== true
         ? (existing.ok ? parseMacosStartIntervalMs(existing.content) : null)
         : null;
       const effective: SchedulerRegistration = preservedInterval !== null
@@ -393,17 +408,25 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
 
       const state = await loadState(registration.identity.macosLabel);
       const wasEnabled = refreshOnly && state.disabled === false;
-      if (wasEnabled && state.loaded) {
+      // When the loaded state is UNKNOWN a possibly-loaded job must still be
+      // reloaded — bootout tolerates a definitive not-loaded answer, and a
+      // genuinely loaded job must not keep firing under the stale plist.
+      if (wasEnabled && (!state.loadedKnown || state.loaded)) {
         // Refresh an ENABLED+loaded agent: reload the definition while the
         // enabled flag stays enabled (task §15).
         const bootout = await run('launchctl', ['bootout', `${domain.domain}/${registration.identity.macosLabel}`]);
         if (bootout.code !== 0) {
-          return {
-            ok: false,
-            kind: 'command_failed',
-            reason: `launchctl_bootout_failed:${bootout.code ?? 'spawn'}:${(bootout.spawnError ?? bootout.stderr).trim().slice(0, 120)}`,
-            nextAction: 'The refreshed plist could not replace the loaded job (bootout failed); the previous definition stays active. Inspect the stderr above and retry.',
-          };
+          const stderr = bootout.stderr.trim();
+          const notLoaded = bootout.spawnError === undefined
+            && /no such process|not loaded|No process existing with specified identity/i.test(stderr);
+          if (!notLoaded) {
+            return {
+              ok: false,
+              kind: 'command_failed',
+              reason: `launchctl_bootout_failed:${bootout.code ?? 'spawn'}:${(bootout.spawnError ?? stderr).slice(0, 120)}`,
+              nextAction: 'The refreshed plist could not replace the loaded job (bootout failed); the previous definition stays active. Inspect the stderr above and retry.',
+            };
+          }
         }
         const bootstrap = await run('launchctl', ['bootstrap', domain.domain, plistFile]);
         if (bootstrap.code !== 0 || !(await verifyLoaded(registration.identity.macosLabel))) {
@@ -559,7 +582,7 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
         };
       }
       const state = await loadState(label);
-      if (state.disabled === true && !state.loaded) {
+      if (state.disabled === true && state.loadedKnown && !state.loaded) {
         return {
           ok: true,
           changed: false,
@@ -653,6 +676,18 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
       // Stop + unload OUR job first, verify it is gone, then remove ONLY our
       // plist (task §3).
       const state = await loadState(label);
+      // An UNREADABLE loaded state is not proof the job is unloaded —
+      // deleting the plist while a stale-loaded job still points at it
+      // would leave an untracked registration. Fail closed instead (the
+      // plist is NOT removed; re-run once launchctl answers).
+      if (!state.loadedKnown) {
+        return {
+          ok: false,
+          kind: 'command_failed',
+          reason: `launchagent_loaded_state_unverified:${(state.unreadableReasons[0] ?? 'launchctl_print_failed').slice(0, 120)}`,
+          nextAction: '`launchctl print` could not prove whether the job is loaded; the plist was NOT removed. Inspect the error above and re-run pd service uninstall.',
+        };
+      }
       if (state.disabled !== true) {
         await run('launchctl', ['disable', `${domain.domain}/${label}`]);
       }

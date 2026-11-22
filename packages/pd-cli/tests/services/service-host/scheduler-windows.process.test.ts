@@ -187,9 +187,9 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
       const result = await lifecycleAdapter.install(registration);
       expect(result.ok, explain(result)).toBe(true);
       if (!result.ok) return;
-      // Refresh semantics: the definition is re-registered (Unregister →
-      // Register) preserving interval and the DISABLED state — a converged
-      // rewrite, not a skipped no-op.
+      // Refresh semantics: the definition is re-registered in place
+      // (ITaskFolder::RegisterTask TASK_UPDATE) preserving interval and the
+      // DISABLED state — a converged rewrite, not a skipped no-op.
       expect(result.changed).toBe(true);
       expect(result.facts.enabled).toBe(false);
     },

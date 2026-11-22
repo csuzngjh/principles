@@ -216,8 +216,10 @@ describe('createWindowsSchedulerAdapter', () => {
     expect(calls[0]?.command).toBe('powershell.exe');
     expect(calls[0]?.args.slice(0, 5)).toEqual(['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command']);
     expect(scriptAt(calls, 0)).toContain('Get-ScheduledTask');
-    expect(scriptAt(calls, 0)).not.toContain('Register-ScheduledTask');
-    expect(scriptAt(calls, 1)).toContain('Register-ScheduledTask');
+    expect(scriptAt(calls, 0)).not.toContain('RegisterTask');
+    // Fresh install uses ITaskFolder::RegisterTask TASK_CREATE(2) — refuses
+    // to overwrite a same-named task that raced in after the query.
+    expect(scriptAt(calls, 1)).toMatch(/RegisterTask\('[^']+',\s*\$xmlText,\s*2,/);
     expect(scriptAt(calls, 2)).toContain('Get-ScheduledTask');
 
     const xmlFile = path.join(registration.pdHome, 'service', 'scheduler-registration-win.xml');
@@ -247,10 +249,15 @@ describe('createWindowsSchedulerAdapter', () => {
     expect(result.facts.registered).toBe(true);
     expect(result.facts.enabled).toBe(true);
     expect(calls.length).toBe(3);
-    // Register-ScheduledTask does not overwrite — the refresh must Unregister
-    // our own task first (real Windows 0x800700b7 evidence).
-    expect(scriptAt(calls, 1)).toContain('Unregister-ScheduledTask');
-    expect(scriptAt(calls, 1)).toContain('Register-ScheduledTask');
+    // The refresh rewrites the task IN PLACE via ITaskFolder::RegisterTask
+    // TASK_UPDATE(4) — never Unregister→Register, which would delete the
+    // registration if the re-register failed (Register-ScheduledTask itself
+    // cannot overwrite: HRESULT 0x800700b7 evidence).
+    expect(scriptAt(calls, 1)).toContain('Schedule.Service');
+    expect(scriptAt(calls, 1)).toContain('RegisterTask');
+    expect(scriptAt(calls, 1)).not.toContain('Unregister-ScheduledTask');
+    // flag position: RegisterTask(name, xml, flags, userId, password, logonType, sddl)
+    expect(scriptAt(calls, 1)).toMatch(/RegisterTask\('[^']+',\s*\$xmlText,\s*4,/);
     // The refreshed definition keeps the enabled flag ON (not the fresh-install false).
     expect(fileIo.writeLog.length).toBe(1);
     expect(fileIo.writeLog[0]?.content).toContain('<Enabled>true</Enabled>');

@@ -240,6 +240,65 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(subsOf(calls)).not.toContain('disable');
   });
 
+  it('install refresh honors an explicitly passed --interval-ms over the registered one', async () => {
+    // An explicit interval is a user command — it must win over the
+    // refresh-preserve rule (review: silent interval override).
+    const registration: SchedulerRegistration = { ...makeRegistration(), intervalMs: 600_000, intervalExplicit: true };
+    const { timerFile } = unitPaths(registration);
+    const state: SystemdState = { enabled: true, active: true, managerSees: true };
+    const { runner } = systemctlRunner(state);
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    fileIo.files.set(timerFile, buildLinuxTimerUnit({ ...registration, intervalMs: 300_000 }));
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.triggerIntervalMs).toBe(600_000);
+    expect(fileIo.files.get(timerFile)).toBe(buildLinuxTimerUnit({ ...registration, intervalMs: 600_000 }));
+  });
+
+  it('disable fails closed when the post-disable verdict is unreadable — never reports stopped without proof', async () => {
+    const registration = makeRegistration();
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true }, {
+      // disable --now "succeeds" but the verdict query cannot be answered
+      // (e.g. bus error) — an unknown state is NOT proof of stopped.
+      'is-enabled': { code: 2, stdout: '', stderr: 'Failed to connect to bus: Connection timed out' },
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.disable(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('systemd_disable_unverified');
+  });
+
+  it('uninstall fails closed and keeps the unit files when the stopped-verdict is unreadable', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: false, active: false, managerSees: true }, {
+      'is-active': { code: null, stdout: '', stderr: '', spawnError: 'ENOENT: systemctl not found' },
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.uninstall(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('systemd_uninstall_unverified');
+    // Nothing was deleted — the possibly-live registration is left for the operator.
+    expect(fileIo.files.has(serviceFile)).toBe(true);
+    expect(fileIo.files.has(timerFile)).toBe(true);
+    expect(fileIo.removeLog.length).toBe(0);
+  });
+
   it('install refuses a foreign service unit and does not overwrite it', async () => {
     const registration = makeRegistration();
     const { serviceFile, timerFile } = unitPaths(registration);

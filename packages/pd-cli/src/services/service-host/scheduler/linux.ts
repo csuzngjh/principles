@@ -308,7 +308,10 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
     }
     const stderr = result.stderr.trim();
     if (result.code === 1) {
-      if (/not[- ]found|no such unit|could not be found/i.test(stderr)) {
+      // 'No such file or directory' is systemd's definitive "the manager
+      // has no unit-file state" answer (search-path miss / never reloaded)
+      // — positive not-registered evidence, not an unreadable query.
+      if (/not[- ]found|no such unit|could not be found|no such file or directory/i.test(stderr)) {
         return { enabled: null, state: 'not_found' };
       }
       if (/disabled/i.test(result.stdout) || stderr === '' || !/failed|error|bus/i.test(stderr)) {
@@ -519,8 +522,9 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
       }
 
       // Refresh semantics (task §15): an existing OWN registration keeps
-      // its interval — only the node/CLI entry and args move forward.
-      const preservedInterval = existingTimer.ok
+      // its interval — only the node/CLI entry and args move forward —
+      // UNLESS the caller explicitly passed a new --interval-ms.
+      const preservedInterval = existingTimer.ok && registration.intervalExplicit !== true
         ? parseLinuxTimerIntervalMs(existingTimer.content)
         : null;
       const effective: SchedulerRegistration = preservedInterval !== null
@@ -680,14 +684,16 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
           nextAction: '`systemctl --user disable --now` failed; future automatic triggers may still fire. Inspect the stderr above and retry.',
         };
       }
-      // "无法证明停止时不得返回成功" — verify disabled AND inactive.
+      // "无法证明停止时不得返回成功" — require POSITIVE disabled+inactive
+      // evidence; an unreadable verdict (query timeout/failure) is not
+      // proof of stopped and must fail closed, not report success.
       const verified = await gatherFacts(registration);
-      if (verified.enabled === true || verified.active === true) {
+      if (verified.enabled !== false || verified.active !== false) {
         return {
           ok: false,
           kind: 'command_failed',
           reason: 'systemd_disable_unverified',
-          nextAction: '`systemctl --user disable --now` returned success but the timer still reports enabled or active. Run pd service status to inspect and retry.',
+          nextAction: '`systemctl --user disable --now` returned success but the timer does not positively report disabled and inactive. Run pd service status to inspect and retry.',
         };
       }
       return {
@@ -737,7 +743,7 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
       const disable = await systemctl(['disable', '--now', timerUnitName(registration)]);
       if (disable.code !== 0) {
         const stderr = disable.stderr.trim();
-        const notFound = /not[- ]found|no such unit|could not be found/i.test(stderr);
+        const notFound = /not[- ]found|no such unit|could not be found|no such file|does not exist/i.test(stderr);
         if (!notFound || disable.spawnError !== undefined) {
           return {
             ok: false,
@@ -749,15 +755,20 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
         // not-found: the manager already has no such unit — continue to
         // remove the on-disk files.
       }
-      // 2. Confirm inactive + disabled before deleting (task §4).
+      // 2. Confirm inactive + disabled before deleting (task §4): require
+      // POSITIVE stopped evidence — `not_found` (the manager provably has
+      // no such timer) or `disabled` for enablement, and an explicit
+      // inactive answer for activity. An UNREADABLE verdict is not proof;
+      // treat it as still-live and refuse to delete.
       const enabled = await enabledVerdict(registration);
       const active = await activeVerdict(registration);
-      if (enabled.enabled === true || active.active === true) {
+      const provablyDisabled = enabled.enabled === false || enabled.state === 'not_found';
+      if (!provablyDisabled || active.active !== false) {
         return {
           ok: false,
           kind: 'command_failed',
           reason: 'systemd_uninstall_unverified',
-          nextAction: 'The timer still reports enabled or active after disable; the unit files were NOT removed. Inspect with pd service status and re-run pd service uninstall.',
+          nextAction: 'The timer does not positively report disabled and inactive after disable (enabled/active may still be true or unreadable); the unit files were NOT removed. Inspect with pd service status and re-run pd service uninstall.',
         };
       }
       // 3. Remove ONLY our unit files.

@@ -651,12 +651,12 @@ export async function runServiceManagedOnce(options: ManagedRunOptions): Promise
     runError = error;
     result = { ok: false, outcome: 'refused', runId, reason: 'internal_error', nextAction: '' };
   }
-  const release = releaseLock(handle);
-  const releaseFailed = release === 'failed_busy' || release === 'failed_unwritable';
   if (runThrew) {
     // A crashed run persists 'failed' — the status file must not keep the
     // PREVIOUS run's record standing in for a run that never completed
-    // (task §10 review). Best-effort: persist only while the lock is ours.
+    // (task §10 review). The lock must still be ours at write time, so
+    // persist BEFORE release: holdsServiceRunLock after releaseLock is
+    // always false and the failure would never reach the status file.
     try {
       const stillHolds = (options.probes?.holdsLock ?? holdsServiceRunLock)(handle);
       if (stillHolds) {
@@ -683,11 +683,14 @@ export async function runServiceManagedOnce(options: ManagedRunOptions): Promise
     } catch {
       // Persisting the failure must never mask the original error.
     }
-    if (releaseFailed) {
-      console.error(`pd service run-once (managed): lock release also failed (${release}) after the run error`);
+    const crashedRelease = releaseLock(handle);
+    if (crashedRelease === 'failed_busy' || crashedRelease === 'failed_unwritable') {
+      console.error(`pd service run-once (managed): lock release also failed (${crashedRelease}) after the run error`);
     }
     throw runError;
   }
+  const release = releaseLock(handle);
+  const releaseFailed = release === 'failed_busy' || release === 'failed_unwritable';
   if (releaseFailed) {
     if (result.outcome === 'completed') {
       return {

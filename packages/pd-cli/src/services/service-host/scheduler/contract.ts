@@ -77,6 +77,12 @@ export interface SchedulerRegistration {
   /** Absolute node executable that runs the entry. */
   readonly nodePath: string;
   readonly intervalMs: number;
+  /**
+   * True when the caller explicitly passed `--interval-ms` on install. An
+   * explicit interval wins over the OS-preserved one on refresh; an omitted
+   * interval keeps the registered cadence (task §15 refresh semantics).
+   */
+  readonly intervalExplicit?: boolean;
   /** Derived platform names — see {@link schedulerIdentityFor}. */
   readonly identity: SchedulerIdentity;
 }

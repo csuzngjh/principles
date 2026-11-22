@@ -549,6 +549,31 @@ describe('createMacosSchedulerAdapter', () => {
     expect(fileIo.removeLog).toHaveLength(0);
   });
 
+  it('uninstall fails closed and keeps the plist when launchctl print cannot answer', async () => {
+    // A failed print WITHOUT a definitive not-loaded answer leaves the
+    // loaded state UNKNOWN — deleting the plist would orphan a possibly
+    // still-loaded job that keeps firing with no file to re-inspect.
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const plistFile = plistPathFor(registration);
+    const state: LaunchctlState = { label: registration.identity.macosLabel, loaded: true, disabled: false };
+    const { runner } = launchctlRunner(state, {
+      print: { code: null, stdout: '', stderr: '', spawnError: 'EACCES: launchctl not executable' },
+    });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(plistFile, buildMacosLaunchAgentPlist(registration));
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.uninstall(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('command_failed');
+    expect(result.reason).toContain('launchagent_loaded_state_unverified');
+    expect(fileIo.files.has(plistFile)).toBe(true);
+    expect(fileIo.removeLog).toHaveLength(0);
+  });
+
   it('install refuses when the uid is unavailable (no writes, no launchctl calls)', async () => {
     const home = tempHome();
     const registration = makeRegistration(home);
