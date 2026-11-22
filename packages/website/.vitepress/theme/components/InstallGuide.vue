@@ -298,8 +298,8 @@
           <li>
             <strong>{{ isZh ? '插件启用：' : 'Plugin enabled:' }}</strong>
             {{ isZh
-              ? '安装器把 settings.json 的 enabledPlugins["principles-disciple@<marketplace>"] 记录为「已有选择优先，否则用插件清单默认值」。插件清单默认 defaultEnabled=false，所以全新安装是「已安装但未启用」，需要你在 WorkBuddy 插件管理里启用后 hook 才执行、手动入口才生效；已经显式启用或禁用过的选择会被原样保留。'
-              : 'the installer records enabledPlugins["principles-disciple@<marketplace>"] in settings.json, preferring an existing Owner true/false choice and otherwise applying the manifest default. The manifest default is defaultEnabled=false, so a fresh install is INSTALLED but NOT ENABLED — it must be enabled in WorkBuddy\'s plugin manager before its hooks run and the manual entry takes effect. An explicit Owner enable or disable is preserved unchanged.'
+              ? '安装器把 settings.json 的 enabledPlugins["principles-disciple@<marketplace>"] 记录为「已有选择优先，否则用插件清单默认值」。插件清单默认 defaultEnabled=true，所以全新安装默认已启用：hook 与内置 pd-recall MCP 服务在下一次会话自动生效，无需再进插件管理手动开启；已经显式禁用过的选择会被原样保留。'
+              : 'the installer records enabledPlugins["principles-disciple@<marketplace>"] in settings.json, preferring an existing Owner true/false choice and otherwise applying the manifest default. The manifest default is defaultEnabled=true, so a fresh install is ENABLED out of the box — its hooks run and the bundled pd-recall MCP server loads on the next session, with no manual plugin-manager step. An explicit Owner disable is preserved unchanged.'
             }}
           </li>
           <li>
