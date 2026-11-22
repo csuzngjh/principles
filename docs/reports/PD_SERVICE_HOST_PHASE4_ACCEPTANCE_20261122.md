@@ -2,7 +2,7 @@
 
 - **工单**：PRI-1282（Phase 4 — OpenClaw Worker 解耦、Gateway AutoConsumer 迁移与 Parity）
 - **分支**：`ai/PRI-1282-openclaw-worker`；基线 `0102002b9`（PR #2743 merge commit = origin/main）
-- **PR**：见 Linear/PR 链接（提交序列 `3a3faf7d0..64490bc89` + 本 docs 提交）
+- **PR**：https://github.com/csuzngjh/principles/pull/2749
 - **结论**：**PASS_WITH_LIMITATIONS**（限制见 §8；生产 marker 翻转维持平台门禁）
 
 ## 1. 提交序列
