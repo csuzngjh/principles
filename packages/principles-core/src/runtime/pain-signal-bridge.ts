@@ -12,6 +12,7 @@ import { shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evi
 import {
   denyAllSourceMaterialAuthorization,
   findUnauthorizedSourceRef,
+  isOwnerExplicitCorrectionChannel,
   type SourceMaterialAuthorizationPort,
 } from './source-material-authorization.js';
 import {
@@ -679,10 +680,37 @@ export async function evaluateAndPersistAdmissionFromStore(
         nextAction: `ingress evidence sourceRef '${ingressBlocked.sourceRef}' (host ${ingressBlocked.hostKind ?? 'unknown'}) is no longer authorized; run 'pd consent sweep-revoked --apply' and re-run the diagnosis before intake`,
       };
     }
+    // PRI-1283 review round 2 (directive D2): the ingress ORIGIN is the
+    // durable source attribution. After the R3 sweep removes the revoked
+    // evidence excerpts, `painIngress.origin` (kept by the sweep) is what
+    // still identifies the candidate's material as originating from a host
+    // whose consent is no longer granted — such a diagnosis must never re-
+    // enter internalization or downstream model stages, no matter how old its
+    // admission verdict is. `origin.kind === 'owner_manual'` (explicit Owner
+    // submission) is an Owner act and stays allowed (directive B).
+    const ingressOriginNested: unknown = ingressPayload !== null && isRecord(ingressPayload.painIngress)
+      ? ingressPayload.painIngress.origin
+      : undefined;
+    const ingressOrigin = isRecord(ingressOriginNested) ? ingressOriginNested : null;
+    if (ingressOrigin !== null && ingressOrigin.kind === 'automatic_hook' && typeof ingressOrigin.source === 'string') {
+      const sourcePrefix = ingressOrigin.source.split(':')[0] ?? '';
+      if ((sourcePrefix === 'codex' || sourcePrefix === 'workbuddy')
+        && !authorization.isHostSourceMaterialAuthorized(sourcePrefix).authorized) {
+        return {
+          ok: false,
+          reason: `source_authorization_revoked:ingress_origin_host_${sourcePrefix}`,
+          nextAction: `the diagnosis material originates from host '${sourcePrefix}' whose conversation-ingestion consent is no longer granted; intake is refused (the R3 sweep keeps this attribution even after excerpts are purged)`,
+        };
+      }
+    }
     const correctionBlockedByChannel = (() => {
       const correction = reentry.correctionEvidence;
       if (correction === undefined) return false;
       const channel = typeof (correction as { channel?: unknown }).channel === 'string' ? (correction as { channel: string }).channel : '';
+      // PRI-1283 review round 2 (directive B): explicit Owner submission
+      // channels are Owner acts — not governed by the conversation-ingestion
+      // consent ledger; they survive a revocation.
+      if (isOwnerExplicitCorrectionChannel(channel)) return false;
       const ingressHost = typeof ingressPayload?.hostKind === 'string' ? ingressPayload.hostKind : '';
       if (channel.startsWith('codex')) return !authorization.isHostSourceMaterialAuthorized('codex').authorized;
       if (channel.startsWith('workbuddy')) return !authorization.isHostSourceMaterialAuthorized('workbuddy').authorized;

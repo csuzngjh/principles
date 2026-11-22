@@ -2,8 +2,10 @@
 "@principles/core": minor
 "@principles/host-runtime": minor
 "@principles/pd-cli": minor
-"@principles/pd-console": minor
 "@principles/pd-mcp-server": minor
+"@principles/codex-adapter": patch
+"@principles/workbuddy-adapter": patch
+"create-principles-disciple": patch
 ---
 
 PRI-1283 R2/R3 (SPEC-PD-FEEDBACK-RESILIENCE-001 TECH §2.2): sourceRef
@@ -30,14 +32,31 @@ R3 — `runSourceRevocationSweep` (host-runtime): idempotent, visible,
 retryable purge of persisted excerpts for every host whose recorded consent
 decision is not granted — governance_observations text/tool facts NULLed and
 retention-class expired (the store's no-regain guard makes re-granting NOT
-resurrect old excerpts), admission marker payloads redacted, pain_events
-text/reason NULLed (the Pain row and its identity survive), task
-diagnostic_json evidence entries removed with a truthful
+resurrect old excerpts), admission marker payloads redacted (including the
+independent `reason` column and pending-review termination), pain_events
+text/reason NULLed for automatic pains (the Pain row and its identity
+survive), task diagnostic_json evidence entries removed with a truthful
 `painIngress.evidenceClass` (`source_revoked` added to the v1 reason enum)
-and a non-sensitive `sourceRevocation` audit block, pain_diagnoses and
-diagnostician artifacts evidence filtered via row CAS. Wired into
-`pd codex setup --decline` / `pd workbuddy setup --decline` (immediate sweep)
-and exposed as `pd consent sweep-revoked [--apply] [--json]` (default dry
-run); audit trail at `.state/source-revocation-sweep.jsonl` carries metadata
-only. Ledger-missing workspaces are not swept (not a revocation) while R2
-gates keep blocking; an unreadable ledger fails the sweep loudly.
+and a non-sensitive `sourceRevocation` audit block, pain_diagnoses,
+diagnostician artifacts, runs.output_payload and pi_artifacts evidence
+filtered via row CAS. Wired into `pd codex setup --decline` / `pd workbuddy
+setup --decline` (immediate sweep) and exposed as `pd consent sweep-revoked
+[--apply] [--json]` (default dry run — truly read-only connections, no schema
+init, no WAL/journal writes); audit trail at
+`.state/source-revocation-sweep.jsonl` carries metadata only. Ledger-missing
+workspaces are not swept (not a revocation) while R2 gates keep blocking; an
+unreadable ledger fails the sweep loudly.
+
+Review round 2 hardening (directives A–F): pending Stage-2 reviews of a
+revoked host are terminated `abandoned('source_revoked')` by both the sweep
+and the claim path (claim-time consent re-validation; pre-classifier claim
+verification blocks new model requests after a revocation; in-flight results
+are fenced by the decision+claimToken CAS); explicit Owner statements
+(`PD记录痛苦：` / `pd pain explicit` / WorkBuddy explicit intake) are
+classified by their own provenance and survive the revocation on every read
+path (sweep / recall / context assembler / console) and in the intake
+re-verification (a historical `admitted` verdict is re-verified against the
+latest source authorization before internalization may reuse it); dry runs
+are read-only per table with counted-from-write purges and reported audit
+failures; the core barrel surface carries only cross-package production
+consumers (9 admitted symbols).

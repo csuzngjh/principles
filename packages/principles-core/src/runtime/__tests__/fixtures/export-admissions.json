@@ -344,6 +344,117 @@
       ],
       "whyNotInternal": "Same boundary as HostSessionClaim: the verification verdict shape flows from the pd-mcp-server verifier (host-runtime store read) into the core capability which stays I/O-free; both packages must share one contract.",
       "alternativeConsidered": "Inlining the union in submit-assembly was rejected: the capability receipt field would then be typed by a foreign duplicate that can drift."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "GOVERNANCE_OBSERVATION_SOURCE_REF_PREFIX",
+      "kind": "value",
+      "consumers": [
+        "packages/host-runtime/src/source-revocation-sweep.ts"
+      ],
+      "whyNotInternal": "The revocation sweep lives in host-runtime and must attribute persisted evidence sourceRefs to the swept host with the exact prefix the codex/workbuddy ingestion producers write; a private copy would drift from the one mapping authority.",
+      "alternativeConsidered": "Re-declaring the prefix literal in host-runtime, rejected because two independent prefix constants would silently diverge on the next producer change.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "denyAllSourceMaterialAuthorization",
+      "kind": "value",
+      "consumers": [
+        "packages/host-runtime/src/governance-trajectory-turn-reader.ts"
+      ],
+      "whyNotInternal": "host-runtime composition roots need the fail-closed default port so an unwired authorization check denies governance-sourced turns instead of silently re-opening the R2 read gate.",
+      "alternativeConsidered": "Constructing an inline deny port in each host-runtime root, rejected because the denial reason string would be duplicated and drift from the documented default.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "isOwnerExplicitCorrectionChannel",
+      "kind": "value",
+      "consumers": [
+        "packages/host-runtime/src/source-revocation-sweep.ts"
+      ],
+      "whyNotInternal": "The revocation sweep must classify explicit Owner submission channels so Owner statements survive a host revocation; the classification is one shared judgment with the recall/assembler/console read gates.",
+      "alternativeConsidered": "A channel list literal inside the sweep, rejected because four read paths would drift on the next channel addition.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "isOwnerExplicitStatementReason",
+      "kind": "value",
+      "consumers": [
+        "packages/pd-console/src/server/models/EvidenceChainConsoleModel.ts",
+        "packages/host-runtime/src/source-revocation-sweep.ts"
+      ],
+      "whyNotInternal": "Console evidence-chain redaction and the revocation sweep both classify persisted pain/admission reasons by the explicit-owner marker so Owner statements are never wrongly withheld or purged.",
+      "alternativeConsidered": "Substring matching the marker text in each consumer, rejected because the marker string would exist in two packages.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "SourceMaterialHostKind",
+      "kind": "type",
+      "consumers": [
+        "packages/host-runtime/src/source-material-authorization.ts",
+        "packages/host-runtime/src/governance-trajectory-turn-reader.ts"
+      ],
+      "whyNotInternal": "host-runtime implements and consumes the authorization port; its public signatures need the governed-host union so a new host kind is a compile error, not a silent string.",
+      "alternativeConsidered": "Declaring a structural string union in host-runtime, rejected because it would accept kinds core does not govern.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "SourceMaterialDenialReason",
+      "kind": "type",
+      "consumers": [
+        "packages/host-runtime/src/source-material-authorization.ts"
+      ],
+      "whyNotInternal": "The ledger-backed port implementation in host-runtime returns the structured denial reason codes operators and the console surface; the codes are part of the port contract.",
+      "alternativeConsidered": "Widening the result to plain strings, rejected because unstructured denials are the rc-9 regression this gate exists to prevent.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "SourceAuthorizationState",
+      "kind": "type",
+      "consumers": [
+        "packages/host-runtime/src/source-material-authorization.ts"
+      ],
+      "whyNotInternal": "The authorization decision shape is the port contract host-runtime implements and pd-cli annotates; keeping it internal would force any implementer to redeclare it.",
+      "alternativeConsidered": "Re-exporting the type from host-runtime only, rejected because pd-cli would then depend on host-runtime for a core contract type.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "SourceMaterialAuthorizationPort",
+      "kind": "type",
+      "consumers": [
+        "packages/pd-cli/src/services/admission-write-gate.ts",
+        "packages/host-runtime/src/source-material-authorization.ts"
+      ],
+      "whyNotInternal": "The port is implemented in host-runtime and injected from pd-cli composition roots; both packages must name the interface or the injection is untyped.",
+      "alternativeConsidered": "A structural inline type in each consumer, rejected because a drifted shape would compile until a revocation slipped through.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
+    },
+    {
+      "entry": "./runtime/pain-recall",
+      "symbol": "PainRecallOptions",
+      "kind": "type",
+      "consumers": [
+        "packages/pd-cli/src/commands/pain-recall.ts"
+      ],
+      "whyNotInternal": "The pd pain-recall command forwards the authorization port into recall so governance excerpts are gated at the CLI boundary; the options type is that seam.",
+      "alternativeConsidered": "A positional extra parameter without a published type, rejected because the CLI would redeclare the option shape and drift.",
+      "addedIn": "PRI-1283",
+      "expiresAt": "2027-05-22"
     }
   ],
   "removals": [

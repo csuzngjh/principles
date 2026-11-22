@@ -39,6 +39,7 @@ import { readPromotedEvidenceWindow } from './promoted-evidence-reader.js';
 import {
   denyAllSourceMaterialAuthorization,
   filterEvidenceByAuthorization,
+  isOwnerExplicitCorrectionChannel,
   type SourceMaterialAuthorizationPort,
   type SourceMaterialHostKind,
 } from '../../source-material-authorization.js';
@@ -54,13 +55,15 @@ function isPainProvenance(value: unknown): value is (typeof PAIN_PROVENANCE_VALU
 }
 
 /**
- * PRI-1283 R2: correction evidence channel → the host whose consent governs
- * the statement. Governance-admitted corrections carry an explicit channel;
- * for channel-less legacy records the task's codex/workbuddy attribution
- * decides (their correction text came from that host's consent-gated
- * ingestion). OpenClaw / CLI-submitted corrections are owner-initiated
- * submissions (category A per-submission consent) — NOT governed by the
- * conversation-ingestion ledger — and return null.
+ * PRI-1283 R2 (review round 2, directive B): correction evidence channel →
+ * the host whose consent governs the statement. EXPLICIT Owner submission
+ * channels (`codex_explicit_prefix` / `codex_explicit_agent` /
+ * `workbuddy_explicit_prefix`) are Owner acts, not conversation ingestion —
+ * they are NOT governed by the conversation-ingestion ledger and survive a
+ * revocation (classification via the shared core helper so sweep / recall /
+ * assembler / console apply ONE judgment). Channel-less legacy records of a
+ * codex/workbuddy task remain governed (their correction text came from that
+ * host's consent-gated ingestion); OpenClaw / CLI corrections return null.
  */
 function correctionEvidenceHost(
   correction: NonNullable<DiagnosticianTaskRecord['correctionEvidence']>,
@@ -69,6 +72,7 @@ function correctionEvidenceHost(
   const channel = typeof (correction as { channel?: unknown }).channel === 'string'
     ? (correction as { channel: string }).channel
     : '';
+  if (isOwnerExplicitCorrectionChannel(channel)) return null;
   if (channel.startsWith('codex')) return 'codex';
   if (channel.startsWith('workbuddy')) return 'workbuddy';
   if (taskHostKind === 'codex') return 'codex';
@@ -584,6 +588,13 @@ export class SqliteContextAssembler implements ContextAssembler {
       turnIndex: num(obj.turnIndex),
       referencesAssistantTurnId: num(obj.referencesAssistantTurnId),
       occurredAt: str(obj.occurredAt),
+      // PRI-1283 review round 2 (directive B): the classification/channel are
+      // PROVENANCE the writer persists (PainCorrectionEvidenceSchema) — the
+      // explicit Owner-submission channels decide whether a correction is an
+      // Owner act that survives a consent revocation. Dropping them here made
+      // every correction fall back to task-host attribution (mis-withheld).
+      ...(obj.classification === 'owner_statement' ? { classification: 'owner_statement' as const } : {}),
+      ...(typeof obj.channel === 'string' && obj.channel.length > 0 ? { channel: obj.channel as PainCorrectionEvidence['channel'] } : {}),
     };
   }
 

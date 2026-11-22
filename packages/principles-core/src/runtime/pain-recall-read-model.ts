@@ -67,6 +67,8 @@ import { painRecallSnapshotTestHooks, type SnapshotStatsLike } from './pain-reca
 import {
   denyAllSourceMaterialAuthorization,
   filterEvidenceByAuthorization,
+  isOwnerExplicitCorrectionChannel,
+  isOwnerExplicitStatementReason,
   type SourceMaterialAuthorizationPort,
   type SourceMaterialHostKind,
 } from './source-material-authorization.js';
@@ -794,7 +796,13 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery, 
         const row = painRows.get(painId);
         if (!isRecord(row)) continue; // step 7 guaranteed presence; guard anyway (rc-1)
         const painHost = ownString(row, 'host_kind') ?? 'unknown';
-        const painGovernanceBlocked = governedHostUnauthorized(painHost, null);
+        // PRI-1283 review round 2 (directive B): an EXPLICIT Owner statement
+        // (`PD记录痛苦：` / `pd pain explicit` / WorkBuddy explicit intake —
+        // identified by the persisted reason marker) is an Owner act, not
+        // conversation ingestion; its text/reason survive a revocation.
+        // Rows without the marker stay governed (fail toward withholding).
+        const painOwnerExplicit = isOwnerExplicitStatementReason(ownString(row, 'reason'));
+        const painGovernanceBlocked = !painOwnerExplicit && governedHostUnauthorized(painHost, null);
         const pain: PainEventView = {
           occurredAt: ownString(row, 'created_at'),
           source: ownString(row, 'source'),
@@ -845,8 +853,13 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery, 
               : null;
             const persisted = payload !== null ? payload.correctionEvidence : undefined;
             const correctionChannel = isRecord(persisted) ? ownString(persisted, 'channel') : null;
+            // PRI-1283 review round 2 (directive B): explicit Owner submission
+            // channels are Owner acts — never governed by the conversation-
+            // ingestion consent ledger (same classification as the sweep and
+            // the context assembler).
             const correctionBlocked = isRecord(persisted)
               && typeof persisted.text === 'string' && persisted.text.length > 0
+              && !isOwnerExplicitCorrectionChannel(correctionChannel)
               && governedHostUnauthorized(painHost, correctionChannel);
             if (isRecord(persisted) && typeof persisted.text === 'string' && persisted.text.length > 0 && !correctionBlocked) {
               correction = {

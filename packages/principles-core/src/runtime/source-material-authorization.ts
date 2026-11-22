@@ -73,6 +73,46 @@ export const denyAllSourceMaterialAuthorization: SourceMaterialAuthorizationPort
 /** The one sourceRef prefix produced by consent-gated governance ingestion. */
 export const GOVERNANCE_OBSERVATION_SOURCE_REF_PREFIX = 'governance_observation:';
 
+// ── Owner-explicit provenance (PRI-1283 review round 2, directive B) ────────
+//
+// Revocation of a host's conversation-ingestion consent governs material the
+// system COLLECTED from that host's conversations. It does NOT govern material
+// the Owner explicitly submitted (`PD记录痛苦：` prefix, `pd pain explicit`,
+// WorkBuddy explicit intake) — those are Owner acts, not ingestion. Every
+// purge/read gate below must classify provenance through these helpers so the
+// four consumption entry points (sweep / recall / context assembler / console)
+// share ONE judgment instead of four (directive B2).
+
+/** Correction-evidence channels that mark an EXPLICIT Owner submission. */
+export const OWNER_EXPLICIT_CORRECTION_CHANNELS: readonly string[] = [
+  'codex_explicit_prefix',
+  'codex_explicit_agent',
+  'workbuddy_explicit_prefix',
+];
+
+/**
+ * Does this correction-evidence channel mark an explicit Owner submission?
+ * Unknown/non-string channels are NOT owner-explicit (fail toward the
+ * consent-gated reading — directive B3: unattributable is never a grant).
+ */
+export function isOwnerExplicitCorrectionChannel(channel: unknown): boolean {
+  return typeof channel === 'string' && OWNER_EXPLICIT_CORRECTION_CHANNELS.includes(channel);
+}
+
+/**
+ * The persisted `reason` marker produced by `correctionReason` for explicit
+ * Owner statements (admission markers and pain_events rows carry it).
+ */
+export const OWNER_EXPLICIT_STATEMENT_REASON_MARKER = 'explicit owner statement';
+
+/**
+ * Does this persisted pain/admission reason describe an explicit Owner
+ * statement? Rows lacking the marker are treated as automatic (governed).
+ */
+export function isOwnerExplicitStatementReason(reason: unknown): boolean {
+  return typeof reason === 'string' && reason.includes(OWNER_EXPLICIT_STATEMENT_REASON_MARKER);
+}
+
 /** logicalKey host prefixes, as produced by the codex/workbuddy adapters. */
 const GOVERNANCE_LOGICAL_KEY_HOST_PREFIXES: ReadonlyMap<string, SourceMaterialHostKind> = new Map([
   ['codex|', 'codex'],

@@ -36,10 +36,19 @@ function printHuman(report: SourceRevocationSweepReport): void {
     const p = host.purged;
     console.log(`    governance_observations text purged: ${p.governanceObservations}`);
     console.log(`    admission payloads redacted:          ${p.admissionPayloads}`);
+    console.log(`    admission reason columns redacted:    ${p.admissionReasons}`);
+    console.log(`    pending reviews terminated:           ${p.pendingReviewsTerminated}`);
+    console.log(`    owner-explicit statements preserved:  ${p.preservedOwnerStatements}`);
+    console.log(`    unattributable markers redacted:      ${p.unattributableMarkers}`);
     console.log(`    pain_events text/reason purged:       ${p.painEventTexts}`);
     console.log(`    tasks evidence-cleaned:               ${p.tasks} (${p.taskEvidenceEntries} entries, ${p.taskCorrectionEvidence} correction blocks)`);
     console.log(`    pain_diagnoses evidence-cleaned:      ${p.painDiagnoses} (${p.painDiagnosesEvidenceEntries} entries)`);
     console.log(`    diagnostician artifacts cleaned:      ${p.artifacts} (${p.artifactEvidenceEntries} entries)`);
+    console.log(`    runs output_payload cleaned:          ${p.runs} (${p.runEvidenceEntries} entries)`);
+    console.log(`    pi_artifacts cleaned:                 ${p.piArtifacts} (${p.piArtifactEvidenceEntries} entries)`);
+    for (const na of host.notApplicable) {
+      console.log(`    n/a (table/store absent):             ${na}`);
+    }
     for (const failure of host.failures) {
       console.error(`    WARN: ${failure}`);
     }

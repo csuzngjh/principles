@@ -32,6 +32,7 @@ import {
   SqliteConnection,
   sanitizeString,
   assembleEvidenceChain,
+  isOwnerExplicitStatementReason,
 } from '@principles/core/runtime';
 import { openTrajectoryDbReadonly } from '@principles/core/trajectory-store';
 import { readSourceMaterialAuthorization } from '@principles/host-runtime';
@@ -476,6 +477,9 @@ export class EvidenceChainConsoleModel {
     // is NOT cleanup (R3 owns the persisted copies), but the READ path must
     // still refuse them. IDs, states, timestamps and model-authored fields
     // survive; conversation-derived text is replaced with a visible marker.
+    // Review round 2 (directive B): an EXPLICIT Owner submission (explicit
+    // correction channel or the explicit reason marker in the summary) is an
+    // Owner act, not conversation ingestion — it stays fully visible.
     const blockedHosts = new Set<string>(
       (['codex', 'workbuddy'] as const)
         .filter((host) => readSourceMaterialAuthorization({ workspaceDir: this.workspaceDir, hostKind: host }).status === 'blocked'),
@@ -483,6 +487,10 @@ export class EvidenceChainConsoleModel {
     if (blockedHosts.size > 0) {
       for (const record of response.records) {
         if (record.hostKind !== undefined && blockedHosts.has(record.hostKind)) {
+          // The evidence-chain view carries no correction channel; the
+          // explicit-statement reason marker in the summary is the available
+          // provenance fact. No marker → withheld (fail toward withholding).
+          if (isOwnerExplicitStatementReason(record.summary)) continue;
           record.summary = `[source consent not granted — conversation-derived excerpt withheld (PRI-1283 R2)]`;
           if (record.correctionEvidence !== undefined) {
             record.correctionEvidence = undefined;

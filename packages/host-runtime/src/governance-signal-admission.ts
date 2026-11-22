@@ -1460,7 +1460,7 @@ export interface ClaimPendingCandidatesInput {
 }
 
 export type ClaimPendingCandidatesResult =
-  | { ok: true; candidates: readonly PendingCorrectionCandidate[]; expired: number }
+  | { ok: true; candidates: readonly PendingCorrectionCandidate[]; expired: number; revoked: number }
   | Degradation;
 
 
@@ -1494,6 +1494,17 @@ function parsePendingRow(row: Record<string, unknown>): { payloadText: string; p
  * text. Rows whose claim is younger than PENDING_REVIEW_CLAIM_TTL_MS are
  * skipped (another worker is reviewing them); TTL-expired rows become
  * `abandoned(ttl_expired)` here, before any LLM work.
+ *
+ * PRI-1283 review round 2 (directive A4): every claim re-reads the LATEST
+ * conversation-ingestion consent for the row's host. A host whose consent is
+ * no longer granted never yields a claimable candidate — the pending row is
+ * terminated as `abandoned('source_revoked')` right here (CAS on the exact
+ * payload text; the D6 terminal field set drops trigger.text /
+ * trigger.matchedTerms / hostTurnId / task_payload), so the revoked excerpt
+ * can neither be claimed nor keep living in the payload. Revocation is the
+ * linearization point: claims after it see the terminal row, and an
+ * in-flight claim is fenced by `recordPendingCorrectionReview` /
+ * `settlePendingCorrection` (both CAS on `decision='pending_llm_review'`).
  */
 export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesInput): ClaimPendingCandidatesResult {
   const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
@@ -1504,6 +1515,7 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
   const limit = Math.min(Math.max(input.limit ?? 2, 1), 8);
   const candidates: PendingCorrectionCandidate[] = [];
   let expired = 0;
+  let revoked = 0;
   try {
     const rows = db.prepare(`SELECT * FROM governance_signal_admissions
       WHERE decision = 'pending_llm_review' ORDER BY id LIMIT ?`).all(limit * 3);
@@ -1521,6 +1533,22 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
           WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
           .run('invalid_pending_payload', pendingTerminalPayload({ decision: 'abandoned', reason: 'invalid_pending_payload', attempts: 0, confidence: null, nowIso }), nowIso, key);
         expired += 1;
+        continue;
+      }
+      // Directive A4: latest-consent re-validation at claim time. The row's
+      // own host attribution (host_kind column) is the authority — never the
+      // caller's assumption. Blocked consent terminates the row instead of
+      // yielding a candidate whose text would flow into a model call.
+      const authorization = readSourceMaterialAuthorization({
+        workspaceDir: path.resolve(input.workspaceDir),
+        hostKind: parsed.hostKind === 'workbuddy' ? 'workbuddy' : 'codex',
+      });
+      if (authorization.status === 'blocked') {
+        const { changes } = db.prepare(`UPDATE governance_signal_admissions
+          SET decision = 'abandoned', reason = 'source_revoked', task_payload_json = ?, updated_at = ?
+          WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+          .run(pendingTerminalPayload({ decision: 'abandoned', reason: 'source_revoked', attempts: parsed.payload.review.attempts, confidence: null, nowIso }), nowIso, key, parsed.payloadText);
+        if (changes === 1) revoked += 1;
         continue;
       }
       const ageMs = Date.parse(parsed.createdAt);
@@ -1563,10 +1591,64 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
         createdAt: parsed.createdAt,
       });
     }
-    return { ok: true, candidates, expired };
+    return { ok: true, candidates, expired, revoked };
   } catch (error) {
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { ok: false, reason: `pending_claim_failed:${detail}`, nextAction: 'inspect the workspace trajectory database; pending rows remain durable' };
+  } finally {
+    close();
+  }
+}
+
+// ─── Pre-classification claim verification (directive A5) ───────────────────
+
+export interface VerifyPendingClaimInput {
+  readonly workspaceDir: string;
+  readonly logicalObservationKey: string;
+  /** The fencing token this worker received from the claim. */
+  readonly claimToken: string;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type VerifyPendingClaimResult =
+  | { ok: true; allowed: true }
+  | { ok: true; allowed: false; reason: 'source_revoked' | 'consent_not_granted' | 'claim_not_owned' | 'not_pending' | 'payload_invalid' }
+  | Degradation;
+
+/**
+ * PRI-1283 review round 2 (directive A5): the LAST authorization gate before
+ * `classifier(candidate.text, …)` starts a model request. Verifies, in one
+ * fresh read, that (a) the row is STILL `pending_llm_review`, (b) this
+ * worker's fencing token still owns the claim, and (c) the row's host still
+ * has granted consent. This is the revocation linearization boundary for NEW
+ * model requests: after a revocation completes (ledger decision or sweep
+ * termination), no fresh classifier call may start on the old source's text.
+ * A request already in flight cannot be recalled — its RESULT is fenced
+ * instead by `recordPendingCorrectionReview` (decision + claimToken CAS).
+ */
+export function verifyPendingClaimForClassification(input: VerifyPendingClaimInput): VerifyPendingClaimResult {
+  const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const row = pendingReviewMarkerRow(db, input.logicalObservationKey);
+    if (row === null || rowField(row, 'decision') !== 'pending_llm_review') {
+      return { ok: true, allowed: false, reason: 'not_pending' };
+    }
+    const parsed = parsePendingRow(row);
+    if (parsed === null) return { ok: true, allowed: false, reason: 'payload_invalid' };
+    const currentClaimToken = parsed.payload.review.claimToken;
+    if (currentClaimToken === undefined || currentClaimToken !== input.claimToken) {
+      return { ok: true, allowed: false, reason: 'claim_not_owned' };
+    }
+    const authorization = readSourceMaterialAuthorization({
+      workspaceDir: path.resolve(input.workspaceDir),
+      hostKind: parsed.hostKind === 'workbuddy' ? 'workbuddy' : 'codex',
+    });
+    if (authorization.status === 'blocked') {
+      return { ok: true, allowed: false, reason: authorization.reason === 'consent_revoked' ? 'source_revoked' : 'consent_not_granted' };
+    }
+    return { ok: true, allowed: true };
   } finally {
     close();
   }

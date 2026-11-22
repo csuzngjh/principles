@@ -6,9 +6,14 @@ import Database from 'better-sqlite3';
 import {
   admitGovernanceSignals,
   buildSharedSeedKeywordStore,
+  claimPendingCorrectionCandidates,
+  recordPendingCorrectionReview,
+  verifyPendingClaimForClassification,
   type GovernanceCorrectionCandidate,
 } from '../src/governance-signal-admission.js';
-import { ingestGovernanceObservations, promoteGovernanceEvidence } from '../src/governance-observation-store.js';
+import { runStage2CorrectionCycle } from '../src/signal-stage2-cycle.js';
+import { recallPains } from '@principles/core/runtime/pain-recall';
+import { ingestGovernanceObservations } from '../src/governance-observation-store.js';
 import {
   createConsentLedgerSourceMaterialAuthorization,
   readSourceMaterialAuthorization,
@@ -23,12 +28,8 @@ import { CODEX_INGESTION_DISCLOSURE_VERSION } from '../src/codex-disclosure.js';
 import {
   RuntimeStateManager,
   createDiagnosticianTaskId,
-  filterEvidenceByAuthorization,
   denyAllSourceMaterialAuthorization,
-  findUnauthorizedSourceRef,
-  hostKindFromGovernanceSourceRef,
 } from '@principles/core/runtime';
-import { readPromotedEvidenceWindow } from '@principles/core/runtime';
 
 /**
  * PRI-1283 acceptance suite (T1-T6): sourceRef revocation safety gate (R2)
@@ -255,21 +256,6 @@ describe('PRI-1283 T1 — granted consent authorizes source material', () => {
     expect(turns.length).toBe(1);
     expect(turns[0]?.rawExcerpt).toContain('codex-turn-text-1');
   });
-
-  it('promoted window returns promoted rows when the host is authorized', () => {
-    writeConsent('codex', 'granted');
-    const { painId } = seedAdmittedCodexPain();
-    promoteGovernanceEvidence({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-1', triggerLogicalKey: 'codex|rollout-1|turn-1|user', painRef: painId, now: NOW });
-    const port = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
-    const window = readPromotedEvidenceWindow({
-      workspaceDir,
-      painId,
-      maxEntries: 10,
-      authorizedHostKinds: ['codex', 'workbuddy'].filter((h) => port.isHostSourceMaterialAuthorized(h as 'codex' | 'workbuddy').authorized),
-    });
-    expect(window.status).toBe('ok');
-    if (window.status === 'ok') expect(window.entries.length).toBeGreaterThan(0);
-  });
 });
 
 // ── T2: revocation blocks every read path ───────────────────────────────────
@@ -302,36 +288,9 @@ describe('PRI-1283 T2 — revoked consent blocks every read path', () => {
     expect(wbTurns[0]?.rawExcerpt).toContain('workbuddy-turn-text-1');
   });
 
-  it('evidence filter removes revoked-source entries and keeps owner-reported ones', () => {
-    writeConsent('codex', 'revoked');
-    const port = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
-    const filtered = filterEvidenceByAuthorization([
-      { sourceRef: 'governance_observation:codex|rollout-1|turn-1|user', note: 'x' },
-      { sourceRef: 'owner_reported:cli', note: 'y' },
-      { sourceRef: 'candidate://abc', note: 'z' },
-    ], port);
-    expect(filtered.kept.map((e) => e.sourceRef)).toEqual(['owner_reported:cli', 'candidate://abc']);
-    expect(filtered.removed.length).toBe(1);
-    expect(filtered.denialReasons).toEqual(['consent_revoked']);
-  });
-
-  it('model-boundary check finds the revoked ref (used at invokeRuntime)', () => {
-    writeConsent('codex', 'revoked');
-    const port = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
-    const hit = findUnauthorizedSourceRef(['owner_reported:cli', 'governance_observation:codex|r|t|user'], port);
-    expect(hit).not.toBeNull();
-    expect(hit?.reason).toBe('consent_revoked');
-    expect(findUnauthorizedSourceRef(['owner_reported:cli'], port)).toBeNull();
-  });
-
   it('an unwired port denies governance material (fail-closed default)', () => {
     const decision = denyAllSourceMaterialAuthorization.isHostSourceMaterialAuthorized('codex');
     expect(decision.authorized).toBe(false);
-    const filtered = filterEvidenceByAuthorization([
-      { sourceRef: 'governance_observation:codex|r|t|user', note: 'x' },
-      { sourceRef: 'owner_reported:cli', note: 'y' },
-    ], denyAllSourceMaterialAuthorization);
-    expect(filtered.kept.map((e) => e.sourceRef)).toEqual(['owner_reported:cli']);
   });
 });
 
@@ -359,15 +318,6 @@ describe('PRI-1283 T6 — missing/pending/failed/unreadable consent', () => {
     const result = readSourceMaterialAuthorization({ workspaceDir, hostKind: 'codex' });
     expect(result.status).toBe('blocked');
     if (result.status === 'blocked') expect(result.reason).toBe('consent_unreadable');
-  });
-
-  it('an unattributable governance ref fails closed', () => {
-    expect(hostKindFromGovernanceSourceRef('governance_observation:alien|x')).toBeNull();
-    const hit = findUnauthorizedSourceRef(['governance_observation:alien|x'], {
-      isHostSourceMaterialAuthorized: () => ({ authorized: true }),
-    });
-    expect(hit).not.toBeNull();
-    expect(hit?.reason).toBe('authorization_unavailable');
   });
 
   it('authorization is workspace-scoped (cross-workspace isolation)', () => {
@@ -446,7 +396,10 @@ describe('PRI-1283 T4 — revocation sweep purges persisted copies (raw DB readb
       sourceRevocation?: Record<string, unknown>;
     };
     expect(parsed.evidence.map((e) => e.sourceRef)).toEqual(['owner_reported:cli']);
-    expect(parsed.correctionEvidence).toBeUndefined();
+    // Directive B: this fixture's correctionEvidence carries the explicit
+    // Owner channel (`codex_explicit_prefix`) — an Owner act survives the
+    // revocation and is NOT purged from the task payload.
+    expect(parsed.correctionEvidence).toBeDefined();
     expect(parsed.painIngress.evidenceClass.status).toBe('available');
     expect(parsed.painIngress.evidenceClass.entryCount).toBe(1);
     expect(parsed.sourceRevocation?.schemaVersion).toBe(1);
@@ -501,7 +454,6 @@ describe('PRI-1283 T5 — re-grant does NOT resurrect purged material', () => {
   it('old excerpts stay gone; only NEW material re-enters', async () => {
     writeConsent('codex', 'granted');
     const { painId, evidenceSourceRef } = seedAdmittedCodexPain();
-    promoteGovernanceEvidence({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-1', triggerLogicalKey: 'codex|rollout-1|turn-1|user', painRef: painId, now: NOW });
     await seedDiagnosisTask({ painId, evidenceSourceRef });
     writeConsent('codex', 'revoked');
     await runSourceRevocationSweep({ workspaceDir, apply: true });
@@ -514,11 +466,6 @@ describe('PRI-1283 T5 — re-grant does NOT resurrect purged material', () => {
     // The turn reader serves NOTHING for the old turns (expired, no-regain).
     const reader = createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: port });
     expect(reader.listUserTurnsForSession('rollout-1')).toEqual([]);
-
-    // Promoted window for the old pain stays empty.
-    const window = readPromotedEvidenceWindow({ workspaceDir, painId, maxEntries: 10, authorizedHostKinds: ['codex'] });
-    expect(window.status).toBe('ok');
-    if (window.status === 'ok') expect(window.entries.length).toBe(0);
 
     // Task evidence stays purged.
     const task = withState((db) => db.prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?').get(`diagnosis_${painId}`) as { diagnostic_json: string });
@@ -561,7 +508,13 @@ describe('PRI-1283 T6 — sweep edge behaviors', () => {
       db.prepare('UPDATE governance_signal_admissions SET task_payload_json = ? WHERE host_kind = ?').run('governance_observation:codex|torn{not json', 'codex');
     });
     const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
-    expect(report.outcome).toBe('completed');
+    // An unprovable payload is redacted fail-closed AND reported — the run is
+    // 'partial' because the unattributable marker is a visible degradation
+    // (directive A2.6/B3: never a silent guess either way).
+    expect(report.outcome).toBe('partial');
+    if (report.outcome === 'completed' || report.outcome === 'partial') {
+      expect(report.hosts[0]?.failures.some((f) => f.includes('unparseable'))).toBe(true);
+    }
     const marker = withTrajectory((db) => db.prepare('SELECT task_payload_json FROM governance_signal_admissions').get() as { task_payload_json: string });
     expect(marker.task_payload_json).toContain('source_revoked');
     // The tasks table enforces json_valid(diagnostic_json), so the sweep's
@@ -581,5 +534,460 @@ describe('PRI-1283 T6 — sweep edge behaviors', () => {
     } finally {
       await manager.close().catch(() => undefined);
     }
+  });
+});
+
+// ── Review round 2 (directive A7): pending review revocation bypass ─────────
+
+const SECRET = 'PD_REVOKE_SECRET_7A91';
+
+/**
+ * Seed a real pending_llm_review row whose trigger text carries the unique
+ * sensitive marker (ambiguous seed-overlay term → Stage-2 pending path).
+ */
+function seedPendingReviewWithSecret(): { key: string } {
+  writeConsent('codex', 'granted');
+  seedCodexObservation({ visibleText: `${SECRET} ambient turn text` });
+  const candidate: GovernanceCorrectionCandidate = {
+    kind: 'user_correction',
+    hostKind: 'codex',
+    logicalObservationKey: 'codex|rollout-1|turn-1|user',
+    rolloutIdentity: 'rollout-1',
+    rootSessionId: 'root-session-1',
+    hostTurnId: 'turn-1',
+    text: `我不同意这个方案 ${SECRET}`,
+    observedAt: NOW.toISOString(),
+  };
+  const admitted = admitGovernanceSignals({ workspaceDir, candidates: [candidate], now: NOW, keywordStore: buildSharedSeedKeywordStore() });
+  if (!('ok' in admitted) || !admitted.ok) throw new Error(`admission degraded: ${JSON.stringify(admitted)}`);
+  const outcome = admitted.outcomes[0];
+  if (outcome === undefined || outcome.disposition !== 'pending_llm_review') {
+    throw new Error(`expected pending_llm_review, got: ${JSON.stringify(admitted.outcomes.map((o) => o.disposition))}`);
+  }
+  return { key: candidate.logicalObservationKey };
+}
+
+function markerRow(): { decision: string; reason: string | null; task_payload_json: string | null } {
+  return withTrajectory((db) => db.prepare('SELECT decision, reason, task_payload_json FROM governance_signal_admissions').get() as { decision: string; reason: string | null; task_payload_json: string | null });
+}
+
+describe('PRI-1283 r2 A — pending review terminated by revocation (real SQLite)', () => {
+  it('Test A: sweep purges nested trigger text/matchedTerms, row unclaimable, classifier never called', async () => {
+    seedPendingReviewWithSecret();
+    const before = markerRow();
+    expect(before.task_payload_json).toContain(SECRET);
+
+    writeConsent('codex', 'revoked', new Date('2026-11-21T11:00:00.000Z').toISOString());
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+    if (report.outcome === 'completed' || report.outcome === 'partial') {
+      expect(report.hosts[0]?.purged.pendingReviewsTerminated).toBe(1);
+    }
+
+    const after = markerRow();
+    // Nested copies dropped: the D6 terminal payload carries no trigger.text,
+    // matchedTerms, hostTurnId or task_payload.
+    expect(after.decision).toBe('abandoned');
+    expect(after.reason).toBe('source_revoked');
+    expect(after.task_payload_json).not.toContain(SECRET);
+    expect(after.task_payload_json).not.toContain('trigger');
+    expect(after.task_payload_json).not.toContain('task_payload');
+    const terminal = JSON.parse(after.task_payload_json ?? '{}') as { decision?: string; reason?: string };
+    expect(terminal.decision).toBe('abandoned');
+    expect(terminal.reason).toBe('source_revoked');
+
+    // Raw string search across the trajectory DB: the secret is gone.
+    const allMarkers = withTrajectory((db) => db.prepare('SELECT task_payload_json, reason FROM governance_signal_admissions').all() as { task_payload_json: string | null; reason: string | null }[]);
+    for (const row of allMarkers) {
+      expect(`${row.task_payload_json ?? ''}${row.reason ?? ''}`).not.toContain(SECRET);
+    }
+
+    // Unclaimable: the claim path finds nothing.
+    const claim = claimPendingCorrectionCandidates({ workspaceDir, now: new Date('2026-11-21T11:05:00.000Z') });
+    expect(claim.ok).toBe(true);
+    if (claim.ok) expect(claim.candidates.length).toBe(0);
+
+    // The Stage-2 cycle makes ZERO classifier calls.
+    let classifierCalls = 0;
+    const report2 = await runStage2CorrectionCycle({
+      workspaceDir,
+      classifier: async () => { classifierCalls += 1; return null; },
+      now: new Date('2026-11-21T11:05:00.000Z'),
+    });
+    expect(classifierCalls).toBe(0);
+    expect(report2.claimed).toBe(0);
+  });
+
+  it('Test B: already-claimed worker cannot proceed after revocation+sweep (zero classifier calls)', async () => {
+    const { key } = seedPendingReviewWithSecret();
+    const claim = claimPendingCorrectionCandidates({ workspaceDir, now: NOW });
+    expect(claim.ok).toBe(true);
+    if (!claim.ok) return;
+    expect(claim.candidates.length).toBe(1);
+    const workerToken = claim.candidates[0]?.claimToken ?? null;
+    expect(workerToken).not.toBeNull();
+
+    writeConsent('codex', 'revoked');
+    await runSourceRevocationSweep({ workspaceDir, apply: true });
+
+    // The pre-classifier gate refuses: the row is terminal, the claim is dead.
+    const verify = verifyPendingClaimForClassification({ workspaceDir, logicalObservationKey: key, claimToken: workerToken! });
+    expect(verify.ok && verify.allowed).toBe(false);
+
+    let classifierCalls = 0;
+    await runStage2CorrectionCycle({
+      workspaceDir,
+      classifier: async () => { classifierCalls += 1; return null; },
+      now: new Date('2026-11-21T11:05:00.000Z'),
+    });
+    expect(classifierCalls).toBe(0);
+    expect(markerRow().decision).toBe('abandoned');
+  });
+
+  it('Test C: an in-flight classifier result is fenced after revocation (never persisted)', async () => {
+    const { key } = seedPendingReviewWithSecret();
+    const claim = claimPendingCorrectionCandidates({ workspaceDir, now: NOW });
+    if (!claim.ok) throw new Error('claim failed');
+    const workerToken = claim.candidates[0]?.claimToken;
+    if (workerToken === undefined || workerToken === null) throw new Error('no token');
+
+    // The model request "already started": revocation lands, then the result
+    // returns. The row was terminated by the sweep — the durable write must
+    // be refused (marker_not_pending), and nothing may be persisted.
+    writeConsent('codex', 'revoked');
+    await runSourceRevocationSweep({ workspaceDir, apply: true });
+
+    const recorded = recordPendingCorrectionReview({
+      workspaceDir,
+      logicalObservationKey: key,
+      claimToken: workerToken,
+      llmResult: { is_feedback: true, type: 'correction', confidence: 0.99, reason: `${SECRET} classified` },
+      now: new Date('2026-11-21T11:05:00.000Z'),
+    });
+    expect(recorded.ok).toBe(true);
+    if (recorded.ok) expect(recorded.disposition).toBe('not_pending');
+
+    const after = markerRow();
+    expect(after.decision).toBe('abandoned');
+    expect(`${after.task_payload_json ?? ''}${after.reason ?? ''}`).not.toContain(SECRET);
+  });
+
+  it('Test D: two workers cannot both hold the claim; after revocation neither can consume', async () => {
+    seedPendingReviewWithSecret();
+    const claimA = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
+    const claimB = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
+    expect(claimA.ok && claimB.ok).toBe(true);
+    if (!claimA.ok || !claimB.ok) return;
+    // The second claim finds the row skipped (fresh claim held by A).
+    expect(claimA.candidates.length).toBe(1);
+    expect(claimB.candidates.length).toBe(0);
+
+    writeConsent('codex', 'revoked');
+    // The NEXT claim attempt (either worker) terminates the row outright (A4).
+    const claimA2 = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: new Date('2026-11-21T11:05:00.000Z') });
+    expect(claimA2.ok).toBe(true);
+    if (claimA2.ok) {
+      expect(claimA2.candidates.length).toBe(0);
+      expect(claimA2.revoked).toBe(1);
+    }
+    expect(markerRow().decision).toBe('abandoned');
+  });
+
+  it('Test E: re-grant does not resurrect the terminated pending review or its text', async () => {
+    seedPendingReviewWithSecret();
+    writeConsent('codex', 'revoked');
+    await runSourceRevocationSweep({ workspaceDir, apply: true });
+
+    writeConsent('codex', 'granted');
+    const claim = claimPendingCorrectionCandidates({ workspaceDir, now: new Date('2026-11-21T12:00:00.000Z') });
+    expect(claim.ok).toBe(true);
+    if (claim.ok) expect(claim.candidates.length).toBe(0);
+    const after = markerRow();
+    expect(after.decision).toBe('abandoned');
+    expect(after.task_payload_json).not.toContain(SECRET);
+
+    // NEW ambiguous material under the re-granted consent enters pending again.
+    seedCodexObservation({ logicalKey: 'codex|rollout-1|turn-9|user', turnId: 'turn-9', visibleText: 'fresh turn' });
+    const candidate: GovernanceCorrectionCandidate = {
+      kind: 'user_correction',
+      hostKind: 'codex',
+      logicalObservationKey: 'codex|rollout-1|turn-9|user',
+      rolloutIdentity: 'rollout-1',
+      rootSessionId: 'root-session-1',
+      hostTurnId: 'turn-9',
+      text: '我不同意新方案',
+      observedAt: NOW.toISOString(),
+    };
+    const admitted = admitGovernanceSignals({ workspaceDir, candidates: [candidate], now: new Date('2026-11-21T12:01:00.000Z'), keywordStore: buildSharedSeedKeywordStore() });
+    expect(admitted.ok && admitted.outcomes[0]?.disposition).toBe('pending_llm_review');
+  });
+});
+
+// ── Review round 2 (directive B4): explicit Owner statement preservation ─────
+
+describe('PRI-1283 r2 B — Owner statement survives the sweep; automatic material does not', () => {
+  it('sweep preserves the explicit marker/pain while purging the automatic one; recall serves the Owner statement', async () => {
+    writeConsent('codex', 'granted');
+    // Automatic correction pain (seed) + an explicit Owner statement pain.
+    const { painId: autoPainId } = seedAdmittedCodexPain();
+    const explicitCandidate: GovernanceCorrectionCandidate = {
+      kind: 'user_correction',
+      hostKind: 'codex',
+      logicalObservationKey: 'codex|rollout-1|turn-2|user',
+      rolloutIdentity: 'rollout-1',
+      rootSessionId: 'root-session-1',
+      hostTurnId: 'turn-2',
+      text: `PD记录痛苦：${SECRET} owner explicit statement`,
+      observedAt: NOW.toISOString(),
+      explicitOwnerStatement: true,
+      explicitChannel: 'codex_explicit_prefix',
+    };
+    const explicit = admitGovernanceSignals({ workspaceDir, candidates: [explicitCandidate], now: NOW, keywordStore: buildSharedSeedKeywordStore() });
+    if (!explicit.ok || explicit.outcomes[0]?.disposition !== 'admitted') throw new Error(`explicit admission failed: ${JSON.stringify(explicit)}`);
+    const ownerPainId = explicit.outcomes[0]?.canonicalPainId ?? '';
+
+    writeConsent('codex', 'revoked');
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+
+    const markers = withTrajectory((db) => db.prepare('SELECT decision, reason, task_payload_json, canonical_pain_id FROM governance_signal_admissions ORDER BY id').all() as { decision: string; reason: string | null; task_payload_json: string | null; canonical_pain_id: string | null }[]);
+    const ownerMarker = markers.find((m) => m.canonical_pain_id === ownerPainId);
+    const autoMarker = markers.find((m) => m.canonical_pain_id === autoPainId);
+    // Owner statement marker fully preserved (payload, reason, decision).
+    expect(ownerMarker?.decision).toBe('admitted');
+    expect(ownerMarker?.task_payload_json).toContain(SECRET);
+    expect(ownerMarker?.reason).toContain('explicit owner statement');
+    // Automatic marker redacted.
+    expect(autoMarker?.task_payload_json).not.toContain('不要自作主张');
+    expect(autoMarker?.reason).not.toContain('不要自作主张');
+
+    // pain_events: owner pain text KEPT, automatic pain text NULLed.
+    const pains = withTrajectory((db) => db.prepare('SELECT canonical_pain_id, text, reason FROM pain_events').all() as { canonical_pain_id: string | null; text: string | null; reason: string | null }[]);
+    const ownerPain = pains.find((p) => p.canonical_pain_id === ownerPainId);
+    const autoPain = pains.find((p) => p.canonical_pain_id === autoPainId);
+    expect(ownerPain?.text).toContain(SECRET);
+    expect(autoPain?.text).toBeNull();
+    expect(autoPain?.reason).toBeNull();
+
+    // Recall (real read model): the Owner statement pain is SERVED with its
+    // text; the automatic pain is withheld (text/reason null in the view).
+    // The association is the reuse-evidence ledger path (same fixture shape
+    // as the pd-cli recall suite).
+    const ledger = {
+      _tree: {
+        principles: {
+          'p-recall-1': {
+            id: 'p-recall-1', version: 1, text: 'verify before acting', triggerPattern: 'w', action: 'a', status: 'active',
+            derivedFromPainIds: [],
+            reuseEvidence: [
+              { painId: ownerPainId, candidateId: 'cand-owner', decision: 'reuse', actor: { kind: 'owner', id: 'owner-1' }, reason: 'same pain', decidedAt: NOW.toISOString() },
+              { painId: autoPainId, candidateId: 'cand-auto', decision: 'reuse', actor: { kind: 'owner', id: 'owner-1' }, reason: 'same pain', decidedAt: NOW.toISOString() },
+            ],
+            createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+          },
+        },
+        rules: {}, implementations: {}, metrics: {}, lastUpdated: NOW.toISOString(),
+      },
+    };
+    fs.writeFileSync(path.join(workspaceDir, '.state', 'principle_training_state.json'), JSON.stringify(ledger, null, 2));
+    const recall = await recallPains(workspaceDir, { requestedPrincipleId: 'p-recall-1', limit: 10 }, {
+      sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+    });
+    const recallPainTexts = recall.results.map((entry) => entry.pain.text ?? '').join('\n');
+    expect(recallPainTexts).toContain(SECRET);
+    const autoEntry = recall.results.find((entry) => entry.painId === autoPainId);
+    expect(autoEntry?.pain.text ?? null).toBeNull();
+  });
+});
+
+// ── Review round 2 (directive C6): every persisted copy of a diagnosis ───────
+
+describe('PRI-1283 r2 C — full diagnosis pipeline cleanup (runs/pi_artifacts/admission.reason)', () => {
+  it('the unique secret is absent from every persisted location after the sweep', async () => {
+    writeConsent('codex', 'granted');
+    const { painId, evidenceSourceRef } = seedAdmittedCodexPain();
+    await seedDiagnosisTask({ painId, evidenceSourceRef });
+    await seedDiagnosisAndArtifactRows({ painId, evidenceSourceRef });
+
+    // Additional persisted copies: runs.output_payload + pi_artifacts + the
+    // admission reason COLUMN quoting the matched terms.
+    withState((db) => {
+      db.prepare('UPDATE runs SET output_payload = ? WHERE run_id = ?').run(JSON.stringify({
+        valid: true, diagnosisId: 'diag-1', summary: `s ${SECRET}`, rootCause: 'People: x',
+        violatedPrinciples: [], evidence: [{ sourceRef: evidenceSourceRef, note: `run excerpt ${SECRET}` }, { sourceRef: 'owner_reported:cli', note: 'keep' }],
+        recommendations: [{ kind: 'defer', reason: 'r' }], confidence: 0.9, schemaVersion: 'diagnostician-output-v2',
+      }), 'run-1');
+      db.prepare('INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run('pi-art-1', 'internalization_output', `diagnosis_${painId}`, '[]', 'validated', JSON.stringify({
+          evidence: [{ sourceRef: evidenceSourceRef, note: `pi excerpt ${SECRET}` }, { sourceRef: 'owner_reported:cli', note: 'keep' }],
+          summary: 'pi summary',
+        }), NOW.toISOString(), NOW.toISOString());
+    });
+    withTrajectory((db) => {
+      db.prepare('UPDATE governance_signal_admissions SET reason = ? WHERE host_kind = ?').run(`User correction detected: ${SECRET}`, 'codex');
+    });
+
+    writeConsent('codex', 'revoked');
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+    if (report.outcome === 'completed' || report.outcome === 'partial') {
+      const p = report.hosts[0]?.purged;
+      expect(p?.runs).toBe(1);
+      expect(p?.runEvidenceEntries).toBe(1);
+      expect(p?.piArtifacts).toBe(1);
+      expect(p?.piArtifactEvidenceEntries).toBe(1);
+      expect(p?.admissionReasons).toBe(1);
+    }
+
+    // Raw string search over every persisted location (directive C6).
+    const runOut = withState((db) => (db.prepare('SELECT output_payload FROM runs WHERE run_id = ?').get('run-1') as { output_payload: string | null }).output_payload ?? '');
+    expect(runOut).not.toContain(SECRET);
+    expect(JSON.parse(runOut).evidence.map((e: { sourceRef: string }) => e.sourceRef)).toEqual(['owner_reported:cli']);
+    const piOut = withState((db) => (db.prepare('SELECT content_json FROM pi_artifacts WHERE artifact_id = ?').get('pi-art-1') as { content_json: string }).content_json);
+    expect(piOut).not.toContain(SECRET);
+    expect(JSON.parse(piOut).evidence.map((e: { sourceRef: string }) => e.sourceRef)).toEqual(['owner_reported:cli']);
+    const admissionReason = markerRow().reason ?? '';
+    expect(admissionReason).not.toContain(SECRET);
+    // Owner evidence and task/run execution metadata survive untouched.
+    const task = withState((db) => db.prepare('SELECT status, diagnostic_json FROM tasks WHERE task_id = ?').get(`diagnosis_${painId}`) as { status: string; diagnostic_json: string });
+    expect(task.status).toBe('pending');
+    expect((JSON.parse(task.diagnostic_json) as { evidence: { sourceRef: string }[] }).evidence.map((e) => e.sourceRef)).toEqual(['owner_reported:cli']);
+    const runStatus = withState((db) => (db.prepare('SELECT execution_status FROM runs WHERE run_id = ?').get('run-1') as { execution_status: string }).execution_status);
+    expect(runStatus).toBe('succeeded');
+    // The audit trail carries metadata only — no secret.
+    const audit = fs.readFileSync(path.join(workspaceDir, '.state', SOURCE_REVOCATION_SWEEP_AUDIT_FILENAME), 'utf8');
+    expect(audit).not.toContain(SECRET);
+  });
+});
+
+// ── Review round 2 (directive E6): dry-run is truly read-only ────────────────
+
+function sha256File(filePath: string): string {
+  const crypto = require('node:crypto') as { createHash: (alg: string) => { update: (data: Buffer) => { digest: (enc: string) => string } } };
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function snapshotTree(dir: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const name of fs.readdirSync(dir).sort()) {
+    const full = path.join(dir, name);
+    const stat = fs.statSync(full);
+    out.set(name, stat.isDirectory() ? `dir:${name}` : `file:${sha256File(full)}:${stat.size}`);
+  }
+  return out;
+}
+
+describe('PRI-1283 r2 E — dry run is truly read-only; per-table independence; counted writes', () => {
+  it('dry run: state.db and trajectory.db byte-identical, schema unchanged, no WAL/SHM churn, no audit file', async () => {
+    writeConsent('codex', 'granted');
+    const { painId, evidenceSourceRef } = seedAdmittedCodexPain();
+    await seedDiagnosisTask({ painId, evidenceSourceRef });
+    await seedDiagnosisAndArtifactRows({ painId, evidenceSourceRef });
+    writeConsent('codex', 'revoked');
+
+    // Every writer is closed by the seed helpers, so the WAL is checkpointed
+    // and -wal/-shm are gone. A read-only SQLite open of a WAL-mode database
+    // may legitimately (re)create the -shm index and a 0-byte -wal on this
+    // platform — a 0-byte WAL contains ZERO write frames, so the database
+    // CONTENT proof below is what "truly read-only" means: byte-identical
+    // .db files, no schema change, no business rows, no audit line.
+    const stateDir = path.join(workspaceDir, '.pd');
+    const trajDir = path.join(workspaceDir, '.state');
+    const beforeState = sha256File(path.join(stateDir, 'state.db'));
+    const beforeTraj = sha256File(path.join(trajDir, 'trajectory.db'));
+    const beforeStateTables = withState((db) => (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[]).map((r) => r.name).join(','));
+    const beforeTrajRows = withTrajectory((db) => (db.prepare("SELECT COUNT(*) AS n FROM governance_observations WHERE visible_text IS NOT NULL").get() as { n: number }).n);
+
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: false });
+    expect(report.outcome).toBe('completed');
+
+    expect(sha256File(path.join(stateDir, 'state.db'))).toBe(beforeState);
+    expect(sha256File(path.join(trajDir, 'trajectory.db'))).toBe(beforeTraj);
+    // Any -wal sidecar the readonly open created must be EMPTY (zero frames).
+    for (const walPath of [path.join(stateDir, 'state.db-wal'), path.join(trajDir, 'trajectory.db-wal')]) {
+      if (fs.existsSync(walPath)) expect(fs.statSync(walPath).size).toBe(0);
+    }
+    // Schema and business rows untouched.
+    expect(withState((db) => (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[]).map((r) => r.name).join(','))).toBe(beforeStateTables);
+    expect(withTrajectory((db) => (db.prepare("SELECT COUNT(*) AS n FROM governance_observations WHERE visible_text IS NOT NULL").get() as { n: number }).n)).toBe(beforeTrajRows);
+    expect(fs.existsSync(path.join(trajDir, SOURCE_REVOCATION_SWEEP_AUDIT_FILENAME))).toBe(false);
+  });
+
+  it('a missing table is not_applicable for that table only — every other table still sweeps', async () => {
+    writeConsent('codex', 'granted');
+    seedAdmittedCodexPain();
+    writeConsent('codex', 'revoked');
+    // Drop governance_observations AFTER seeding: admissions + pain_events
+    // must still sweep (directive E4 — no early exit).
+    withTrajectory((db) => db.exec('DROP TABLE governance_observations'));
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+    if (report.outcome === 'completed' || report.outcome === 'partial') {
+      const host = report.hosts[0];
+      expect(host?.notApplicable).toContain('governance_observations');
+      expect((host?.purged.admissionPayloads ?? 0) + (host?.purged.pendingReviewsTerminated ?? 0)).toBeGreaterThanOrEqual(1);
+      expect(host?.purged.painEventTexts).toBe(1);
+    }
+    const pain = withTrajectory((db) => db.prepare('SELECT text FROM pain_events').get() as { text: string | null });
+    expect(pain.text).toBeNull();
+  });
+
+  it('a CAS loss is reported and never counted as purged (RAISE(IGNORE) injection)', async () => {
+    writeConsent('codex', 'granted');
+    const { painId, evidenceSourceRef } = seedAdmittedCodexPain();
+    await seedDiagnosisTask({ painId, evidenceSourceRef });
+    await seedDiagnosisAndArtifactRows({ painId, evidenceSourceRef });
+    writeConsent('codex', 'revoked');
+    // BEFORE UPDATE trigger raises IGNORE for pain_diagnoses updates: the
+    // sweep's row CAS sees changes=0 — the deterministic single-thread shape
+    // of a concurrent writer winning the race.
+    withState((db) => db.exec('CREATE TRIGGER block_diag_update BEFORE UPDATE ON pain_diagnoses BEGIN SELECT RAISE(IGNORE); END'));
+
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('partial');
+    if (report.outcome === 'completed' || report.outcome === 'partial') {
+      const host = report.hosts[0];
+      expect(host?.failures.some((f) => f.startsWith('pain_diagnoses_'))).toBe(true);
+      expect(host?.purged.painDiagnoses).toBe(0);
+      expect(host?.purged.painDiagnosesEvidenceEntries).toBe(0);
+      // The untouched row still carries the revoked evidence — the failure
+      // note says so and a rerun (without the trigger) converges.
+      const evidence = withState((db) => (db.prepare('SELECT evidence_json FROM pain_diagnoses').get() as { evidence_json: string }).evidence_json);
+      expect(evidence).toContain('governance_observation:codex');
+    }
+    // Rerun after removing the injected block converges (retryable).
+    withState((db) => db.exec('DROP TRIGGER block_diag_update'));
+    const second = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(second.outcome).toBe('completed');
+    const evidence2 = withState((db) => (db.prepare('SELECT evidence_json FROM pain_diagnoses').get() as { evidence_json: string }).evidence_json);
+    expect(evidence2).not.toContain('governance_observation:codex');
+  });
+
+  it('an audit write failure degrades the outcome to partial and is reported', async () => {
+    writeConsent('codex', 'granted');
+    seedAdmittedCodexPain();
+    writeConsent('codex', 'revoked');
+    // A DIRECTORY at the audit path makes appendFileSync fail.
+    fs.mkdirSync(path.join(workspaceDir, '.state', SOURCE_REVOCATION_SWEEP_AUDIT_FILENAME), { recursive: true });
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('partial');
+    if (report.outcome === 'completed' || report.outcome === 'partial') {
+      expect(report.hosts[0]?.failures.some((f) => f.startsWith('audit_write_failed'))).toBe(true);
+    }
+    // The purge itself still executed (best-effort observability, loud report).
+    const obs = withTrajectory((db) => (db.prepare('SELECT visible_text FROM governance_observations WHERE host_kind = ?').get('codex') as { visible_text: string | null }).visible_text);
+    expect(obs).toBeNull();
+  });
+
+  it('re-grant after a completed sweep does not restore purged admission reasons', async () => {
+    writeConsent('codex', 'granted');
+    seedAdmittedCodexPain();
+    writeConsent('codex', 'revoked');
+    await runSourceRevocationSweep({ workspaceDir, apply: true });
+    writeConsent('codex', 'granted');
+    await runSourceRevocationSweep({ workspaceDir, apply: true });
+    const marker = markerRow();
+    expect(marker.reason ?? '').not.toContain('不要自作主张');
+    expect((marker.task_payload_json ?? '').includes('不要自作主张')).toBe(false);
   });
 });

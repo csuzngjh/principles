@@ -454,10 +454,39 @@ export class InternalizationOrchestrator {
       };
     }
     const current = currentEvaluation(read.document);
+    if (current !== null && current.decision === 'admitted') {
+      // PRI-1283 review round 2 (directive D): a historical `admitted` is NOT
+      // a permanent grant. Before the verdict is reused, the candidate's
+      // diagnosis lineage is re-verified against the LATEST source-material
+      // authorization (read-only — the historical evaluation document itself
+      // is not rewritten; a revoked source refuses the claim instead of
+      // quietly re-entering internalization and downstream model stages).
+      const candidate = await this.stateManager.getCandidate(candidateId);
+      if (candidate === null) {
+        return {
+          decision: 'needs_evidence',
+          reason: 'candidate_not_found_at_claim',
+          nextAction: 'the queued dreamer task references a candidate that no longer exists; remove the task or re-run the diagnosis',
+        };
+      }
+      const reverified = await evaluateAndPersistAdmissionFromStore(this.stateManager, [candidateId], {
+        taskId: candidate.taskId,
+        persist: false,
+        sourceMaterialAuthorization: this.sourceMaterialAuthorization,
+      });
+      if (!reverified.ok && reverified.reason.startsWith('source_authorization_revoked')) {
+        return {
+          decision: 'source_authorization_revoked',
+          reason: reverified.reason,
+          nextAction: reverified.nextAction,
+        };
+      }
+      // Any other outcome keeps the durable admitted verdict — only the
+      // authorization re-verification may veto a historical admission here.
+      return null;
+    }
     if (current !== null) {
-      return current.decision === 'admitted'
-        ? null
-        : { decision: current.decision, reason: current.reason, nextAction: current.nextAction };
+      return { decision: current.decision, reason: current.reason, nextAction: current.nextAction };
     }
     const candidate = await this.stateManager.getCandidate(candidateId);
     if (candidate === null) {

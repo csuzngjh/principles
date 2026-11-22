@@ -524,8 +524,12 @@ describe('PRI-1283 R2 — pd pain recall withholds revoked-source excerpts', () 
     // owner-reported entry survives.
     const evidence = entry.diagnoses[0].supportingEvidence.map((e: { sourceRef: string }) => e.sourceRef);
     expect(evidence).toEqual(['owner_reported:cli']);
-    // Channel-bound correction evidence (codex) is withheld.
-    expect(entry.correctionEvidence).toBeNull();
+    // PRI-1283 review round 2 (directive B): this fixture's correction
+    // evidence carries the EXPLICIT Owner channel (codex_explicit_prefix +
+    // owner_statement) — an Owner act is NOT governed by the
+    // conversation-ingestion consent and is SERVED, not withheld.
+    expect(entry.correctionEvidence).toMatchObject({ channel: 'codex_explicit_prefix', classification: 'owner_statement' });
+    expect(entry.correctionEvidence.text).toBe('verbatim owner correction');
     expect(exitSpy).not.toHaveBeenCalled();
   });
 });
