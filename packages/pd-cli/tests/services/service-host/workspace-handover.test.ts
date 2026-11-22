@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // entry (Windows process spawn is slow); the suite default of 5s is too tight.
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
 import { runWorkspaceHandover, runWorkspaceRollback, readHandoverEvidence } from '../../../src/services/service-host/workspace-handover.js';
+import { MANAGED_WORKER_HOST_KINDS, WORKER_HOST_KINDS } from '../../../src/services/service-host/worker-adapter.js';
 import { readWorkspaceBackgroundOwnership } from '@principles/install-layout';
 import { writeGatewayQuiesceAck } from '../../../../openclaw-plugin/src/service/gateway-quiesce-ack.js';
 
@@ -50,6 +51,17 @@ beforeEach(() => {
     mode: 'canonical',
     hosts: ['openclaw'],
     workspaces: [],
+  }, null, 2) + '\n', 'utf8');
+  // Legal-minimal active release record (the install-layout fixture shape)
+  // so the managed coordinator's release validation passes.
+  fs.writeFileSync(path.join(home, '.pd', 'active.json'), JSON.stringify({
+    schemaVersion: 1,
+    generation: 3,
+    releaseId: 'rel-2026-11-22-abc',
+    releaseMetadataDigest: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    previousReleaseId: null,
+    transactionId: 'tx-0001',
+    productVersion: '0.9.0',
   }, null, 2) + '\n', 'utf8');
   fs.writeFileSync(path.join(home, '.pd', 'runtime', 'pd-cli', 'dist', 'index.js'), STUB_CLI, 'utf8');
   stubModeFile = path.join(home, '.pd', 'runtime', 'pd-cli', 'dist', 'stub-mode.txt');
@@ -230,5 +242,75 @@ describe('runWorkspaceRollback', () => {
     // hold an ownership record (workspace_not_registered); a registered one
     // is simply not service_host_owned (unexpected_state).
     expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: expect.stringContaining('begin_rollback_failed') });
+  });
+});
+
+describe('managed dispatch after handover (§8.5 regression)', () => {
+  it('a service_host_owned openclaw workspace is EXECUTED by the managed run-once', async () => {
+    writeGatewayQuiesceAck({
+      workspaceDir: workspace, state: 'handover_preparing', operationId: 'op-managed-1', generation: 1,
+      inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
+    });
+    await runWorkspaceHandover(workspace, { pdHomeOverride: home, env: env(), resumeOperationId: 'op-managed-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
+    expect(ownership()).toMatchObject({ status: 'service_host_owned' });
+
+    const { runServiceManagedOnce } = await import('../../../src/services/service-host/managed-run.js');
+    let executed = 0;
+    const result = await runServiceManagedOnce({
+      env: env(),
+      trustedHomeDir: home,
+      probes: {
+        adapters: {
+          openclaw: {
+            hostKind: 'openclaw',
+            adapterVersion: 'pd.worker-adapter.v1',
+            supports: () => ({ supported: true }),
+            executeOnce: async () => {
+              executed += 1;
+              return {
+                hostKind: 'openclaw',
+                adapterVersion: 'pd.worker-adapter.v1',
+                workspaceDir: workspace,
+                invocationId: 'test-invocation',
+                cycleOutcome: 'cycle_completed_without_business_progress',
+                lastProgressAt: null,
+                businessProgress: {
+                  taskStateChanged: false, changedTaskCount: 0, diagnosticianSucceeded: false,
+                  downstreamRan: false, postProcessingResumed: 0, catchUpProcessed: 0,
+                  evidenceReadable: false, evidenceReason: 'not_attempted',
+                },
+                health: {
+                  livenessFile: path.join(workspace, '.state', 'openclaw-worker-liveness.json'),
+                  livenessRecorded: false, lastCycleDriver: null, lastCycleCompletedAt: null,
+                  lastCycleMode: null, runningStage: null, lastInvocationId: null,
+                },
+                startedAt: new Date().toISOString(),
+                completedAt: new Date().toISOString(),
+                durationMs: 1,
+                worker: {
+                  cliEntry: '/stub', cliEntrySource: 'canonical', exitCode: 0, termSignal: null,
+                  timedOut: false, cancelled: false, stdoutTruncated: false,
+                  environmentReport: { stripped: [], pinnedFromTrustedIdentity: [], passedThrough: [], invocationSource: 'service_host' },
+                },
+              };
+            },
+          },
+        },
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(executed).toBe(1);
+    const record = result.ok ? result.executions.find((entry) => entry.canonicalDir === workspace) : undefined;
+    expect(record).toMatchObject({ hostKind: 'openclaw', admission: 'executed' });
+  }, 60_000);
+
+  it('SHADOW cannot select openclaw — the compile-time boundary plus the command-level invalid-host gate (Phase 2; runtime refusal covered by the existing service-command suite)', () => {
+    // The shadow surfaces type as ShadowHostKind ('codex' | 'workbuddy') —
+    // openclaw is structurally absent from every shadow entry point, and the
+    // existing service-command tests already pin the `--shadow --host
+    // openclaw` CLI refusal. This regression guard pins the CONSTANT the
+    // boundary is enforced with.
+    expect(WORKER_HOST_KINDS).toEqual(['codex', 'workbuddy']);
+    expect(MANAGED_WORKER_HOST_KINDS).toEqual(['codex', 'workbuddy', 'openclaw']);
   });
 });
