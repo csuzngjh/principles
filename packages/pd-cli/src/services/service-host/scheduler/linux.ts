@@ -44,30 +44,90 @@ import type {
   SchedulerRegistration,
 } from './contract.js';
 
-/** Parse `OnUnitActiveSec=120s` / `90ms` / `2min` from the timer unit. */
-export function parseLinuxTimerIntervalMs(timerUnit: string): number | null {
-  const match = /^OnUnitActiveSec\s*=\s*(.+)$/m.exec(timerUnit);
-  if (match === null) return null;
-  const value = match[1]?.trim() ?? '';
-  const minMatch = /^(\d+(?:\.\d+)?)min$/.exec(value);
-  if (minMatch !== null) return Math.round(Number(minMatch[1] ?? 0) * 60_000);
-  const secMatch = /^(\d+(?:\.\d+)?)s$/.exec(value);
-  if (secMatch !== null) return Math.round(Number(secMatch[1] ?? 0) * 1000);
-  const msMatch = /^(\d+(?:\.\d+)?)ms$/.exec(value);
-  if (msMatch !== null) return Math.round(Number(msMatch[1] ?? 0));
-  return null;
+/** All `Key=` values inside `[Section]` (comments, blank lines and other
+ * sections are ignored — systemd semantics). Empty `Key=` lines are kept:
+ * in systemd they RESET a list setting, so ownership must see them. */
+function sectionSettings(content: string, section: string, key: string): string[] {
+  const values: string[] = [];
+  let inSection = false;
+  for (const raw of content.split('\n')) {
+    const line = raw.trim();
+    const header = /^\[([^\]]+)\]$/.exec(line);
+    if (header !== null) {
+      inSection = header[1] === section;
+      continue;
+    }
+    if (!inSection || line === '' || line.startsWith('#') || line.startsWith(';')) continue;
+    const kv = /^([A-Za-z][A-Za-z0-9]*)\s*=\s*(.*)$/.exec(line);
+    if (kv !== null && kv[1] === key) values.push((kv[2] ?? '').trim());
+  }
+  return values;
 }
 
 /**
- * Escape a value for a unit-file SETTING line (WorkingDirectory=,
- * Description=): systemd expands `%` specifiers and `$`/`${}` environment
- * references inside settings, so a literal `%` becomes `%%` and a literal
- * `$` becomes `$$` (task §7 review — an install path containing `%` or `$`
- * previously produced a broken or mis-expanded unit).
+ * systemd time-span → ms: `900s`, `15min`, `2h`, `1d`, `1w`, `1h30min`,
+ * `1h 30min`, or a bare number (seconds). Composite expressions are summed
+ * like systemd does; unknown units/leftover text yield null.
+ */
+export function parseSystemdDurationMs(value: string): number | null {
+  const compact = value.trim().replace(/\s+/g, '');
+  if (compact === '') return null;
+  if (/^\d+(?:\.\d+)?$/.test(compact)) return Math.round(Number(compact) * 1000);
+  const UNIT_MS: Record<string, number> = {
+    us: 0.001,
+    usec: 0.001,
+    'µs': 0.001,
+    ms: 1,
+    msec: 1,
+    s: 1000,
+    sec: 1000,
+    second: 1000,
+    seconds: 1000,
+    m: 60_000,
+    min: 60_000,
+    minute: 60_000,
+    minutes: 60_000,
+    h: 3_600_000,
+    hr: 3_600_000,
+    hour: 3_600_000,
+    hours: 3_600_000,
+    d: 86_400_000,
+    day: 86_400_000,
+    days: 86_400_000,
+    w: 604_800_000,
+    week: 604_800_000,
+    weeks: 604_800_000,
+  };
+  let rest = compact;
+  let total = 0;
+  while (rest.length > 0) {
+    const match = /^(\d+(?:\.\d+)?)(usec|us|µs|msec|ms|seconds?|sec|s|minutes?|min|m|hours?|hr|h|days?|d|weeks?|w)/i.exec(rest);
+    if (match === null) return null;
+    const unit = UNIT_MS[(match[2] ?? '').toLowerCase()];
+    if (unit === undefined) return null;
+    total += Number(match[1]) * unit;
+    rest = rest.slice(match[0].length);
+  }
+  return total > 0 ? Math.round(total) : null;
+}
+
+/** Parse `OnUnitActiveSec=` from the timer unit's [Timer] section. */
+export function parseLinuxTimerIntervalMs(timerUnit: string): number | null {
+  const values = sectionSettings(timerUnit, 'Timer', 'OnUnitActiveSec');
+  const [value] = values;
+  if (value === undefined) return null;
+  return parseSystemdDurationMs(value);
+}
+
+/**
+ * Escape a value for a non-command unit SETTING line (WorkingDirectory=,
+ * Description=): systemd expands `%` specifiers there, but does NOT apply
+ * `$`/`${}` environment substitution (that substitution only applies to
+ * Exec* command lines and a few documented settings) — doubling `$` here
+ * would leave a literal `$$` in the unit.
  */
 function systemdSettingEscape(value: string): string {
-  // '$$$$' in a JS replacement emits '$$' — a literal dollar in unit syntax.
-  return value.replace(/%/g, '%%').replace(/\$/g, '$$$$');
+  return value.replace(/%/g, '%%');
 }
 
 /**
@@ -151,20 +211,16 @@ function splitExecStart(value: string): string[] | null {
   return tokens;
 }
 
-/** Value of a `Key=` line in a unit file (first match wins, like systemd). */
-function unitSetting(content: string, key: string): string | null {
-  const match = new RegExp(`^${key}\\s*=\\s*(.+)$`, 'm').exec(content);
-  return match === null ? null : (match[1] ?? '').trim();
-}
-
+/** Inverse of systemdSettingEscape — `%` specifiers only (settings are
+ * not env-substituted; a `$`/`$$` sequence is ambiguous → null). */
 function unescapeSetting(value: string): string | null {
   let out = '';
   for (let index = 0; index < value.length; index += 1) {
     const ch = value[index] ?? '';
-    if ((ch === '%' || ch === '$')) {
+    if (ch === '%') {
       const next = value[index + 1];
-      if (next === ch) {
-        out += ch;
+      if (next === '%') {
+        out += '%';
         index += 1;
         continue;
       }
@@ -251,15 +307,20 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
    * our path strings inside another job definition is foreign.
    */
   function serviceOwnership(content: string, registration: SchedulerRegistration): boolean {
-    const execStart = unitSetting(content, 'ExecStart');
-    const workDir = unitSetting(content, 'WorkingDirectory');
-    if (execStart === null || workDir === null) return false;
-    const argv = splitExecStart(execStart);
+    // Section-scoped, multiplicity-aware ownership (review §5): systemd
+    // allows several ExecStart= lines (each adds a command) and empty
+    // `ExecStart=` resets the list — our unit declares exactly ONE
+    // non-empty ExecStart inside [Service]; anything else is ambiguous.
+    const execStarts = sectionSettings(content, 'Service', 'ExecStart');
+    const workDirs = sectionSettings(content, 'Service', 'WorkingDirectory');
+    if (execStarts.length !== 1 || execStarts[0] === '') return false;
+    if (workDirs.length !== 1 || workDirs[0] === '') return false;
+    const argv = splitExecStart(execStarts[0] ?? '');
     if (argv === null) return false;
     const expected = [registration.nodePath, ...schedulerInvocationArgs(registration)];
     if (argv.length !== expected.length) return false;
     if (!argv.every((token, index) => token === expected[index])) return false;
-    const dir = unescapeSetting(workDir);
+    const dir = unescapeSetting(workDirs[0] ?? '');
     return dir === registration.pdHome;
   }
 
@@ -269,7 +330,9 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
    * timer driving a foreign service is never ours.
    */
   function timerOwnership(content: string, registration: SchedulerRegistration): boolean {
-    return unitSetting(content, 'Unit') === serviceUnitName(registration);
+    // Exactly one `Unit=` pointer inside [Timer], pointing at OUR service.
+    const units = sectionSettings(content, 'Timer', 'Unit');
+    return units.length === 1 && units[0] === serviceUnitName(registration);
   }
 
   type UnitRead = ReturnType<SchedulerFileIo['readIfExists']>;
@@ -293,35 +356,53 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
    * A not-found or manager-unavailable answer is NEVER folded into
    * "disabled" — it is its own evidence class.
    */
+  /** stderr phrases that are systemd's definitive "manager has no such
+   * unit" answer (search-path miss, never loaded, or systemd 254+ exit 4). */
+  const UNIT_NOT_FOUND = /not[- ]found|no such unit|could not be found|no such file or directory|no files found/i;
+
+  /**
+   * `is-enabled` verdict — evidence classes only, never stderr inference
+   * (task review §3.1): only an explicit stdout verdict decides
+   * enabled/disabled; a not-found phrase decides not_found; EVERY other
+   * outcome — permission denied, empty output, spawn failure, timeout, a
+   * dead user bus, an unrecognized exit code/text — is `unreadable`
+   * (UNKNOWN), never folded into "disabled".
+   */
   async function enabledVerdict(
     registration: SchedulerRegistration,
   ): Promise<{ enabled: boolean | null; state: 'enabled' | 'disabled' | 'not_found' | 'unreadable'; unreadableReason?: string }> {
     const result = await systemctl(['is-enabled', timerUnitName(registration)]);
+    const stdout = result.stdout.trim();
+    const stderr = result.stderr.trim();
+    if (result.spawnError !== undefined) {
+      return { enabled: null, state: 'unreadable', unreadableReason: `systemctl_is_enabled_failed:spawn:${result.spawnError.slice(0, 120)}` };
+    }
     if (result.code === 0) {
-      const stdout = result.stdout.trim();
       if (stdout === 'enabled' || stdout === 'enabled-runtime' || stdout === 'alias') {
         return { enabled: true, state: 'enabled' };
       }
-      // static/indirect/generated units fire via dependencies, not a timer
-      // enablement — treated as not-enabled for our purposes but recorded.
+      // static/indirect/generated/masked-runtime etc. are enablement states
+      // the contract cannot classify — they stay UNKNOWN, never disabled.
       return { enabled: null, state: 'unreadable', unreadableReason: `systemd_unit_unexpected_state:${stdout.slice(0, 60)}` };
     }
-    const stderr = result.stderr.trim();
-    if (result.code === 1) {
-      // 'No such file or directory' is systemd's definitive "the manager
-      // has no unit-file state" answer (search-path miss / never reloaded)
-      // — positive not-registered evidence, not an unreadable query.
-      if (/not[- ]found|no such unit|could not be found|no such file or directory/i.test(stderr)) {
-        return { enabled: null, state: 'not_found' };
-      }
-      if (/disabled/i.test(result.stdout) || stderr === '' || !/failed|error|bus/i.test(stderr)) {
-        return { enabled: false, state: 'disabled' };
-      }
+    // Non-zero exit: only an explicit verdict line counts as evidence.
+    if (stdout === 'disabled') {
+      return { enabled: false, state: 'disabled' };
+    }
+    // 'masked' cannot fire and cannot be enabled — a stronger form of
+    // disabled that satisfies "not enabled" but is still explicit stdout.
+    if (stdout === 'masked' || stdout === 'masked-runtime') {
+      return { enabled: false, state: 'disabled' };
+    }
+    if (stdout === 'not-found' || UNIT_NOT_FOUND.test(stderr)) {
+      // Exit 4 + "not-found" (systemd 254+), exit 1 + "Failed to get unit
+      // file state ... No such file", etc. — positive not-registered.
+      return { enabled: null, state: 'not_found' };
     }
     return {
       enabled: null,
       state: 'unreadable',
-      unreadableReason: `systemctl_is_enabled_failed:${result.code ?? 'spawn'}:${(result.spawnError ?? stderr).slice(0, 120)}`,
+      unreadableReason: `systemctl_is_enabled_failed:${result.code ?? 'spawn'}:${(stderr || stdout || 'no output').slice(0, 120)}`,
     };
   }
 
@@ -350,17 +431,60 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
    * means the unit dir is outside the manager's search path (HOME/XDG
    * mismatch) and "registered" must not be reported.
    */
-  async function managerSeesUnit(
+  /**
+   * Manager view of BOTH units via `systemctl cat` (review §3.5):
+   * `cat` prints `# /resolved/path` headers — the primary file for each
+   * unit must be OUR file (a same-name unit elsewhere in the search path
+   * shadows ours → ambiguous), and any `*.d/*.conf` drop-in makes the
+   * effective unit different from the file we verified → ambiguous.
+   */
+  async function managerUnitView(
     registration: SchedulerRegistration,
-  ): Promise<{ seen: boolean; unreadableReason?: string }> {
-    const result = await systemctl(['cat', serviceUnitName(registration)]);
-    if (result.code === 0) return { seen: true };
-    if (/not[- ]found|no such unit|could not be found|no files found/i.test(result.stderr)) return { seen: false };
-    if (result.code === 1 && result.stderr.trim() === '') return { seen: false };
-    return {
-      seen: false,
-      unreadableReason: `systemctl_cat_failed:${result.code ?? 'spawn'}:${(result.spawnError ?? result.stderr.trim()).slice(0, 120)}`,
-    };
+  ): Promise<{ seen: true; shadowed?: string } | { seen: false; unreadableReason?: string }> {
+    const units: [string, string][] = [
+      [serviceUnitName(registration), serviceUnitPath(registration)],
+      [timerUnitName(registration), timerUnitPath(registration)],
+    ];
+    for (const [name, file] of units) {
+      const result = await systemctl(['cat', name]);
+      if (result.code !== 0) {
+        if (result.spawnError === undefined && (UNIT_NOT_FOUND.test(result.stderr) || (result.code === 1 && result.stderr.trim() === ''))) {
+          return { seen: false };
+        }
+        return {
+          seen: false,
+          unreadableReason: `systemctl_cat_failed:${result.code ?? 'spawn'}:${(result.spawnError ?? result.stderr.trim()).slice(0, 120)}`,
+        };
+      }
+      const headers = [...result.stdout.matchAll(/^#\s*(\S+)\s*$/gm)].map((m) => m[1] ?? '');
+      const primary = headers.find((h) => h.endsWith('.service') || h.endsWith('.timer'));
+      if (primary !== undefined && primary !== file) {
+        return { seen: true, shadowed: `resolved_path:${primary}` };
+      }
+      const dropIn = headers.find((h) => /\.d\/[^/]+\.conf$/.test(h));
+      if (dropIn !== undefined) {
+        return { seen: true, shadowed: `drop_in:${dropIn}` };
+      }
+    }
+    return { seen: true };
+  }
+
+  /** Both units must be definitively gone from the manager's view. */
+  async function managerUnitsGone(
+    registration: SchedulerRegistration,
+  ): Promise<{ gone: true } | { gone: false; still: string } | { gone: null; unreadableReason: string }> {
+    for (const name of [serviceUnitName(registration), timerUnitName(registration)]) {
+      const result = await systemctl(['cat', name]);
+      if (result.code === 0) return { gone: false, still: name };
+      if (result.spawnError === undefined && (UNIT_NOT_FOUND.test(result.stderr) || (result.code === 1 && result.stderr.trim() === ''))) {
+        continue;
+      }
+      return {
+        gone: null,
+        unreadableReason: `systemctl_cat_failed:${result.code ?? 'spawn'}:${(result.spawnError ?? result.stderr.trim()).slice(0, 120)}`,
+      };
+    }
+    return { gone: true };
   }
 
   interface ServiceFacts {
@@ -491,13 +615,28 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
           return unreadableRegistration(registration, unitDetail(existingService) + '/' + unitDetail(existingTimer));
         }
         if (!existingService.ok || !existingTimer.ok) {
-          return {
-            ok: false,
-            kind: 'unsafe_state',
-            reason: 'systemd_units_partial_registration',
-            nextAction: 'A partial unit registration exists (service without timer or vice versa). Inspect the unit directory, remove leftovers manually if they are yours, then re-run pd service install.',
-          };
-        }
+          // A partial registration completes only when the present file is
+          // provably OURS — a foreign leftover is still a refusal.
+          if (existingService.ok && !serviceOwnership(existingService.content, registration)) {
+            return {
+              ok: false,
+              kind: 'external_conflict',
+              reason: 'systemd_unit_conflict_foreign_unit',
+              nextAction: `${serviceFile} exists but its ExecStart/WorkingDirectory do not match this PD install; PD never overwrites foreign systemd units. Inspect it manually.`,
+            };
+          }
+          if (existingTimer.ok && !timerOwnership(existingTimer.content, registration)) {
+            return {
+              ok: false,
+              kind: 'external_conflict',
+              reason: 'systemd_timer_conflict_foreign_unit',
+              nextAction: `${timerFile} exists but its Unit= does not point at this PD install's service; PD never overwrites foreign systemd units. Inspect it manually.`,
+            };
+          }
+          // own partial leftover from a failed first install → the writes
+          // below complete the pair (first-install rollback normally
+          // removes leftovers; this path is the safe resume).
+        } else {
         // Each unit is verified independently (task §4): a foreign service
         // AND a foreign timer are two separate refusal paths.
         if (!serviceOwnership(existingService.content, registration)) {
@@ -519,14 +658,25 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
         // Idempotent: our own units — rewrite with the current definition
         // (refresh) and reload; the enabled state is systemd enablement
         // state, PRESERVED by not touching enable/disable here.
+        }
       }
 
       // Refresh semantics (task §15): an existing OWN registration keeps
       // its interval — only the node/CLI entry and args move forward —
-      // UNLESS the caller explicitly passed a new --interval-ms.
+      // UNLESS the caller explicitly passed a new --interval-ms. An
+      // UNPARSEABLE existing interval must refuse BEFORE writing: silently
+      // falling back to the default would clobber an unknown schedule.
       const preservedInterval = existingTimer.ok && registration.intervalExplicit !== true
         ? parseLinuxTimerIntervalMs(existingTimer.content)
         : null;
+      if (existingTimer.ok && registration.intervalExplicit !== true && preservedInterval === null) {
+        return {
+          ok: false,
+          kind: 'unsafe_state',
+          reason: 'systemd_timer_interval_unparseable',
+          nextAction: `The existing timer's OnUnitActiveSec in ${timerFile} could not be parsed — PD refuses to overwrite an unknown interval with a default. Fix the value manually or pass --interval-ms explicitly, then retry.`,
+        };
+      }
       const effective: SchedulerRegistration = preservedInterval !== null
         ? { ...registration, intervalMs: preservedInterval }
         : registration;
@@ -536,28 +686,51 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
       if (!mkdir.ok) {
         return { ok: false, kind: 'command_failed', reason: `systemd_unit_dir_unwritable:${mkdir.reason.slice(0, 80)}`, nextAction: `Could not create ${dir}; check permissions and retry pd service install.` };
       }
+      // Refresh failure must restore the ORIGINAL files — a half-rewritten
+      // pair is never left behind (review §5). A first install has no
+      // original: its rollback removes the file this call created.
+      const priorService = existingService.ok ? existingService.content : null;
+      const priorTimer = existingTimer.ok ? existingTimer.content : null;
+      const rollbackUnit = (file: string, prior: string | null, reason: string): string => {
+        if (prior === null) {
+          const removed = fileIo.remove(file);
+          return removed.ok ? reason : `${reason}+rollback_remove_failed:${file}:${removed.reason.slice(0, 60)}`;
+        }
+        const restored = fileIo.writeAtomic(file, prior);
+        return restored.ok ? reason : `${reason}+rollback_restore_failed:${file}:${restored.reason.slice(0, 60)}`;
+      };
+
       const writtenService = fileIo.writeAtomic(serviceFile, buildLinuxServiceUnit(effective));
       if (!writtenService.ok) {
         return { ok: false, kind: 'command_failed', reason: `systemd_service_write_failed:${writtenService.reason.slice(0, 80)}`, nextAction: `Could not write ${serviceFile}; retry pd service install after fixing the filesystem issue.` };
       }
       const writtenTimer = fileIo.writeAtomic(timerFile, buildLinuxTimerUnit(effective));
       if (!writtenTimer.ok) {
-        return { ok: false, kind: 'command_failed', reason: `systemd_timer_write_failed:${writtenTimer.reason.slice(0, 80)}`, nextAction: `Could not write ${timerFile}; the service unit is on disk but the pair is incomplete. Re-run pd service install (idempotent).` };
+        return {
+          ok: false,
+          kind: 'command_failed',
+          reason: rollbackUnit(serviceFile, priorService, `systemd_timer_write_failed:${writtenTimer.reason.slice(0, 80)}`),
+          nextAction: `Could not write ${timerFile}; the service unit was rolled back to its previous content (or removed for a first install). Re-run pd service install.`,
+        };
       }
+      const rollbackBoth = (reason: string): string =>
+        rollbackUnit(timerFile, priorTimer, rollbackUnit(serviceFile, priorService, reason));
       const reload = await systemctl(['daemon-reload']);
       if (reload.code !== 0) {
         return {
           ok: false,
           kind: 'command_failed',
-          reason: `systemctl_daemon_reload_failed:${reload.code ?? 'spawn'}:${(reload.spawnError ?? reload.stderr).trim().slice(0, 120)}`,
-          nextAction: 'Unit files were written but `systemctl --user daemon-reload` failed. The registration is on disk but not necessarily active — fix the cause (a dead user bus usually means no active login session) and re-run pd service install.',
+          reason: rollbackBoth(`systemctl_daemon_reload_failed:${reload.code ?? 'spawn'}:${(reload.spawnError ?? reload.stderr).trim().slice(0, 120)}`),
+          nextAction: 'Unit files were written but `systemctl --user daemon-reload` failed; the files were rolled back to their previous content (or removed for a first install). Fix the cause (a dead user bus usually means no active login session) and re-run pd service install.',
         };
       }
       // Task §12 review: never report registered when the manager cannot
-      // see the unit (HOME/XDG_CONFIG_HOME search-path mismatch).
-      const seen = await managerSeesUnit(registration);
-      if (!seen.seen) {
-        if (seen.unreadableReason === undefined) {
+      // see BOTH units (HOME/XDG_CONFIG_HOME search-path mismatch). A
+      // resolved path that is not our file, or a *.d/*.conf drop-in, makes
+      // the effective unit ambiguous → refuse, never claim it ours.
+      const view = await managerUnitView(registration);
+      if (!view.seen) {
+        if (view.unreadableReason === undefined) {
           return {
             ok: false,
             kind: 'unsafe_state',
@@ -568,8 +741,16 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
         return {
           ok: false,
           kind: 'command_failed',
-          reason: seen.unreadableReason,
-          nextAction: 'The unit files were written but PD could not verify the manager sees them. Inspect the stderr above and re-run pd service install.',
+          reason: rollbackBoth(view.unreadableReason),
+          nextAction: 'The unit files were written but PD could not verify the manager sees them; the files were rolled back to their previous content. Inspect the stderr above and re-run pd service install.',
+        };
+      }
+      if (view.shadowed !== undefined) {
+        return {
+          ok: false,
+          kind: 'unsafe_state',
+          reason: rollbackBoth(`systemd_unit_ambiguous_manager_view:${view.shadowed.slice(0, 100)}`),
+          nextAction: `The written units are ours, but the manager's effective unit resolves differently (${view.shadowed}) — a same-name unit elsewhere or a drop-in changes what systemd would run; the files were rolled back. Inspect \`systemctl --user cat\` and resolve the conflict, then re-run pd service install.`,
         };
       }
       const facts = await gatherFacts(registration);
@@ -604,6 +785,17 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
           nextAction: 'The unit pair is not PD\'s own registration; PD refuses to modify foreign systemd units.',
         };
       }
+      // Drop-ins or a same-name unit elsewhere make the EFFECTIVE unit
+      // different from the file we verified → ambiguous, refuse to arm it.
+      const view = await managerUnitView(registration);
+      if (view.seen && view.shadowed !== undefined) {
+        return {
+          ok: false,
+          kind: 'external_conflict',
+          reason: `systemd_unit_ambiguous_manager_view:${view.shadowed.slice(0, 100)}`,
+          nextAction: `The manager's effective unit resolves via ${view.shadowed} — a drop-in or same-name unit changes what systemd would run; PD refuses to modify an ambiguous registration. Inspect \`systemctl --user cat\` manually.`,
+        };
+      }
       const already = await enabledVerdict(registration);
       const active = await activeVerdict(registration);
       if (already.enabled === true && active.active === true) {
@@ -624,14 +816,15 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
         };
       }
       // Verify before reporting enabled (task §4/§14): the enable command's
-      // exit code alone is not proof the timer is armed + active.
+      // exit code alone is not proof — BOTH is-enabled and is-active must
+      // positively answer; either UNKNOWN means the enable is unverified.
       const verified = await gatherFacts(registration);
-      if (verified.enabled !== true) {
+      if (verified.enabled !== true || verified.active !== true) {
         return {
           ok: false,
           kind: 'command_failed',
           reason: 'systemd_enable_unverified',
-          nextAction: '`systemctl --user enable --now` returned success but `is-enabled` does not report the timer enabled. Run pd service status to inspect and retry.',
+          nextAction: '`systemctl --user enable --now` returned success but `is-enabled`/`is-active` do not positively report enabled+active. Run pd service status to inspect and retry.',
         };
       }
       return {
@@ -663,6 +856,15 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
           kind: 'external_conflict',
           reason: 'systemd_unit_conflict_foreign_unit',
           nextAction: 'The unit pair is not PD\'s own registration; PD refuses to modify foreign systemd units.',
+        };
+      }
+      const view = await managerUnitView(registration);
+      if (view.seen && view.shadowed !== undefined) {
+        return {
+          ok: false,
+          kind: 'external_conflict',
+          reason: `systemd_unit_ambiguous_manager_view:${view.shadowed.slice(0, 100)}`,
+          nextAction: `The manager's effective unit resolves via ${view.shadowed} — a drop-in or same-name unit changes what systemd would run; PD refuses to modify an ambiguous registration. Inspect \`systemctl --user cat\` manually.`,
         };
       }
       const already = await enabledVerdict(registration);
@@ -797,13 +999,17 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
           nextAction: 'The unit files were removed but `systemctl --user daemon-reload` failed; the manager may hold a stale registration until the next reload or login. Re-run pd service uninstall (idempotent).',
         };
       }
-      const seen = await managerSeesUnit(registration);
-      if (seen.seen) {
+      // BOTH units must be definitively gone from the manager's view —
+      // an unreadable manager query is UNKNOWN, not success.
+      const gone = await managerUnitsGone(registration);
+      if (gone.gone !== true) {
         return {
           ok: false,
           kind: 'command_failed',
-          reason: 'systemd_uninstall_unverified',
-          nextAction: 'The unit files were removed but the manager still resolves the service unit — a stale registration may exist in another unit directory. Inspect `systemctl --user cat` output manually.',
+          reason: gone.gone === false ? 'systemd_uninstall_unverified' : `systemd_uninstall_unverified:${gone.unreadableReason.slice(0, 80)}`,
+          nextAction: gone.gone === false
+            ? `The unit files were removed but the manager still resolves ${gone.still} — a stale registration may exist in another unit directory. Inspect \`systemctl --user cat ${gone.still}\` manually.`
+            : 'The unit files were removed but the manager state could not be verified — the removal is on disk but OS-visible state is UNKNOWN. Re-run pd service uninstall once systemctl answers.',
         };
       }
       return {

@@ -213,10 +213,12 @@ describe('parseMacosStartIntervalMs', () => {
 });
 
 describe('parseLinuxTimerIntervalMs', () => {
-  it("parses '120s', '2min' and '90ms' values; null when absent", () => {
+  it("parses '120s', '2min' and '90ms' inside [Timer]; null when absent or outside the section", () => {
     expect(parseLinuxTimerIntervalMs('[Timer]\nOnUnitActiveSec=120s\n')).toBe(120_000);
-    expect(parseLinuxTimerIntervalMs('OnUnitActiveSec=2min')).toBe(120_000);
-    expect(parseLinuxTimerIntervalMs('OnUnitActiveSec=90ms')).toBe(90);
+    expect(parseLinuxTimerIntervalMs('[Timer]\nOnUnitActiveSec=2min')).toBe(120_000);
+    expect(parseLinuxTimerIntervalMs('[Timer]\nOnUnitActiveSec=90ms')).toBe(90);
+    // Section-aware (round-3): a bare line outside [Timer] is not a timer directive.
+    expect(parseLinuxTimerIntervalMs('[Service]\nOnUnitActiveSec=2min')).toBeNull();
     expect(parseLinuxTimerIntervalMs('[Timer]\nAccuracySec=30s\n')).toBeNull();
   });
 });

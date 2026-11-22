@@ -23,7 +23,7 @@ import {
   type SchedulerFileIo,
   type SchedulerRegistration,
 } from '../../../src/services/service-host/scheduler/contract.js';
-import { buildLinuxServiceUnit, buildLinuxTimerUnit, createLinuxSchedulerAdapter, systemdQuote } from '../../../src/services/service-host/scheduler/linux.js';
+import { buildLinuxServiceUnit, buildLinuxTimerUnit, createLinuxSchedulerAdapter, parseLinuxTimerIntervalMs, systemdQuote } from '../../../src/services/service-host/scheduler/linux.js';
 
 interface RecordedCall {
   readonly command: string;
@@ -117,7 +117,10 @@ class FakeFileIo implements SchedulerFileIo {
     return { ok: true, content };
   }
 
+  readonly failWrites = new Set<string>();
+
   writeAtomic(file: string, content: string): ReturnType<SchedulerFileIo['writeAtomic']> {
+    if (this.failWrites.has(file)) return { ok: false, reason: 'EACCES: permission denied' };
     this.files.set(file, content);
     this.writeLog.push({ file, content });
     return { ok: true };
@@ -199,8 +202,9 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(result.facts.active).toBe(false);
     expect(fileIo.files.get(serviceFile)).toBe(buildLinuxServiceUnit(registration));
     expect(fileIo.files.get(timerFile)).toBe(buildLinuxTimerUnit(registration));
-    // Sequence: daemon-reload → manager visibility probe (cat) → facts.
-    expect(subsOf(calls)).toEqual(['daemon-reload', 'cat', 'is-enabled', 'is-active', 'show']);
+    // Sequence: daemon-reload → manager visibility probe (cat ×2, one
+    // per unit — dual verification) → facts.
+    expect(subsOf(calls)).toEqual(['daemon-reload', 'cat', 'cat', 'is-enabled', 'is-active', 'show']);
   });
 
   it('install refuses to report registered when the manager cannot see the units (task §12 HOME/XDG mismatch)', async () => {
@@ -341,20 +345,39 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('install refuses a partial registration (service unit without its timer)', async () => {
+  it('install safely completes an OWN partial registration (service unit without its timer)', async () => {
+    // A leftover of OUR service unit (e.g. first-install rollback that
+    // failed mid-way) is provably PD-owned → install completes the pair
+    // instead of refusing; a retry converges (review §3.8).
     const registration = makeRegistration();
-    const { serviceFile } = unitPaths(registration);
-    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: true });
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: false, active: false, managerSees: true });
     const fileIo = new FakeFileIo();
     fileIo.files.set(serviceFile, buildLinuxServiceUnit(registration));
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
 
     const result = await adapter.install(registration);
 
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.registered).toBe(true);
+    expect(fileIo.files.get(timerFile)).toBe(buildLinuxTimerUnit(registration));
+  });
+
+  it('install refuses a FOREIGN partial registration (service unit without its timer)', async () => {
+    const registration = makeRegistration();
+    const { serviceFile } = unitPaths(registration);
+    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: true });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(serviceFile, buildLinuxServiceUnit(registration).replace('ExecStart=', 'ExecStart=/usr/bin/other '));
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.kind).toBe('unsafe_state');
-    expect(result.reason).toBe('systemd_units_partial_registration');
+    expect(result.kind).toBe('external_conflict');
+    expect(result.reason).toBe('systemd_unit_conflict_foreign_unit');
     expect(fileIo.writeLog).toHaveLength(0);
     expect(calls).toHaveLength(0);
   });
@@ -655,7 +678,8 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(result.facts.registered).toBe(false);
     expect(fileIo.files.has(serviceFile)).toBe(false);
     expect(fileIo.files.has(timerFile)).toBe(false);
-    expect(subsOf(calls)).toEqual(['disable', 'is-enabled', 'is-active', 'daemon-reload', 'cat']);
+    // Dual verification: BOTH units must be gone from the manager's view.
+    expect(subsOf(calls)).toEqual(['disable', 'is-enabled', 'is-active', 'daemon-reload', 'cat', 'cat']);
   });
 
   it('uninstall does NOT delete files when disable fails (task §4: no early delete)', async () => {
@@ -768,5 +792,226 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(result.changed).toBe(false);
     expect(result.facts.registered).toBe(false);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('lifecycle reliability round 3 (verdict strictness / dual verification / rollback)', () => {
+  it('exit 4 + stdout not-found is positive not-found evidence (systemd 254+)', async () => {
+    const registration = makeRegistration();
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true }, {
+      'is-enabled': { code: 4, stdout: 'not-found\n', stderr: '' },
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.status(registration);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // not-found is its own class — enabled stays null, never disabled.
+    expect(result.facts.enabled).toBeNull();
+  });
+
+  it.each([
+    ['permission denied', { code: 1, stdout: '', stderr: 'Failed to get unit file state: Permission denied' }],
+    ['an empty answer', { code: 1, stdout: '', stderr: '' }],
+    ['a dead user bus', { code: 2, stdout: '', stderr: 'Failed to connect to bus: No medium found' }],
+    ['unrecognized output', { code: 0, stdout: 'baffled\n', stderr: '' }],
+  ])('is-enabled %s → unreadable UNKNOWN, never inferred as disabled', async (_label, injected) => {
+    const registration = makeRegistration();
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true }, {
+      'is-enabled': injected,
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.status(registration);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBeNull();
+    expect(result.facts.degradedReasons?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('a masked unit is explicit not-enabled evidence', async () => {
+    const registration = makeRegistration();
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true }, {
+      'is-enabled': { code: 1, stdout: 'masked\n', stderr: '' },
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.status(registration);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBe(false);
+  });
+
+  it('enable fails when post-enable is-active does not positively answer', async () => {
+    const registration = makeRegistration();
+    const { runner } = systemctlRunner({ enabled: false, active: false, managerSees: true }, {
+      'is-active': { code: 3, stdout: 'inactive\n', stderr: '' },
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.enable(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('systemd_enable_unverified');
+  });
+
+  it('refresh refuses BEFORE writing when the registered interval cannot be parsed', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const weird = (fileIo.files.get(timerFile) ?? '').replace(/OnUnitActiveSec=.+/, 'OnUnitActiveSec=whenever');
+    fileIo.files.set(timerFile, weird);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('systemd_timer_interval_unparseable');
+    // Not a byte was touched.
+    expect(fileIo.writeLog).toHaveLength(0);
+    expect(fileIo.files.get(timerFile)).toBe(weird);
+    expect(fileIo.files.get(serviceFile)).toBeDefined();
+  });
+
+  it.each([
+    ['120s', 120_000],
+    ['15min', 900_000],
+    ['2h', 7_200_000],
+    ['1h30min', 5_400_000],
+    ['1d', 86_400_000],
+    ['1h 30min', 5_400_000],
+    ['90ms', 90],
+    ['900', 900_000],
+  ])('parseLinuxTimerIntervalMs parses OnUnitActiveSec=%s → %s ms', (value, expected) => {
+    expect(parseLinuxTimerIntervalMs(`[Timer]\nOnUnitActiveSec=${value}\n`)).toBe(expected);
+  });
+
+  it.each([['whenever'], ['10fortnights'], [''], ['0s']])(
+    'parseLinuxTimerIntervalMs refuses %j → null',
+    (value) => {
+      expect(parseLinuxTimerIntervalMs(`[Timer]\nOnUnitActiveSec=${value}\n`)).toBeNull();
+    },
+  );
+
+  it('refresh preserves a registered h/min interval it can parse', async () => {
+    const registration = makeRegistration();
+    const { timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    fileIo.files.set(timerFile, (fileIo.files.get(timerFile) ?? '').replace(/OnUnitActiveSec=.+/, 'OnUnitActiveSec=1h30min'));
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.triggerIntervalMs).toBe(5_400_000);
+    expect(fileIo.files.get(timerFile)).toContain('OnUnitActiveSec=5400s');
+  });
+
+  it('a service unit with TWO ExecStart lines is foreign (multi-command ambiguity)', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    fileIo.files.set(serviceFile, (fileIo.files.get(serviceFile) ?? '') + 'ExecStart=/usr/bin/evil\n');
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+  });
+
+  it('a service unit whose ExecStart sits outside [Service] is foreign', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const unit = fileIo.files.get(serviceFile) ?? '';
+    const execLine = /ExecStart=.+/.exec(unit)?.[0] ?? '';
+    fileIo.files.set(serviceFile, unit.replace(execLine, '').replace('[Service]', `${execLine}\n[Service]`));
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+  });
+
+  it('a drop-in in the manager view makes the effective unit ambiguous → refuse', async () => {
+    const registration = makeRegistration();
+    const { serviceFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true }, {
+      cat: { code: 0, stdout: `# ${serviceFile}\n[Service]\nExecStart=x\n# /etc/systemd/user/x.service.d/10-override.conf\n[Service]\nExecStart=\n` },
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('systemd_unit_ambiguous_manager_view');
+  });
+
+  it('first-install timer-write failure removes the just-written service unit', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: false, active: false, managerSees: true });
+    const fileIo = new FakeFileIo();
+    fileIo.failWrites.add(timerFile);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('systemd_timer_write_failed');
+    expect(fileIo.files.has(serviceFile)).toBe(false);
+    expect(fileIo.removeLog).toContain(serviceFile);
+  });
+
+  it('refresh restores BOTH unit files when daemon-reload fails', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true }, {
+      'daemon-reload': { code: 1, stdout: '', stderr: 'bus error' },
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const priorService = fileIo.files.get(serviceFile);
+    const priorTimer = fileIo.files.get(timerFile);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    expect(fileIo.files.get(serviceFile)).toBe(priorService);
+    expect(fileIo.files.get(timerFile)).toBe(priorTimer);
+  });
+
+  it('paths containing $ and % round-trip through ExecStart quoting and WorkingDirectory escaping', async () => {
+    const pdHome = '/home/we$ird %dir/.pd';
+    const homeDir = '/home/we$ird %dir';
+    const registration: SchedulerRegistration = {
+      pdHome, homeDir,
+      cliEntry: `${homeDir}/rel/index.js`, nodePath: '/usr/bin/node',
+      intervalMs: 120_000, identity: schedulerIdentityFor(pdHome),
+    };
+    const serviceFile = `${homeDir}/.config/systemd/user/${registration.identity.linuxUnitBase}.service`;
+    const timerFile = `${homeDir}/.config/systemd/user/${registration.identity.linuxUnitBase}.timer`;
+    const { runner } = systemctlRunner({ enabled: false, active: false, managerSees: true });
+    const fileIo = new FakeFileIo();
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(true);
+    // Field-specific escaping: ExecStart args escape BOTH $ (env
+    // expansion) and % (specifiers), while WorkingDirectory only needs
+    // %% for specifiers — a stray $$ there would prove blanket escaping.
+    const unit = fileIo.files.get(serviceFile) ?? '';
+    expect(unit).toContain('"/home/we$$ird %%dir/rel/index.js"');
+    expect(unit).toContain('WorkingDirectory=/home/we$ird %%dir/.pd');
+    const status = await adapter.status(registration);
+    expect(status.ok).toBe(true);
   });
 });
