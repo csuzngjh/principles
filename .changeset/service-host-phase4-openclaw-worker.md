@@ -3,6 +3,7 @@
 "@principles/host-runtime": minor
 "principles-disciple": minor
 "@principles/pd-cli": minor
+"create-principles-disciple": minor
 ---
 
 PD Service Host Phase 4 (PRI-1282, SPEC-PD-SERVICE-HOST-001 §11 Phase 4 /
@@ -58,6 +59,16 @@ only crash continuation; `--abort`/`--resume`); managed dispatch host set
 adds openclaw (`MANAGED_WORKER_HOST_KINDS`) while Phase 2 shadow stays
 codex|workbuddy (`--shadow --host openclaw` still refused); managed
 status record `hostKind` widens additively (still `pd.service-run-status.v1`).
+
+create-principles-disciple (minor) — install.json writers join the
+ownership CAS lock discipline (ERR-168): the installer's
+`writeInstallManifest` and the update side's `writeInstallConfig` /
+`mergeIntoInstallJson` run their read-modify-save under the same physical
+lock as the §8.4 transition primitive, failing loud instead of silently
+clobbering `backgroundExecutions` records. Against an older registry-
+resolved @principles/install-layout (the pre-cohort release window) the
+lock export is feature-detected and the pre-PR unlocked write behavior is
+kept for that window only.
 
 Adaptive timer decision: V1 fixed 120s OS period (no persisted Gateway
 counters, no timer service) — quantified comparison and disclosed
