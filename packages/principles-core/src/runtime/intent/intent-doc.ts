@@ -16,13 +16,24 @@ interface SectionDef { key: keyof IntentDocSections; headerRegex: RegExp; label:
 // Anything else after the title (e.g. `## 1. Why not`) is still NOT the
 // canonical section, preserving the exact-title semantics for content that
 // merely starts with the section title.
-const SUFFIX_ANNOTATION = '(?:\\s*[—–:：]\\s*\\S.*)?';
+//
+// Whitespace inside a heading must stay on the SAME physical line: `\s`
+// matches `\n`, so `\\s*` after the title (and inside the annotation
+// group) could cross the blank line under a heading and swallow a body
+// line that happens to start with `—`, `–` or `:` (PR #2750 review P1-1:
+// `## 3. Non-negotiables\n\n— 不得编造事实。` parsed the first real
+// constraint INTO the heading match, and parseIntentDocSections then
+// dropped it from the section body — a data-loss defect, not a style
+// issue). `[^\\S\\n]` is "\s minus newline": same-line whitespace only,
+// applied to EVERY gap inside the heading pattern for the same reason.
+const HWS = '[^\\S\\n]';
+const SUFFIX_ANNOTATION = `(?:${HWS}*[—–:：]${HWS}*\\S.*)?`;
 const SECTION_DEFS: SectionDef[] = [
-  { key: 'why', headerRegex: new RegExp(`^##\\s+1\\.\\s*Why\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'why', header: '## 1. Why' },
-  { key: 'desiredOutcome', headerRegex: new RegExp(`^##\\s+2\\.\\s*Desired Outcome\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'desiredOutcome', header: '## 2. Desired Outcome' },
-  { key: 'nonNegotiables', headerRegex: new RegExp(`^##\\s+3\\.\\s*Non-negotiables\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'nonNegotiables', header: '## 3. Non-negotiables' },
-  { key: 'stopEscalation', headerRegex: new RegExp(`^##\\s+4\\.\\s*Stop\\s*\\/\\s*Escalation\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'stopEscalation', header: '## 4. Stop / Escalation' },
-  { key: 'currentStrategicFocus', headerRegex: new RegExp(`^##\\s+5\\.\\s*Current Strategic Focus\\s*${SUFFIX_ANNOTATION}$`, 'im'), label: 'currentStrategicFocus', header: '## 5. Current Strategic Focus' },
+  { key: 'why', headerRegex: new RegExp(`^##${HWS}+1\\.${HWS}*Why${HWS}*${SUFFIX_ANNOTATION}$`, 'im'), label: 'why', header: '## 1. Why' },
+  { key: 'desiredOutcome', headerRegex: new RegExp(`^##${HWS}+2\\.${HWS}*Desired Outcome${HWS}*${SUFFIX_ANNOTATION}$`, 'im'), label: 'desiredOutcome', header: '## 2. Desired Outcome' },
+  { key: 'nonNegotiables', headerRegex: new RegExp(`^##${HWS}+3\\.${HWS}*Non-negotiables${HWS}*${SUFFIX_ANNOTATION}$`, 'im'), label: 'nonNegotiables', header: '## 3. Non-negotiables' },
+  { key: 'stopEscalation', headerRegex: new RegExp(`^##${HWS}+4\\.${HWS}*Stop${HWS}*\\/${HWS}*Escalation${HWS}*${SUFFIX_ANNOTATION}$`, 'im'), label: 'stopEscalation', header: '## 4. Stop / Escalation' },
+  { key: 'currentStrategicFocus', headerRegex: new RegExp(`^##${HWS}+5\\.${HWS}*Current Strategic Focus${HWS}*${SUFFIX_ANNOTATION}$`, 'im'), label: 'currentStrategicFocus', header: '## 5. Current Strategic Focus' },
 ];
 export function parseIntentDocSections(raw: string): IntentDocSections {
   const sections: IntentDocSections = {};

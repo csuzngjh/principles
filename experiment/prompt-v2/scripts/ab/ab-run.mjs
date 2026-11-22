@@ -438,14 +438,16 @@ async function runSampleArm(sample, arm, rep) {
 
     // 3) Formation: round-robin ALL THREE runner kinds.
     // Recovery fix 2026-11-22 (intent ON/OFF pilot): run-once leases the
-    // workspace-oldest pending task of the kind, workspace-WIDE. The off arm
-    // carries surplus pending dreamers from out-of-design repeat reps, so an
-    // unbounded loop would drain them too (quota + scope damage). The loop is
-    // now bounded to THIS chain's formation tasks (via its candidates), with
-    // an oldest-first guard so run-once is only invoked when the workspace-
-    // oldest live task of that kind belongs to this chain, plus an optional
-    // --formation-depth N that stops after N complete candidate chains
-    // (dreamer->philosopher->scribe) for upstream request-budget control.
+    // workspace-oldest READY task of the kind, workspace-WIDE — and wakeOnce
+    // skips non-ready candidates (retry_wait pending, blocked,
+    // admission-refused), so an "oldest live task is ours" pre-check does
+    // NOT bound what actually gets leased (PR #2750 review P1-2). Isolation
+    // is therefore enforced INSIDE selection: every run-once invocation
+    // carries --only-candidates <this chain's candidate ids>, and the CLI's
+    // skipCandidate excludes every foreign task regardless of queue order.
+    // The optional --formation-depth N stops after N complete candidate
+    // chains (dreamer->philosopher->scribe) for upstream request-budget
+    // control.
     const wsDb = path.join(armWorkspaceDir(arm, args.shardId), '.pd', 'state.db');
     const chainFormationSnapshot = () => {
       const sdb = new Database(wsDb, { readonly: true });
@@ -457,18 +459,20 @@ async function runSampleArm(sample, arm, rep) {
           `SELECT task_id, task_kind, status, updated_at FROM tasks WHERE task_kind IN ('dreamer','philosopher','scribe') AND ${like} TRUE`,
         ).all(...cands.map((id) => `%${id}%`));
         const byTaskId = new Map(rows.map((r) => [r.task_id, r]));
-        // Workspace-oldest LIVE (pending/retry_wait) task per kind — the task
-        // run-once would actually lease next.
-        const oldestLive = {};
-        for (const kind of ['dreamer', 'philosopher', 'scribe']) {
-          oldestLive[kind] = sdb.prepare(
-            "SELECT task_id FROM tasks WHERE task_kind = ? AND status IN ('pending','retry_wait') ORDER BY updated_at ASC, task_id ASC LIMIT 1",
-          ).get(kind)?.task_id ?? null;
-        }
-        return { byTaskId, oldestLive, scribeTerminal: rows.filter((r) => r.task_kind === 'scribe' && (r.status === 'succeeded' || r.status === 'failed')).length };
+        return { cands, byTaskId };
       } finally { sdb.close(); }
     };
     const loopLog = [];
+    // PRI-1284 (PR #2750 review P1-3): the loop's exit REASON is part of the
+    // terminal contract — three distinguishable states:
+    //   'chain-terminal'    — formation finished: no live chain task remains;
+    //   'depth-reached'     — the preregistered --formation-depth bound hit,
+    //                         a by-design early stop;
+    //   'budget-exhausted'  — the loop budget ran out while chain tasks were
+    //                         still executable: NOT a completed unit, must
+    //                         classify `incomplete` (and stay resumable —
+    //                         `incomplete` is not in COMPLETED_TERMINAL_STATUSES).
+    let formationOutcome = 'budget-exhausted';
     for (let i = 0; i < args.maxFormationLoops; i++) {
       const snap = chainFormationSnapshot();
       const chainTasks = [...snap.byTaskId.values()];
@@ -476,17 +480,19 @@ async function runSampleArm(sample, arm, rep) {
       const scribeSucceeded = chainTasks.filter((t) => t.task_kind === 'scribe' && t.status === 'succeeded').length;
       if (liveChain.length === 0) {
         loopLog.push({ i, note: 'chain-terminal', chainTasks: chainTasks.length });
+        formationOutcome = 'chain-terminal';
         break;
       }
       if (args.formationDepth !== null && scribeSucceeded >= args.formationDepth) {
         loopLog.push({ i, note: 'formation-depth-reached', scribeSucceeded, remainingLive: liveChain.length });
+        formationOutcome = 'depth-reached';
         break;
       }
       let ranWork = false;
       for (const runner of ['dreamer', 'philosopher', 'scribe']) {
-        // Only invoke run-once when THIS chain owns the workspace-oldest live
-        // task of the kind (orchestrator lease order: updated_at ASC) —
-        // otherwise the invocation would lease a foreign chain's task.
+        // Cheap skip only: don't invoke run-once when this chain has no live
+        // task of the kind. Isolation itself is NOT decided here — it is
+        // enforced inside wakeOnce selection by --only-candidates.
         const chainLiveOfKind = liveChain.filter((t) => t.task_kind === runner && ['pending', 'retry_wait'].includes(t.status));
         if (chainLiveOfKind.length === 0) continue;
         // Depth semantics: while a candidate chain of this arm is mid-flight
@@ -505,14 +511,11 @@ async function runSampleArm(sample, arm, rep) {
             continue;
           }
         }
-        // Same order as the orchestrator's lease contract (updated_at ASC,
-        // task_id ASC) — this is the task run-once would lease next.
-        const chainOldest = [...chainLiveOfKind].sort((a, b) => (a.updated_at < b.updated_at ? -1 : a.updated_at > b.updated_at ? 1 : a.task_id < b.task_id ? -1 : 1))[0].task_id;
-        if (snap.oldestLive[runner] !== null && snap.oldestLive[runner] !== chainOldest) {
-          loopLog.push({ i, runner, skipped: 'not_workspace_oldest', oldest: snap.oldestLive[runner] });
-          continue;
-        }
-        const once = await runPd(arm, ['runtime', 'internalization', 'run-once', '--runner', runner], { timeoutMs: 30 * 60_000, shardId: args.shardId });
+        // The allowlist rides INSIDE selection (PRI-1284): run-once may
+        // legitimately return no_ready_tasks (e.g. our chain's tasks are all
+        // in retry_wait backoff) while foreign tasks sit ahead — that is a
+        // poll-again signal, never a foreign lease.
+        const once = await runPd(arm, ['runtime', 'internalization', 'run-once', '--runner', runner, '--only-candidates', snap.cands.join(',')], { timeoutMs: 30 * 60_000, shardId: args.shardId });
         let j = null;
         try { j = JSON.parse(once.stdout.slice(once.stdout.indexOf('{'))); } catch { /* raw */ }
         const decision = j?.decision ?? 'unknown';
@@ -525,7 +528,17 @@ async function runSampleArm(sample, arm, rep) {
         await new Promise((r2) => setTimeout(r2, 15_000));
       }
     }
-    log('internalization-loop', { rounds: loopLog.length, formationDepth: args.formationDepth, chainTasks: [...chainFormationSnapshot().byTaskId.values()].map((t) => ({ kind: t.task_kind, status: t.status })), tail: loopLog.slice(-10) });
+    // Reconcile the exit state against a FINAL snapshot: tasks that were
+    // leased/running when the budget ended may have completed meanwhile — a
+    // chain with zero live tasks at this point IS finished.
+    const finalSnap = chainFormationSnapshot();
+    const finalLiveChain = [...finalSnap.byTaskId.values()].filter((t) => ['pending', 'leased', 'running', 'retry_wait'].includes(t.status));
+    if (formationOutcome === 'budget-exhausted' && finalLiveChain.length === 0) {
+      formationOutcome = 'chain-terminal';
+    }
+    const formationComplete = formationOutcome !== 'budget-exhausted';
+    record.formationOutcome = formationOutcome;
+    log('internalization-loop', { rounds: loopLog.length, formationDepth: args.formationDepth, formationOutcome, formationComplete, chainTasks: [...finalSnap.byTaskId.values()].map((t) => ({ kind: t.task_kind, status: t.status })), tail: loopLog.slice(-10) });
 
     // 4) Collect + STRICT terminal verification.
     record.artifacts = collectArtifacts(arm, args.shardId, newTaskId);
@@ -574,6 +587,10 @@ async function runSampleArm(sample, arm, rep) {
     });
     verification.checks.candidatesComplete = linkage.ok;
     if (linkage.problems.length > 0) verification.candidateProblems = linkage.problems.slice(0, 8);
+    // PRI-1284 (P1-3): formation completion is part of the terminal
+    // contract — a budget-exhausted formation loop can never certify a
+    // done-family terminal.
+    verification.checks.formationComplete = formationComplete;
     const terminal = classifyTerminal({
       diagnoseOk: verification.checks.diagnoseOk,
       routerTaskSucceeded: verification.checks.routerTaskSucceeded,
@@ -582,6 +599,7 @@ async function runSampleArm(sample, arm, rep) {
       candidatesComplete: linkage.ok,
       admissionRefused: Boolean(allRefused),
       deferOnly,
+      formationComplete,
     });
     verification.legitimateTerminal = terminal.legitimateTerminal;
     verification.ok = terminal.ok;

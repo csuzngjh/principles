@@ -85,6 +85,47 @@ Agent 依据可追溯证据做判断。
     const s = parseIntentDocSections('## 1. Why not do this\n\nbody\n');
     expect(s.why).toBeUndefined();
   });
+  // Regression (PR #2750 review P1-1): the annotation gap used `\s`, which
+  // matches `\n` — a body line beginning with `—`, `–` or `:` directly under
+  // a heading was folded INTO the header match and silently dropped from the
+  // section body (data loss the IntentEditor could then persist back to
+  // disk). Heading whitespace is now same-line only; a dash/colon on the
+  // NEXT line is body content, never an annotation.
+  it('does not swallow a body line starting with — (em dash)', () => {
+    const s = parseIntentDocSections('## 3. Non-negotiables\n\n— 不得编造事实。\n— 必须保留证据。\n');
+    expect(s.nonNegotiables).toBe('— 不得编造事实。\n— 必须保留证据。');
+  });
+  it('does not swallow a body line starting with – (en dash)', () => {
+    const s = parseIntentDocSections('## 3. Non-negotiables\n\n– first constraint\n– second constraint\n');
+    expect(s.nonNegotiables).toBe('– first constraint\n– second constraint');
+  });
+  it('does not swallow a body line starting with a colon', () => {
+    const s = parseIntentDocSections('## 3. Non-negotiables\n\n: first constraint\n: second constraint\n');
+    expect(s.nonNegotiables).toBe(': first constraint\n: second constraint');
+  });
+  it('keeps a dash/colon body line even when the heading carries no annotation', () => {
+    const s = parseIntentDocSections('## 1. Why\n\n— a leading dash is content\n: a leading colon is content\nplain line\n');
+    expect(s.why).toBe('— a leading dash is content\n: a leading colon is content\nplain line');
+  });
+  it('keeps the annotation bound to its own line: next-line dash stays body', () => {
+    const s = parseIntentDocSections('## 1. Why — annotation\n\n— body line, not annotation\n');
+    expect(s.why).toBe('— body line, not annotation');
+  });
+  it('round-trips all five sections through assemble/parse, annotated headings included', () => {
+    const sections: IntentDocSections = {
+      why: 'why-content',
+      desiredOutcome: 'outcome-content',
+      nonNegotiables: '— 不得编造事实。\n— 必须保留证据。',
+      stopEscalation: 'stop-content',
+      currentStrategicFocus: 'focus-content',
+    };
+    const s = parseIntentDocSections(assembleIntentDoc(sections));
+    expect(s.why).toBe('why-content');
+    expect(s.desiredOutcome).toBe('outcome-content');
+    expect(s.nonNegotiables).toBe('— 不得编造事实。\n— 必须保留证据。');
+    expect(s.stopEscalation).toBe('stop-content');
+    expect(s.currentStrategicFocus).toBe('focus-content');
+  });
   it('round-trips: assemble output still parses under the tolerant regexes', () => {
     const sections: IntentDocSections = { why: 'w-content', desiredOutcome: 'd-content' };
     const s = parseIntentDocSections(assembleIntentDoc(sections));
