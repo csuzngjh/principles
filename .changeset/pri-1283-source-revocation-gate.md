@@ -60,3 +60,17 @@ latest source authorization before internalization may reuse it); dry runs
 are read-only per table with counted-from-write purges and reported audit
 failures; the core barrel surface carries only cross-package production
 consumers (9 admitted symbols).
+
+Review round 3 (owner_manual classification ruling): an explicit Owner
+statement is owner_manual only when its text is credibly Owner-authored —
+a direct Owner channel (`codex_explicit_prefix` / `workbuddy_explicit_prefix`
+/ `cli_owner_statement` / `openclaw_manual_pain`), or an agent-assisted
+`codex_explicit_agent` submission carrying a bound Owner confirmation record
+(`ownerConfirmation.kind = owner_verbatim_turn_match` written by the
+registration path after verifying the statement VERBATIM against the current
+turn's host transcript, fingerprint-bound to the persisted text). A
+self-declared `owner_statement` classification or a forged/mismatched
+confirmation never exempts: unverified agent submissions persist as
+Agent-derived and are governed by the consent ledger on every entry point
+(sweep / recall / context assembler / console / admission), consistent under
+one shared `isOwnerManualCorrectionEvidence` judgment.

@@ -67,7 +67,7 @@ import { painRecallSnapshotTestHooks, type SnapshotStatsLike } from './pain-reca
 import {
   denyAllSourceMaterialAuthorization,
   filterEvidenceByAuthorization,
-  isOwnerExplicitCorrectionChannel,
+  isOwnerManualCorrectionEvidence,
   isOwnerExplicitStatementReason,
   type SourceMaterialAuthorizationPort,
   type SourceMaterialHostKind,
@@ -859,7 +859,7 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery, 
             // the context assembler).
             const correctionBlocked = isRecord(persisted)
               && typeof persisted.text === 'string' && persisted.text.length > 0
-              && !isOwnerExplicitCorrectionChannel(correctionChannel)
+              && !isOwnerManualCorrectionEvidence(persisted)
               && governedHostUnauthorized(painHost, correctionChannel);
             if (isRecord(persisted) && typeof persisted.text === 'string' && persisted.text.length > 0 && !correctionBlocked) {
               correction = {

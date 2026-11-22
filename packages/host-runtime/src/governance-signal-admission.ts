@@ -45,6 +45,8 @@ import {
   createDiagnosticianTaskId,
   sanitizeString,
   boundCorrectionEvidenceText,
+  fingerprintStatement,
+  isOwnerManualCorrectionEvidence,
   MAX_EVIDENCE_VALUE_CHARS,
   evaluateStage2ConfidenceGate,
   evaluatePainIngress,
@@ -488,6 +490,16 @@ export interface GovernanceCorrectionCandidate {
    * admission, rate limit and idempotency are identical either way.
    */
   readonly explicitChannel?: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix';
+  /**
+   * PRI-1283 round 3 (owner_manual ruling): set ONLY by the registration
+   * path after the submitted statement was verified VERBATIM against the
+   * current turn's host transcript — the trusted Owner interaction record.
+   * Never accepted from a submission payload: an agent cannot self-declare
+   * Owner confirmation (a payload claim is not a confirmation record).
+   * Agent-assisted statements without this flag persist as Agent-derived
+   * (no `owner_statement` classification, no ownerConfirmation block).
+   */
+  readonly ownerVerbatimConfirmed?: boolean;
 }
 
 export type GovernanceSignalCandidate = GovernanceCorrectionCandidate;
@@ -564,9 +576,15 @@ interface CorrectionPainArgs {
 /** ONE reason builder for inline admission and the pending→admitted transition. */
 function correctionReason(candidate: GovernanceCorrectionCandidate, matchedTerms: readonly string[]): string {
   if (candidate.explicitOwnerStatement === true) {
-    return candidate.explicitChannel === 'codex_explicit_agent'
-      ? 'Codex explicit owner statement (agent-assisted, no prefix)'
-      : `${candidate.hostKind === 'workbuddy' ? 'WorkBuddy' : 'Codex'} explicit owner statement (PD记录痛苦 prefix)`;
+    if (candidate.explicitChannel === 'codex_explicit_agent') {
+      // PRI-1283 round 3: only a transcript-verified agent submission may
+      // carry the owner-explicit reason marker; an unverified one is
+      // Agent-derived and must NOT match `isOwnerExplicitStatementReason`.
+      return candidate.ownerVerbatimConfirmed === true
+        ? 'Codex explicit owner statement (agent-assisted, owner confirmed)'
+        : 'Codex agent-reported pain statement (owner confirmation unverified)';
+    }
+    return `${candidate.hostKind === 'workbuddy' ? 'WorkBuddy' : 'Codex'} explicit owner statement (PD记录痛苦 prefix)`;
   }
   return matchedTerms.length > 0
     ? `User correction detected: ${matchedTerms.join(', ')}`
@@ -602,7 +620,18 @@ interface GovernanceTaskSubmissionPayload {
    * correction evidence (verbatim, classified) — never inside evidence[]
    * pseudo-trace entries and never summarized by an AI.
    */
-  readonly correctionEvidence?: { text: string; classification: 'owner_statement'; channel: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix' };
+  readonly correctionEvidence?: {
+    text: string;
+    /**
+     * Absent for Agent-derived submissions (PRI-1283 round 3): an
+     * unverified `codex_explicit_agent` statement keeps channel disclosure
+     * but must NOT carry the owner_statement classification.
+     */
+    classification?: 'owner_statement';
+    channel: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix';
+    /** Bound Owner confirmation — registration-written only, never payload-supplied. */
+    ownerConfirmation?: { kind: 'owner_verbatim_turn_match'; statementFingerprint: string };
+  };
 }
 
 /**
@@ -664,7 +693,21 @@ function buildTaskSubmissionPayload(candidate: GovernanceCorrectionCandidate, wo
     ...(candidate.explicitOwnerStatement === true
       ? { correctionEvidence: candidate.hostKind === 'workbuddy'
         ? { text: boundCorrectionEvidenceText({ text: candidate.text, classification: 'owner_statement', channel: 'workbuddy_explicit_prefix' }, workspaceDir).text, classification: 'owner_statement' as const, channel: 'workbuddy_explicit_prefix' as const }
-        : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: candidate.explicitChannel === 'codex_explicit_agent' ? 'codex_explicit_agent' as const : 'codex_explicit_prefix' as const } }
+        : candidate.explicitChannel === 'codex_explicit_agent'
+          ? (candidate.ownerVerbatimConfirmed === true
+            ? (() => {
+              // PRI-1283 round 3: the bound confirmation fingerprint covers
+              // the PERSISTED (sanitized) text — the final submitted content.
+              const text = sanitizeString(candidate.text, workspaceDir);
+              return {
+                text,
+                classification: 'owner_statement' as const,
+                channel: 'codex_explicit_agent' as const,
+                ownerConfirmation: { kind: 'owner_verbatim_turn_match' as const, statementFingerprint: fingerprintStatement(text) },
+              };
+            })()
+            : { text: sanitizeString(candidate.text, workspaceDir), channel: 'codex_explicit_agent' as const })
+          : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: 'codex_explicit_prefix' as const } }
       : {}),
   };
   return payload;
@@ -2172,13 +2215,27 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
   // such submissions (the statement itself satisfies the empty-input-evidence
   // admission condition).
   const correctionEvidence = own(value, 'correctionEvidence');
+  const correctionChannel = isRecord(correctionEvidence) ? own(correctionEvidence, 'channel') : undefined;
+  const correctionText = isRecord(correctionEvidence) ? own(correctionEvidence, 'text') : undefined;
   const hasOwnerStatement = isRecord(correctionEvidence)
     && own(correctionEvidence, 'classification') === 'owner_statement'
-    && ((own(correctionEvidence, 'channel') === 'codex_explicit_prefix' || own(correctionEvidence, 'channel') === 'codex_explicit_agent') && hostKind === 'codex'
-      || own(correctionEvidence, 'channel') === 'workbuddy_explicit_prefix' && hostKind === 'workbuddy')
-    && typeof own(correctionEvidence, 'text') === 'string'
-    && (own(correctionEvidence, 'text') as string).length > 0;
-  if (correctionEvidence !== undefined && !hasOwnerStatement) return false;
+    && typeof correctionText === 'string' && correctionText.length > 0
+    && (
+      // Direct Owner channels: the channel itself is the credible record.
+      (correctionChannel === 'codex_explicit_prefix' && hostKind === 'codex')
+      || (correctionChannel === 'workbuddy_explicit_prefix' && hostKind === 'workbuddy')
+      // Agent-assisted: owner_manual ONLY with a bound Owner confirmation
+      // record — kind + fingerprint re-verified against the persisted text
+      // (PRI-1283 round 3; a bare payload claim is never sufficient).
+      || (correctionChannel === 'codex_explicit_agent' && hostKind === 'codex'
+        && isOwnerManualCorrectionEvidence(correctionEvidence))
+    );
+  const isAgentDerivedStatement = isRecord(correctionEvidence)
+    && correctionChannel === 'codex_explicit_agent' && hostKind === 'codex'
+    && typeof correctionText === 'string' && correctionText.length > 0
+    && own(correctionEvidence, 'classification') === undefined
+    && own(correctionEvidence, 'ownerConfirmation') === undefined;
+  if (correctionEvidence !== undefined && !hasOwnerStatement && !isAgentDerivedStatement) return false;
   const evidence = own(value, 'evidence');
   if (!Array.isArray(evidence) || (evidence.length === 0 && !hasOwnerStatement) || evidence.length > 8) return false;
   for (const entry of evidence) {

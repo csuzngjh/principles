@@ -12,7 +12,7 @@ import { shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evi
 import {
   denyAllSourceMaterialAuthorization,
   findUnauthorizedSourceRef,
-  isOwnerExplicitCorrectionChannel,
+  isOwnerManualCorrectionEvidence,
   type SourceMaterialAuthorizationPort,
 } from './source-material-authorization.js';
 import {
@@ -707,10 +707,13 @@ export async function evaluateAndPersistAdmissionFromStore(
       const correction = reentry.correctionEvidence;
       if (correction === undefined) return false;
       const channel = typeof (correction as { channel?: unknown }).channel === 'string' ? (correction as { channel: string }).channel : '';
-      // PRI-1283 review round 2 (directive B): explicit Owner submission
-      // channels are Owner acts — not governed by the conversation-ingestion
-      // consent ledger; they survive a revocation.
-      if (isOwnerExplicitCorrectionChannel(channel)) return false;
+      // PRI-1283 review round 3 (owner_manual ruling): credibly
+      // Owner-authored statements — a direct Owner channel, or an
+      // agent-assisted channel with a bound Owner confirmation record —
+      // are Owner acts: not governed by the conversation-ingestion consent
+      // ledger, surviving a revocation. An unconfirmed codex_explicit_agent
+      // record is Agent-derived and stays governed below.
+      if (isOwnerManualCorrectionEvidence(correction)) return false;
       const ingressHost = typeof ingressPayload?.hostKind === 'string' ? ingressPayload.hostKind : '';
       if (channel.startsWith('codex')) return !authorization.isHostSourceMaterialAuthorized('codex').authorized;
       if (channel.startsWith('workbuddy')) return !authorization.isHostSourceMaterialAuthorized('workbuddy').authorized;

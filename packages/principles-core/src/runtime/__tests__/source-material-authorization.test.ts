@@ -14,7 +14,9 @@ import { denyAllSourceMaterialAuthorization } from '../source-material-authoriza
 import {
   filterEvidenceByAuthorization,
   hostKindFromGovernanceSourceRef,
+  isOwnerManualCorrectionEvidence,
 } from '../source-material-authorization.js';
+import { fingerprintStatement } from '../store/candidate/admission-document.js';
 import { readPromotedEvidenceWindow } from '../store/context/promoted-evidence-reader.js';
 import { assertPayloadSourceAuthorization, assertArtifactEvidenceAuthorized } from '../internalization/source-authorization-boundary.js';
 import type { SourceMaterialAuthorizationPort } from '../source-material-authorization.js';
@@ -264,5 +266,114 @@ describe('PRI-1283 core — SqliteContextAssembler gate (real SQLite)', () => {
     const payload = await assembler().assemble(createDiagnosticianTaskId('pain_1'));
     expect(payload.diagnosisTarget.evidence?.map((e) => e.sourceRef)).toEqual(['owner_reported:cli']);
     expect(payload.diagnosisTarget.correctionEvidence?.text).toBe('owner words');
+  });
+
+  async function createAgentChannelTask(painId: string, correctionEvidence: Record<string, unknown>): Promise<void> {
+    await stateManager.createTask({
+      taskId: createDiagnosticianTaskId(painId),
+      taskKind: 'diagnostician',
+      inputRef: painId,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        sourcePainId: painId,
+        reasonSummary: 'r',
+        source: 'user_correction',
+        severity: 'severe',
+        sessionIdHint: null,
+        provenance: 'host_context_bound',
+        hostKind: 'codex',
+        evidence: [{ sourceRef: 'owner_reported:cli', note: 'owner note' }],
+        correctionEvidence,
+        workspaceDir,
+      }),
+    });
+  }
+
+  it('r3: revoked port WITHHOLDS an unverified codex_explicit_agent correction (Agent-derived, governed)', async () => {
+    await createAgentChannelTask('pain_agent_unverified', {
+      text: 'agent-transcribed words',
+      channel: 'codex_explicit_agent',
+    });
+    const payload = await assembler(deny('codex')).assemble(createDiagnosticianTaskId('pain_agent_unverified'));
+    expect(payload.diagnosisTarget.correctionEvidence).toBeUndefined();
+    // Self-declared classification does not rescue it either.
+    await createAgentChannelTask('pain_agent_selfdeclared', {
+      text: 'agent-claimed owner words',
+      classification: 'owner_statement',
+      channel: 'codex_explicit_agent',
+    });
+    const selfDeclared = await assembler(deny('codex')).assemble(createDiagnosticianTaskId('pain_agent_selfdeclared'));
+    expect(selfDeclared.diagnosisTarget.correctionEvidence).toBeUndefined();
+  });
+
+  it('r3: revoked port KEEPS a codex_explicit_agent correction carrying a bound Owner confirmation', async () => {
+    const text = 'owner words relayed verbatim';
+    await createAgentChannelTask('pain_agent_confirmed', {
+      text,
+      classification: 'owner_statement',
+      channel: 'codex_explicit_agent',
+      ownerConfirmation: { kind: 'owner_verbatim_turn_match', statementFingerprint: fingerprintStatement(text) },
+    });
+    const payload = await assembler(deny('codex')).assemble(createDiagnosticianTaskId('pain_agent_confirmed'));
+    expect(payload.diagnosisTarget.correctionEvidence?.text).toBe(text);
+  });
+});
+
+describe('PRI-1283 r3 — owner_manual 判定 (Owner classification ruling)', () => {
+  const confirmed = (text: string) => ({
+    text,
+    classification: 'owner_statement',
+    channel: 'codex_explicit_agent',
+    ownerConfirmation: { kind: 'owner_verbatim_turn_match', statementFingerprint: fingerprintStatement(text) },
+  });
+
+  it('直接 Owner 通道属于 owner_manual（无需确认记录）', () => {
+    for (const channel of ['codex_explicit_prefix', 'workbuddy_explicit_prefix', 'cli_owner_statement', 'openclaw_manual_pain']) {
+      expect(isOwnerManualCorrectionEvidence({ text: 'owner words', channel })).toBe(true);
+    }
+  });
+
+  it('Agent 代提交 + 绑定确认记录属于 owner_manual', () => {
+    expect(isOwnerManualCorrectionEvidence(confirmed('owner words verbatim'))).toBe(true);
+  });
+
+  it('Agent 自行转述/总结（无确认记录）属于 Agent-derived', () => {
+    expect(isOwnerManualCorrectionEvidence({ text: 'agent words', channel: 'codex_explicit_agent' })).toBe(false);
+    expect(isOwnerManualCorrectionEvidence({ text: 'agent words', channel: 'codex_explicit_agent', classification: 'owner_statement' })).toBe(false);
+  });
+
+  it('Payload 中自我声明的 Owner 确认不构成有效确认', () => {
+    // 伪造 kind / 伪造 fingerprint 均不满足。
+    expect(isOwnerManualCorrectionEvidence({
+      text: 't', classification: 'owner_statement', channel: 'codex_explicit_agent',
+      ownerConfirmation: { kind: 'self_declared', statementFingerprint: fingerprintStatement('t') },
+    })).toBe(false);
+    expect(isOwnerManualCorrectionEvidence({
+      text: 't', classification: 'owner_statement', channel: 'codex_explicit_agent',
+      ownerConfirmation: { kind: 'owner_verbatim_turn_match', statementFingerprint: 'forged' },
+    })).toBe(false);
+    expect(isOwnerManualCorrectionEvidence({
+      text: 't', classification: 'owner_statement', channel: 'codex_explicit_agent',
+      ownerConfirmation: 'not-an-object',
+    })).toBe(false);
+  });
+
+  it('确认内容与最终提交不一致（fingerprint 绑定失败）不属于 owner_manual', () => {
+    expect(isOwnerManualCorrectionEvidence({
+      text: 'final submitted text',
+      classification: 'owner_statement',
+      channel: 'codex_explicit_agent',
+      ownerConfirmation: { kind: 'owner_verbatim_turn_match', statementFingerprint: fingerprintStatement('different confirmed text') },
+    })).toBe(false);
+  });
+
+  it('非受管/未知通道不属于 owner_manual；缺 text 不属于 owner_manual', () => {
+    expect(isOwnerManualCorrectionEvidence({ text: 't', channel: 'some_other' })).toBe(false);
+    expect(isOwnerManualCorrectionEvidence({ channel: 'codex_explicit_prefix' })).toBe(false);
+    expect(isOwnerManualCorrectionEvidence({ text: '', channel: 'codex_explicit_prefix' })).toBe(false);
+    expect(isOwnerManualCorrectionEvidence('not-an-object')).toBe(false);
+    expect(isOwnerManualCorrectionEvidence(null)).toBe(false);
   });
 });

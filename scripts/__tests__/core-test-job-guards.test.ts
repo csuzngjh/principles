@@ -57,16 +57,18 @@ describe('PRI-1198 — packages/principles-core/tests is linted', () => {
 });
 
 describe('PRI-1167 — core job caps test workers instead of raising the timeout', () => {
-  function coverageStep(): StepDef {
-    const step = coreJobSteps().find((s) => s.name === 'Test with coverage');
-    if (!step) throw new Error('ci.yml core job has no "Test with coverage" step');
+  function testStep(): StepDef {
+    // PRI-1283: #2746 dropped the coverage collection and renamed the step —
+    // locate the vitest invocation itself, not a step name that can drift.
+    const step = coreJobSteps().find((s) => (s.run ?? '').includes('npm run test'));
+    if (!step) throw new Error('ci.yml core job has no step running `npm run test`');
     return step;
   }
 
   it('pins a bounded --maxWorkers on the vitest command', () => {
     // Reverting the fix (dropping the flag) makes this fail: an unbounded run
     // is what let isolate startup starve the first test past 5000ms.
-    const match = (coverageStep().run ?? '').match(/--maxWorkers=(\d+)/);
+    const match = (testStep().run ?? '').match(/--maxWorkers=(\d+)/);
     expect(match, 'core test command must pin --maxWorkers=<n>').not.toBeNull();
     const workers = Number(match![1]);
     expect(workers).toBeGreaterThan(0);

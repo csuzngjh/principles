@@ -7,6 +7,7 @@
  * PRI-345: input-evidence hard gate + empty-evidence short circuit.
  */
 import type { PainProvenance } from './admission-gate.js';
+import { isOwnerManualCorrectionEvidence } from './source-material-authorization.js';
 
 /**
  * Returns true when the provenance indicates a pain signal whose submission
@@ -46,12 +47,14 @@ export function shouldShortCircuitEmptyEvidence(evidenceLength: number, source: 
 }
 
 /**
- * SPEC-CODEX-PAIN-CLOSURE-001 CR-02: a correction-evidence payload is an
- * explicit Owner statement only when it carries the owner_statement
- * classification. Legacy correction traces (no classification) never count.
+ * SPEC-CODEX-PAIN-CLOSURE-001 CR-02 / PRI-1283 round 3 (owner_manual ruling):
+ * a correction-evidence payload counts as an explicit Owner statement only
+ * when the shared owner_manual judgment says its text is credibly
+ * Owner-authored — a direct Owner channel, or an agent-assisted channel with
+ * a bound Owner confirmation record. An agent's self-declared
+ * `owner_statement` classification (no confirmation) never counts: it is
+ * Agent-derived and must not satisfy owner-statement conditions anywhere.
  */
 export function isOwnerStatementEvidence(correctionEvidence: unknown): boolean {
-  if (typeof correctionEvidence !== 'object' || correctionEvidence === null || Array.isArray(correctionEvidence)) return false;
-  const record = correctionEvidence as Record<string, unknown>;
-  return typeof record.text === 'string' && record.text.length > 0 && record.classification === 'owner_statement';
+  return isOwnerManualCorrectionEvidence(correctionEvidence);
 }

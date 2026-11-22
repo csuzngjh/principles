@@ -29,6 +29,8 @@ import {
   RuntimeStateManager,
   createDiagnosticianTaskId,
   denyAllSourceMaterialAuthorization,
+  fingerprintStatement,
+  isOwnerManualCorrectionEvidence,
 } from '@principles/core/runtime';
 
 /**
@@ -1010,5 +1012,227 @@ describe('PRI-1283 r2 E — dry run is truly read-only; per-table independence; 
     const marker = markerRow();
     expect(marker.reason ?? '').not.toContain('不要自作主张');
     expect((marker.task_payload_json ?? '').includes('不要自作主张')).toBe(false);
+  });
+});
+
+// ── Review round 3 (owner_manual ruling): agent-assisted statements ─────────
+//
+// Owner's final classification ruling:
+//   owner_manual   = a DIRECT Owner channel, or an agent-submitted statement
+//                    carrying a bound Owner confirmation record (written only
+//                    by the registration path after a verbatim transcript
+//                    match, fingerprint-bound to the persisted text);
+//   Agent-derived  = everything else, including a self-declared
+//                    'owner_statement' classification on codex_explicit_agent.
+// All assertions use real SQLite workspaces + the production sweep/recall.
+
+function seedAgentChannelPain(args: { text: string; turnId: string; confirmed: boolean }): string {
+  seedCodexObservation({
+    logicalKey: `codex|rollout-1|${args.turnId}|user`,
+    turnId: args.turnId,
+    visibleText: `${SECRET} ambient ${args.turnId}`,
+  });
+  const candidate: GovernanceCorrectionCandidate = {
+    kind: 'user_correction',
+    hostKind: 'codex',
+    logicalObservationKey: `codex|rollout-1|${args.turnId}|user`,
+    rolloutIdentity: 'rollout-1',
+    rootSessionId: 'root-session-1',
+    hostTurnId: args.turnId,
+    text: args.text,
+    observedAt: NOW.toISOString(),
+    explicitOwnerStatement: true,
+    explicitChannel: 'codex_explicit_agent',
+    ...(args.confirmed ? { ownerVerbatimConfirmed: true } : {}),
+  };
+  const admitted = admitGovernanceSignals({ workspaceDir, candidates: [candidate], now: NOW, keywordStore: buildSharedSeedKeywordStore() });
+  if (!('ok' in admitted) || !admitted.ok || admitted.outcomes[0]?.disposition !== 'admitted') {
+    throw new Error(`agent-channel admission failed: ${JSON.stringify(admitted)}`);
+  }
+  return admitted.outcomes[0].canonicalPainId;
+}
+
+function markerFor(painId: string): { decision: string; reason: string | null; task_payload_json: string | null } | undefined {
+  return withTrajectory((db) => db
+    .prepare('SELECT decision, reason, task_payload_json FROM governance_signal_admissions WHERE canonical_pain_id = ?')
+    .get(painId) as { decision: string; reason: string | null; task_payload_json: string | null } | undefined);
+}
+
+function painRowFor(painId: string): { text: string | null; reason: string | null } | undefined {
+  return withTrajectory((db) => db
+    .prepare('SELECT text, reason FROM pain_events WHERE canonical_pain_id = ?')
+    .get(painId) as { text: string | null; reason: string | null } | undefined);
+}
+
+function writeRecallLedger(painIds: readonly string[]): void {
+  const ledger = {
+    _tree: {
+      principles: {
+        'p-recall-r3': {
+          id: 'p-recall-r3', version: 1, text: 'verify before acting', triggerPattern: 'w', action: 'a', status: 'active',
+          derivedFromPainIds: [],
+          reuseEvidence: painIds.map((painId) => ({
+            painId, candidateId: `cand-${painId}`, decision: 'reuse', actor: { kind: 'owner', id: 'owner-1' }, reason: 'same pain', decidedAt: NOW.toISOString(),
+          })),
+          createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+        },
+      },
+      rules: {}, implementations: {}, metrics: {}, lastUpdated: NOW.toISOString(),
+    },
+  };
+  fs.writeFileSync(path.join(workspaceDir, '.state', 'principle_training_state.json'), JSON.stringify(ledger, null, 2));
+}
+
+async function recallTexts(): Promise<readonly (string | null)[]> {
+  const recall = await recallPains(workspaceDir, { requestedPrincipleId: 'p-recall-r3', limit: 10 }, {
+    sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+  });
+  return recall.results.map((entry) => entry.pain.text);
+}
+
+describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', () => {
+  it('A. Owner 直接提交 (codex_explicit_prefix): 撤回授权后仍保留', async () => {
+    writeConsent('codex', 'granted');
+    const candidate: GovernanceCorrectionCandidate = {
+      kind: 'user_correction',
+      hostKind: 'codex',
+      logicalObservationKey: 'codex|rollout-1|turn-a|user',
+      rolloutIdentity: 'rollout-1',
+      rootSessionId: 'root-session-1',
+      hostTurnId: 'turn-a',
+      text: `PD记录痛苦：${SECRET} owner direct`,
+      observedAt: NOW.toISOString(),
+      explicitOwnerStatement: true,
+      explicitChannel: 'codex_explicit_prefix',
+    };
+    const admitted = admitGovernanceSignals({ workspaceDir, candidates: [candidate], now: NOW, keywordStore: buildSharedSeedKeywordStore() });
+    if (!('ok' in admitted) || !admitted.ok || admitted.outcomes[0]?.disposition !== 'admitted') throw new Error(`admission failed: ${JSON.stringify(admitted)}`);
+    const painId = admitted.outcomes[0].canonicalPainId;
+
+    writeConsent('codex', 'revoked');
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+
+    const marker = markerFor(painId);
+    expect(marker?.decision).toBe('admitted');
+    expect(marker?.task_payload_json).toContain(SECRET);
+    expect(marker?.reason).toContain('explicit owner statement');
+    expect(painRowFor(painId)?.text).toContain(SECRET);
+
+    writeRecallLedger([painId]);
+    const texts = await recallTexts();
+    expect(texts.join('\n')).toContain(SECRET);
+  });
+
+  it('B. Agent 代提交 + Owner 确认最终内容 (bound confirmation): 撤回授权后仍保留', async () => {
+    writeConsent('codex', 'granted');
+    const painId = seedAgentChannelPain({ text: `${SECRET} owner confirmed via agent`, turnId: 'turn-b', confirmed: true });
+
+    // Persisted read-back: classification + bound confirmation record.
+    const before = markerFor(painId);
+    const evidence = JSON.parse(before?.task_payload_json ?? '{}') as { correctionEvidence?: { classification?: string; channel?: string; ownerConfirmation?: { kind?: string; statementFingerprint?: string } } };
+    expect(evidence.correctionEvidence?.classification).toBe('owner_statement');
+    expect(evidence.correctionEvidence?.channel).toBe('codex_explicit_agent');
+    expect(evidence.correctionEvidence?.ownerConfirmation?.kind).toBe('owner_verbatim_turn_match');
+    expect(evidence.correctionEvidence?.ownerConfirmation?.statementFingerprint).toBe(fingerprintStatement(`${SECRET} owner confirmed via agent`));
+
+    writeConsent('codex', 'revoked');
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+
+    const marker = markerFor(painId);
+    expect(marker?.task_payload_json).toContain(SECRET);
+    expect(marker?.reason).toContain('explicit owner statement');
+    expect(painRowFor(painId)?.text).toContain(SECRET);
+
+    writeRecallLedger([painId]);
+    const texts = await recallTexts();
+    expect(texts.join('\n')).toContain(SECRET);
+  });
+
+  it('C. Agent 自行转述 (unverified codex_explicit_agent): 撤回授权后清退', async () => {
+    writeConsent('codex', 'granted');
+    const painId = seedAgentChannelPain({ text: `${SECRET} agent transcription claim`, turnId: 'turn-c', confirmed: false });
+
+    // Persisted read-back: agent-derived shape — no classification, no confirmation.
+    const before = markerFor(painId);
+    const evidence = JSON.parse(before?.task_payload_json ?? '{}') as { correctionEvidence?: { classification?: string; channel?: string; ownerConfirmation?: unknown } };
+    expect(evidence.correctionEvidence?.channel).toBe('codex_explicit_agent');
+    expect(evidence.correctionEvidence?.classification).toBeUndefined();
+    expect(evidence.correctionEvidence?.ownerConfirmation).toBeUndefined();
+    expect(before?.reason ?? '').not.toContain('explicit owner statement');
+
+    writeConsent('codex', 'revoked');
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+
+    const marker = markerFor(painId);
+    expect(marker?.task_payload_json ?? '').not.toContain(SECRET);
+    expect(painRowFor(painId)?.text).toBeNull();
+
+    writeRecallLedger([painId]);
+    const texts = await recallTexts();
+    expect(texts.join('\n')).not.toContain(SECRET);
+  });
+
+  it('D. Agent 自行总结 (unverified codex_explicit_agent): 撤回授权后清退', async () => {
+    writeConsent('codex', 'granted');
+    const painId = seedAgentChannelPain({ text: `${SECRET} agent self summary`, turnId: 'turn-d', confirmed: false });
+
+    writeConsent('codex', 'revoked');
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+
+    expect(markerFor(painId)?.task_payload_json ?? '').not.toContain(SECRET);
+    expect(painRowFor(painId)?.text).toBeNull();
+
+    writeRecallLedger([painId]);
+    const texts = await recallTexts();
+    expect(texts.join('\n')).not.toContain(SECRET);
+  });
+
+  it('E. Agent 在持久化记录中伪造 Owner 确认: 拒绝 Owner Statement 分类并被清退', async () => {
+    writeConsent('codex', 'granted');
+    const painId = seedAgentChannelPain({ text: `${SECRET} forged claim`, turnId: 'turn-e', confirmed: false });
+
+    // Forge: self-declared classification + a confirmation claim the
+    // registration path never wrote (kind fabricated / fingerprint wrong).
+    const forged = JSON.parse(markerFor(painId)?.task_payload_json ?? '{}') as Record<string, unknown>;
+    forged.correctionEvidence = {
+      text: `${SECRET} forged claim`,
+      classification: 'owner_statement',
+      channel: 'codex_explicit_agent',
+      ownerConfirmation: { kind: 'owner_verbatim_turn_match', statementFingerprint: fingerprintStatement('not the persisted text') },
+    };
+    withTrajectory((db) => db.prepare('UPDATE governance_signal_admissions SET task_payload_json = ? WHERE canonical_pain_id = ?').run(JSON.stringify(forged), painId));
+    expect(isOwnerManualCorrectionEvidence(forged.correctionEvidence)).toBe(false);
+
+    writeConsent('codex', 'revoked');
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+
+    expect(markerFor(painId)?.task_payload_json ?? '').not.toContain(SECRET);
+    expect(painRowFor(painId)?.text).toBeNull();
+  });
+
+  it('F. Owner 确认与最终提交内容不一致 (fingerprint 绑定失败): 不能获得豁免', async () => {
+    writeConsent('codex', 'granted');
+    const painId = seedAgentChannelPain({ text: `${SECRET} confirmed original`, turnId: 'turn-f', confirmed: true });
+
+    // Simulate a confirmation recorded for DIFFERENT content than what was
+    // finally persisted: replace the persisted text after admission so the
+    // bound fingerprint no longer matches.
+    const forged = JSON.parse(markerFor(painId)?.task_payload_json ?? '{}') as { correctionEvidence?: { text?: string } };
+    if (forged.correctionEvidence !== undefined) forged.correctionEvidence.text = `${SECRET} tampered final`;
+    withTrajectory((db) => db.prepare('UPDATE governance_signal_admissions SET task_payload_json = ? WHERE canonical_pain_id = ?').run(JSON.stringify(forged), painId));
+    expect(isOwnerManualCorrectionEvidence(forged.correctionEvidence)).toBe(false);
+
+    writeConsent('codex', 'revoked');
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: true });
+    expect(report.outcome).toBe('completed');
+
+    const after = JSON.parse(markerFor(painId)?.task_payload_json ?? '{}') as { correctionEvidence?: unknown; evidence?: unknown; reason?: string };
+    expect(after.correctionEvidence).toBeUndefined();
+    expect(after.reason).not.toContain('explicit owner statement');
   });
 });

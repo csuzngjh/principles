@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2056,
+  "count": 2058,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1759,6 +1759,7 @@
     "findOwnerResolutionForCurrentEpoch",
     "findUnclassifiedSurfaces",
     "fingerprintAdmissionMaterial",
+    "fingerprintStatement",
     "formatContextBudgetSummary",
     "formatCorePrinciplesList",
     "formatLegacyRuleContractRemediation",
@@ -1833,6 +1834,7 @@
     "isOwnerExplicitCorrectionChannel",
     "isOwnerExplicitManual",
     "isOwnerExplicitStatementReason",
+    "isOwnerManualCorrectionEvidence",
     "isOwnerStatementEvidence",
     "isPDErrorCategory",
     "isPDTaskStatus",

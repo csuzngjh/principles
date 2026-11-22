@@ -37,6 +37,8 @@
  *   - any other prefix → null (not consent-gated by this ledger).
  */
 
+import { fingerprintStatement } from './store/candidate/admission-document.js';
+
 /** Host kinds whose conversation ingestion is governed by the consent ledger. */
 export type SourceMaterialHostKind = 'codex' | 'workbuddy' | 'openclaw';
 
@@ -73,21 +75,45 @@ export const denyAllSourceMaterialAuthorization: SourceMaterialAuthorizationPort
 /** The one sourceRef prefix produced by consent-gated governance ingestion. */
 export const GOVERNANCE_OBSERVATION_SOURCE_REF_PREFIX = 'governance_observation:';
 
-// ── Owner-explicit provenance (PRI-1283 review round 2, directive B) ────────
+// ── Owner-explicit provenance (PRI-1283 review round 2, directive B; ───────
+//    round 3: owner_manual vs Agent-derived semantics) ──────────────────────
 //
 // Revocation of a host's conversation-ingestion consent governs material the
 // system COLLECTED from that host's conversations. It does NOT govern material
 // the Owner explicitly submitted (`PD记录痛苦：` prefix, `pd pain explicit`,
-// WorkBuddy explicit intake) — those are Owner acts, not ingestion. Every
-// purge/read gate below must classify provenance through these helpers so the
-// four consumption entry points (sweep / recall / context assembler / console)
-// share ONE judgment instead of four (directive B2).
+// WorkBuddy explicit intake, `--owner-statement`, manual OpenClaw pains) —
+// those are Owner acts, not ingestion. Every purge/read gate below must
+// classify provenance through these helpers so all consumption entry points
+// (sweep / recall / context assembler / console / admission) share ONE
+// judgment instead of five (directive B2).
+//
+// Owner ruling (final): a statement is `owner_manual` ONLY when
+//   (a) the Owner submitted it directly — the channel itself is the credible
+//       record (the host read the Owner's prompt, or the Owner typed it on a
+//       manual entry), or
+//   (b) an agent submitted it AND a trusted Owner confirmation record bound
+//       to the exact persisted text exists (`ownerConfirmation` written by
+//       the registration path after a verbatim turn-transcript match — a
+//       field the submission API cannot self-declare).
+// Everything else an agent produced — paraphrase, summary, inference, or a
+// bare payload claim of Owner approval — is Agent-derived: it stays governed
+// by the host's consent and is withheld/purged on revocation. A persisted
+// `codex_explicit_agent` channel WITHOUT a bound confirmation is therefore
+// never owner-exempt.
 
-/** Correction-evidence channels that mark an EXPLICIT Owner submission. */
+/**
+ * Correction-evidence channels where the channel ITSELF is the credible
+ * Owner record — the text was read from the Owner's own input by the host
+ * (prefix entries), typed by the Owner on a manual entry, or recorded as a
+ * manual OpenClaw pain. `codex_explicit_agent` is deliberately absent: it is
+ * model-transcribed text and requires a bound confirmation record instead
+ * ({@link isOwnerManualCorrectionEvidence}).
+ */
 export const OWNER_EXPLICIT_CORRECTION_CHANNELS: readonly string[] = [
   'codex_explicit_prefix',
-  'codex_explicit_agent',
   'workbuddy_explicit_prefix',
+  'cli_owner_statement',
+  'openclaw_manual_pain',
 ];
 
 /**
@@ -100,17 +126,75 @@ export function isOwnerExplicitCorrectionChannel(channel: unknown): boolean {
 }
 
 /**
+ * The `ownerConfirmation.kind` the registration path stamps on an
+ * agent-assisted statement ONLY after verifying the submitted text appears
+ * verbatim in the current turn's host transcript — the trusted Owner
+ * interaction record. `statementFingerprint` is sha256 of the PERSISTED
+ * (sanitized) text, binding the confirmation to the final submitted content:
+ * a confirmation recorded for different text, or text altered afterwards,
+ * never matches.
+ */
+export const OWNER_VERBATIM_CONFIRMATION_KIND = 'owner_verbatim_turn_match';
+
+function ownField(record: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(record, key) ? Object.getOwnPropertyDescriptor(record, key)?.value : undefined;
+}
+
+/**
+ * The ONE Owner-statement judgment (owner_manual vs Agent-derived): is this
+ * persisted correction evidence credibly Owner-authored — an Owner act that
+ * survives a consent revocation?
+ *
+ *   - a direct-Owner channel → yes (the channel is the credible record);
+ *   - `codex_explicit_agent` → yes ONLY with `classification` 'owner_statement'
+ *     AND an `ownerConfirmation` of kind {@link OWNER_VERBATIM_CONFIRMATION_KIND}
+ *     whose `statementFingerprint` equals the fingerprint of the persisted
+ *     text (the confirmation must bind to the final submitted content);
+ *   - anything else — agent-reported, unattributable, self-declared — no.
+ */
+export function isOwnerManualCorrectionEvidence(evidence: unknown): boolean {
+  if (typeof evidence !== 'object' || evidence === null || Array.isArray(evidence)) return false;
+  const record = evidence as Record<string, unknown>;
+  const text = ownField(record, 'text');
+  if (typeof text !== 'string' || text.length === 0) return false;
+  const channel = ownField(record, 'channel');
+  if (isOwnerExplicitCorrectionChannel(channel)) return true;
+  if (channel !== 'codex_explicit_agent') return false;
+  if (ownField(record, 'classification') !== 'owner_statement') return false;
+  const confirmation = ownField(record, 'ownerConfirmation');
+  if (typeof confirmation !== 'object' || confirmation === null || Array.isArray(confirmation)) return false;
+  const confirmationRecord = confirmation as Record<string, unknown>;
+  return ownField(confirmationRecord, 'kind') === OWNER_VERBATIM_CONFIRMATION_KIND
+    && ownField(confirmationRecord, 'statementFingerprint') === fingerprintStatement(text);
+}
+
+/**
  * The persisted `reason` marker produced by `correctionReason` for explicit
  * Owner statements (admission markers and pain_events rows carry it).
  */
 export const OWNER_EXPLICIT_STATEMENT_REASON_MARKER = 'explicit owner statement';
 
 /**
+ * Reason qualifiers that DISQUALIFY the owner-explicit marker: the legacy
+ * agent-assisted reason (`agent-assisted, no prefix`) and every reason that
+ * discloses an unverified Owner confirmation — both describe agent-derived
+ * text, never an Owner act.
+ */
+const AGENT_DERIVED_REASON_QUALIFIERS: readonly string[] = [
+  'agent-assisted, no prefix',
+  'unverified',
+];
+
+/**
  * Does this persisted pain/admission reason describe an explicit Owner
- * statement? Rows lacking the marker are treated as automatic (governed).
+ * statement — an Owner act that survives revocation? A reason carrying the
+ * marker but also an agent-derived qualifier (legacy agent-assisted rows, or
+ * a disclosure of unverified confirmation) is Agent-derived, not owner_manual.
  */
 export function isOwnerExplicitStatementReason(reason: unknown): boolean {
-  return typeof reason === 'string' && reason.includes(OWNER_EXPLICIT_STATEMENT_REASON_MARKER);
+  return typeof reason === 'string'
+    && reason.includes(OWNER_EXPLICIT_STATEMENT_REASON_MARKER)
+    && !AGENT_DERIVED_REASON_QUALIFIERS.some((qualifier) => reason.includes(qualifier));
 }
 
 /** logicalKey host prefixes, as produced by the codex/workbuddy adapters. */

@@ -459,6 +459,7 @@ export {
   denyAllSourceMaterialAuthorization,
   isOwnerExplicitCorrectionChannel,
   isOwnerExplicitStatementReason,
+  isOwnerManualCorrectionEvidence,
 } from './source-material-authorization.js';
 export type {
   SourceMaterialHostKind,
@@ -537,6 +538,7 @@ export {
   pendingOwnerDecision,
   appliedOwnerDecision,
   fingerprintMaterial as fingerprintAdmissionMaterial,
+  fingerprintStatement,
 } from './store/candidate/admission-document.js';
 export type {
   AdmissionEvaluationRecord,

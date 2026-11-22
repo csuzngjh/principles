@@ -39,7 +39,7 @@ import { readPromotedEvidenceWindow } from './promoted-evidence-reader.js';
 import {
   denyAllSourceMaterialAuthorization,
   filterEvidenceByAuthorization,
-  isOwnerExplicitCorrectionChannel,
+  isOwnerManualCorrectionEvidence,
   type SourceMaterialAuthorizationPort,
   type SourceMaterialHostKind,
 } from '../../source-material-authorization.js';
@@ -56,14 +56,17 @@ function isPainProvenance(value: unknown): value is (typeof PAIN_PROVENANCE_VALU
 
 /**
  * PRI-1283 R2 (review round 2, directive B): correction evidence channel →
- * the host whose consent governs the statement. EXPLICIT Owner submission
- * channels (`codex_explicit_prefix` / `codex_explicit_agent` /
- * `workbuddy_explicit_prefix`) are Owner acts, not conversation ingestion —
- * they are NOT governed by the conversation-ingestion ledger and survive a
- * revocation (classification via the shared core helper so sweep / recall /
- * assembler / console apply ONE judgment). Channel-less legacy records of a
- * codex/workbuddy task remain governed (their correction text came from that
- * host's consent-gated ingestion); OpenClaw / CLI corrections return null.
+ * the host whose consent governs the statement. Owner-authored statements
+ * (owner_manual — a direct Owner channel, or an agent-assisted channel with
+ * a bound Owner confirmation record) are Owner acts, not conversation
+ * ingestion — they are NOT governed by the conversation-ingestion ledger and
+ * survive a revocation (classification via the shared core helper so sweep /
+ * recall / assembler / console / admission apply ONE judgment). A
+ * `codex_explicit_agent` record WITHOUT a bound confirmation is
+ * Agent-derived and stays governed (it maps back to the codex host below).
+ * Channel-less legacy records of a codex/workbuddy task remain governed
+ * (their correction text came from that host's consent-gated ingestion);
+ * OpenClaw / CLI corrections return null.
  */
 function correctionEvidenceHost(
   correction: NonNullable<DiagnosticianTaskRecord['correctionEvidence']>,
@@ -72,7 +75,7 @@ function correctionEvidenceHost(
   const channel = typeof (correction as { channel?: unknown }).channel === 'string'
     ? (correction as { channel: string }).channel
     : '';
-  if (isOwnerExplicitCorrectionChannel(channel)) return null;
+  if (isOwnerManualCorrectionEvidence(correction)) return null;
   if (channel.startsWith('codex')) return 'codex';
   if (channel.startsWith('workbuddy')) return 'workbuddy';
   if (taskHostKind === 'codex') return 'codex';
@@ -595,6 +598,11 @@ export class SqliteContextAssembler implements ContextAssembler {
       // every correction fall back to task-host attribution (mis-withheld).
       ...(obj.classification === 'owner_statement' ? { classification: 'owner_statement' as const } : {}),
       ...(typeof obj.channel === 'string' && obj.channel.length > 0 ? { channel: obj.channel as PainCorrectionEvidence['channel'] } : {}),
+      // PRI-1283 round 3: carry the bound Owner confirmation record through so
+      // the shared owner_manual judgment can verify agent-assisted statements.
+      ...(typeof obj.ownerConfirmation === 'object' && obj.ownerConfirmation !== null && !Array.isArray(obj.ownerConfirmation)
+        ? { ownerConfirmation: obj.ownerConfirmation as PainCorrectionEvidence['ownerConfirmation'] }
+        : {}),
     };
   }
 

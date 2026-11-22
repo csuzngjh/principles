@@ -96,8 +96,8 @@ import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import { RuntimeStateManager } from '@principles/core/runtime';
 import {
   GOVERNANCE_OBSERVATION_SOURCE_REF_PREFIX,
-  isOwnerExplicitCorrectionChannel,
   isOwnerExplicitStatementReason,
+  isOwnerManualCorrectionEvidence,
 } from '@principles/core/runtime';
 
 export const SOURCE_REVOCATION_SWEEP_AUDIT_FILENAME = 'source-revocation-sweep.jsonl';
@@ -343,9 +343,13 @@ function classifyAdmissionMarker(row: Record<string, unknown>): MarkerClassifica
     return { kind: 'unattributable', payload: null, payloadText };
   }
   const correction = parsed.correctionEvidence;
-  if (isRecord(correction)
-    && (correction.classification === 'owner_statement' || isOwnerExplicitCorrectionChannel(correction.channel))) {
-    return { kind: 'owner_explicit', payload: parsed, payloadText };
+  if (isRecord(correction)) {
+    // PRI-1283 round 3: when the structured correction record exists, ITS
+    // content-binding judgment is authoritative — a failing Owner
+    // confirmation (or none) is Agent-derived even when the reason string
+    // still carries the legacy owner marker (confirmation must bind to the
+    // final submitted content, not to a reason claim).
+    return { kind: isOwnerManualCorrectionEvidence(correction) ? 'owner_explicit' : 'automatic', payload: parsed, payloadText };
   }
   if (isOwnerExplicitStatementReason(typeof parsed.reason === 'string' ? parsed.reason : '')
     || isOwnerExplicitStatementReason(reasonColumn)) {
@@ -646,7 +650,7 @@ async function sweepStateDb(args: {
         if (isRecord(correction)) {
           const channel = typeof correction.channel === 'string' ? correction.channel : '';
           const taskHost = typeof next.hostKind === 'string' ? next.hostKind : '';
-          const governed = !isOwnerExplicitCorrectionChannel(channel)
+          const governed = !isOwnerManualCorrectionEvidence(correction)
             && (channel.startsWith(hostKind) || (channel.length === 0 && (taskHost === 'codex' || taskHost === 'workbuddy') && taskHost === hostKind));
           if (governed) {
             delete next.correctionEvidence;
