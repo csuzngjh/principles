@@ -29,6 +29,7 @@ import * as os from 'node:os';
 import * as yaml from 'js-yaml';
 import {
   WorkBuddyHostInstaller,
+  type WorkbuddyHostInstallerDeps,
   WORKBUDDY_PLUGIN_KEY,
   WORKBUDDY_MARKETPLACE_NAME,
   WORKBUDDY_PLUGIN_NAME,
@@ -43,6 +44,7 @@ import {
   runWorkbuddyEarlyPreflight,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
+import { atomicReplaceTextFile } from '../src/utils/config-file-io.js';
 import { formatHostStateSummary } from '../src/install-summary.js';
 import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
@@ -75,6 +77,9 @@ function writePluginSkeleton(pluginDir: string, version = '0.3.0'): void {
   // Gate 4: the payload contract (and the cache freshness check) includes the
   // launcher; a skeleton without it would make every reinstall look stale.
   fs.cpSync(path.resolve(__dirname, '../../workbuddy-adapter/plugin/mcp'), path.join(pluginDir, 'mcp'), { recursive: true });
+  // The bundled MCP manifest — what makes the plugin's pd-recall a real
+  // substitute for the legacy user-level entry in the migration gate.
+  fs.copyFileSync(path.resolve(__dirname, '../../workbuddy-adapter/plugin/.mcp.json'), path.join(pluginDir, '.mcp.json'));
 
   fs.mkdirSync(path.join(pluginDir, '.codebuddy-plugin'), { recursive: true });
   fs.writeFileSync(
@@ -104,7 +109,7 @@ function writePluginSkeleton(pluginDir: string, version = '0.3.0'): void {
   fs.writeFileSync(path.join(pluginDir, 'scripts', 'wrapper.cjs'), '// test wrapper placeholder\n');
 }
 
-function makeLab(options: { engine?: 'real-fake' | 'unreachable' } = {}): Lab {
+function makeLab(options: { engine?: 'real-fake' | 'unreachable'; installerDeps?: Partial<WorkbuddyHostInstallerDeps> } = {}): Lab {
   const home = fs.mkdtempSync(path.join(TMP, 'pd-wb-home-'));
   const configDir = path.join(home, '.workbuddy');
   fs.mkdirSync(configDir, { recursive: true }); // host discovered
@@ -136,6 +141,7 @@ function makeLab(options: { engine?: 'real-fake' | 'unreachable' } = {}): Lab {
     enginePath: () => engine,
     // Default runCommand (spawnSync) — the fake engine is spawned via the REAL
     // node binary path, exercising the real spawn boundary.
+    ...options.installerDeps,
   });
 
   return {
@@ -178,7 +184,7 @@ function registryPath(lab: Lab): string {
 }
 
 const labs: Lab[] = [];
-function lab(options?: { engine?: 'real-fake' | 'unreachable' }): Lab {
+function lab(options?: { engine?: 'real-fake' | 'unreachable'; installerDeps?: Partial<WorkbuddyHostInstallerDeps> }): Lab {
   const created = makeLab(options);
   labs.push(created);
   return created;
@@ -496,21 +502,41 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
 // ─── legacy USER-level MCP entry cleanup ─────────────────────────────────────
 
 describe('WorkBuddyHostInstaller.install — legacy user-level MCP entry cleanup', () => {
+  /** Deploy the shared-runtime MCP server component so the binding write succeeds. */
+  const deployMcpServerComponent = (created: Lab): void => {
+    const mcpEntry = path.join(created.home, '.pd', 'runtime', 'pd-mcp-server', 'dist', 'index.js');
+    fs.mkdirSync(path.dirname(mcpEntry), { recursive: true });
+    fs.writeFileSync(mcpEntry, '// mcp server entry\n');
+    fs.writeFileSync(
+      path.join(created.home, '.pd', 'runtime', 'pd-mcp-server', 'package.json'),
+      JSON.stringify({ name: '@principles/pd-mcp-server', version: '0.1.0' }, null, 2),
+    );
+  };
+  /** The PD-owned legacy entry every case below starts from (real launcher bytes). */
+  const legacyEntry = (created: Lab): Record<string, unknown> => {
+    const legacyLauncher = path.join(created.payloadRoot, 'workbuddy-adapter', 'plugin', 'mcp', 'launcher.cjs');
+    expect(fs.existsSync(legacyLauncher)).toBe(true);
+    return { command: 'node', args: [legacyLauncher] };
+  };
+  /** An explicit Owner enable — the substitution gate reads post-install state. */
+  const enablePlugin = (created: Lab): void => {
+    fs.writeFileSync(settingsPath(created), JSON.stringify({ enabledPlugins: { [WORKBUDDY_PLUGIN_KEY]: true } }, null, 2));
+  };
+
   it('removes a proven PD-owned pd-recall entry and preserves every other server', async () => {
     const created = lab({ engine: 'unreachable' });
     // The skeleton ships the REAL launcher (PD stamp) under the adapter payload,
     // so ownership can be proven from the bytes instead of the key name.
-    const legacyLauncher = path.join(created.payloadRoot, 'workbuddy-adapter', 'plugin', 'mcp', 'launcher.cjs');
-    expect(fs.existsSync(legacyLauncher)).toBe(true);
     const mcpPath = path.join(created.configDir, 'mcp.json');
-    fs.mkdirSync(created.configDir, { recursive: true });
     fs.writeFileSync(mcpPath, JSON.stringify({
       mcpServers: {
-        'pd-recall': { command: 'node', args: [legacyLauncher] },
+        'pd-recall': legacyEntry(created),
         'other-server': { command: 'npx', args: ['other'] },
       },
       unknownKey: { keep: true },
     }, null, 2));
+    enablePlugin(created);
+    deployMcpServerComponent(created);
 
     const result = await created.installer.install(installCtx(created));
 
@@ -528,7 +554,6 @@ describe('WorkBuddyHostInstaller.install — legacy user-level MCP entry cleanup
   it('leaves a foreign same-name entry byte-identical (never guesses ownership)', async () => {
     const created = lab({ engine: 'unreachable' });
     const mcpPath = path.join(created.configDir, 'mcp.json');
-    fs.mkdirSync(created.configDir, { recursive: true });
     const foreign = JSON.stringify({
       mcpServers: { 'pd-recall': { command: 'npx', args: ['someone-else'] } },
     }, null, 2);
@@ -537,6 +562,135 @@ describe('WorkBuddyHostInstaller.install — legacy user-level MCP entry cleanup
     await created.installer.install(installCtx(created));
 
     expect(fs.readFileSync(mcpPath, 'utf8')).toBe(foreign);
+  });
+
+  it('keeps the legacy entry when the plugin stays DISABLED (a preserved Owner false leaves no substitute)', async () => {
+    const created = lab({ engine: 'unreachable' });
+    const mcpPath = path.join(created.configDir, 'mcp.json');
+    const before = JSON.stringify({
+      mcpServers: { 'pd-recall': legacyEntry(created) },
+    }, null, 2);
+    fs.writeFileSync(mcpPath, before);
+    // A previous install round recorded an explicit false: the plugin keeps it
+    // (Owner choice wins over the shipped default), so its bundled pd-recall
+    // never loads and the trusted user-level entry is the ONLY recall service.
+    fs.writeFileSync(settingsPath(created), JSON.stringify({ enabledPlugins: { [WORKBUDDY_PLUGIN_KEY]: false } }, null, 2));
+    deployMcpServerComponent(created);
+
+    const result = await created.installer.install(installCtx(created));
+
+    expect(result.success).toBe(true);
+    expect(fs.readFileSync(mcpPath, 'utf8')).toBe(before);
+    const warnings = (result.warnings ?? []).join('\n');
+    expect(warnings).toContain('Kept the legacy user-level "pd-recall" entry');
+    expect(warnings).toContain('not enabled');
+    // Nothing may be claimed as migrated when the entry stayed.
+    expect(fs.readdirSync(created.configDir).filter((name) => name.startsWith('mcp.json.pd-legacy-'))).toHaveLength(0);
+  });
+
+  it('keeps the legacy entry when the pd-recall binding could not be written (enablement alone proves nothing)', async () => {
+    const created = lab({ engine: 'unreachable' });
+    const mcpPath = path.join(created.configDir, 'mcp.json');
+    const before = JSON.stringify({
+      mcpServers: { 'pd-recall': legacyEntry(created) },
+    }, null, 2);
+    fs.writeFileSync(mcpPath, before);
+    enablePlugin(created);
+    // No pd-mcp-server component deployed → writeWorkbuddyMcpBinding degrades.
+
+    const result = await created.installer.install(installCtx(created));
+
+    expect(result.success).toBe(true);
+    expect(fs.readFileSync(mcpPath, 'utf8')).toBe(before);
+    expect((result.warnings ?? []).join('\n')).toContain('launcher binding could not be written');
+  });
+
+  it('keeps the newer host save when mcp.json changes between inspection and commit', async () => {
+    const mcpTarget = 'mcp.json';
+    let mcpPath = '';
+    let raced = false;
+    const created = lab({
+      engine: 'unreachable',
+      installerDeps: {
+        atomicReplaceConfig: (filePath, content, ops, retry, expected) => {
+          if (filePath.endsWith(mcpTarget) && !raced) {
+            raced = true;
+            // WorkBuddy saves a NEW server between our snapshot read and the
+            // guarded rename — the migration must refuse, not clobber it.
+            const current = readJson(filePath);
+            (current.mcpServers as Record<string, unknown>)['docs'] = { command: 'npx', args: ['docs'] };
+            fs.writeFileSync(filePath, JSON.stringify(current, null, 2));
+          }
+          return atomicReplaceTextFile(filePath, content, ops, retry, expected);
+        },
+      },
+    });
+    mcpPath = path.join(created.configDir, 'mcp.json');
+    fs.writeFileSync(mcpPath, JSON.stringify({
+      mcpServers: { 'pd-recall': legacyEntry(created) },
+    }, null, 2));
+    enablePlugin(created);
+    deployMcpServerComponent(created);
+
+    const result = await created.installer.install(installCtx(created));
+
+    expect(result.success).toBe(true);
+    // The concurrent host save WINS: `docs` survives, the legacy entry is kept,
+    // and the install reports the conflict instead of claiming a migration.
+    const saved = readJson(mcpPath).mcpServers as Record<string, unknown>;
+    expect(saved['docs']).toEqual({ command: 'npx', args: ['docs'] });
+    expect(saved['pd-recall']).toBeDefined();
+    expect((result.warnings ?? []).join('\n')).toContain('workbuddy_legacy_mcp_concurrent_edit');
+    const backups = fs.readdirSync(created.configDir).filter((name) => name.startsWith('mcp.json.pd-legacy-'));
+    expect(backups, 'the byte backup stays as recovery evidence').toHaveLength(1);
+  });
+
+  it('leaves mcp.json byte-identical when a later install stage fails and rolls back', async () => {
+    let mcpPath = '';
+    const created = lab({
+      engine: 'unreachable',
+      installerDeps: {
+        pdCliEntry: () => '/nonexistent/pd-cli/index.js',
+        runCommand: (file, args) =>
+          args.includes('runtime') && args.includes('init')
+            ? { status: 1, stdout: '', stderr: 'seam fault: runtime init failed' }
+            : { status: 0, stdout: 'v22', stderr: '' },
+      },
+    });
+    mcpPath = path.join(created.configDir, 'mcp.json');
+    const before = JSON.stringify({
+      mcpServers: { 'pd-recall': legacyEntry(created) },
+    }, null, 2);
+    fs.writeFileSync(mcpPath, before);
+    enablePlugin(created);
+    deployMcpServerComponent(created);
+
+    const result = await created.installer.install(installCtx(created));
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('workbuddy_governance_init_failed');
+    // cli-5-failure-no-mutation: the migration runs only after the install
+    // commits, so a rolled-back install never touched the user-level config.
+    expect(fs.readFileSync(mcpPath, 'utf8')).toBe(before);
+    expect(fs.readdirSync(created.configDir).filter((name) => name.startsWith('mcp.json.pd-legacy-'))).toHaveLength(0);
+  });
+
+  it('preserves the backup file mode (a private mcp.json never becomes world-readable)', async () => {
+    const created = lab({ engine: 'unreachable' });
+    const mcpPath = path.join(created.configDir, 'mcp.json');
+    fs.writeFileSync(mcpPath, JSON.stringify({
+      mcpServers: { 'pd-recall': legacyEntry(created) },
+    }, null, 2));
+    fs.chmodSync(mcpPath, 0o600);
+    enablePlugin(created);
+    deployMcpServerComponent(created);
+
+    const result = await created.installer.install(installCtx(created));
+
+    expect(result.success).toBe(true);
+    const backups = fs.readdirSync(created.configDir).filter((name) => name.startsWith('mcp.json.pd-legacy-'));
+    expect(backups).toHaveLength(1);
+    expect(fs.statSync(path.join(created.configDir, backups[0] as string)).mode & 0o777).toBe(0o600);
   });
 });
 

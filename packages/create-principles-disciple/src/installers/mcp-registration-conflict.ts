@@ -304,6 +304,41 @@ function readJsonObject(configPath: string): { ok: true; value: Record<string, u
   }
 }
 
+/**
+ * Classify an ALREADY-PARSED WorkBuddy `mcp.json` object — the exact mirror of
+ * `classifyOpenClawConfigObject`. The legacy-entry migration needs the verdict
+ * computed from the SAME bytes it parses, backs up and commits against; a
+ * second `checkMcpRegistrationConflict` read would judge ownership on a
+ * different snapshot than the write (concurrent-edit race, review 2026-11-22).
+ */
+export function classifyWorkbuddyMcpJsonObject(
+  config: Record<string, unknown>,
+  configPath: string,
+  options: McpRegistrationCheckOptions = {},
+): McpRegistrationCheck {
+  const servers = config.mcpServers;
+  if (servers === undefined) return { ok: true, host: 'workbuddy', configPath, state: 'absent' };
+  if (!isRecord(servers)) {
+    return {
+      ok: false,
+      host: 'workbuddy',
+      configPath,
+      kind: 'unverifiable',
+      reason: `mcp_registration_unverifiable: ${configPath} mcpServers is not an object. No PD write was performed.`,
+      nextAction: `Repair ${configPath} manually, then re-run the installer.`,
+    };
+  }
+  if (Object.hasOwn(servers, PD_MCP_SERVER_NAME)) {
+    return classifyEntryPresence({ present: true, entry: servers[PD_MCP_SERVER_NAME], host: 'workbuddy', configPath, ownershipOptions: options });
+  }
+  return {
+    ok: true,
+    host: 'workbuddy',
+    configPath,
+    state: Object.keys(servers).length === 0 ? 'absent' : 'other_servers_only',
+  };
+}
+
 function classifyJsonHost(
   host: 'openclaw' | 'workbuddy',
   configPath: string,
@@ -333,7 +368,8 @@ function classifyJsonHost(
       nextAction: `Repair ${configPath} manually, then re-run the installer.`,
     };
   }
-  const servers = host === 'openclaw' ? root.servers : root.mcpServers;
+  if (host === 'workbuddy') return classifyWorkbuddyMcpJsonObject(root, configPath, options);
+  const {servers} = root;
   if (servers === undefined) return { ok: true, host, configPath, state: 'absent' };
   if (!isRecord(servers)) {
     return {

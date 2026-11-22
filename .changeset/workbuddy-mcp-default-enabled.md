@@ -15,12 +15,21 @@ available without a separate trust decision (verified against the engine: the
 `mcp-approvals.json` trust store is consulted only for USER-level
 `~/.workbuddy/mcp.json` entries, never for plugin-declared servers).
 
-`create-principles-disciple`: install/update now removes a LEGACY user-level
-`pd-recall` entry from `<config>/mcp.json` when — and only when — the existing
-read-only classifier proves PD ownership from the launcher bytes. Such an entry
-is a different MCP origin: it would demand a manual trust gesture AND duplicate
-the plugin's own server in the MCP list, so an upgraded machine would still
-look broken. A byte-identical backup (`mcp.json.pd-legacy-<ts>.bak`) is written
-first, every other key/format is preserved, and a cleanup failure is reported
-as an install warning — never as an install failure. An unprovable or foreign
-same-name entry is still left untouched (Gate 4 conflict semantics unchanged).
+`create-principles-disciple`: after a successful install/update commit, a
+LEGACY user-level `pd-recall` entry in `<config>/mcp.json` is removed when —
+and only when — the read-only classifier proves PD ownership from the launcher
+bytes AND the plugin-side replacement is usable (the plugin ended enabled,
+its installed payload declares `pd-recall`, and the launcher binding was
+written). Such an entry is a different MCP origin: it would demand a manual
+trust gesture AND duplicate the plugin's own server in the MCP list, so an
+upgraded machine would still look broken. The cleanup runs post-commit so a
+rolled-back install leaves `mcp.json` byte-identical; a permission-preserving
+byte backup (`mcp.json.pd-legacy-<ts>.bak`) is written first, and the
+replacement is guarded by the snapshot bytes so a concurrent host save is
+refused rather than overwritten. Every other key and server entry is kept —
+the file is rewritten in canonical JSON form. When the substitute is not
+proven (e.g. the Owner's explicit disable was preserved), the legacy entry
+stays and the install reports why instead of enabling the plugin behind the
+Owner's back. A cleanup failure is a warning, never an install failure, and an
+unprovable or foreign same-name entry is still left untouched (Gate 4
+conflict semantics unchanged).
