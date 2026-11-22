@@ -843,3 +843,30 @@ export {
   type DirReadStatus,
   type ForeignWorkspaceOwnerVerdict,
 } from './mcp-binding-contract.js';
+
+/**
+ * Workspace background-execution ownership transitions (SPEC §8.4 CAS write
+ * path, PRI-1282 Phase 4): cross-process lock + generation-fenced state
+ * machine + the single read-side ownership projection shared by the OpenClaw
+ * Gateway gate, the `pd openclaw worker` gate and the handover/rollback
+ * commands. Phase 5 reuses the same primitive for Codex / WorkBuddy.
+ */
+export {
+  DEFAULT_CAS_LOCK_STALE_MS,
+  BACKGROUND_EXECUTION_TRANSITIONS,
+  acquireBackgroundExecutionCasLock,
+  defaultCasFsOps,
+  readWorkspaceBackgroundOwnership,
+  transitionWorkspaceBackgroundExecution,
+  type BackgroundExecutionTransitionKind,
+  type TransitionBackgroundExecutionFailure,
+  type TransitionBackgroundExecutionSuccess,
+  type CasFsOps,
+  type CasLockAcquireOptions,
+  type CasLockAcquireResult,
+  type CasLockHandle,
+  type CasLockOwner,
+  type ReadOwnershipOptions,
+  type TransitionBackgroundExecutionInput,
+  type WorkspaceBackgroundOwnership,
+} from './background-execution-transition.js';
