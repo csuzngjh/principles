@@ -104,6 +104,14 @@ export interface PainToPrincipleInput {
   deviationAnchor?: PainDetectedData['deviationAnchor'];
   /** SPEC §11 / TD §6.2: structured anchor for every anchor source. */
   anchor?: PainDetectedData['anchor'];
+  /**
+   * PRI-1274 (B1 / P1-3): submit-time admission disposition. Set when the
+   * submission bound a session and named a target turn whose text is not yet
+   * collectable — the task is created `waiting_for_target_evidence` and the
+   * candidate picker excludes it until the worker reconcile flips it. Same
+   * `recovery` JSON block the receipt fallback writes (one authority).
+   */
+  admissionDisposition?: PainDetectedData['admissionDisposition'];
 }
 
 export interface PainToPrincipleOutput {
@@ -198,6 +206,7 @@ export class PainToPrincipleService {
       painIngress: input.painIngress,
       ...(input.deviationAnchor ? { deviationAnchor: input.deviationAnchor } : {}),
       ...(input.anchor ? { anchor: input.anchor } : {}),
+      ...(input.admissionDisposition ? { admissionDisposition: input.admissionDisposition } : {}),
     };
 
     // SPEC §9.6: B-class authorization is enforced BEFORE the submission

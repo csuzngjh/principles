@@ -94,6 +94,19 @@ const BASE_INPUT = {
   anchorRef: 'P-42@1',
 };
 
+/** Read a persisted task's diagnostic_json through a REAL manager. */
+async function diagnosticJsonOf(taskId: string): Promise<Record<string, unknown>> {
+  const manager = new RuntimeStateManager({ workspaceDir: tmpDir });
+  await manager.initialize();
+  try {
+    const task = await manager.getTask(taskId);
+    expect(task).not.toBeNull();
+    return JSON.parse(task?.diagnosticJson ?? '{}') as Record<string, unknown>;
+  } finally {
+    await manager.close();
+  }
+}
+
 function freshPainId(suffix = 'a1b2c3d4'): string {
   return `mcp_${Date.now()}_${suffix}`;
 }
@@ -415,18 +428,6 @@ describe('submitPainCapability (§5.5–§5.7)', () => {
 // ── PRI-1260: host-session claim verification at the submit boundary ─────────
 
 describe('submitPainCapability host-session association (PRI-1260)', () => {
-  async function diagnosticJsonOf(taskId: string): Promise<Record<string, unknown>> {
-    const manager = new RuntimeStateManager({ workspaceDir: tmpDir });
-    await manager.initialize();
-    try {
-      const task = await manager.getTask(taskId);
-      expect(task).not.toBeNull();
-      return JSON.parse(task?.diagnosticJson ?? '{}') as Record<string, unknown>;
-    } finally {
-      await manager.close();
-    }
-  }
-
   it('a VERIFIED claim becomes the task sessionIdHint and the receipt association', async () => {
     writeLedger([{ id: 'P-42' }]);
     const painId = freshPainId('00000001');
@@ -519,5 +520,74 @@ describe('submitPainCapability host-session association (PRI-1260)', () => {
     expect(receipt.sessionAssociation).toEqual({ status: 'absent' });
     const payload = await diagnosticJsonOf(receipt.taskId as string);
     expect(payload.sessionIdHint).toBeNull();
+  });
+});
+
+// ── Review round 2 (directives I2/I4/J3): targetTurnId normalization + consent-blocked persistence ──
+
+describe('submitPainCapability — requested target hint normalization and consent gating', () => {
+  async function persistedHint(input: { targetTurnId?: string }, detail: string): Promise<string | undefined> {
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId('00000009');
+    const receipt = await submitPainCapability({
+      ...deps(),
+      painId,
+      verifyHostSession: () => ({ status: 'unverified', detail }),
+    }, { ...BASE_INPUT, ...input });
+    expect(receipt.status, JSON.stringify(receipt.error)).toBe('submitted');
+    const payload = await diagnosticJsonOf(receipt.taskId as string);
+    const ingress = payload.painIngress as Record<string, unknown> | undefined;
+    const hint = ingress !== undefined && Object.hasOwn(ingress, 'requestedTargetTurnId')
+      ? ingress.requestedTargetTurnId
+      : undefined;
+    expect(hint === undefined || typeof hint === 'string').toBe(true);
+    return typeof hint === 'string' ? hint : undefined;
+  }
+
+  it('I4: turn-10, " turn-10 " and "turn-10 " persist the IDENTICAL trimmed id; case is preserved', async () => {
+    for (const variant of ['turn-10', ' turn-10 ', 'turn-10 ']) {
+      const hint = await persistedHint({ targetTurnId: variant }, 'codex_host_metadata_missing');
+      expect(hint).toBe('turn-10');
+    }
+    expect(await persistedHint({ targetTurnId: 'Turn-Ten' }, 'codex_host_metadata_missing')).toBe('Turn-Ten');
+  });
+
+  it('I4: empty/whitespace, over-length and control-character targets persist NO hint', async () => {
+    expect(await persistedHint({ targetTurnId: '' }, 'codex_host_metadata_missing')).toBeUndefined();
+    expect(await persistedHint({ targetTurnId: '   ' }, 'codex_host_metadata_missing')).toBeUndefined();
+    expect(await persistedHint({ targetTurnId: 'x'.repeat(201) }, 'codex_host_metadata_missing')).toBeUndefined();
+    expect(await persistedHint({ targetTurnId: 'bad\u0007turn' }, 'codex_host_metadata_missing')).toBeUndefined();
+  });
+
+  it('J3: a consent-BLOCKED submission persists NO host turn metadata at all', async () => {
+    // blocked_by_consent = the minimal-metadata authorization is OFF: the
+    // model-named turn id is not Owner business input and must not reach the
+    // persisted task (directive J2). The unbound hint survives only on the
+    // designated fallback causes.
+    expect(await persistedHint({ targetTurnId: 'turn-10' }, 'blocked_by_consent')).toBeUndefined();
+    // Every other unbound cause keeps the r2b hint contract.
+    expect(await persistedHint({ targetTurnId: 'turn-10' }, 'host_context_conflict')).toBe('turn-10');
+  });
+
+  it('J3: a consent-blocked submission persists no session metadata (real store read-back)', async () => {
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId('0000000a');
+    const receipt = await submitPainCapability({
+      ...deps(),
+      painId,
+      hostSessionClaim: { threadId: 'thread-1', sessionId: 'sess-1', itemId: 'item-5' },
+      verifyHostSession: () => ({ status: 'unverified', detail: 'blocked_by_consent' }),
+    }, { ...BASE_INPUT, targetTurnId: 'turn-77' });
+
+    expect(receipt.status).toBe('submitted');
+    expect(receipt.sessionAssociation).toEqual({ status: 'unverified', detail: 'blocked_by_consent' });
+    const payload = await diagnosticJsonOf(receipt.taskId as string);
+    // Zero unauthorized identity metadata: no session hint, no turn ids, no
+    // hint inside the ingress block (directive J2).
+    expect(payload.sessionIdHint).toBeNull();
+    const ingress = payload.painIngress as Record<string, unknown>;
+    expect(ingress.correlation).toEqual({ status: 'unbound', reason: 'missing_host_session' });
+    expect(Object.hasOwn(ingress, 'requestedTargetTurnId')).toBe(false);
+    expect(Object.hasOwn(ingress, 'verifiedHostSession')).toBe(false);
   });
 });
