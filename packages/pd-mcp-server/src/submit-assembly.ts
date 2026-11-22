@@ -43,6 +43,7 @@ import {
   isSentinelSessionId,
   resolveHostSubmissionContext,
   type PainEvidenceEntry,
+  type SourceMaterialDenialReason,
 } from '@principles/core/runtime';
 import { submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
@@ -73,19 +74,18 @@ function readHostId(value: unknown): string | undefined {
  * STRUCTURED, not a silent empty array. The classification rides the existing
  * evidence-availability vocabulary of the ingress contract (`available` /
  * `unavailable` with a reason code); causes:
- *   - available      — turn rows with readable text were collected;
- *   - not_found      — the store read succeeded but carries no readable text
- *                      for that (session, turn): an honest "not yet there"
- *                      (the waiting/recovery semantics own completion);
- *   - read_failed    — the store read itself failed (structured stderr note;
- *                      the original submission stays legal — the enrichment
- *                      is optional and never aborts the Pain/Task write).
- * A missing turn and a failed read are DIFFERENT facts; conflating them hid
- * permanently broken stores behind an eternal "waiting" state (rc-9).
- */
+ *   - available: turn rows with readable text were collected;
+ *   - not_found: the store read succeeded but has no readable text for the
+ *                requested (session, turn); this is an honest "not yet there";
+ *   - blocked_by_consent: the latest source-material decision denies the read;
+ *                preserve minimal identity, but block diagnosis;
+ *   - read_failed: the store read itself failed (structured stderr note);
+ *                submission remains legal; enrichment is optional.
+*/
 type TargetTurnEvidenceRead =
   | { readonly status: 'available'; readonly entries: PainEvidenceEntry[] }
   | { readonly status: 'not_found' }
+  | { readonly status: 'blocked_by_consent'; readonly reason: SourceMaterialDenialReason }
   | { readonly status: 'read_failed'; readonly reason: string };
 
 /**
@@ -110,8 +110,8 @@ function readTargetTurnEvidence(input: {
     hostKind: input.host,
   });
   if (authorization.status === 'blocked') {
-    console.error('[pd-submit] target-turn evidence read blocked: consent_' + authorization.reason + ' ? submission continues without turn evidence');
-    return { status: 'read_failed', reason: 'consent_' + authorization.reason };
+    console.error('[pd-submit] target-turn evidence read blocked: ' + authorization.reason + '; submission continues without turn evidence');
+    return { status: 'blocked_by_consent', reason: authorization.reason };
   }
   try {
     const result = listGovernanceObservations({
@@ -122,7 +122,7 @@ function readTargetTurnEvidence(input: {
       limit: 64,
     });
     if (!result.ok) {
-      console.error('[pd-submit] target-turn evidence read degraded: read_failed (' + result.reason + ') ? submission continues without turn evidence');
+      console.error('[pd-submit] target-turn evidence read degraded: read_failed (' + result.reason + '); submission continues without turn evidence');
       return { status: 'read_failed', reason: result.reason };
     }
     const entries = result.observations.flatMap((row) =>
@@ -137,7 +137,7 @@ function readTargetTurnEvidence(input: {
       ? { status: 'available', entries }
       : { status: 'not_found' };
   } catch (error) {
-    console.error('[pd-submit] target-turn evidence read degraded: read_failed (store exception) ? submission continues without turn evidence');
+    console.error('[pd-submit] target-turn evidence read degraded: read_failed (store exception); submission continues without turn evidence');
     return { status: 'read_failed', reason: error instanceof Error ? error.message.slice(0, 120) : 'store_exception' };
   }
 }
@@ -269,16 +269,19 @@ export function assembleSubmitCapability(
     // submission turn and without an explicit target the target stays
     // unknown — the session binding survives (SPEC §G2).
     const targetTurnId = requestedTurnId ?? context.submissionTurnId;
-    // Directive K2: the read result is classified; only `available` carries
-    // entries. not_found / read_failed keep the submission legal with EMPTY
-    // evidence — the honest waiting/recovery semantics apply (a missing turn
-    // and a broken store are different facts, K1).
+    // Directive K2: only available carries entries. not_found keeps the
+    // exact-target wait semantics; blocked_by_consent preserves the separately
+    // authorized identity but marks the task blocked (not waiting); read_failed
+    // remains an observable enrichment failure, distinct from both outcomes.
     const evidenceRead = targetTurnId === undefined
       ? undefined
       : readTargetTurnEvidence({ workspaceDir, host, sessionId: context.sessionId, targetTurnId });
     const inputEvidence = evidenceRead !== undefined && evidenceRead.status === 'available'
       ? evidenceRead.entries
       : [];
+    const targetEvidenceBlockedReason = evidenceRead?.status === 'blocked_by_consent'
+      ? evidenceRead.reason
+      : undefined;
 
     return {
       status: 'verified',
@@ -286,6 +289,7 @@ export function assembleSubmitCapability(
       ...(context.submissionTurnId === undefined ? {} : { submissionTurnId: context.submissionTurnId }),
       ...(targetTurnId === undefined ? {} : { targetTurnId }),
       ...(inputEvidence.length > 0 ? { inputEvidence } : {}),
+      ...(targetEvidenceBlockedReason === undefined ? {} : { targetEvidenceBlockedReason }),
     };
   };
 

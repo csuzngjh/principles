@@ -36,6 +36,7 @@ import { deriveProvenanceFromIngressFacts, normalizeRequestedTargetTurnId } from
 // types, with no cycle back into this module.
 import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, targetEvidenceWaitRequired } from './pain-admission-disposition.js';
 import type { GovernanceHostKind } from './pain-signal-bridge.js';
+import type { SourceMaterialDenialReason } from './source-material-authorization.js';
 import type { PainAnchor, PainAnchorType } from './context-payload.js';
 
 export const SUBMIT_PAIN_CAPABILITY_ID = 'pd_submit_pain' as const;
@@ -121,7 +122,8 @@ export interface HostSessionClaim {
  */
 export type HostSessionVerification =
   | { readonly status: 'verified'; readonly sessionId: string; readonly submissionTurnId?: string;
-    readonly targetTurnId?: string; readonly inputEvidence?: PainEvidenceEntry[] }
+    readonly targetTurnId?: string; readonly inputEvidence?: PainEvidenceEntry[];
+    readonly targetEvidenceBlockedReason?: SourceMaterialDenialReason }
   | { readonly status: 'unverified'; readonly detail: string };
 
 /** PRI-1260: the association outcome surfaced on every submit receipt (internal; inlined into the receipt surface). */
@@ -502,29 +504,42 @@ export async function submitPainCapability(
     }
     : verification ?? { status: 'absent' };
 
-  // PRI-1274 (B1 / P1-3, r2b): ONE waiting rule shared with the receipt
-  // fallback recovery (pain-admission-disposition.targetEvidenceWaitRequired)
-  // — a session-bound submission that NAMED a target turn whose text is not
-  // yet collectable waits for that exact turn; an explicit Owner statement
-  // (`owner_expectation` anchor) is independently admissible and never waits.
+  // PRI-1274 / PRI-1283: one target-evidence rule shared with receipt
+  // recovery. Missing-but-collectable text waits; consent-denied text becomes
+  // blocked_by_consent and cannot enter the diagnostician queue. An explicit
+  // Owner statement anchor remains independently admissible and never waits
+  // for optional target-turn enrichment.
   const submittedTurnEvidenceCount = verification?.status === 'verified' && verification.inputEvidence !== undefined
     ? verification.inputEvidence.length
     : 0;
-  const waitingForTargetEvidence = targetEvidenceWaitRequired({
+  const targetEvidenceRequired = targetEvidenceWaitRequired({
     hasVerifiedSession: sessionAssociation.status === 'verified',
     targetTurnId: sessionAssociation.status === 'verified' ? sessionAssociation.targetTurnId : undefined,
     submittedEvidenceCount: submittedTurnEvidenceCount,
     hasOwnerStatement: input.anchorType === 'owner_expectation',
   });
-  const admissionDisposition: PainDetectedData['admissionDisposition'] = waitingForTargetEvidence
+  const targetEvidenceBlockedReason = verification?.status === 'verified'
+    ? verification.targetEvidenceBlockedReason
+    : undefined;
+  const blockedByTargetEvidenceConsent = targetEvidenceRequired && targetEvidenceBlockedReason !== undefined;
+  const waitingForTargetEvidence = targetEvidenceRequired && !blockedByTargetEvidenceConsent;
+  const admissionDisposition: PainDetectedData['admissionDisposition'] = blockedByTargetEvidenceConsent
     ? {
       schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
-      state: 'waiting_for_target_evidence',
-      reasonCode: 'target_turn_text_pending',
+      state: 'blocked_by_consent',
+      reasonCode: 'target_turn_source_material_' + targetEvidenceBlockedReason,
       attemptCount: 1,
       lastCheckedAt: new Date().toISOString(),
     }
-    : undefined;
+    : waitingForTargetEvidence
+      ? {
+        schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
+        state: 'waiting_for_target_evidence',
+        reasonCode: 'target_turn_text_pending',
+        attemptCount: 1,
+        lastCheckedAt: new Date().toISOString(),
+      }
+      : undefined;
   // PRI-1274 r2b (devin finding 0001) + review round 2 (directives I2/J2):
   // an UNBOUND submission keeps its explicit target as a NORMALIZED,
   // explicitly-UNVERIFIED hint inside the versioned ingress block — the
@@ -716,6 +731,9 @@ export async function submitPainCapability(
       // is admitted only after its exact target turn text becomes available.
       warnings.push(`target_evidence_pending:${sessionAssociation.status === 'verified' ? sessionAssociation.targetTurnId : ''}`);
     }
+    if (blockedByTargetEvidenceConsent && targetEvidenceBlockedReason !== undefined) {
+      warnings.push('target_evidence_blocked:' + targetEvidenceBlockedReason);
+    }
     return {
       schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
       capability: SUBMIT_PAIN_CAPABILITY_ID,
@@ -731,7 +749,9 @@ export async function submitPainCapability(
       provenance,
       warnings,
       error: null,
-      nextAction: result.nextAction ?? null,
+      nextAction: blockedByTargetEvidenceConsent
+        ? 'The named target turn is blocked by source-material authorization (' + targetEvidenceBlockedReason + '); this task will remain blocked and will not be diagnosed without that evidence. Re-submit with a newly authorized target turn. Re-granting consent does not restore text already cleared by revocation.'
+        : result.nextAction ?? null,
       sessionAssociation,
     };
   } catch (err: unknown) {

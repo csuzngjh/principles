@@ -10,9 +10,9 @@
  *     (`recovery.state = waiting_for_target_evidence`) — unless the
  *     submission carries an explicit Owner statement (existing admission
  *     policy continues, no unnecessary wait).
- *  2. The candidate picker excludes waiting tasks INSIDE the store query —
- *     before ORDER BY/LIMIT — so a waiting task never displaces an
- *     admissible one from the bounded window.
+ *  2. The candidate picker excludes inadmissible tasks INSIDE the store query —
+ *     before ORDER BY/LIMIT — so inadmissible work never displaces an
+ *     admissible task from the bounded window.
  *  3. The worker reconcile is the only exit: once the exact target turn's
  *     text exists, the disposition flips to `ready_for_diagnosis`.
  *  4. The context assembler, given a target turn, reads EXACTLY that turn —
@@ -116,11 +116,33 @@ describe('P1-3.3 — submit-time waiting disposition', () => {
   });
 });
 
-describe('P1-3.4 — candidate picker excludes waiting tasks before ORDER BY/LIMIT', () => {
-  it('the OLDEST task being waiting does not consume the bounded window — the admissible task is picked', async () => {
+describe('P1-3.4 — candidate picker excludes inadmissible tasks before ORDER BY/LIMIT', () => {
+  it('waiting and consent-blocked tasks do not consume the bounded window — the admissible task is picked', async () => {
     // Waiting task created FIRST (oldest under updated_at_asc).
     await submitTargetingTurn10('mcp_1700000000043_3c000043');
-    // A plain admissible diagnostician task created SECOND.
+    await stateManager.createTask({
+      taskId: 'diagnosis_blocked_by_consent_1',
+      taskKind: 'diagnostician',
+      inputRef: 'pain_blocked_by_consent_1',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        sourcePainId: 'pain_blocked_by_consent_1',
+        reasonSummary: 'target evidence was revoked',
+        provenance: 'owner_reported_no_host_trace',
+        evidence: [],
+        recovery: {
+          schemaVersion: 1,
+          state: 'blocked_by_consent',
+          reasonCode: 'target_turn_source_material_consent_revoked',
+          attemptCount: 1,
+          lastCheckedAt: new Date().toISOString(),
+        },
+      }),
+    });
+
+    // A plain admissible diagnostician task is created after both blocked rows.
     await stateManager.createTask({
       taskId: 'diagnosis_admissible_1',
       taskKind: 'diagnostician',
@@ -139,6 +161,8 @@ describe('P1-3.4 — candidate picker excludes waiting tasks before ORDER BY/LIM
     // The positive filter finds the waiting task for the reconcile.
     const waiting = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', recoveryState: 'waiting_for_target_evidence', limit: 5 });
     expect(waiting.map((task) => task.taskId)).toEqual([createDiagnosticianTaskId('mcp_1700000000043_3c000043')]);
+    const blocked = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', recoveryState: 'blocked_by_consent', limit: 5 });
+    expect(blocked.map((task) => task.taskId)).toEqual(['diagnosis_blocked_by_consent_1']);
   });
 
   it('executePendingDiagnosis refuses a waiting task even when invoked directly (manual runs too)', async () => {
@@ -154,6 +178,42 @@ describe('P1-3.4 — candidate picker excludes waiting tasks before ORDER BY/LIM
     const result = await bridge.executePendingDiagnosis({ taskId: createDiagnosticianTaskId(painId) });
     expect(result.status).toBe('skipped');
     expect(result.message).toBe('target_evidence_pending');
+  });
+
+  it('executePendingDiagnosis refuses a consent-blocked task even when invoked directly', async () => {
+    const painId = 'mcp_1700000000046_6f000046';
+    const taskId = createDiagnosticianTaskId(painId);
+    await stateManager.createTask({
+      taskId,
+      taskKind: 'diagnostician',
+      inputRef: painId,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        sourcePainId: painId,
+        reasonSummary: 'target evidence was revoked',
+        provenance: 'host_context_bound',
+        evidence: [],
+        recovery: {
+          schemaVersion: 1,
+          state: 'blocked_by_consent',
+          reasonCode: 'target_turn_source_material_consent_revoked',
+          attemptCount: 1,
+          lastCheckedAt: new Date().toISOString(),
+        },
+      }),
+    });
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: { run: async () => { throw new Error('must not run'); } } satisfies DiagnosticianRunnerLike,
+      workspaceDir: tmpDir,
+      intakeService: {} as never,
+      ledgerAdapter: { register: () => undefined, existsForCandidate: () => undefined, getEntries: () => [] } as never,
+    });
+    const result = await bridge.executePendingDiagnosis({ taskId });
+    expect(result.status).toBe('skipped');
+    expect(result.message).toBe('target_evidence_blocked_by_consent');
   });
 });
 

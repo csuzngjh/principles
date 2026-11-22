@@ -496,7 +496,7 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     ...(data.painIngress ? { painIngress: data.painIngress } : {}),
     // PRI-1274 (B1 / P1-3): the SAME `recovery` block the receipt fallback
     // writes — submit-time it marks `waiting_for_target_evidence`, which the
-    // candidate picker's SQL excludes and the worker reconcile flips.
+    // candidate picker excludes; only waiting tasks are worker-reconciled.
     ...(data.admissionDisposition ? { recovery: data.admissionDisposition } : {}),
   });
 }
@@ -1343,8 +1343,14 @@ export class PainSignalBridge {
     // a manual run may diagnose it on OTHER turns' text. The worker
     // reconcile flips the disposition once the authorized target evidence
     // exists; until then this is a skip, never a failure.
-    if (readRecoveryState(task.diagnosticJson) === 'waiting_for_target_evidence') {
+    const recoveryState = readRecoveryState(task.diagnosticJson);
+    if (recoveryState === 'waiting_for_target_evidence') {
       return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'target_evidence_pending' };
+    }
+    // Consent-blocked tasks are not worker-reconciled: only a newly authorized
+    // target turn may replace the denied source material.
+    if (recoveryState === 'blocked_by_consent') {
+      return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'target_evidence_blocked_by_consent' };
     }
 
     // PRI-642 SPEC §9: re-entry validates the persisted rev-2 facts BEFORE

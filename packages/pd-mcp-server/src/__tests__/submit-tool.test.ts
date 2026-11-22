@@ -33,9 +33,9 @@ import { ingestGovernanceObservations } from '@principles/host-runtime';
 import { recordConversationIngestionConsent } from '@principles/host-runtime';
 
 /** PRI-1283 R2 fixture: grant codex conversation-ingestion consent. */
-function recordCodexConsent(workspaceDir: string): void {
+function recordCodexConsent(workspaceDir: string, decision: 'granted' | 'revoked' = 'granted'): void {
   const recorded = recordConversationIngestionConsent(workspaceDir, 'codex', {
-    decision: 'granted',
+    decision,
     decidedVia: 'pd_codex_setup',
     decidedAt: new Date().toISOString(),
     disclosureVersion: 'g2b-2026-11-12',
@@ -1068,5 +1068,121 @@ describe('target-turn evidence read classification (K)', () => {
       // Windows — retry the temp cleanup (the dir is disposable either way).
       await rm(workspaceDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
     }
-  }, 10_000);
+  }, 60_000);
+  it('consent_missing: preserves minimal identity but blocks target evidence reads and diagnosis', async () => {
+    const workspaceDir = await kWorkspace({ minimalMetadata: true }, true);
+    await rm(join(workspaceDir, '.state', 'conversation-ingestion-consent.json'), { force: true });
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      const errors: string[] = [];
+      const originalError = console.error;
+      try {
+        console.error = (...args: unknown[]) => {
+          errors.push(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
+        };
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: {
+            reason: 'The target turn exists but no source-material consent record exists.',
+            anchorType: 'agent_instruction',
+            anchorRef: 'AGENTS.md#safety',
+            painType: 'user_frustration',
+            targetTurnId: 'turn-target',
+          },
+          _meta: { threadId: 'thread-k', 'x-codex-turn-metadata': { turn_id: 'turn-submit' } },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toMatchObject({
+          status: 'verified',
+          sessionId: 'thread-k',
+          targetTurnId: 'turn-target',
+        });
+        expect(result.warnings, JSON.stringify(result)).toContain('target_evidence_blocked:consent_missing');
+        expect(result.warnings.some((warning) => warning.startsWith('target_evidence_pending'))).toBe(false);
+        expect(result.nextAction).toContain('newly authorized target turn');
+        expect(errors.some((line) => line.includes('target-turn evidence read blocked') && line.includes('consent_missing'))).toBe(true);
+        if (result.taskId === null) throw new Error('missing task id');
+        const task = await state.getTask(result.taskId);
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic.evidence).toEqual([]);
+        expect(diagnostic.recovery).toMatchObject({
+          state: 'blocked_by_consent',
+          reasonCode: 'target_turn_source_material_consent_missing',
+        });
+        expect(task?.diagnosticJson).not.toContain('The exact target turn text');
+      } finally {
+        console.error = originalError;
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('consent_revoked: preserves authorized session identity but blocks diagnosis instead of waiting for redacted target text', async () => {
+    const workspaceDir = await kWorkspace({ minimalMetadata: true }, true);
+    recordCodexConsent(workspaceDir, 'revoked');
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      const errors: string[] = [];
+      const originalError = console.error;
+      try {
+        console.error = (...args: unknown[]) => {
+          errors.push(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
+        };
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: {
+            reason: 'The named target turn cannot be used after source revocation.',
+            anchorType: 'agent_instruction',
+            anchorRef: 'AGENTS.md#safety',
+            painType: 'user_frustration',
+            targetTurnId: 'turn-target',
+          },
+          _meta: { threadId: 'thread-k', 'x-codex-turn-metadata': { turn_id: 'turn-submit' } },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toMatchObject({
+          status: 'verified',
+          sessionId: 'thread-k',
+          targetTurnId: 'turn-target',
+        });
+        expect(result.warnings, JSON.stringify(result)).toContain('target_evidence_blocked:consent_revoked');
+        expect(result.warnings.some((warning) => warning.startsWith('target_evidence_pending'))).toBe(false);
+        expect(result.nextAction).toContain('newly authorized target turn');
+        expect(errors.some((line) => line.includes('target-turn evidence read blocked') && line.includes('consent_revoked'))).toBe(true);
+        if (result.taskId === null) throw new Error('missing task id');
+        const task = await state.getTask(result.taskId);
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic.sessionIdHint).toBe('thread-k');
+        expect(diagnostic.painIngress.verifiedHostSession).toMatchObject({
+          status: 'verified',
+          sessionId: 'thread-k',
+          targetTurnId: 'turn-target',
+        });
+        expect(diagnostic.evidence).toEqual([]);
+        expect(diagnostic.recovery).toMatchObject({
+          state: 'blocked_by_consent',
+          reasonCode: 'target_turn_source_material_consent_revoked',
+        });
+        expect(task?.diagnosticJson).not.toContain('The exact target turn text');
+      } finally {
+        console.error = originalError;
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
 });

@@ -313,6 +313,44 @@ describe('PRI-1283 T2 — revoked consent blocks every read path', () => {
     expect(wbTurns[0]?.rawExcerpt).toContain('workbuddy-turn-text-1');
   });
 
+  it('exact target-turn reads are blocked immediately after revocation, before the sweep runs', () => {
+    writeConsent('codex', 'granted');
+    seedCodexObservation({ turnId: 'turn-exact-before-sweep' });
+    writeConsent('codex', 'revoked', new Date(NOW.getTime() + 1000).toISOString());
+    const reader = createGovernanceTrajectoryTurnReader({
+      workspaceDir,
+      sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+    });
+    expect(reader.listTurnTextsForHostTurnId('rollout-1', 'turn-exact-before-sweep', 'codex')).toEqual({
+      userTurns: [],
+      assistantTurns: [],
+    });
+  });
+
+  it('exact target-turn reads are blocked when consent is missing', () => {
+    seedCodexObservation({ turnId: 'turn-exact-missing-consent' });
+    const reader = createGovernanceTrajectoryTurnReader({
+      workspaceDir,
+      sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+    });
+    expect(reader.listTurnTextsForHostTurnId('rollout-1', 'turn-exact-missing-consent', 'codex')).toEqual({
+      userTurns: [],
+      assistantTurns: [],
+    });
+  });
+
+  it('exact target-turn reads are blocked when consent is missing', () => {
+    seedCodexObservation({ turnId: 'turn-exact-missing-consent' });
+    const reader = createGovernanceTrajectoryTurnReader({
+      workspaceDir,
+      sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+    });
+    expect(reader.listTurnTextsForHostTurnId('rollout-1', 'turn-exact-missing-consent', 'codex')).toEqual({
+      userTurns: [],
+      assistantTurns: [],
+    });
+  });
+
   it('an unwired port denies governance material (fail-closed default)', () => {
     const decision = denyAllSourceMaterialAuthorization.isHostSourceMaterialAuthorized('codex');
     expect(decision.authorized).toBe(false);

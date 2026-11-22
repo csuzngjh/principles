@@ -123,11 +123,20 @@ export function createGovernanceTrajectoryTurnReader(args: GovernanceTrajectoryT
       if (sessionId.trim().length === 0 || hostTurnId.trim().length === 0) {
         return { userTurns: [], assistantTurns: [] };
       }
+      // Exact-turn reads are a separate entry point from the session-level
+      // list methods above. Require an explicit supported host and consult
+      // the latest consent decision on EVERY call before opening the store.
+      // An omitted/unsupported host must never become an unscoped read.
+      const authorizedHostKind = GOVERNANCE_TURN_HOSTS.find((candidate) => candidate === hostKind);
+      if (authorizedHostKind === undefined
+        || !port.isHostSourceMaterialAuthorized(authorizedHostKind).authorized) {
+        return { userTurns: [], assistantTurns: [] };
+      }
       const result = listGovernanceObservations({
         workspaceDir: args.workspaceDir,
         rolloutIdentity: sessionId,
+        hostKind: authorizedHostKind,
         hostTurnId,
-        ...(hostKind === undefined ? {} : { hostKind }),
         limit: 64,
       });
       if (!result.ok) return { userTurns: [], assistantTurns: [] };
