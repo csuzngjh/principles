@@ -92,3 +92,19 @@
 ## 10. 最终结论
 
 **PASS_WITH_LIMITATIONS**：Phase 3 的架构、契约、三平台实现、CLI 命令面、installer 集成、Console 只读面全部交付并有单元/进程级证据；评审 P1/P2 整改全部闭环；Windows 在适配器层完成真实 OS 全生命周期 + 真实安装态 CLI 状态契约实证；限制为（a）真实安装态的调度器注册+观察窗待控制台同意可用后按第 5 节脚本补跑（约 1.5h），（b）macOS/Linux 真实平台 NOT_VERIFIED。不得将本阶段结论等同于 Production Cutover（SPEC §2.0）。
+
+## 11. 第三轮整改（SPEC-PRI-1281-SCHEDULER-LIFECYCLE-RELIABILITY-001，head 6e9caf6f5）
+
+按 `docs/specs/SPEC-PRI-1281-SCHEDULER-LIFECYCLE-RELIABILITY-001.md` 全量实施，逐项闭环：
+
+| 项 | 修复 | 验证 |
+|---|---|---|
+| macOS P0 | `loadState` 三态（loadedKnown）；事务化 install（plist 落盘→归属解析→disable 钉入→`launchctl print-disabled` 复核，失败 rollbackPlist/`launchctl enable` 恢复）；refresh 决策矩阵（disabled 态不可证→`launchagent_disabled_state_unverified` 先拒绝后写）；plist 用 `plist@3.1.1` 结构解析 + 重复 key 计数 | scheduler-macos.test.ts 31 例 |
+| Linux P0 | `enabledVerdict` 证据类（disabled/not-found/uncertain 不互推）；disable/uninstall 双后置条件（enabled+active 均须否定证）；卸载 `.service`+`.timer` 双 unit 验证；section-aware 归属（[Service] 恰 1 ExecStart+1 WorkingDirectory、[Timer] 恰 1 Unit=，drop-in/重复/多 ExecStart 拒绝）；字段级 `%`/`$` 转义（Exec* `$$`、其余 `%%`）；h/d/复合 interval 解析，不可解析→`systemd_timer_interval_unparseable` 拒绝刷新；首装部分失败 rollbackUnit/rollbackBoth；`# path` 头+drop-in 遮蔽→`systemd_unit_ambiguous_manager_view` | scheduler-linux.test.ts 66 例 |
+| Windows P1 | `LastTaskResult` 改 `[int64]`（UInt32 高位 HRESULT 不溢出）；Actions 全量解析（恰 1 Exec、无 ComHandler/ShowMessage/SendEmail）；UserId 限定 LogonTrigger 内；**新增 run-as 归属**：`<Principal><UserId>` SID 与查询进程 `WindowsIdentity.GetCurrent().User.Value` 对校，改派外部账户→`runas_mismatch` 拒删 | scheduler-windows.test.ts 39 例 + 真实 Windows CI 生命周期 |
+| 统一契约 §5 | install=写入+归属+OS 可见；enable/disable=双态证实；uninstall=文件消失+OS 确认；refresh=enabled+interval 保留；status 不可读→UNKNOWN 不当成功；destructive=归属→状态→修改→验证→报告 | 三平台单测 + contract 测试 |
+| Devin Review 追加 | 本轮新增 finding（run-as 账户改派→误删）：属实，已修（上表 Windows 行） | 两条回归用例 |
+
+**CI（head `6e9caf6f5`）**：26 项全部 PASS（含 Verify Merge Gate、e2e、packaged-install、pd-cli Windows 真实生命周期）；CodeRabbit SKIP。本轮连带修复：`release-locks/pd-cli` 补 `plist@3.1.1`（真实打包 `npm ci` 本地复验）、`types/plist.d.ts` 移出 src（generated-artifact 门）、`core-test-job-guards` 适配 main #2746 的步骤改名（按命令定位而非步骤名）。
+
+**真实 OS 口径**：Windows 适配器层真实生命周期 PASS（CI 实证，含新 SID 归属校验）；macOS/Linux 本机无对应 OS/总线 → NOT_VERIFIED 如实标注；无 systemd user bus 的真实拒绝透传仍成立。
