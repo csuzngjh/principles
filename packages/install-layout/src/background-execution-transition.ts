@@ -105,6 +105,15 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+function busyWaitMs(ms: number): void {
+  // Sync context: a bounded spin over Date.now(). Callers only reach here on
+  // contention or mid-write windows, which are millisecond-scale events.
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    /* spin */
+  }
+}
+
 const realFsOps: CasFsOps = {
   mkdirExclusive(dir) {
     try {
@@ -259,7 +268,10 @@ export function acquireBackgroundExecutionCasLock(options: CasLockAcquireOptions
     // Lock exists: attribute it.
     const ownerFile = fsOps.readJson(path.join(lockDir, ownerFileName()));
     if (!ownerFile.ok && ownerFile.code === 'missing' && attempt < 2) {
-      // Mid-write or crashed holder: bounded retry before declaring invalid.
+      // Mid-write holder (mkdir landed, owner.json not yet): back off so the
+      // attribution write completes, then retry — declaring lock_invalid on a
+      // microseconds window would fail operations spuriously.
+      busyWaitMs(25);
       continue;
     }
     const holder = ownerFile.ok ? parseLockOwner(ownerFile.value) : null;
@@ -313,15 +325,6 @@ export interface WithManifestWriteLockOptions {
 export type WithManifestWriteLockResult<T> =
   | { ok: true; value: T }
   | { ok: false; reason: 'lock_busy' | 'lock_invalid' | 'lock_io_error'; message: string };
-
-function busyWaitMs(ms: number): void {
-  // Sync context: a bounded spin over Date.now(). Callers only reach here on
-  // contention, which is a millisecond-window event.
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    /* spin */
-  }
-}
 
 /**
  * Run a manifest read-modify-write under the SAME physical lock the §8.4

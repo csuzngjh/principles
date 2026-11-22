@@ -36,8 +36,23 @@ import {
 
 export const WORKER_ADAPTER_CONTRACT_VERSION = 'pd.worker-adapter.v1';
 
-export type WorkerHostKind = 'codex' | 'workbuddy';
+export type WorkerHostKind = 'codex' | 'workbuddy' | 'openclaw';
+/**
+ * The Phase 2 SHADOW host set — deliberately WITHOUT openclaw (instruction
+ * §8.5): shadow-run drives real cycles, and OpenClaw workspaces must only be
+ * driven by the managed path after their §8.4 handover. Extending shadow to
+ * OpenClaw would let `--shadow --host openclaw` consume a legacy-owned
+ * workspace next to the Gateway AutoConsumer.
+ */
 export const WORKER_HOST_KINDS: readonly WorkerHostKind[] = ['codex', 'workbuddy'];
+/** Shadow-mode surfaces (host filter, execution records) use this narrow set. */
+export type ShadowHostKind = (typeof WORKER_HOST_KINDS)[number];
+/**
+ * The MANAGED host set (PRI-1282 Phase 4): every host whose worker the
+ * coordinator may drive for a `service_host_owned` workspace — OpenClaw
+ * joins here, where the ownership admission gate is the only entry.
+ */
+export const MANAGED_WORKER_HOST_KINDS: readonly WorkerHostKind[] = ['codex', 'workbuddy', 'openclaw'];
 
 export interface WorkspaceDescriptor {
   /** Canonical (realpath-preferred) absolute workspace dir. */

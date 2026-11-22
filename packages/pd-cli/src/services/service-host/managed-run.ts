@@ -70,10 +70,11 @@ import {
   type ServiceRunTriggerSource,
 } from './status/service-run-status.js';
 import type { WorkerAdapter, WorkerHostKind, WorkspaceDescriptor , resolveActiveReleaseCliEntry } from './worker-adapter.js';
-import { WORKER_HOST_KINDS } from './worker-adapter.js';
+import { MANAGED_WORKER_HOST_KINDS } from './worker-adapter.js';
 import type { WorkerProcessOptions, WorkerProcessResult } from './worker-process.js';
 import { createCodexWorkerAdapter } from './worker-adapter-codex.js';
 import { createWorkbuddyWorkerAdapter } from './worker-adapter-workbuddy.js';
+import { createOpenClawWorkerAdapter } from './worker-adapter-openclaw.js';
 import {
   carriedProgress,
   dispatchWorkspaceAdapters,
@@ -158,7 +159,7 @@ function declaredHostKinds(canonicalDir: string): WorkerHostKind[] {
   if (!loaded.ok) return [];
   const declared: WorkerHostKind[] = [];
   for (const declaration of loaded.declarations) {
-    if (WORKER_HOST_KINDS.includes(declaration.hostKind as WorkerHostKind)) {
+    if (MANAGED_WORKER_HOST_KINDS.includes(declaration.hostKind as WorkerHostKind)) {
       declared.push(declaration.hostKind as WorkerHostKind);
     }
   }
@@ -422,7 +423,7 @@ async function completeManagedRun(identity: InstallIdentity, context: {
       const dispatch = await dispatchWorkspaceAdapters({
         workspaceDir: entry.canonicalDir,
         descriptor: buildDescriptor(entry),
-        hostKinds: [...WORKER_HOST_KINDS],
+        hostKinds: [...MANAGED_WORKER_HOST_KINDS],
         timeoutMs,
         adapters: context.adapters,
         activeRelease,
@@ -488,7 +489,7 @@ async function completeManagedRun(identity: InstallIdentity, context: {
           canonicalDir: entry.canonicalDir,
           hostKind: null,
           admission: 'executed',
-          skipReason: `no_adapter_supports_workspace:${WORKER_HOST_KINDS.join('|')}`,
+          skipReason: `no_adapter_supports_workspace:${MANAGED_WORKER_HOST_KINDS.join('|')}`,
           skipNextAction: 'This service_host_owned workspace has no validated host binding (claim or host-tool declaration) for any adapter. Register the host binding; the scheduler cannot execute it.',
           workspaceState: 'unavailable',
           lastProgressAt: previousAt ?? null,
@@ -629,6 +630,7 @@ export async function runServiceManagedOnce(options: ManagedRunOptions): Promise
   const adapters: Record<WorkerHostKind, WorkerAdapter> = {
     codex: options.probes?.adapters?.codex ?? createCodexWorkerAdapter(),
     workbuddy: options.probes?.adapters?.workbuddy ?? createWorkbuddyWorkerAdapter(),
+    openclaw: options.probes?.adapters?.openclaw ?? createOpenClawWorkerAdapter(),
   };
 
   let result: ManagedRunResult;
