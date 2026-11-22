@@ -13,6 +13,7 @@
 1. **Before implementing**, run `npm run error:context -- --paths <expected-files> --signals <concepts>`. Read only the HIGH hits plus the MEDIUM hits your own judgment selects, and turn their `Must check` into concrete verification steps. Do not load the whole records tree.
 2. **Before handoff / PR**, rerun `npm run error:context` (diff mode), reconcile any new HIGH hit, and record the **actual** router result in the PR's Error Experience / Task Risk Contract.
 3. **Never treat a prose ERR as a control.** Only an executable gate (CI check) or a regression test proven red against the pre-fix state counts as evidence that a risk is covered. `npm run error:hotspots` items marked `ENFORCEMENT DECISION REQUIRED` must be triaged at PR review, not carried silently.
+4. **Below the fold**: §25A (PD-Lab — Agent behavior-experiment infrastructure) sits near the end of this file and may be truncated from injected context. When a change touches the Agent behavior surface, read its authoritative guide `docs/process/PD-LAB-USAGE.md` directly.
 
 ---
 

@@ -61,10 +61,11 @@ Agent 可以不使用 PD-Lab，但必须能解释原因（写进 PR Impact 字�
 2. **检查已有实验资产**：`experiment/prompt-v2/` 历史报告、既有 run 记录、`docs/experiments/`、同族实验的 PREREGISTRATION/DECISION_CARD——能复用就不新建。
 3. **确定 baseline / candidate**：两臂唯一允许差异是什么？（必须能一句话说清；多于一个差异即设计缺陷）
 4. **检查样本、配置、环境与预注册**：`experiment-config.json`、样本分母、requestCap、预注册冻结状态。
-5. **用现有 lab CLI 执行**（§6 命令参考；不得自建执行器）。
-6. **用现有 Metrics / Blindpack / Evaluator / Summary 产出结果**。
-7. **检查结果、限制与副作用**：护栏是否触发、失败/降级样本是否留在分母、限制是否披露。
-8. **PR 附实验证据**：结果词汇（§5）+ 证据位置 + 已知限制。
+5. **核对 T6 运行许可**：运行 `npm run lab:qualify` 读取资格结论与 `t6Permissions`；确认性执行须 `confirmatoryT6Allowed`，探索性执行须 `exploratoryT6Allowed`（且 D2 明确批准探索性）。`lab:preflight` 通过**不等于**有运行资格——预检只查隔离/配置/摘要绑定，不检查 T7a/T6 资格。
+6. **用现有 lab CLI 执行**（§6 命令参考；不得自建执行器）。
+7. **用现有 Metrics / Blindpack / Evaluator / Summary 产出结果**。
+8. **检查结果、限制与副作用**：护栏是否触发、失败/降级样本是否留在分母、限制是否披露。
+9. **PR 附实验证据**：结果词汇（§5）+ 证据位置 + 已知限制。
 
 **复用纪律（硬约束）**：必须使用现有实现；不得重建 Runner、Evaluator、Evidence Store、Report 系统。
 
@@ -82,13 +83,13 @@ Agent 可以不使用 PD-Lab，但必须能解释原因（写进 PR Impact 字�
 | **D5** | Owner 盲评（样本量、一致率、仲裁） | 不得要求/模拟 Owner 盲评 |
 | **D6** | 全保真数据使用（范围/存储/保留/撤回） | 不得访问真实全保真数据 |
 
-权威参数清单见同族实验的 `PREREGISTRATION.md`（§9 全部 OWNER_DECISION_REQUIRED）与 `DECISION_CARD.md`（§2）。**口头授权、聊天摘要、旧实验授权、合成 fixture 均不构成批准。**
+D2–D6 的权威参数清单见 [`docs/plans/PD-LAB-V03-IMPLEMENTATION-HANDOFF.md`](../plans/PD-LAB-V03-IMPLEMENTATION-HANDOFF.md) 的 Owner 决策表；每轮实验的批准以该轮独立的 Owner 决策记录为准（参数清单不等于批准记录，二者不可互替）。**口头授权、聊天摘要、旧实验授权、合成 fixture 均不构成批准。**
 
 ### 5.2 没有授权时允许做什么
 
 * 离线合成验证：仓库 fixtures、合成双臂工作区、`buildHealthyWorld` 正控、负控注入；
-* 只读探测与资格复算：`lab:probe`（探测当前数据/环境 → READY/BLOCKED）、`lab:qualify`（复算 T6 资格）、`lab:judge-validate`（协议合成校验）；
-* 这些命令 fail-closed：无授权输入 → 全路径 BLOCKED，属预期行为，不是故障。
+* 只读探测与校验：`lab:probe`（准入探测；无 D6 时只以合成 fixture 模式运行，真实数据路径记为 `NOT_RUN_WITHOUT_D6`）、`lab:judge-validate`（裁判协议记录包的结构/绑定/负控校验，不判定实验资格）、`lab:qualify`（T6 资格复算，三态结论见 §5.4）；
+* 这些命令 fail-closed：无授权时不会进入真实路径——探测停留在合成模式、资格结论为 `BLOCKED`、校验失败退出非零。这属预期行为，不是故障；但只有 `lab:qualify` 的 `BLOCKED` 是资格结论，前两条命令的输出不是。
 
 ### 5.3 明确禁止
 
@@ -104,9 +105,9 @@ Agent 可以不使用 PD-Lab，但必须能解释原因（写进 PR Impact 字�
 | `PASS` | 验证目标在授权范围内达成，证据可复算 |
 | `PASS_WITH_LIMITATIONS` | 达成但存在已披露限制（如同族裁判、后见信息、样本受限） |
 | `BLOCKED` | 资格/授权/数据完整性不满足；合成验证通过**不改变**真实执行的 BLOCKED 判定 |
-| `NOT_RUN` | 未执行（无授权、无环境、显式跳过）；NOT_RUN 的样本不得计入任何 PASS 分母 |
+| `NOT_RUN` | 某项运行/校准/评审未执行（无授权、无环境、显式跳过）；计划内未执行的样本单元不得剔除——按计分契约以 `UNKNOWN` 保留在分母 |
 
-T6 资格判定另有协议级词汇：`CONFIRMATORY_READY` / `EXPLORATORY_ONLY` / `BLOCKED` / `NOT_RUN`（由 `lab:qualify` 机械输出，不得人工改写）。
+T6 资格判定另有协议级**三态**词汇：`CONFIRMATORY_READY` / `EXPLORATORY_ONLY` / `BLOCKED`（由 `lab:qualify` 机械输出，不得人工改写）。`NOT_RUN` 只标记校准/评审等前置事项未执行（如实时裁判校准 `NOT_RUN`），本身不是第四种资格结论。
 
 ---
 
@@ -126,6 +127,8 @@ T6 资格判定另有协议级词汇：`CONFIRMATORY_READY` / `EXPLORATORY_ONLY`
 | `npm run lab:qualify` | `scripts/dev/pd-lab/t6-qualify.mjs` | T6 资格机械判定 | 只读 |
 
 `experiment/prompt-v2/scripts/ab/ab-run.mjs` 是 `lab:run` 的单臂执行器，由 grid 驱动，通常不直接运行。
+
+**`lab:eval` 是旧版百分制评分器**：输出 0–100 dimensionScores 与 `A/B/tie` pairwise，**不是** `jp-pd-lab@1` 协议裁判记录，不能充当新版裁判证据；T6/jp-pd-lab@1 证据链以盲评包 + 协议裁判记录 + `lab:judge-validate`/`lab:card` 为准。
 
 ---
 
