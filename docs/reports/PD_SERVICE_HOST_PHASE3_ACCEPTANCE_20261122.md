@@ -56,12 +56,39 @@
 - 真实安装运行中桥接未触发（未传同意旗标）→ 无静默注册，符合 §6。
 - installer `test:fast` 全绿（本 PR 改动范围内）。
 
-## 8. 提交链
+## 8. 审查整改（P1/P2 findings remediation，2026-11-22 追加）
+
+评审基线 `7587268c5` 上的全部 P1/P2 整改已完成并实证。逐项闭环：
+
+| 条目 | 整改 | 证据 |
+|---|---|---|
+| P1 JSON 桥契约 | stdout 恰好一个 JSON 文档，整串解析 + post-parse schema 校验；空/混日志/截断/非法字段/未知 schemaVersion 各自 fail-closed 分类；解析失败绝不解释为“未注册” | `service-host-bridge.integration.test.ts` 26 例：真实 pd-cli dist 经真实 stdout 往返（含无 user bus 时 `service_host_cli_refused:*` 如实透传）+ 敌意 stdout fixture 全分类 |
+| P1 Windows argv 序列化 | CommandLineToArgvW 语义序列化/解码；归属按 `<Command>`+`<Arguments>` 结构化比对 | 往返矩阵含 CJK/`&`/`%`/`!`/引号/尾随反斜杠/含空格 HOME（32 例全绿） |
+| P1 macOS 生命周期 | install=不 bootstrap+钉 disabled；enable=归属验证→enable→bootstrap→verifyLoaded；disable=持久禁用→bootout→verifyUnloaded | 状态机级状态迁移测试 19 例 |
+| P1 Linux 双 unit | .service+.timer 独立双侧证（`systemctl --user cat` + `Unit=` 指针）；uninstall=disable 核对→not-enabled/not-active→删→reload→cat 复核 | 状态机级测试 35 例（外来/残缺/不可读均 fail-closed） |
+| P1 统一 fail-closed 归属 | 三平台归属判定全部改为对存储注册的结构化解析 | 各平台外来任务/冲突/不可解析用例覆盖 |
+| P1 macOS 首跑日志目录 | install 预建 `<pdHome>/service`；mkdir 失败 → 零写入 | failMkdirs 注入用例 |
+| P2 systemd 转义 | 修复 `$` 倍增实现缺陷（`$$` 字面量逃逸） | `systemdQuote` 矩阵 7 例 |
+| P2 Windows StartBoundary 时区 | `formatWindowsStartBoundary` 显式本地时区偏移 | UTC+8/−5/+0 用例 |
+| P2 状态契约证据 | `pd.service-status.v1` 增 `osActive`、enabled=null 未知态、`degradedReasons` | service-status 契约测试 |
+| P2 managed 拒绝落盘 | refusal 以顶层 `outcome:'refused'`+`managed.triggerSource` 持久化 | managed-run 持久化断言 |
+| P2 triggerSource 可信级 | `triggerSourceCredibility:'self-declared'` 字段 + 运行手册降级采信说明 | 状态契约测试 + 手册 §5 |
+| P2 Linux manager 可见性 | install 后 `systemctl --user cat` 双侧证门禁；`No files found` 归入 not-found | managerSeesUnit 用例 |
+| P2 Linux OS 查询失败 / enabled×active 独立 | 两字段独立见证、独立失败分类，互不推断 | verdict 类型 + 不同意组合测试 |
+| P2 升级保留调度配置 | 适配器解析 OS 侧 interval+enabled；桥接传 `--interval-ms` 自实时状态文档；不可读 fail-closed | 三层测试（适配器/桥/“interval 不可读→fail closed”） |
+
+**测试**：pd-cli 2769 全绿；create-principles-disciple 1484 全绿；pd-console 3619 全绿。eslint/tsc 于全部改动文件零错误。`error:context`（diff 前置 + PR 前复跑）EP-02/03/04 证据由上述真实入口集成测试与逐见证状态契约覆盖。
+
+**真实 OS 验收状态**：本整改未改变第 4/5/6 节口径——Windows 适配器层真实验收仍 PASS；真实安装态注册+观察窗仍 PENDING（控制台同意）；macOS/Linux 真实平台仍 NOT_VERIFIED。新增证据：本机无 systemd user bus 环境下，真实 CLI `service install` 的结构化拒绝经桥接如实透传为 `service_host_cli_refused:*`（非 parse error、非“未注册”）——拒绝路径真实端到端。
+
+## 9. 提交链
 
 - `e53384e96…` Phase 3 全量（调度器/managed/状态契约/CLI/installer 桥/Console 路由/文档/测试）
 - `68ff46464` `--pd-home` 必须传受信 HOME 根（真实安装验收发现的缺陷修复）+ 进程测试双轨重构
 - `3faf59c86` 控制台同意不可得时进程测试显式 skip
+- `a23f0de0d` P1/P2 调度器整改：fail-closed 归属、双见证生命周期、诚实状态契约（pd-cli，14 文件）
+- `ff02655f1` 严格 JSON 桥契约 + refresh 保留现场 interval + Console 路由加固 + 真实跨包集成测试
 
-## 9. 最终结论
+## 10. 最终结论
 
-**PASS_WITH_LIMITATIONS**：Phase 3 的架构、契约、三平台实现、CLI 命令面、installer 集成、Console 只读面全部交付并有单元/进程级证据；Windows 在适配器层完成真实 OS 全生命周期 + 真实安装态 CLI 状态契约实证；限制为（a）真实安装态的调度器注册+观察窗待控制台同意可用后按第 5 节脚本补跑（约 1.5h），（b）macOS/Linux 真实平台 NOT_VERIFIED。不得将本阶段结论等同于 Production Cutover（SPEC §2.0）。
+**PASS_WITH_LIMITATIONS**：Phase 3 的架构、契约、三平台实现、CLI 命令面、installer 集成、Console 只读面全部交付并有单元/进程级证据；评审 P1/P2 整改全部闭环；Windows 在适配器层完成真实 OS 全生命周期 + 真实安装态 CLI 状态契约实证；限制为（a）真实安装态的调度器注册+观察窗待控制台同意可用后按第 5 节脚本补跑（约 1.5h），（b）macOS/Linux 真实平台 NOT_VERIFIED。不得将本阶段结论等同于 Production Cutover（SPEC §2.0）。
