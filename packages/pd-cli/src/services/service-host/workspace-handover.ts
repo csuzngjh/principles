@@ -38,6 +38,7 @@ import * as path from 'node:path';
 import {
   readWorkspaceBackgroundOwnership,
   transitionWorkspaceBackgroundExecution,
+  type BackgroundExecutionRecord,
   type WorkspaceBackgroundOwnership,
 } from '@principles/install-layout';
 import { resolveCoordinatorInstallIdentity } from './install-identity.js';
@@ -138,13 +139,116 @@ export function writeHandoverEvidence(evidence: HandoverEvidence, pdHome: string
   }
 }
 
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+/** Field-level validation of one persisted evidence step (rc-3/rc-4). */
+function parseEvidenceStep(value: unknown): { step: string; at: string; outcome: string; detail?: string } | null {
+  if (!isJsonObject(value)) return null;
+  if (!isNonEmptyString(value.step) || !isNonEmptyString(value.at) || !isNonEmptyString(value.outcome)) return null;
+  if (value.detail !== undefined && !isNonEmptyString(value.detail)) return null;
+  return { step: value.step, at: value.at, outcome: value.outcome, ...(value.detail !== undefined ? { detail: value.detail } : {}) };
+}
+
+/**
+ * Field-level validation of one embedded BackgroundExecutionRecord
+ * (rc-3: required fields validated explicitly, never cast into shape).
+ */
+function parseEvidenceRecord(
+  value: unknown,
+  state: 'legacy_owned' | 'handover_preparing' | 'service_host_owned' | 'rollback_pending',
+): BackgroundExecutionRecord | null {
+  if (!isJsonObject(value)) return null;
+  if (value.state !== state) return null;
+  if (value.effectiveOwner !== 'legacy' && value.effectiveOwner !== 'service_host') return null;
+  if (typeof value.generation !== 'number' || !Number.isInteger(value.generation) || value.generation < 0) return null;
+  if (value.operationId !== null && !isNonEmptyString(value.operationId)) return null;
+  if (value.previousOwner !== null && value.previousOwner !== 'legacy' && value.previousOwner !== 'service_host') return null;
+  if (value.targetOwner !== null && value.targetOwner !== 'legacy' && value.targetOwner !== 'service_host') return null;
+  if (!isNonEmptyString(value.updatedAt)) return null;
+  return {
+    state,
+    effectiveOwner: value.effectiveOwner,
+    generation: value.generation,
+    operationId: value.operationId ?? null,
+    previousOwner: value.previousOwner,
+    targetOwner: value.targetOwner,
+    updatedAt: value.updatedAt,
+  };
+}
+
+/**
+ * Field-level validation of the persisted ownership projection embedded in
+ * an evidence document (rc-2/rc-3: untrusted JSON until proven). Every
+ * branch constructs its exact variant from validated fields — no casts.
+ */
+function parseEvidenceOwnership(value: unknown): WorkspaceBackgroundOwnership | null {
+  if (!isJsonObject(value)) return null;
+  if (typeof value.generation !== 'number' || !Number.isInteger(value.generation) || value.generation < 0) return null;
+  if (value.status === 'legacy_owned') {
+    if (value.source !== 'record' && value.source !== 'no_record') return null;
+    if (value.record === undefined) {
+      return { status: 'legacy_owned', source: value.source, generation: value.generation };
+    }
+    const record = parseEvidenceRecord(value.record, 'legacy_owned');
+    if (record === null) return null;
+    return { status: 'legacy_owned', source: value.source, generation: value.generation, record };
+  }
+  if (value.status === 'manifest_unreadable') {
+    if (!isNonEmptyString(value.reason) || !isNonEmptyString(value.nextAction)) return null;
+    return { status: 'manifest_unreadable', reason: value.reason, nextAction: value.nextAction };
+  }
+  if (value.status !== 'handover_preparing' && value.status !== 'service_host_owned' && value.status !== 'rollback_pending') {
+    return null;
+  }
+  const record = parseEvidenceRecord(value.record, value.status);
+  if (record === null) return null;
+  return {
+    status: value.status,
+    generation: value.generation,
+    record,
+  };
+}
+
+/**
+ * Read + field-validate the write-once evidence document (rc-2/rc-3:
+ * untrusted JSON until proven — an unreadable or malformed document is
+ * null, i.e. "no evidence", and the caller fails closed).
+ */
 export function readHandoverEvidence(pdHome: string, canonicalDir: string, operationId: string): HandoverEvidence | null {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(handoverEvidencePath(pdHome, canonicalDir, operationId), 'utf8'));
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    const record = parsed as Record<string, unknown>;
-    if (record.schemaVersion !== HANDOVER_EVIDENCE_SCHEMA) return null;
-    return record as unknown as HandoverEvidence;
+    if (!isJsonObject(parsed)) return null;
+    if (parsed.schemaVersion !== HANDOVER_EVIDENCE_SCHEMA) return null;
+    if (parsed.kind !== 'handover' && parsed.kind !== 'rollback') return null;
+    if (!isNonEmptyString(parsed.operationId) || !isNonEmptyString(parsed.workspaceDir)) return null;
+    if (!isNonEmptyString(parsed.startedAt) || !isNonEmptyString(parsed.completedAt)) return null;
+    if (parsed.outcome !== 'completed' && parsed.outcome !== 'aborted' && parsed.outcome !== 'failed') return null;
+    if (!Array.isArray(parsed.steps)) return null;
+    const steps: { step: string; at: string; outcome: string; detail?: string }[] = [];
+    for (const rawStep of parsed.steps) {
+      const step = parseEvidenceStep(rawStep);
+      if (step === null) return null;
+      steps.push(step);
+    }
+    const finalOwnership = parseEvidenceOwnership(parsed.finalOwnership);
+    if (finalOwnership === null) return null;
+    return {
+      schemaVersion: HANDOVER_EVIDENCE_SCHEMA,
+      kind: parsed.kind,
+      operationId: parsed.operationId,
+      workspaceDir: parsed.workspaceDir,
+      startedAt: parsed.startedAt,
+      completedAt: parsed.completedAt,
+      outcome: parsed.outcome,
+      steps,
+      finalOwnership,
+    };
   } catch {
     return null;
   }
@@ -183,7 +287,7 @@ async function runActiveReleaseWorkerProbe(args: {
 function parseWorkerJson(stdout: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(stdout);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+    return isJsonObject(parsed) ? parsed : null;
   } catch {
     return null;
   }

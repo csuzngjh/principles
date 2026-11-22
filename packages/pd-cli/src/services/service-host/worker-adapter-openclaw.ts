@@ -17,13 +17,15 @@ import {
   readReportEvidence,
 } from './worker-adapter.js';
 
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function readOpenClawLivenessFile(workspaceDir: string): Record<string, unknown> | null {
   try {
     const file = path.join(path.resolve(workspaceDir), '.state', 'openclaw-worker-liveness.json');
     const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+    return isJsonObject(parsed) ? parsed : null;
   } catch {
     return null;
   }

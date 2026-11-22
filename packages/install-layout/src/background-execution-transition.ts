@@ -105,6 +105,11 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+/** Type-guard narrowing for untrusted JSON values (rc-2: never an `as`). */
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function busyWaitMs(ms: number): void {
   // Sync context: a bounded spin over Date.now(). Callers only reach here on
   // contention or mid-write windows, which are millisecond-scale events.
@@ -598,10 +603,10 @@ export function transitionWorkspaceBackgroundExecution(
     let raw: Record<string, unknown>;
     try {
       const parsedJson: unknown = JSON.parse(text.text);
-      if (typeof parsedJson !== 'object' || parsedJson === null || Array.isArray(parsedJson)) {
+      if (!isJsonObject(parsedJson)) {
         return { ok: false, reason: 'manifest_unreadable', message: 'install manifest is not a JSON object', nextAction: 'Repair ~/.pd/install.json.' };
       }
-      raw = parsedJson as Record<string, unknown>;
+      raw = parsedJson;
     } catch {
       return { ok: false, reason: 'manifest_unreadable', message: 'install manifest is not valid JSON', nextAction: 'Repair ~/.pd/install.json.' };
     }
