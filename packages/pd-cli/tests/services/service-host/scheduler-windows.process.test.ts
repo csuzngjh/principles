@@ -37,6 +37,12 @@ const registration: SchedulerRegistration = {
   identity: schedulerIdentityFor(pdHome),
 };
 
+
+/** Render a failed adapter result for assertion messages (real-OS diagnostics). */
+function explain(result: { ok: boolean; kind?: string; reason?: string; nextAction?: string }): string {
+  return result.ok ? '' : `${result.kind ?? 'unknown'}: ${result.reason ?? ''} — ${result.nextAction ?? ''}`;
+}
+
 const unelevatedAdapter = createWindowsSchedulerAdapter({
   runner: createSpawnSchedulerRunner({ timeoutMs: 90_000 }),
   fileIo: nodeSchedulerFileIo,
@@ -160,7 +166,7 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
         return;
       }
       const result = await lifecycleAdapter.install(registration);
-      expect(result.ok).toBe(true);
+      expect(result.ok, explain(result)).toBe(true);
       if (!result.ok) return;
       // Standard host: the probe already registered — this re-install is the
       // idempotent no-op. Hardened host: the elevated bridge does the real
@@ -181,7 +187,7 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
         return;
       }
       const result = await lifecycleAdapter.install(registration);
-      expect(result.ok).toBe(true);
+      expect(result.ok, explain(result)).toBe(true);
       if (!result.ok) return;
       expect(result.changed).toBe(false);
       expect(result.facts.enabled).toBe(false);
@@ -197,12 +203,12 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
         return;
       }
       const enabled = await lifecycleAdapter.enable(registration);
-      expect(enabled.ok).toBe(true);
+      expect(enabled.ok, explain(enabled)).toBe(true);
       if (!enabled.ok) return;
       expect(enabled.facts.enabled).toBe(true);
 
       const status = await lifecycleAdapter.status(registration);
-      expect(status.ok).toBe(true);
+      expect(status.ok, explain(status)).toBe(true);
       if (!status.ok) return;
       expect(status.facts.registered).toBe(true);
       expect(status.facts.enabled).toBe(true);
@@ -229,7 +235,7 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
         child.on('error', (error) => reject(error));
       });
       const status = await lifecycleAdapter.status(registration);
-      expect(status.ok).toBe(true);
+      expect(status.ok, explain(status)).toBe(true);
       if (!status.ok) return;
       // LastRunTime left the sentinel and LastTaskResult is a real exit
       // code — the missing CLI entry makes it non-zero (node could not load
@@ -250,22 +256,22 @@ describe.runIf(process.platform === 'win32')('real Windows Task Scheduler lifecy
         return;
       }
       const disabled = await lifecycleAdapter.disable(registration);
-      expect(disabled.ok).toBe(true);
+      expect(disabled.ok, explain(disabled)).toBe(true);
       if (!disabled.ok) return;
       expect(disabled.facts.enabled).toBe(false);
 
       const removed = await lifecycleAdapter.uninstall(registration);
-      expect(removed.ok).toBe(true);
+      expect(removed.ok, explain(removed)).toBe(true);
       if (!removed.ok) return;
       expect(removed.changed).toBe(true);
 
       const status = await lifecycleAdapter.status(registration);
-      expect(status.ok).toBe(true);
+      expect(status.ok, explain(status)).toBe(true);
       if (!status.ok) return;
       expect(status.facts.registered).toBe(false);
 
       const again = await lifecycleAdapter.uninstall(registration);
-      expect(again.ok).toBe(true);
+      expect(again.ok, explain(again)).toBe(true);
       if (!again.ok) return;
       expect(again.changed).toBe(false);
     },

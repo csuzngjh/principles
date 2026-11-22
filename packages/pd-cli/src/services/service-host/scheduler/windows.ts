@@ -452,14 +452,15 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
    * definition cannot be parsed at all is foreign too — PD never modifies
    * or deletes what it cannot prove is its own.
    */
-  function ownershipVerdict(body: PowerShellQueryBody, registration: SchedulerRegistration): { ours: true } | { ours: false; conflict: 'external' } {
-    if (!body.found || typeof body.xml !== 'string') return { ours: false, conflict: 'external' };
+  function ownershipVerdict(body: PowerShellQueryBody, registration: SchedulerRegistration): { ours: true } | { ours: false; conflict: 'external'; detail: string } {
+    if (!body.found || typeof body.xml !== 'string') return { ours: false, conflict: 'external', detail: 'no_exported_xml' };
     const command = execElement(body.xml, 'Command');
     const argsText = execElement(body.xml, 'Arguments');
     const workDir = execElement(body.xml, 'WorkingDirectory');
     const principal = taskPrincipalUser(body.xml);
     if (command === null || argsText === null || workDir === null) {
-      return { ours: false, conflict: 'external' };
+      const missing = [command === null ? 'Command' : '', argsText === null ? 'Arguments' : '', workDir === null ? 'WorkingDirectory' : ''].filter(Boolean).join('+');
+      return { ours: false, conflict: 'external', detail: `unparsable_exec:${missing}` };
     }
     const execArgv = [command, ...windowsParseCommandLine(argsText)];
     const expectedArgv = [registration.nodePath, ...schedulerInvocationArgs(registration)];
@@ -469,7 +470,13 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
     // The task must run under an interactive user principal — an empty
     // principal means a definition PD did not write.
     const principalPresent = principal !== null && principal !== '';
-    return execMatches && workDirMatches && principalPresent ? { ours: true } : { ours: false, conflict: 'external' };
+    if (execMatches && workDirMatches && principalPresent) return { ours: true };
+    const detail = [
+      execMatches ? '' : `argv_mismatch(expected ${expectedArgv.length} got ${execArgv.length})`,
+      workDirMatches ? '' : 'workdir_mismatch',
+      principalPresent ? '' : 'missing_principal',
+    ].filter(Boolean).join('+');
+    return { ours: false, conflict: 'external', detail };
   }
 
   async function status(registration: SchedulerRegistration): Promise<SchedulerOperationResult> {
@@ -556,7 +563,7 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
             ok: false,
             kind: 'external_conflict',
             reason: 'scheduler_task_name_conflict_foreign_task',
-            nextAction: `A Task Scheduler task named ${taskName} already exists but does not reference this PD install (${registration.pdHome}). PD never overwrites or deletes foreign registrations — remove or rename it manually, or inspect it with Export-ScheduledTask.`,
+            nextAction: `A Task Scheduler task named ${taskName} already exists but does not reference this PD install (${registration.pdHome}; verdict: ${ownership.detail}). PD never overwrites or deletes foreign registrations — remove or rename it manually, or inspect it with Export-ScheduledTask.`,
             facts: factsFromQuery(registration.identity, query.body),
           };
         }
@@ -596,7 +603,7 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
           ok: false,
           kind: 'external_conflict',
           reason: 'scheduler_task_name_conflict_foreign_task',
-          nextAction: `The task named ${taskName} is not PD's own registration; PD refuses to modify it. Remove it manually if you own it.`,
+          nextAction: `The task named ${taskName} is not PD's own registration (verdict: ${ownership.detail}); PD refuses to modify it. Remove it manually if you own it.`,
           facts: factsFromQuery(registration.identity, query.body),
         };
       }
@@ -628,7 +635,7 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
           ok: false,
           kind: 'external_conflict',
           reason: 'scheduler_task_name_conflict_foreign_task',
-          nextAction: `The task named ${taskName} is not PD's own registration; PD refuses to modify it.`,
+          nextAction: `The task named ${taskName} is not PD's own registration (verdict: ${ownership.detail}); PD refuses to modify it.`,
           facts: factsFromQuery(registration.identity, query.body),
         };
       }
@@ -658,7 +665,7 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
           ok: false,
           kind: 'external_conflict',
           reason: 'scheduler_task_name_conflict_foreign_task',
-          nextAction: `A task named ${taskName} exists but does not reference this PD install; PD never deletes foreign registrations. Inspect it with Export-ScheduledTask and remove it manually if you own it.`,
+          nextAction: `A task named ${taskName} exists but does not reference this PD install (verdict: ${ownership.detail}); PD never deletes foreign registrations. Inspect it with Export-ScheduledTask and remove it manually if you own it.`,
           facts: factsFromQuery(registration.identity, query.body),
         };
       }
