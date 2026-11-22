@@ -15,6 +15,20 @@ import type { OpenClawPluginServiceContext } from '../../src/openclaw-sdk.js';
 vi.mock('../../src/core/pd-config-loader.js');
 vi.mock('../../src/core/system-logger.js');
 
+// PRI-1282 §8.4 ownership gate: these timer-chain fixtures are temp dirs
+// outside any real install manifest, so the gate's REAL reader would fail
+// closed (manifest_unreadable) and never arm a chain. Mock the reader at
+// the seam the SERVICE imports (a different module — the mock applies) to
+// the legacy default; the gate's own behaviors are covered by the dedicated
+// internalization-auto-consumer-ownership suite.
+vi.mock('../../src/openclaw-worker.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/openclaw-worker.js')>();
+  return {
+    ...actual,
+    readOpenClawWorkspaceOwnership: vi.fn(() => ({ status: 'legacy_owned' as const, source: 'no_record' as const, generation: 0 })),
+  };
+});
+
 // PRI-655: the timer-chain tests below need to inject a cycle rejection.
 // Spread-mock host-runtime (ERR-115: full-module replacement breaks on new
 // exports) — runInternalizationConsumerCycle defaults to delegating to the

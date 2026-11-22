@@ -88,12 +88,12 @@ describe('install.json writers coexist with the §8.4 ownership CAS (ERR-168)', 
       manifestPath: file, workspaceDir: ws, kind: 'begin_handover', operationId: 'op-coexist-2', registerWorkspace: true,
     });
     const paths = resolvePdHomePaths(home);
-    writeInstallConfig(paths, { channel: 'beta', autoCheck: true });
+    writeInstallConfig(paths, { channel: 'candidate', autoCheck: true });
 
     expect(readWorkspaceBackgroundOwnership({ manifestPath: installJson(home), workspaceDir: ws }))
       .toMatchObject({ status: 'handover_preparing', generation: 1 });
     const raw = JSON.parse(fs.readFileSync(installJson(home), 'utf8')) as Record<string, unknown>;
-    expect(raw.channel).toBe('beta');
+    expect(raw.channel).toBe('candidate');
   });
 
   it('a writer fails LOUD while a transition holds the CAS lock — never a silent unlocked write', () => {

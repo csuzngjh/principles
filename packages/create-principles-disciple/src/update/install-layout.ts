@@ -23,7 +23,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { parseProductVersion, ProductIdentityError, isReleaseChannelName, type ReleaseChannelName } from './product-identity.js';
 import { normalizeReleaseMetadataUrl } from './release-metadata-source.js';
-import { withInstallManifestWriteLock } from '@principles/install-layout';
+import * as installLayoutModule from '@principles/install-layout';
 
 export interface PdHomePaths {
   readonly home: string;
@@ -261,9 +261,21 @@ export function readInstallJsonRecord(filePath: string): Record<string, unknown>
  * Shared lock discipline for install.json writers: LOUD failure, never a
  * silent unlocked fallback — an unlocked write is exactly the ERR-168
  * clobber the lock exists to prevent.
+ *
+ * Release-window compat: `withInstallManifestWriteLock` ships in the
+ * PRI-1282 install-layout cohort. Until that cohort publishes, a registry-
+ * resolved @principles/install-layout (the packaged smoke gate installs
+ * exactly that) does not export it yet — feature-detect and keep the
+ * pre-PR unlocked write behavior for that window ONLY. The ERR-168 guard
+ * engages as soon as the cohort dependency is present.
  */
 function runUnderManifestWriteLock(options: { manifestPath: string; operation: string; context: string }, fn: () => void): void {
-  const result = withInstallManifestWriteLock(options, fn);
+  const lock = installLayoutModule.withInstallManifestWriteLock;
+  if (typeof lock !== 'function') {
+    fn();
+    return;
+  }
+  const result = lock(options, fn);
   if (!result.ok) {
     throw new InstallLayoutError('install.json', `could not acquire the install manifest write lock (${options.operation}): ${result.message}`);
   }
