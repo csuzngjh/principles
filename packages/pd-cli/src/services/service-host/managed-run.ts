@@ -65,6 +65,7 @@ import {
   type ActiveReleaseFacts,
   type HostRootReport,
   type ManagedExecutionRecord,
+  type ServiceRunOutcome,
   type ServiceRunStatus,
   type ServiceRunTriggerSource,
 } from './status/service-run-status.js';
@@ -190,6 +191,10 @@ function buildManagedStatus(args: {
   runId: string;
   startedAt: Date;
   completedAt: Date;
+  /** Persisted outcome — never hardcoded: refused persists 'refused', a
+   *  crashed run persists 'failed', only a real completion persists
+   *  'completed' (task §10 review). */
+  outcome: ServiceRunOutcome;
   triggerSource: ServiceRunTriggerSource;
   activeRelease: ActiveReleaseFacts;
   manifest: ServiceRunStatus['manifest'];
@@ -205,7 +210,7 @@ function buildManagedStatus(args: {
   return {
     schemaVersion: 'pd.service-run-status.v1',
     runId: args.runId,
-    outcome: 'completed',
+    outcome: args.outcome,
     dryRun: false,
     triggerSource: args.triggerSource,
     startedAt: args.startedAt.toISOString(),
@@ -303,6 +308,7 @@ async function completeManagedRun(identity: InstallIdentity, context: {
       runId: context.runId,
       startedAt: context.startedAt,
       completedAt: new Date(),
+      outcome: 'refused',
       triggerSource: options.triggerSource,
       activeRelease: args.activeRelease,
       manifest: args.manifest ?? { verdict: 'ok', hosts: [], unknownHosts: [], workspacesCount: 0 },
@@ -539,6 +545,7 @@ async function completeManagedRun(identity: InstallIdentity, context: {
     runId: context.runId,
     startedAt: context.startedAt,
     completedAt: new Date(),
+    outcome: 'completed',
     triggerSource: options.triggerSource,
     activeRelease,
     manifest: manifestSection(manifestRead),
@@ -647,6 +654,35 @@ export async function runServiceManagedOnce(options: ManagedRunOptions): Promise
   const release = releaseLock(handle);
   const releaseFailed = release === 'failed_busy' || release === 'failed_unwritable';
   if (runThrew) {
+    // A crashed run persists 'failed' — the status file must not keep the
+    // PREVIOUS run's record standing in for a run that never completed
+    // (task §10 review). Best-effort: persist only while the lock is ours.
+    try {
+      const stillHolds = (options.probes?.holdsLock ?? holdsServiceRunLock)(handle);
+      if (stillHolds) {
+        const activeRelease = readActiveReleaseFacts(identity.activeRecordPath);
+        const manifestRead = readManifest(identity);
+        writeServiceRunStatus(identity.pdHome, buildManagedStatus({
+          identity,
+          runId,
+          startedAt,
+          completedAt: new Date(),
+          outcome: 'failed',
+          triggerSource: options.triggerSource,
+          activeRelease,
+          manifest: manifestSection(manifestRead),
+          discovery: buildEmptyDiscovery(),
+          hostRoots: hostRootReports(identity, options.probes?.listDir ?? defaultListDir),
+          bindingDiagnostics: [],
+          timeoutMs: Math.max(MIN_MANAGED_WORKSPACE_TIMEOUT_MS, options.timeoutMs ?? DEFAULT_MANAGED_WORKSPACE_TIMEOUT_MS),
+          executions: [],
+          progressCarryVerdict: 'missing',
+          nextAction: 'The managed run terminated with an internal error before completion — the failure itself is recorded as outcome=failed. Inspect the error and the service directory before the next trigger.',
+        }));
+      }
+    } catch {
+      // Persisting the failure must never mask the original error.
+    }
     if (releaseFailed) {
       console.error(`pd service run-once (managed): lock release also failed (${release}) after the run error`);
     }

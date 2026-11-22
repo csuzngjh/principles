@@ -132,14 +132,33 @@ export interface SchedulerFacts {
   readonly taskName: string;
   /** A registration exists in the OS (any enabled state). null = unreadable. */
   readonly registered: boolean | null;
-  /** Future automatic triggers will fire. null = unreadable. */
+  /**
+   * Future automatic triggers will fire (the persistent arm bit: Task
+   * enabled / launchd not-disabled / timer is-enabled). null = unreadable —
+   * a failed query is NEVER reported as disabled or enabled (task §9).
+   */
   readonly enabled: boolean | null;
+  /**
+   * The job is loaded/active in the OS right now (Task Running / launchd
+   * loaded / timer is-active). Independent of `enabled` — the two are
+   * separate witnesses and never inferred from each other (task §14).
+   * null = unreadable. Absent on platforms reporting no load state.
+   */
+  readonly active?: boolean | null;
   /** Configured trigger interval in ms, read from the OS artifact when parseable. */
   readonly triggerIntervalMs?: number | null;
   /** OS-level last trigger time (ISO) when the platform reports one. */
   readonly lastRunAt: string | null;
   /** OS-level last run result (platform vocabulary, raw). */
   readonly lastResult: string | null;
+  /**
+   * Every degraded/unreadable OS witness behind the verdicts above, each
+   * with its own bounded reason (query failures, unparsable output, bus
+   * unavailable). The status composer folds these into degradedReasons so
+   * an unreadable witness is never folded into a healthy-looking document
+   * (task §9/§13).
+   */
+  readonly degradedReasons?: readonly string[];
 }
 
 /** Structured operation result — success/failed/unavailable with reason + nextAction (rc-9). */

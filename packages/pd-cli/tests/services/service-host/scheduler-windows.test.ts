@@ -2,20 +2,30 @@
  * Windows scheduler adapter — PowerShell protocol tests against a faked
  * command boundary (task §9.F): install/enable/disable/uninstall/status call
  * sequencing, the PD_TASK_XML environment hand-off, fail-closed foreign-task
- * handling, and the honest failure mapping (AccessDenied must never read as
- * "not installed"; spawn failure reads as unavailable, not success).
+ * handling, the honest failure mapping (AccessDenied must never read as
+ * "not installed"; spawn failure reads as unavailable, not success), the
+ * Win32 argv serializer round-trip (task §2), the explicit-timezone
+ * StartBoundary (task §8) and the parsed-structure ownership verdict
+ * (task §5 — substring matching is gone).
  */
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   schedulerIdentityFor,
+  schedulerInvocationArgs,
   type SchedulerCommandResult,
   type SchedulerCommandRunner,
   type SchedulerFileIo,
   type SchedulerRegistration,
 } from '../../../src/services/service-host/scheduler/contract.js';
-import { createWindowsSchedulerAdapter } from '../../../src/services/service-host/scheduler/windows.js';
+import {
+  buildWindowsTaskXml,
+  createWindowsSchedulerAdapter,
+  formatWindowsStartBoundary,
+  windowsParseCommandLine,
+  windowsSerializeCommandLine,
+} from '../../../src/services/service-host/scheduler/windows.js';
 
 interface RecordedCall {
   readonly command: string;
@@ -101,15 +111,85 @@ function makeRegistration(): SchedulerRegistration {
   return { pdHome, homeDir: path.dirname(pdHome), cliEntry, nodePath, intervalMs: 120_000, identity: schedulerIdentityFor(pdHome) };
 }
 
-/** Exported task XML the ownership check accepts as OURS (entry + pdHome). */
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/**
+ * Exported task XML the ownership check accepts as OURS (task §5 review):
+ * Exec Command = nodePath, Exec Arguments = the serialized argv of
+ * [cliEntry, ...schedulerInvocationArgs], WorkingDirectory = pdHome, a
+ * non-empty LogonTrigger principal — all in XML-escaped form (the real
+ * Export-ScheduledTask escapes).
+ */
 function oursXml(registration: SchedulerRegistration, triggers = ''): string {
+  const args = windowsSerializeCommandLine(schedulerInvocationArgs(registration));
   return (
-    `<Task><Actions><Exec><Command>${registration.nodePath}</Command>` +
-    `<Arguments>"${registration.cliEntry}" service run-once --json --trigger scheduler --pd-home ${registration.homeDir}</Arguments>` +
-    `<WorkingDirectory>${registration.pdHome}</WorkingDirectory>` +
-    `</Exec></Actions>${triggers}</Task>`
+    `<Task><Triggers><LogonTrigger><UserId>TESTDOMAIN\\testuser</UserId></LogonTrigger>${triggers}</Triggers>` +
+    `<Actions><Exec><Command>${escapeXml(registration.nodePath)}</Command>` +
+    `<Arguments>${escapeXml(args)}</Arguments>` +
+    `<WorkingDirectory>${escapeXml(registration.pdHome)}</WorkingDirectory>` +
+    `</Exec></Actions></Task>`
   );
 }
+
+describe('windowsSerializeCommandLine / windowsParseCommandLine (task §2)', () => {
+  it.each([
+    ['simple tokens', ['service', 'run-once', '--json', '--trigger', 'scheduler']],
+    ['spaced HOME', ['C:\\Program Files\\node\\node.exe', 'C:\\Users\\PD User\\.pd\\runtime\\index.js', 'service', 'run-once', '--pd-home', 'C:\\Users\\PD User']],
+    ['CJK home', ['C:\\Users\\张三\\node.exe', 'C:\\Users\\张三 项目\\.pd\\index.js', '--pd-home', 'C:\\Users\\张三 项目']],
+    ['cmd metacharacters & % ! ^', ['C:\\dir&name\\node.exe', 'D:\\a%b\\cli.js', '--pd-home', 'E:\\p!q^home']],
+    ['embedded quotes', ['arg"with"quotes', 'plain']],
+    ['trailing backslash', ['C:\\dir\\', '--flag', 'next']],
+    ['empty arg', ['', '--flag']],
+  ])('round-trips through the CommandLineToArgvW rules: %s', (_label, argv) => {
+    const serialized = windowsSerializeCommandLine(argv);
+    expect(windowsParseCommandLine(serialized)).toEqual([...argv]);
+  });
+
+  it('doubles the backslash run before a closing quote (trailing-backslash path)', () => {
+    const serialized = windowsSerializeCommandLine(['C:\\My Dir\\']);
+    // "C:\My Dir\\" — the trailing \ must be doubled or it would escape the quote.
+    expect(serialized).toBe('"C:\\My Dir\\\\"');
+    expect(windowsParseCommandLine(serialized)).toEqual(['C:\\My Dir\\']);
+  });
+
+  it('escapes an embedded quote (\\" inside quoting)', () => {
+    const serialized = windowsSerializeCommandLine(['a"b']);
+    expect(serialized).toBe('"a\\"b"');
+    expect(windowsParseCommandLine(serialized)).toEqual(['a"b']);
+  });
+
+  it('parses a Task-Scheduler-style unquoted Arguments element', () => {
+    // When no arg needs quoting, the serializer leaves tokens bare; the
+    // parser still recovers them.
+    const parsed = windowsParseCommandLine('service run-once --json --trigger scheduler --pd-home C:\\Users\\me');
+    expect(parsed).toEqual(['service', 'run-once', '--json', '--trigger', 'scheduler', '--pd-home', 'C:\\Users\\me']);
+  });
+});
+
+describe('formatWindowsStartBoundary (task §8)', () => {
+  it('UTC+8 keeps the +08:00 marker and the shifted wall-clock', () => {
+    // 2026-11-22T12:00:00Z → 20:00 local at UTC+8.
+    const boundary = formatWindowsStartBoundary(Date.UTC(2026, 10, 22, 12, 0, 0), 480);
+    expect(boundary).toBe('2026-11-22T20:00:00+08:00');
+  });
+
+  it('UTC-5 keeps the -05:00 marker', () => {
+    const boundary = formatWindowsStartBoundary(Date.UTC(2026, 10, 22, 12, 0, 0), -300);
+    expect(boundary).toBe('2026-11-22T07:00:00-05:00');
+  });
+
+  it('UTC itself is written as +00:00 — never passed off as bare local time', () => {
+    const boundary = formatWindowsStartBoundary(Date.UTC(2026, 10, 22, 12, 0, 0), 0);
+    expect(boundary).toBe('2026-11-22T12:00:00+00:00');
+  });
+});
 
 describe('createWindowsSchedulerAdapter', () => {
   it('install registers a disabled task when none exists (query → write XML → Register → re-query)', async () => {
@@ -149,10 +229,12 @@ describe('createWindowsSchedulerAdapter', () => {
     expect(calls[1]?.extraEnv?.PD_TASK_XML).toBe(xmlFile);
   });
 
-  it('install is idempotent for our own Ready task (no mutation, enabled state preserved)', async () => {
+  it('install refreshes our own Ready task — interval and ENABLED state preserved (task §15)', async () => {
     const registration = makeRegistration();
     const { runner, calls } = sequentialRunner([
-      psResult({ found: true, state: 'Ready', xml: oursXml(registration), lastRunAt: '2026-11-22T00:00:00.0000000+00:00', lastResult: 0 }),
+      psResult({ found: true, state: 'Ready', xml: oursXml(registration, '<Repetition><Interval>PT2M</Interval></Repetition>'), lastRunAt: '2026-11-22T00:00:00.0000000+00:00', lastResult: 0 }),
+      psResult({ done: true }),
+      psResult({ found: true, state: 'Ready', xml: oursXml(registration, '<Repetition><Interval>PT2M</Interval></Repetition>'), lastResult: 0 }),
     ]);
     const fileIo = new FakeFileIo();
     const adapter = createWindowsSchedulerAdapter({ runner, fileIo });
@@ -161,11 +243,16 @@ describe('createWindowsSchedulerAdapter', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.changed).toBe(false);
+    expect(result.changed).toBe(true);
     expect(result.facts.registered).toBe(true);
     expect(result.facts.enabled).toBe(true);
-    expect(calls.length).toBe(1);
-    expect(fileIo.writeLog.length).toBe(0);
+    expect(calls.length).toBe(3);
+    expect(scriptAt(calls, 1)).toContain('Register-ScheduledTask');
+    // The refreshed definition keeps the enabled flag ON (not the fresh-install false).
+    expect(fileIo.writeLog.length).toBe(1);
+    expect(fileIo.writeLog[0]?.content).toContain('<Enabled>true</Enabled>');
+    // …and the PT2M interval parsed from the existing task, not the caller default.
+    expect(fileIo.writeLog[0]?.content).toContain('<Interval>PT2M</Interval>');
   });
 
   it('install refuses a foreign task occupying our name (external_conflict)', async () => {
@@ -180,6 +267,27 @@ describe('createWindowsSchedulerAdapter', () => {
     if (result.ok) return;
     expect(result.kind).toBe('external_conflict');
     expect(result.reason).toContain('foreign');
+    expect(fileIo.writeLog.length).toBe(0);
+  });
+
+  it('install refuses a task whose Exec matches but whose WorkingDirectory differs (parsed ownership, task §5)', async () => {
+    const registration = makeRegistration();
+    const args = windowsSerializeCommandLine(schedulerInvocationArgs(registration));
+    const foreignXml =
+      `<Task><Triggers><LogonTrigger><UserId>TESTDOMAIN\\testuser</UserId></LogonTrigger></Triggers>` +
+      `<Actions><Exec><Command>${escapeXml(registration.nodePath)}</Command>` +
+      `<Arguments>${escapeXml(args)}</Arguments>` +
+      `<WorkingDirectory>${escapeXml(path.join(BASE_DIR, 'other-home', '.pd'))}</WorkingDirectory>` +
+      `</Exec></Actions></Task>`;
+    const { runner } = sequentialRunner([psResult({ found: true, state: 'Ready', xml: foreignXml })]);
+    const fileIo = new FakeFileIo();
+    const adapter = createWindowsSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
     expect(fileIo.writeLog.length).toBe(0);
   });
 
@@ -351,7 +459,7 @@ describe('createWindowsSchedulerAdapter', () => {
 
   it('status parses Disabled state, the 1899 never-run sentinel and the PT2M interval', async () => {
     const registration = makeRegistration();
-    const xml = oursXml(registration, '<Triggers><Repetition><Interval>PT2M</Interval></Repetition></Triggers>');
+    const xml = oursXml(registration, '<Repetition><Interval>PT2M</Interval></Repetition>');
     const { runner } = sequentialRunner([
       psResult({ found: true, state: 'Disabled', xml, lastRunAt: '1899-11-30T00:00:00.0000000+00:00', lastResult: 267009 }),
     ]);
@@ -363,9 +471,25 @@ describe('createWindowsSchedulerAdapter', () => {
     if (!result.ok) return;
     expect(result.facts.registered).toBe(true);
     expect(result.facts.enabled).toBe(false);
+    expect(result.facts.active).toBe(false);
     expect(result.facts.lastRunAt).toBeNull();
     expect(result.facts.triggerIntervalMs).toBe(120_000);
     expect(result.facts.lastResult).toBe('267009');
+  });
+
+  it('status witnesses active independently from enabled (task §9: Running ≠ Enabled)', async () => {
+    const registration = makeRegistration();
+    const { runner } = sequentialRunner([
+      psResult({ found: true, state: 'Running', xml: oursXml(registration) }),
+    ]);
+    const adapter = createWindowsSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
+
+    const result = await adapter.status(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBe(true);
+    expect(result.facts.active).toBe(true);
   });
 
   it('special-char install paths (& \' CJK) match their own XML-ESCAPED registration (ownership never misreads its own task)', async () => {
@@ -382,25 +506,33 @@ describe('createWindowsSchedulerAdapter', () => {
       intervalMs: 120_000,
       identity: schedulerIdentityFor(pdHome),
     };
-    const escapeXml = (value: string): string =>
-      value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c] ?? c);
-    // The query returns the definition in Task-Scheduler's ESCAPED form; the
-    // pdHome rides along in the escaped Arguments (homeDir) AND the escaped
-    // WorkingDirectory so the ownership check finds BOTH facts.
     const escapedXml =
-      `<Task><Actions><Exec><Command>${escapeXml(registration.nodePath)}</Command>` +
-      `<Arguments>${escapeXml(`"${registration.cliEntry}" service run-once --json --trigger scheduler --pd-home ${registration.homeDir}`)}</Arguments>` +
+      `<Task><Triggers><LogonTrigger><UserId>TESTDOMAIN\\testuser</UserId></LogonTrigger></Triggers>` +
+      `<Actions><Exec><Command>${escapeXml(registration.nodePath)}</Command>` +
+      `<Arguments>${escapeXml(windowsSerializeCommandLine(schedulerInvocationArgs(registration)))}</Arguments>` +
       `<WorkingDirectory>${escapeXml(registration.pdHome)}</WorkingDirectory>` +
       `</Exec></Actions></Task>`;
-    const { runner } = sequentialRunner([psResult({ found: true, state: 'Ready', xml: escapedXml, lastResult: 0 })]);
+    const { runner } = sequentialRunner([
+      psResult({ found: true, state: 'Ready', xml: escapedXml, lastResult: 0 }),
+      psResult({ done: true }),
+      psResult({ found: true, state: 'Ready', xml: escapedXml, lastResult: 0 }),
+    ]);
     const adapter = createWindowsSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
 
     const result = await adapter.install(registration);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Idempotent reuse — NOT an external_conflict, NOT a re-register.
-    expect(result.changed).toBe(false);
+    // Refresh — NOT an external_conflict, enabled state preserved.
+    expect(result.changed).toBe(true);
     expect(result.facts.registered).toBe(true);
     expect(result.facts.enabled).toBe(true);
+  });
+
+  it('buildWindowsTaskXml marks a fresh registration disabled and a refresh keeps enabled', () => {
+    const registration = makeRegistration();
+    const fresh = buildWindowsTaskXml(registration, new Date(0), false);
+    expect(fresh).toContain('<Enabled>false</Enabled>');
+    const refreshed = buildWindowsTaskXml(registration, new Date(0), true);
+    expect(refreshed).toContain('<Enabled>true</Enabled>');
   });
 });

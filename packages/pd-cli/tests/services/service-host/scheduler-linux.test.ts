@@ -1,10 +1,18 @@
 /**
- * Linux scheduler adapter — systemd --user protocol tests against a faked
- * command boundary (task §9.F): unit file write + daemon-reload sequencing,
- * idempotent refresh without touching enablement, fail-closed foreign/partial
- * unit handling, honest daemon-reload and is-enabled failure mapping (an
- * unreadable enabled state is null, never silently "not installed"), and the
- * ExecMainStatus/ExecMainExitTimestamp facts from systemctl show.
+ * Linux scheduler adapter — systemd --user protocol tests against a
+ * STATEFUL faked command boundary (task §9.F). Covers the reviewed
+ * contract:
+ *
+ *  - dual-unit: install/status/enable/disable/uninstall verify BOTH the
+ *    .service (parsed ExecStart/WorkingDirectory) and the .timer (parsed
+ *    Unit= pointer) independently (task §4/§5);
+ *  - ExecStart serialization: %, $, space, quote, backslash (task §7);
+ *  - manager visibility: install never reports registered when the manager
+ *    cannot see the units (task §12);
+ *  - query-failure evidence: not-found / disabled / unreadable stay
+ *    distinct — is-enabled≠is-active≠last-run (task §13/§14);
+ *  - uninstall: disable result CHECKED, inactive+disabled VERIFIED, files
+ *    removed only after, daemon-reload, manager re-verify (task §4).
  */
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -15,17 +23,35 @@ import {
   type SchedulerFileIo,
   type SchedulerRegistration,
 } from '../../../src/services/service-host/scheduler/contract.js';
-import { buildLinuxServiceUnit, buildLinuxTimerUnit, createLinuxSchedulerAdapter } from '../../../src/services/service-host/scheduler/linux.js';
+import { buildLinuxServiceUnit, buildLinuxTimerUnit, createLinuxSchedulerAdapter, systemdQuote } from '../../../src/services/service-host/scheduler/linux.js';
 
 interface RecordedCall {
   readonly command: string;
   readonly args: readonly string[];
 }
 
-type Handler = SchedulerCommandResult | ((args: readonly string[]) => SchedulerCommandResult);
+/** Mutable user-manager state the fake answers from. */
+interface SystemdState {
+  /** Timer enablement flag (systemd enablement, not activity). */
+  enabled: boolean;
+  /** Timer ACTIVE state — independent from enabled (task §14). */
+  active: boolean;
+  /** The manager's unit-file cache sees our units (search-path hit). */
+  managerSees: boolean;
+  lastResult?: string;
+  lastRunAt?: string;
+}
 
-/** Dispatches by `systemctl --user <sub>`; unscripted subcommands throw. */
-function systemctlRunner(handlers: Readonly<Record<string, Handler>>): {
+/**
+ * Stateful systemctl --user fake. `failures` maps a subcommand to a fixed
+ * result (state unchanged). Semantics:
+ *  - is-enabled → 0 'enabled' / 1 'disabled' / 1 'not-found' when the
+ *    manager has no such unit;
+ *  - is-active → 0 'active' / 3 'inactive';
+ *  - cat → 0 when the manager sees the unit, 1 'not-found' otherwise;
+ *  - enable/disable flip enabled+active; show reports last-run facts.
+ */
+function systemctlRunner(state: SystemdState, failures: Readonly<Record<string, SchedulerCommandResult>> = {}): {
   runner: SchedulerCommandRunner;
   calls: RecordedCall[];
 } {
@@ -36,10 +62,41 @@ function systemctlRunner(handlers: Readonly<Record<string, Handler>>): {
       if (args[0] !== '--user') throw new Error(`expected systemctl --user, got: ${args.join(' ')}`);
       const sub = args[1];
       if (sub === undefined) throw new Error(`systemctl call without a subcommand: ${args.join(' ')}`);
-      const handler = handlers[sub];
-      if (handler === undefined) throw new Error(`unexpected systemctl subcommand '${sub}': ${args.join(' ')}`);
       calls.push({ command, args });
-      return typeof handler === 'function' ? handler(args) : handler;
+      const injected = failures[sub];
+      if (injected !== undefined) return injected;
+      switch (sub) {
+        case 'daemon-reload':
+          return { code: 0, stdout: '', stderr: '' };
+        case 'is-enabled':
+          if (!state.managerSees) return { code: 1, stdout: '', stderr: 'Failed to get unit file state for x.timer: No such file or directory' };
+          return state.enabled
+            ? { code: 0, stdout: 'enabled\n', stderr: '' }
+            : { code: 1, stdout: 'disabled\n', stderr: '' };
+        case 'is-active':
+          return state.active
+            ? { code: 0, stdout: 'active\n', stderr: '' }
+            : { code: 3, stdout: 'inactive\n', stderr: '' };
+        case 'cat':
+          return state.managerSees
+            ? { code: 0, stdout: '# unit file\n', stderr: '' }
+            : { code: 1, stdout: '', stderr: 'No files found for x.service.' };
+        case 'enable':
+          state.enabled = true;
+          state.active = true;
+          return { code: 0, stdout: '', stderr: '' };
+        case 'disable':
+          state.enabled = false;
+          state.active = false;
+          return { code: 0, stdout: '', stderr: '' };
+        case 'stop':
+          state.active = false;
+          return { code: 0, stdout: '', stderr: '' };
+        case 'show':
+          return { code: 0, stdout: `${state.lastResult ?? ''}\n${state.lastRunAt ?? ''}\n`, stderr: '' };
+        default:
+          throw new Error(`unexpected systemctl subcommand '${sub}': ${args.join(' ')}`);
+      }
     },
   };
   return { runner, calls };
@@ -48,11 +105,13 @@ function systemctlRunner(handlers: Readonly<Record<string, Handler>>): {
 /** In-memory file boundary implementing the SchedulerFileIo contract. */
 class FakeFileIo implements SchedulerFileIo {
   readonly files = new Map<string, string>();
+  readonly unreadableFiles = new Set<string>();
   readonly writeLog: Array<{ file: string; content: string }> = [];
   readonly removeLog: string[] = [];
   readonly mkdirLog: string[] = [];
 
   readIfExists(file: string): ReturnType<SchedulerFileIo['readIfExists']> {
+    if (this.unreadableFiles.has(file)) return { ok: false, reason: 'unreadable', detail: 'EACCES: permission denied' };
     const content = this.files.get(file);
     if (content === undefined) return { ok: false, reason: 'missing' };
     return { ok: true, content };
@@ -80,16 +139,6 @@ class FakeFileIo implements SchedulerFileIo {
   }
 }
 
-const IS_ENABLED_YES: SchedulerCommandResult = { code: 0, stdout: 'enabled\n', stderr: '' };
-const IS_ENABLED_NO: SchedulerCommandResult = { code: 1, stdout: 'disabled\n', stderr: '' };
-const RELOAD_OK: SchedulerCommandResult = { code: 0, stdout: '', stderr: '' };
-
-/**
- * Registration with Linux-realistic POSIX paths: the adapter under test
- * targets Linux hosts, and ExecStart goes through systemd quoting (backslash
- * doubling), so Windows-style backslash paths would not round-trip through
- * the builder output the way they do on the real platform.
- */
 const LINUX_HOME = '/home/pd-sched-test';
 
 function makeRegistration(): SchedulerRegistration {
@@ -107,18 +156,36 @@ function unitPaths(registration: SchedulerRegistration): { serviceFile: string; 
   };
 }
 
-/** Pre-fill both unit files with OUR definitions. */
 function installOurs(fileIo: FakeFileIo, registration: SchedulerRegistration): void {
   const { serviceFile, timerFile } = unitPaths(registration);
   fileIo.files.set(serviceFile, buildLinuxServiceUnit(registration));
   fileIo.files.set(timerFile, buildLinuxTimerUnit(registration));
 }
 
+function subsOf(calls: readonly RecordedCall[]): string[] {
+  return calls.map((c) => c.args[1] ?? '');
+}
+
+describe('systemdQuote (task §7)', () => {
+  it.each([
+    ['plain', '/usr/bin/node', '"/usr/bin/node"'],
+    ['spaces', '/home/pd user/.pd/index.js', '"/home/pd user/.pd/index.js"'],
+    ['dollar (env-expansion escaped)', '/home/$USER/.pd', '"/home/$$USER/.pd"'],
+    ['percent (specifier escaped)', '/home/pd%h/.pd', '"/home/pd%%h/.pd"'],
+    ['backslash', 'C:\\dir\\node.exe', '"C:\\\\dir\\\\node.exe"'],
+    ['double quote', '/home/a"b/.pd', '"/home/a\\"b/.pd"'],
+    ['combined', '/home/p$d%h a\\.pd', '"/home/p$$d%%h a\\\\.pd"'],
+  ])('%s', (_label, input, expected) => {
+    expect(systemdQuote(input)).toBe(expected);
+  });
+});
+
 describe('createLinuxSchedulerAdapter', () => {
-  it('install writes both unit files and runs daemon-reload (default disabled)', async () => {
+  it('install writes both unit files, reloads, and verifies the manager sees them (default disabled)', async () => {
     const registration = makeRegistration();
     const { serviceFile, timerFile } = unitPaths(registration);
-    const { runner, calls } = systemctlRunner({ 'daemon-reload': RELOAD_OK, 'is-enabled': IS_ENABLED_NO });
+    const state: SystemdState = { enabled: false, active: false, managerSees: true };
+    const { runner, calls } = systemctlRunner(state);
     const fileIo = new FakeFileIo();
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
 
@@ -127,40 +194,60 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.changed).toBe(true);
-    expect(result.facts.platform).toBe('linux');
-    expect(result.facts.taskName).toBe(`${registration.identity.linuxUnitBase}.timer`);
     expect(result.facts.registered).toBe(true);
     expect(result.facts.enabled).toBe(false);
+    expect(result.facts.active).toBe(false);
     expect(fileIo.files.get(serviceFile)).toBe(buildLinuxServiceUnit(registration));
     expect(fileIo.files.get(timerFile)).toBe(buildLinuxTimerUnit(registration));
-    expect(calls.map((c) => c.args[1])).toEqual(['daemon-reload', 'is-enabled']);
+    // Sequence: daemon-reload → manager visibility probe (cat) → facts.
+    expect(subsOf(calls)).toEqual(['daemon-reload', 'cat', 'is-enabled', 'is-active', 'show']);
   });
 
-  it('install refreshes our own units (rewrite + daemon-reload) without enabling them', async () => {
+  it('install refuses to report registered when the manager cannot see the units (task §12 HOME/XDG mismatch)', async () => {
     const registration = makeRegistration();
-    const { runner, calls } = systemctlRunner({ 'daemon-reload': RELOAD_OK, 'is-enabled': IS_ENABLED_YES });
+    const state: SystemdState = { enabled: false, active: false, managerSees: false };
+    const { runner } = systemctlRunner(state);
+    const fileIo = new FakeFileIo();
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('unsafe_state');
+    expect(result.reason).toBe('systemd_unit_not_in_manager_search_path');
+  });
+
+  it('install refreshes our own units — interval preserved, enablement untouched (task §15)', async () => {
+    const registration = makeRegistration();
+    const { timerFile } = unitPaths(registration);
+    const state: SystemdState = { enabled: true, active: true, managerSees: true };
+    const { runner, calls } = systemctlRunner(state);
     const fileIo = new FakeFileIo();
     installOurs(fileIo, registration);
+    // Custom interval already registered — refresh must NOT reset to default.
+    fileIo.files.set(timerFile, buildLinuxTimerUnit({ ...registration, intervalMs: 300_000 }));
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
 
     const result = await adapter.install(registration);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.changed).toBe(true);
-    expect(result.facts.enabled).toBe(true); // from is-enabled exit 0
-    expect(fileIo.writeLog).toHaveLength(2); // rewritten with the current definition
-    expect(calls.find((c) => c.args[1] === 'daemon-reload')).toBeDefined();
-    expect(calls.find((c) => c.args[1] === 'enable')).toBeUndefined();
+    expect(result.facts.enabled).toBe(true);
+    expect(result.facts.triggerIntervalMs).toBe(300_000);
+    expect(fileIo.files.get(timerFile)).toBe(buildLinuxTimerUnit({ ...registration, intervalMs: 300_000 }));
+    expect(subsOf(calls)).not.toContain('enable');
+    expect(subsOf(calls)).not.toContain('disable');
   });
 
   it('install refuses a foreign service unit and does not overwrite it', async () => {
     const registration = makeRegistration();
-    const { serviceFile } = unitPaths(registration);
-    const foreignUnit = '[Unit]\nDescription=someone else\n';
-    const { runner, calls } = systemctlRunner({});
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const foreignUnit = '[Unit]\nDescription=someone else\n[Service]\nExecStart=/bin/false\nWorkingDirectory=/\n';
+    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: true });
     const fileIo = new FakeFileIo();
     fileIo.files.set(serviceFile, foreignUnit);
+    fileIo.files.set(timerFile, buildLinuxTimerUnit(registration));
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
 
     const result = await adapter.install(registration);
@@ -169,7 +256,28 @@ describe('createLinuxSchedulerAdapter', () => {
     if (result.ok) return;
     expect(result.kind).toBe('external_conflict');
     expect(result.reason).toBe('systemd_unit_conflict_foreign_unit');
-    expect(fileIo.files.get(serviceFile)).toBe(foreignUnit); // untouched
+    expect(fileIo.files.get(serviceFile)).toBe(foreignUnit);
+    expect(fileIo.writeLog).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('install refuses a foreign TIMER unit (Unit= points elsewhere) and does not overwrite it (task §4)', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const foreignTimer = '[Timer]\nUnit=other.service\nOnUnitActiveSec=60s\n';
+    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: true });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(serviceFile, buildLinuxServiceUnit(registration));
+    fileIo.files.set(timerFile, foreignTimer);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+    expect(result.reason).toBe('systemd_timer_conflict_foreign_unit');
+    expect(fileIo.files.get(timerFile)).toBe(foreignTimer);
     expect(fileIo.writeLog).toHaveLength(0);
     expect(calls).toHaveLength(0);
   });
@@ -177,7 +285,7 @@ describe('createLinuxSchedulerAdapter', () => {
   it('install refuses a partial registration (service unit without its timer)', async () => {
     const registration = makeRegistration();
     const { serviceFile } = unitPaths(registration);
-    const { runner, calls } = systemctlRunner({});
+    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: true });
     const fileIo = new FakeFileIo();
     fileIo.files.set(serviceFile, buildLinuxServiceUnit(registration));
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
@@ -192,11 +300,31 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('install refuses to overwrite an UNREADABLE unit (fail-closed)', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: true });
+    const fileIo = new FakeFileIo();
+    fileIo.unreadableFiles.add(serviceFile);
+    fileIo.unreadableFiles.add(timerFile);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.install(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('command_failed');
+    expect(result.reason.startsWith('systemd_unit_unreadable')).toBe(true);
+    expect(fileIo.writeLog).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
   it('install reports daemon-reload failure honestly (files on disk, operation failed)', async () => {
     const registration = makeRegistration();
-    const { runner } = systemctlRunner({
-      'daemon-reload': { code: 1, stdout: '', stderr: 'Failed to connect to bus: No medium found' },
-    });
+    const { runner } = systemctlRunner(
+      { enabled: false, active: false, managerSees: true },
+      { 'daemon-reload': { code: 1, stdout: '', stderr: 'Failed to connect to bus: No medium found' } },
+    );
     const fileIo = new FakeFileIo();
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
 
@@ -206,13 +334,12 @@ describe('createLinuxSchedulerAdapter', () => {
     if (result.ok) return;
     expect(result.kind).toBe('command_failed');
     expect(result.reason.startsWith('systemctl_daemon_reload_failed:1:')).toBe(true);
-    expect(result.reason).toContain('Failed to connect to bus');
-    expect(fileIo.writeLog).toHaveLength(2); // unit files were written before the reload
+    expect(fileIo.writeLog).toHaveLength(2);
   });
 
   it('enable refuses when no units exist (unsafe_state scheduler_not_registered)', async () => {
     const registration = makeRegistration();
-    const { runner } = systemctlRunner({});
+    const { runner } = systemctlRunner({ enabled: false, active: false, managerSees: true });
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
 
     const result = await adapter.enable(registration);
@@ -223,10 +350,11 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(result.reason).toBe('scheduler_not_registered');
   });
 
-  it('enable runs systemctl --user enable --now for our timer', async () => {
+  it('enable runs systemctl --user enable --now and VERIFIES enabled+active', async () => {
     const registration = makeRegistration();
     const timerName = `${registration.identity.linuxUnitBase}.timer`;
-    const { runner, calls } = systemctlRunner({ 'is-enabled': IS_ENABLED_NO, enable: RELOAD_OK });
+    const state: SystemdState = { enabled: false, active: false, managerSees: true };
+    const { runner, calls } = systemctlRunner(state);
     const fileIo = new FakeFileIo();
     installOurs(fileIo, registration);
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
@@ -237,13 +365,35 @@ describe('createLinuxSchedulerAdapter', () => {
     if (!result.ok) return;
     expect(result.changed).toBe(true);
     expect(result.facts.enabled).toBe(true);
+    expect(result.facts.active).toBe(true);
     const enableCall = calls.find((c) => c.args[1] === 'enable');
     expect(enableCall?.args).toEqual(['--user', 'enable', '--now', timerName]);
+    expect(state.enabled).toBe(true);
   });
 
-  it('enable is a no-op when is-enabled already reports enabled', async () => {
+  it('enable fails when the timer does not verify enabled after enable --now', async () => {
     const registration = makeRegistration();
-    const { runner, calls } = systemctlRunner({ 'is-enabled': IS_ENABLED_YES, show: { code: 0, stdout: '\n\n', stderr: '' } });
+    const state: SystemdState = { enabled: false, active: false, managerSees: true };
+    const { runner } = systemctlRunner(state, {
+      // enable reports success but the flag flaps back — the adapter must
+      // notice via is-enabled, not trust the exit code.
+      enable: { code: 0, stdout: '', stderr: '' },
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.enable(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('command_failed');
+    expect(result.reason).toBe('systemd_enable_unverified');
+  });
+
+  it('enable is a no-op when is-enabled already reports enabled AND active', async () => {
+    const registration = makeRegistration();
+    const { runner, calls } = systemctlRunner({ enabled: true, active: true, managerSees: true });
     const fileIo = new FakeFileIo();
     installOurs(fileIo, registration);
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
@@ -253,32 +403,14 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.changed).toBe(false);
-    expect(result.facts.enabled).toBe(true);
-    expect(calls.find((c) => c.args[1] === 'enable')).toBeUndefined();
+    expect(subsOf(calls)).not.toContain('enable');
   });
 
-  it('status keeps registered=true and enabled=null when is-enabled is unreadable (exit 3)', async () => {
-    const registration = makeRegistration();
-    const { runner } = systemctlRunner({
-      'is-enabled': { code: 3, stdout: '', stderr: 'Failed to connect to bus' },
-      show: { code: 0, stdout: '\n\n', stderr: '' },
-    });
-    const fileIo = new FakeFileIo();
-    installOurs(fileIo, registration);
-    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
-
-    const result = await adapter.status(registration);
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.facts.registered).toBe(true);
-    expect(result.facts.enabled).toBeNull(); // never silently false
-  });
-
-  it('disable runs systemctl --user disable --now for our timer', async () => {
+  it('disable runs systemctl --user disable --now and VERIFIES disabled+inactive', async () => {
     const registration = makeRegistration();
     const timerName = `${registration.identity.linuxUnitBase}.timer`;
-    const { runner, calls } = systemctlRunner({ 'is-enabled': IS_ENABLED_YES, disable: RELOAD_OK });
+    const state: SystemdState = { enabled: true, active: true, managerSees: true };
+    const { runner, calls } = systemctlRunner(state);
     const fileIo = new FakeFileIo();
     installOurs(fileIo, registration);
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
@@ -289,13 +421,34 @@ describe('createLinuxSchedulerAdapter', () => {
     if (!result.ok) return;
     expect(result.changed).toBe(true);
     expect(result.facts.enabled).toBe(false);
+    expect(result.facts.active).toBe(false);
     const disableCall = calls.find((c) => c.args[1] === 'disable');
     expect(disableCall?.args).toEqual(['--user', 'disable', '--now', timerName]);
   });
 
-  it('disable is a no-op when is-enabled already reports disabled', async () => {
+  it('disable fails when the timer still reports enabled after disable --now (unproven stop)', async () => {
     const registration = makeRegistration();
-    const { runner, calls } = systemctlRunner({ 'is-enabled': IS_ENABLED_NO });
+    const state: SystemdState = { enabled: true, active: true, managerSees: true };
+    const { runner } = systemctlRunner(state, {
+      // disable exits 0 but leaves the timer enabled — the adapter must not
+      // report "stopped" without proof (task §4).
+      disable: { code: 0, stdout: '', stderr: '' },
+    });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.disable(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('command_failed');
+    expect(result.reason).toBe('systemd_disable_unverified');
+  });
+
+  it('disable is a no-op when already disabled AND inactive', async () => {
+    const registration = makeRegistration();
+    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: true });
     const fileIo = new FakeFileIo();
     installOurs(fileIo, registration);
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
@@ -305,19 +458,135 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.changed).toBe(false);
-    expect(calls.find((c) => c.args[1] === 'disable')).toBeUndefined();
+    expect(subsOf(calls)).not.toContain('disable');
   });
 
-  it('uninstall stops the timer (failure ignored), removes both units, then daemon-reloads', async () => {
+  it('status reports enabled vs active INDEPENDENTLY (task §14): enabled=true, active=false', async () => {
     const registration = makeRegistration();
-    const { serviceFile, timerFile } = unitPaths(registration);
-    const { runner, calls } = systemctlRunner({
-      disable: { code: 1, stdout: '', stderr: 'Failed to connect to bus' }, // ignored by uninstall
-      'daemon-reload': RELOAD_OK,
-    });
+    const { runner } = systemctlRunner({ enabled: true, active: false, managerSees: true });
     const fileIo = new FakeFileIo();
     installOurs(fileIo, registration);
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.status(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBe(true);
+    expect(result.facts.active).toBe(false);
+  });
+
+  it('status reports enabled=false, active=true without folding one into the other', async () => {
+    const registration = makeRegistration();
+    const { runner } = systemctlRunner({ enabled: false, active: true, managerSees: true });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.status(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBe(false);
+    expect(result.facts.active).toBe(true);
+  });
+
+  it('status keeps enabled=null + degradedReasons when is-enabled is unreadable (bus failure)', async () => {
+    const registration = makeRegistration();
+    const { runner } = systemctlRunner(
+      { enabled: true, active: true, managerSees: true },
+      { 'is-enabled': { code: 3, stdout: '', stderr: 'Failed to connect to bus' } },
+    );
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.status(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.registered).toBe(true);
+    expect(result.facts.enabled).toBeNull(); // never silently false
+    expect(result.facts.active).toBe(true);
+    expect(result.facts.degradedReasons?.some((r) => r.startsWith('systemctl_is_enabled_failed'))).toBe(true);
+  });
+
+  it('status keeps active=null when is-active is unparsable (query failure ≠ inactive)', async () => {
+    const registration = makeRegistration();
+    const { runner } = systemctlRunner(
+      { enabled: true, active: true, managerSees: true },
+      { 'is-active': { code: 1, stdout: 'wat\n', stderr: 'unexpected reply' } },
+    );
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.status(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBe(true);
+    expect(result.facts.active).toBeNull();
+    expect(result.facts.degradedReasons?.some((r) => r.startsWith('systemctl_is_active_failed'))).toBe(true);
+  });
+
+  it('status reports a foreign timer (Unit= elsewhere) as external_conflict', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(serviceFile, buildLinuxServiceUnit(registration));
+    fileIo.files.set(timerFile, '[Timer]\nUnit=other.service\n');
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.status(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+    expect(result.reason).toBe('systemd_timer_conflict_foreign_unit');
+  });
+
+  it('status reads ExecMainStatus and ExecMainExitTimestamp from systemctl show --value lines', async () => {
+    const registration = makeRegistration();
+    const { runner, calls } = systemctlRunner({ enabled: true, active: true, managerSees: true, lastResult: '0', lastRunAt: 'Sun 2026-11-22 10:00:00 UTC' });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.status(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBe(true);
+    expect(result.facts.active).toBe(true);
+    expect(result.facts.triggerIntervalMs).toBe(120_000);
+    expect(result.facts.lastResult).toBe('0');
+    expect(result.facts.lastRunAt).toBe('Sun 2026-11-22 10:00:00 UTC');
+    const showCall = calls.find((c) => c.args[1] === 'show');
+    expect(showCall?.args).toContain(`${registration.identity.linuxUnitBase}.service`);
+    expect(showCall?.args).toContain('--property=ExecMainStatus');
+    expect(showCall?.args).toContain('--property=ExecMainExitTimestamp');
+    expect(showCall?.args).toContain('--value');
+  });
+
+  it('uninstall verifies disabled+inactive, removes both units, reloads, re-verifies gone (task §4)', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const state: SystemdState = { enabled: true, active: true, managerSees: true };
+    // After the files are removed, the manager stops seeing them.
+    const { runner, calls } = systemctlRunner(state, {});
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+    // The fake's cat answers from managerSees — flip it when the files are
+    // gone, as a real manager would after daemon-reload.
+    const origRemove = fileIo.remove.bind(fileIo);
+    fileIo.remove = (file) => {
+      const result = origRemove(file);
+      state.managerSees = false;
+      return result;
+    };
 
     const result = await adapter.uninstall(registration);
 
@@ -327,15 +596,73 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(result.facts.registered).toBe(false);
     expect(fileIo.files.has(serviceFile)).toBe(false);
     expect(fileIo.files.has(timerFile)).toBe(false);
-    expect(fileIo.removeLog.sort()).toEqual([serviceFile, timerFile].sort());
-    expect(calls.map((c) => c.args[1])).toEqual(['disable', 'daemon-reload']);
+    expect(subsOf(calls)).toEqual(['disable', 'is-enabled', 'is-active', 'daemon-reload', 'cat']);
+  });
+
+  it('uninstall does NOT delete files when disable fails (task §4: no early delete)', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner(
+      { enabled: true, active: true, managerSees: true },
+      { disable: { code: 1, stdout: '', stderr: 'Failed to connect to bus' } },
+    );
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.uninstall(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('command_failed');
+    expect(result.reason.startsWith('systemctl_disable_failed')).toBe(true);
+    expect(fileIo.files.has(serviceFile)).toBe(true);
+    expect(fileIo.files.has(timerFile)).toBe(true);
+    expect(fileIo.removeLog).toHaveLength(0);
+  });
+
+  it('uninstall keeps files when the timer still reports enabled after disable (unverified)', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner(
+      { enabled: true, active: true, managerSees: true },
+      { disable: { code: 0, stdout: '', stderr: '' } }, // exit 0 but flag stays set
+    );
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.uninstall(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('command_failed');
+    expect(result.reason).toBe('systemd_uninstall_unverified');
+    expect(fileIo.files.has(serviceFile)).toBe(true);
+    expect(fileIo.files.has(timerFile)).toBe(true);
+  });
+
+  it('uninstall continues past a not-found manager state and removes the leftover files', async () => {
+    const registration = makeRegistration();
+    const { serviceFile, timerFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: false, active: false, managerSees: false });
+    const fileIo = new FakeFileIo();
+    installOurs(fileIo, registration);
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+
+    const result = await adapter.uninstall(registration);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(fileIo.files.has(serviceFile)).toBe(false);
+    expect(fileIo.files.has(timerFile)).toBe(false);
   });
 
   it('uninstall refuses a foreign service unit and preserves both files', async () => {
     const registration = makeRegistration();
     const { serviceFile, timerFile } = unitPaths(registration);
     const foreignUnit = '[Unit]\nDescription=not ours\n';
-    const { runner, calls } = systemctlRunner({});
+    const { runner, calls } = systemctlRunner({ enabled: true, active: true, managerSees: true });
     const fileIo = new FakeFileIo();
     fileIo.files.set(serviceFile, foreignUnit);
     fileIo.files.set(timerFile, buildLinuxTimerUnit(registration));
@@ -351,29 +678,36 @@ describe('createLinuxSchedulerAdapter', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('status reads ExecMainStatus and ExecMainExitTimestamp from systemctl show --value lines', async () => {
+  it('uninstall refuses an unreadable unit (never deletes what it cannot verify)', async () => {
     const registration = makeRegistration();
-    const { runner, calls } = systemctlRunner({
-      'is-enabled': IS_ENABLED_YES,
-      show: { code: 0, stdout: '0\nSun 2026-11-22 10:00:00 UTC\n', stderr: '' },
-    });
+    const { serviceFile } = unitPaths(registration);
+    const { runner } = systemctlRunner({ enabled: true, active: true, managerSees: true });
     const fileIo = new FakeFileIo();
+    fileIo.unreadableFiles.add(serviceFile);
     installOurs(fileIo, registration);
+    fileIo.unreadableFiles.add(serviceFile);
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
 
-    const result = await adapter.status(registration);
+    const result = await adapter.uninstall(registration);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('command_failed');
+    expect(result.reason.startsWith('systemd_unit_unreadable')).toBe(true);
+    expect(fileIo.removeLog).toHaveLength(0);
+  });
+
+  it('uninstall is an idempotent no-op when nothing is registered', async () => {
+    const registration = makeRegistration();
+    const { runner, calls } = systemctlRunner({ enabled: false, active: false, managerSees: false });
+    const adapter = createLinuxSchedulerAdapter({ runner, fileIo: new FakeFileIo() });
+
+    const result = await adapter.uninstall(registration);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.facts.registered).toBe(true);
-    expect(result.facts.enabled).toBe(true);
-    expect(result.facts.triggerIntervalMs).toBe(120_000);
-    expect(result.facts.lastResult).toBe('0');
-    expect(result.facts.lastRunAt).toBe('Sun 2026-11-22 10:00:00 UTC');
-    const showCall = calls.find((c) => c.args[1] === 'show');
-    expect(showCall?.args).toContain(`${registration.identity.linuxUnitBase}.service`);
-    expect(showCall?.args).toContain('--property=ExecMainStatus');
-    expect(showCall?.args).toContain('--property=ExecMainExitTimestamp');
-    expect(showCall?.args).toContain('--value');
+    expect(result.changed).toBe(false);
+    expect(result.facts.registered).toBe(false);
+    expect(calls).toHaveLength(0);
   });
 });

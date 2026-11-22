@@ -879,7 +879,7 @@ serviceCmd
   .option('--shadow', 'Phase 2 mode: run one explicit bounded REAL worker cycle per --workspace selection (business tasks may advance; not a dry-run)', false)
   .option('-w, --workspace <path>', 'Shadow target workspace (repeatable; at least one required with --shadow)', (value: string, previous: string[]) => [...previous, value], [] as string[])
   .option('--host <kind>', 'Restrict shadow to one host adapter: codex | workbuddy')
-  .option('--trigger <source>', 'Truthful trigger source for the status record: manual | scheduler (default manual; login vs periodic is not distinguishable)')
+  .option('--trigger <source>', 'Self-declared trigger source for the status record: manual | scheduler (default manual; a REPORTED flag, not verified OS evidence; login vs periodic is not distinguishable)')
   .option('--pd-home <dir>', 'Trusted PD home injection (used by the scheduler registration and the installer)')
   .option('--timeout-ms <ms>', 'Per-workspace bounded execution time in ms (default 2700000, minimum 1000)')
   .option('--json', 'Output raw JSON')

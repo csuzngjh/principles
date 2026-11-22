@@ -44,7 +44,8 @@ export type ServiceRunTriggerSource = 'manual' | 'scheduler';
 export type ServiceRunOutcome =
   | 'completed'
   | 'already_running'
-  | 'refused';
+  | 'refused'
+  | 'failed';
 
 /**
  * The five task-required read verdicts (missing / read_failed / unparsable /
@@ -264,7 +265,7 @@ export function readServiceRunStatus(pdHome: string): ServiceRunStatusRead {
   if (
     !Object.hasOwn(doc, 'schemaVersion') || doc.schemaVersion !== SERVICE_RUN_STATUS_SCHEMA_VERSION
     || !Object.hasOwn(doc, 'runId') || typeof doc.runId !== 'string'
-    || !Object.hasOwn(doc, 'outcome') || (doc.outcome !== 'completed' && doc.outcome !== 'already_running' && doc.outcome !== 'refused')
+    || !Object.hasOwn(doc, 'outcome') || (doc.outcome !== 'completed' && doc.outcome !== 'already_running' && doc.outcome !== 'refused' && doc.outcome !== 'failed')
     || !Object.hasOwn(doc, 'triggerSource') || (doc.triggerSource !== 'manual' && doc.triggerSource !== 'scheduler')
   ) {
     return { ok: false, verdict: 'corrupt', detail: 'schema_mismatch' };

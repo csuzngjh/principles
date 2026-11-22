@@ -311,6 +311,18 @@ describe('fail-closed trusted prefix', () => {
     expect(result.ok).toBe(false);
     expect(result.outcome).toBe('refused');
     expect(result.reason).toMatch(/^install_manifest_/);
+
+    // Task §10 regression chain: the refused outcome is PERSISTED — a later
+    // `pd service status` reads outcome='refused', never a hardcoded
+    // 'completed'. The status file is the observable witness.
+    const persisted = JSON.parse(readFileSync(serviceRunStatusPath(pdDir), 'utf8')) as {
+      schemaVersion: string;
+      outcome: string;
+      managed: { triggerSource: string };
+    };
+    expect(persisted.schemaVersion).toBe('pd.service-run-status.v1');
+    expect(persisted.outcome).toBe('refused');
+    expect(persisted.managed.triggerSource).toBe('scheduler'); // self-declared trigger still recorded
   });
 
   it('refuses when no active release record exists', async () => {

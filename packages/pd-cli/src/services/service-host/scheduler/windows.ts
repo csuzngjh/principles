@@ -56,19 +56,135 @@ function escapeXml(value: string): string {
 const EXECUTION_TIME_LIMIT = 'PT8H';
 
 /**
- * The Task Scheduler XML definition. `__PD_TASK_USER__` is substituted with
- * `DOMAIN\user` INSIDE PowerShell (env-derived), never on the Node side.
- * Exported for unit tests.
+ * Serialize ONE argument the way CommandLineToArgvW parses it back
+ * (task §3.2 review): an argument containing whitespace, a quote, or the
+ * empty string is wrapped in double quotes; a run of `n` backslashes
+ * immediately before a quote or the closing quote is doubled, and an
+ * embedded `"` is emitted as `\"`. Exported for the round-trip tests —
+ * quoting only the CLI path while joining the rest raw let a spaced
+ * `--pd-home` root split into extra argv entries on the OS side.
  */
-/** The Arguments element: quote the entry path (spaces/CJK safe); generated flags are plain words. */
-function schedulerArgumentsString(registration: SchedulerRegistration): string {
-  const args = schedulerInvocationArgs(registration);
-  return `"${args[0]}" ${args.slice(1).join(' ')}`;
+export function windowsSerializeArg(arg: string): string {
+  if (arg.length > 0 && !/[\s"]/.test(arg)) return arg;
+  let out = '"';
+  let backslashes = 0;
+  for (const ch of arg) {
+    if (ch === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (ch === '"') {
+      out += '\\'.repeat(backslashes * 2 + 1) + '"';
+    } else {
+      out += '\\'.repeat(backslashes) + ch;
+    }
+    backslashes = 0;
+  }
+  out += '\\'.repeat(backslashes * 2) + '"';
+  return out;
 }
 
-export function buildWindowsTaskXml(registration: SchedulerRegistration): string {
+/** Serialize a full argv to the single command-line string the task's Exec uses. */
+export function windowsSerializeCommandLine(argv: readonly string[]): string {
+  return argv.map(windowsSerializeArg).join(' ');
+}
+
+/**
+ * CommandLineToArgvW-faithful command-line parser (the same algorithm the
+ * Windows process startup applies): `2n` backslashes + quote = `n` literal
+ * backslashes + delimiter; `2n+1` + quote = `n` backslashes + a literal
+ * quote; unquoted whitespace splits. Ownership verification and the
+ * serialization tests both go through this — never a string-contains
+ * shortcut (task §3.2/§5).
+ */
+export function windowsParseCommandLine(commandLine: string): string[] {
+  const args: string[] = [];
+  let current = '';
+  let tokenStarted = false;
+  let inQuotes = false;
+  let i = 0;
+  while (i < commandLine.length) {
+    const ch = commandLine[i];
+    if (ch === ' ' || ch === '\t') {
+      if (inQuotes) {
+        current += ch;
+      } else if (tokenStarted) {
+        args.push(current);
+        current = '';
+        tokenStarted = false;
+      }
+      i += 1;
+      continue;
+    }
+    if (ch === '\\') {
+      let backslashes = 0;
+      while (commandLine[i] === '\\') {
+        backslashes += 1;
+        i += 1;
+      }
+      if (commandLine[i] === '"') {
+        if (backslashes % 2 === 0) {
+          current += '\\'.repeat(backslashes / 2);
+          inQuotes = !inQuotes;
+          tokenStarted = true;
+        } else {
+          current += '\\'.repeat((backslashes - 1) / 2) + '"';
+          tokenStarted = true;
+        }
+        i += 1;
+      } else {
+        current += '\\'.repeat(backslashes);
+        tokenStarted = true;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      // A `""` inside a quoted run is an escaped quote for MSVC argv rules;
+      // outside it toggles quoting. Two adjacent quotes mid-token collapse.
+      if (inQuotes && commandLine[i + 1] === '"') {
+        current += '"';
+        i += 2;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      tokenStarted = true;
+      i += 1;
+      continue;
+    }
+    current += ch;
+    tokenStarted = true;
+    i += 1;
+  }
+  if (tokenStarted) args.push(current);
+  return args;
+}
+
+/**
+ * Task Scheduler StartBoundary with an EXPLICIT timezone (task §8 review):
+ * `YYYY-MM-DDTHH:MM:SS±HH:MM`. UTC input keeps a real offset marker —
+ * stripping `Z` used to pass a UTC instant off as local time and shifted
+ * the first trigger by the host's UTC offset.
+ */
+export function formatWindowsStartBoundary(epochMs: number, offsetMinutesEast: number): string {
+  const local = new Date(epochMs + offsetMinutesEast * 60_000);
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  const sign = offsetMinutesEast >= 0 ? '+' : '-';
+  const abs = Math.abs(offsetMinutesEast);
+  return (
+    `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}` +
+    `T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}` +
+    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+  );
+}
+
+/** The Arguments element: EVERY argument is serialized independently per the Win32 argv rules. */
+function schedulerArgumentsString(registration: SchedulerRegistration): string {
+  return windowsSerializeCommandLine(schedulerInvocationArgs(registration));
+}
+
+export function buildWindowsTaskXml(registration: SchedulerRegistration, now: Date = new Date(), enabled = false): string {
   const { nodePath, pdHome, intervalMs } = registration;
-  const startBoundary = new Date().toISOString().replace(/\.\d{3}Z$/, ''); // local-ish, Task XML tolerant
+  const startBoundary = formatWindowsStartBoundary(now.getTime(), -now.getTimezoneOffset());
   const args = schedulerArgumentsString(registration);
   return [
     // No encoding declaration: Task Scheduler's MSXML rejects a UTF-8
@@ -101,9 +217,10 @@ export function buildWindowsTaskXml(registration: SchedulerRegistration): string
     '    <StartWhenAvailable>true</StartWhenAvailable>',
     '    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>',
     '    <AllowStartOnDemand>true</AllowStartOnDemand>',
-    // installed_disabled: the registration exists but never fires until
-    // `pd service enable` flips it (task §5).
-    '    <Enabled>false</Enabled>',
+    // installed_disabled: a FRESH registration never fires until
+    // `pd service enable` flips it (task §5). On refresh the caller passes
+    // the preserved OS enabled state (task §15).
+    `    <Enabled>${enabled ? 'true' : 'false'}</Enabled>`,
     '    <Hidden>false</Hidden>',
     '    <RunOnlyIfIdle>false</RunOnlyIfIdle>',
     '    <WakeToRun>false</WakeToRun>',
@@ -122,9 +239,28 @@ export function buildWindowsTaskXml(registration: SchedulerRegistration): string
   ].join('\r\n');
 }
 
-/** Case-insensitive containment used for "ours" identity checks on Windows. */
-function containsIgnoreCase(haystack: string, needle: string): boolean {
-  return haystack.toLowerCase().includes(needle.toLowerCase());
+/** XML-unescape a scalar element's text content. */
+function unescapeXml(value: string): string {
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+/** First `<tag>text</tag>` inside the Exec Actions block, or null. */
+function execElement(xml: string, tag: string): string | null {
+  const execMatch = /<Exec\b[^>]*>([\s\S]*?)<\/Exec>/i.exec(xml);
+  const scope = execMatch?.[1] ?? xml;
+  const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i').exec(scope);
+  return match === null ? null : unescapeXml(match[1] ?? '');
+}
+
+/** First `<UserId>text</UserId>` (LogonTrigger principal), or null. */
+function taskPrincipalUser(xml: string): string | null {
+  const match = /<UserId>([\s\S]*?)<\/UserId>/i.exec(xml);
+  return match === null ? null : unescapeXml(match[1] ?? '').trim();
 }
 
 interface PowerShellQueryBody {
@@ -215,6 +351,7 @@ function factsFromQuery(identity: SchedulerIdentity, body: PowerShellQueryBody):
     taskName: identity.windowsTaskName,
     registered: true,
     enabled: state === '' ? null : state !== 'Disabled',
+    active: state === '' ? null : state === 'Running',
     triggerIntervalMs: typeof body.xml === 'string' ? parseWindowsIntervalMs(body.xml) : null,
     lastRunAt,
     lastResult: body.lastResult === undefined ? null : String(body.lastResult),
@@ -306,16 +443,33 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
     return { ok: true, body: parsed.body };
   }
 
-  /** Fail-closed ownership check: the exported definition must reference THIS install. */
+  /**
+   * Fail-closed ownership check (task §5 review): the exported Task XML is
+   * PARSED — Exec Command, Exec Arguments (decoded per the Win32 argv
+   * rules), WorkingDirectory and the LogonTrigger principal are each
+   * verified. A task whose definition merely CONTAINS our path strings
+   * (foreign content with matching substrings) is foreign; a task whose
+   * definition cannot be parsed at all is foreign too — PD never modifies
+   * or deletes what it cannot prove is its own.
+   */
   function ownershipVerdict(body: PowerShellQueryBody, registration: SchedulerRegistration): { ours: true } | { ours: false; conflict: 'external' } {
     if (!body.found || typeof body.xml !== 'string') return { ours: false, conflict: 'external' };
-    const {xml} = body;
-    // The definition carries XML-escaped paths — a real install path with
-    // `& ' < >` chars must still match its own registration (special-char
-    // paths are a task §3.2 requirement), so both forms are checked.
-    const referencesEntry = containsIgnoreCase(xml, registration.cliEntry) || containsIgnoreCase(xml, escapeXml(registration.cliEntry));
-    const referencesPdHome = containsIgnoreCase(xml, registration.pdHome) || containsIgnoreCase(xml, escapeXml(registration.pdHome));
-    return referencesEntry && referencesPdHome ? { ours: true } : { ours: false, conflict: 'external' };
+    const command = execElement(body.xml, 'Command');
+    const argsText = execElement(body.xml, 'Arguments');
+    const workDir = execElement(body.xml, 'WorkingDirectory');
+    const principal = taskPrincipalUser(body.xml);
+    if (command === null || argsText === null || workDir === null) {
+      return { ours: false, conflict: 'external' };
+    }
+    const execArgv = [command, ...windowsParseCommandLine(argsText)];
+    const expectedArgv = [registration.nodePath, ...schedulerInvocationArgs(registration)];
+    const execMatches = execArgv.length === expectedArgv.length
+      && execArgv.every((token, index) => token.toLowerCase() === expectedArgv[index]?.toLowerCase());
+    const workDirMatches = workDir.toLowerCase() === registration.pdHome.toLowerCase();
+    // The task must run under an interactive user principal — an empty
+    // principal means a definition PD did not write.
+    const principalPresent = principal !== null && principal !== '';
+    return execMatches && workDirMatches && principalPresent ? { ours: true } : { ours: false, conflict: 'external' };
   }
 
   async function status(registration: SchedulerRegistration): Promise<SchedulerOperationResult> {
@@ -325,6 +479,8 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
     }
     return { ok: true, changed: false, facts: factsFromQuery(registration.identity, query.body) };
   }
+
+
 
   async function runMutation(
     registration: SchedulerRegistration,
@@ -357,6 +513,33 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
     return { ...statusNow, changed: true };
   }
 
+  /** Write the task XML under <pdHome>/service and Register-ScheduledTask it. */
+  async function writeAndRegisterXml(
+    registration: SchedulerRegistration,
+    xml: string,
+  ): Promise<SchedulerOperationResult> {
+    const xmlDir = path.join(registration.pdHome, 'service');
+    const xmlFile = path.join(xmlDir, 'scheduler-registration-win.xml');
+    const mkdir = fileIo.mkdirs(xmlDir);
+    if (!mkdir.ok) {
+      return { ok: false, kind: 'command_failed', reason: `scheduler_xml_dir_unwritable:${mkdir.reason.slice(0, 80)}`, nextAction: `Could not prepare ${xmlDir}; check permissions and retry pd service install.` };
+    }
+    const written = fileIo.writeAtomic(xmlFile, xml);
+    if (!written.ok) {
+      return { ok: false, kind: 'command_failed', reason: `scheduler_xml_write_failed:${written.reason.slice(0, 80)}`, nextAction: `Could not write the task definition to ${xmlFile}; retry pd service install after fixing the filesystem issue.` };
+    }
+    const body = (name: string) => `
+  # -Encoding UTF8: the definition is written UTF-8 without BOM; Windows
+  # PowerShell 5.1 would otherwise decode it with the ANSI codepage and
+  # corrupt CJK/special characters in install paths (task §3.2).
+  $xmlText = Get-Content -LiteralPath $env:PD_TASK_XML -Raw -Encoding UTF8
+  $user = "$env:USERDOMAIN\\$env:USERNAME" -replace '&','&amp;'
+  $xmlText = $xmlText.Replace('__PD_TASK_USER__', $user)
+  Register-ScheduledTask -TaskName '${name}' -Xml $xmlText | Out-Null
+  [PSCustomObject]@{ done = $true } | ConvertTo-Json -Compress`;
+    return runMutation(registration, body, { extraEnv: { PD_TASK_XML: xmlFile } });
+  }
+
   return {
     platform: 'win32',
 
@@ -377,32 +560,20 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
             facts: factsFromQuery(registration.identity, query.body),
           };
         }
-        // Idempotent: our own registration is reused; the enabled/disabled
-        // state is PRESERVED (task §5 install contract).
-        return { ok: true, changed: false, facts: factsFromQuery(registration.identity, query.body) };
+        // Refresh our own registration (task §15 review): rewrite the
+        // definition from the CURRENT OS state — interval + enabled
+        // preserved, only the CLI entry/node path move forward.
+        const preservedInterval = typeof query.body.xml === 'string'
+          ? parseWindowsIntervalMs(query.body.xml)
+          : null;
+        const effective: SchedulerRegistration = preservedInterval !== null
+          ? { ...registration, intervalMs: preservedInterval }
+          : registration;
+        const wasEnabled = query.body.state !== '' && query.body.state !== 'Disabled';
+        return writeAndRegisterXml(registration, buildWindowsTaskXml(effective, new Date(), wasEnabled));
       }
 
-      const xml = buildWindowsTaskXml(registration);
-      const xmlDir = path.join(registration.pdHome, 'service');
-      const xmlFile = path.join(xmlDir, 'scheduler-registration-win.xml');
-      const mkdir = fileIo.mkdirs(xmlDir);
-      if (!mkdir.ok) {
-        return { ok: false, kind: 'command_failed', reason: `scheduler_xml_dir_unwritable:${mkdir.reason.slice(0, 80)}`, nextAction: `Could not prepare ${xmlDir}; check permissions and retry pd service install.` };
-      }
-      const written = fileIo.writeAtomic(xmlFile, xml);
-      if (!written.ok) {
-        return { ok: false, kind: 'command_failed', reason: `scheduler_xml_write_failed:${written.reason.slice(0, 80)}`, nextAction: `Could not write the task definition to ${xmlFile}; retry pd service install after fixing the filesystem issue.` };
-      }
-      const body = (name: string) => `
-  # -Encoding UTF8: the definition is written UTF-8 without BOM; Windows
-  # PowerShell 5.1 would otherwise decode it with the ANSI codepage and
-  # corrupt CJK/special characters in install paths (task §3.2).
-  $xmlText = Get-Content -LiteralPath $env:PD_TASK_XML -Raw -Encoding UTF8
-  $user = "$env:USERDOMAIN\\$env:USERNAME" -replace '&','&amp;'
-  $xmlText = $xmlText.Replace('__PD_TASK_USER__', $user)
-  Register-ScheduledTask -TaskName '${name}' -Xml $xmlText | Out-Null
-  [PSCustomObject]@{ done = $true } | ConvertTo-Json -Compress`;
-      return runMutation(registration, body, { extraEnv: { PD_TASK_XML: xmlFile } });
+      return writeAndRegisterXml(registration, buildWindowsTaskXml(registration));
     },
 
     async enable(registration) {

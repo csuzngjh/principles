@@ -63,6 +63,8 @@ export interface ServiceHostStatusDocument {
     /** OS-level witness (distinct from the run-once status file). */
     readonly osLastRunAt: string | null;
     readonly osLastResult: string | null;
+    /** OS loaded/running witness — independent from enabled (task §9). */
+    readonly osActive: boolean | null;
     readonly reason?: string;
     readonly nextAction?: string;
   };
@@ -72,6 +74,9 @@ export interface ServiceHostStatusDocument {
     readonly outcome: ServiceRunStatus['outcome'];
     readonly mode: 'dry-run' | 'shadow' | 'managed' | 'unknown';
     readonly triggerSource: ServiceRunStatus['triggerSource'];
+    /** 'scheduler'/'manual' is the run's SELF-DECLARED flag (task §11 review) —
+     *  written by the run-once process itself, not verified OS evidence. */
+    readonly triggerSourceCredibility: 'self-declared';
     readonly startedAt: string;
     readonly completedAt: string;
     readonly durationMs: number;
@@ -134,6 +139,7 @@ export async function composeServiceHostStatus(options: ServiceHostStatusOptions
         },
         osLastRunAt: lifecycle.facts.lastRunAt,
         osLastResult: lifecycle.facts.lastResult,
+        osActive: lifecycle.facts.active ?? null,
       }
     : {
         available: false,
@@ -143,12 +149,19 @@ export async function composeServiceHostStatus(options: ServiceHostStatusOptions
         triggerConfiguration: null,
         osLastRunAt: null,
         osLastResult: null,
+        osActive: null,
         ...(schedulerFailure !== null ? { reason: schedulerFailure.reason, nextAction: schedulerFailure.nextAction } : {}),
       };
   if (schedulerFailure !== null) {
     // The scheduler witness failed (unavailable/permission/query) — the rest
     // of the document stays truthful and the failure is explicit.
     degradedReasons.push(`scheduler:${schedulerFailure.reason}`);
+  } else if (lifecycle.ok && lifecycle.facts.degradedReasons !== undefined) {
+    // Per-witness unreadable reasons from the OS probes (task §9): a
+    // partially-readable registration is degraded, not silently healthy.
+    for (const reason of lifecycle.facts.degradedReasons) {
+      degradedReasons.push(`scheduler:${reason}`);
+    }
   }
 
   // ── Last-run witness (status file) ──
@@ -161,6 +174,7 @@ export async function composeServiceHostStatus(options: ServiceHostStatusOptions
         outcome: lastRunRead.status.outcome,
         mode: lastRunModeOf(lastRunRead.status),
         triggerSource: lastRunRead.status.triggerSource,
+        triggerSourceCredibility: 'self-declared',
         startedAt: lastRunRead.status.startedAt,
         completedAt: lastRunRead.status.completedAt,
         durationMs: lastRunRead.status.durationMs,
@@ -218,8 +232,12 @@ export async function composeServiceHostStatus(options: ServiceHostStatusOptions
   let nextAction: string;
   if (schedulerFailure !== null) {
     ({ nextAction } = schedulerFailure);
+  } else if (lifecycle.ok && lifecycle.facts.registered === null) {
+    nextAction = 'The OS scheduler registration state could not be READ (see degradedReasons) — this is an unreadable witness, not "not installed". Fix the degraded scheduler source before trusting any other clause.';
   } else if (lifecycle.ok && lifecycle.facts.registered !== true) {
     nextAction = 'No OS scheduler registration exists for this install. Run pd service install (then pd service enable) to arm the automatic trigger.';
+  } else if (lifecycle.ok && lifecycle.facts.enabled === null) {
+    nextAction = 'The registration exists but its ENABLED state is unreadable (see degradedReasons). Automatic triggers may or may not be armed — fix the degraded witness before drawing a healthy conclusion.';
   } else if (lifecycle.ok && lifecycle.facts.enabled === false) {
     nextAction = 'The scheduler registration is installed but DISABLED — future automatic triggers are off by choice. Run pd service enable to arm them; nothing else is required.';
   } else if (lastRunVerdict === 'missing') {

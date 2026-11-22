@@ -18,7 +18,7 @@ import {
   validateSchedulerIntervalMs,
   type SchedulerRegistration,
 } from '../../../src/services/service-host/scheduler/contract.js';
-import { buildWindowsTaskXml, parseWindowsIntervalMs } from '../../../src/services/service-host/scheduler/windows.js';
+import { buildWindowsTaskXml, parseWindowsIntervalMs, windowsParseCommandLine, windowsSerializeCommandLine } from '../../../src/services/service-host/scheduler/windows.js';
 import { buildMacosLaunchAgentPlist, parseMacosStartIntervalMs } from '../../../src/services/service-host/scheduler/macos.js';
 import { buildLinuxServiceUnit, buildLinuxTimerUnit, parseLinuxTimerIntervalMs } from '../../../src/services/service-host/scheduler/linux.js';
 
@@ -124,10 +124,14 @@ describe('buildWindowsTaskXml', () => {
     const registration = makeRegistration();
     const xml = buildWindowsTaskXml(registration);
     expect(xml).toContain(`<Command>${registration.nodePath}</Command>`);
-    // The cliEntry is quoted in the argument string; the quotes are part of
-    // the XML text and therefore serialized as &quot; entities.
-    expect(xml).toContain(
-      `<Arguments>&quot;${registration.cliEntry}&quot; service run-once --json --trigger scheduler --pd-home ${registration.homeDir}</Arguments>`,
+    // The Arguments element carries the CommandLineToArgvW-serialized
+    // invocation (task §2): parse it back and compare argv, never strings.
+    const argsMatch = /<Arguments>([^<]*)<\/Arguments>/.exec(xml);
+    expect(argsMatch).not.toBeNull();
+    expect(windowsParseCommandLine(argsMatch?.[1] ?? '')).toEqual(schedulerInvocationArgs(registration));
+    // Round-trip: the serializer's own output parses back identically.
+    expect(windowsParseCommandLine(windowsSerializeCommandLine(schedulerInvocationArgs(registration)))).toEqual(
+      schedulerInvocationArgs(registration),
     );
     expect(xml).toContain(`<WorkingDirectory>${registration.pdHome}</WorkingDirectory>`);
     expect(xml).toContain(`<Description>PD Service Host managed run-once trigger for pdHome ${registration.pdHome}.`);

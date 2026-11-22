@@ -14,8 +14,13 @@
  *    Adapter. Shadow calls the real worker — business tasks may advance —
  *    and requires explicit workspace selection; never scheduled.
  *
- * `--trigger manual|scheduler` records the truthful trigger source (task
- * §4): the scheduler registers `--trigger scheduler`; login vs periodic is
+ * `--trigger manual|scheduler` records the SELF-DECLARED trigger source
+ * (task §4/§11 review): the scheduler registers `--trigger scheduler`, but
+ * the flag is written by the run-once process itself — it is a REPORTED
+ * trigger, not verified OS evidence. Any caller may claim 'scheduler';
+ * consumers (status document, Examiner, Console) must never treat the flag
+ * as proof of an OS-triggered run — the OS scheduler witnesses
+ * (registration/lastRun) are the verified side. Login vs periodic is
  * deliberately NOT distinguished (no platform reports it reliably).
  *
  * cli-1: `--json` stdout carries exactly one machine-readable document;
@@ -42,7 +47,8 @@ export interface ServiceRunOnceArgs {
   readonly host?: WorkerHostKind;
   /** Set when --host was given a value outside codex|workbuddy (fail-closed). */
   readonly invalidHost?: string;
-  /** Truthful trigger source for the status record (default manual). */
+  /** Self-declared trigger source for the status record (default manual) —
+   *  reported, never verified (task §11). */
   readonly trigger?: ServiceRunTriggerSource;
   /** Set when --trigger was given a value outside manual|scheduler (fail-closed). */
   readonly invalidTrigger?: string;
