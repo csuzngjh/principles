@@ -94,11 +94,19 @@ async function realWorkspace(): Promise<RealWorkspace> {
 
 async function seedRound(
   ws: RealWorkspace,
-  opts: { parent?: string; router?: string; round: 'r1' | 'r2'; pain?: string },
+  opts: {
+    parent?: string;
+    router?: string;
+    round: 'r1' | 'r2';
+    pain?: string;
+    parentDiagnosticJson?: Record<string, unknown>;
+    output?: DiagnosticianOutputV2;
+  },
 ): Promise<string> {
   const parent = opts.parent ?? `pain_parent_${opts.round}`;
   const router = opts.router ?? `diag_router_${opts.round}`;
   const runId = `run-${opts.round}-${router}`;
+  const output = opts.output ?? roundOutput(opts.round);
   const { manager } = ws;
   await manager.createTask({
     taskId: parent,
@@ -107,7 +115,7 @@ async function seedRound(
     status: 'succeeded',
     attemptCount: 1,
     maxAttempts: 3,
-    diagnosticJson: JSON.stringify({
+    diagnosticJson: JSON.stringify(opts.parentDiagnosticJson ?? {
       sourcePainId: opts.pain ?? `pain_${opts.round}`,
       reasonSummary: 'original pain input',
       source: 'manual',
@@ -136,7 +144,7 @@ async function seedRound(
     executionStatus: 'succeeded',
     startedAt: NOW,
     endedAt: NOW,
-    outputPayload: JSON.stringify(roundOutput(opts.round)),
+    outputPayload: JSON.stringify(output),
   });
   const connection = new SqliteConnection(ws.workspaceDir);
   try {
@@ -144,7 +152,7 @@ async function seedRound(
     await committer.commit({
       runId,
       taskId: router,
-      output: roundOutput(opts.round),
+      output,
       idempotencyKey: `${router}:${runId}`,
       contentJson: JSON.stringify({ text: `Principle from ${opts.round}`, triggerPattern: 'tp', action: 'act' }),
     });
@@ -802,4 +810,92 @@ describe('round binding: the owning run is the only admissible output', () => {
       await ws.manager.close().catch(() => undefined);
     }
   }, REAL_SQLITE_TIMEOUT_MS);
+  it('REFUSES swept Agent-derived Codex ingress after re-grant, including the legacy owner_manual channel shape', async () => {
+    const ws = await realWorkspace();
+    try {
+      const alwaysAuthorized = { isHostSourceMaterialAuthorized: () => ({ authorized: true as const }) };
+      const deniedAuthorization = { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'consent_revoked' as const }) };
+      const cases = [
+        {
+          suffix: 'agent-assisted',
+          origin: { kind: 'agent_assisted', channel: 'codex_explicit_agent' },
+          provenance: 'agent_reported_owner_approved',
+          hasTombstone: true,
+          authorization: alwaysAuthorized,
+          expectedReason: 'source_authorization_revoked:agent_assisted_source_revoked',
+        },
+        {
+          suffix: 'legacy-agent-channel',
+          origin: { kind: 'owner_manual', channel: 'codex_explicit_agent' },
+          provenance: 'host_context_bound',
+          hasTombstone: true,
+          authorization: alwaysAuthorized,
+          expectedReason: 'source_authorization_revoked:agent_assisted_source_revoked',
+        },
+        {
+          suffix: 'live-revocation',
+          origin: { kind: 'agent_assisted', channel: 'codex_explicit_agent' },
+          provenance: 'agent_reported_owner_approved',
+          hasTombstone: false,
+          authorization: deniedAuthorization,
+          expectedReason: 'source_authorization_revoked:ingress_origin_host_codex',
+        },
+      ] as const;
+      for (const variant of cases) {
+        const parent = 'pain_parent_revoked_' + variant.suffix;
+        const router = 'diag_router_revoked_' + variant.suffix;
+        const parentDiagnosticJson: Record<string, unknown> = {
+          sourcePainId: parent,
+          reasonSummary: 'Agent-derived Codex correction after source revocation',
+          source: 'user_correction',
+          severity: 'moderate',
+          sessionIdHint: null,
+          agentIdHint: null,
+          provenance: variant.provenance,
+          provenanceReason: 'agent-assisted submission; Owner authorship not verified',
+          hostKind: 'codex',
+          evidence: [],
+          workspaceDir: null,
+          painIngress: {
+            version: 'v1',
+            origin: variant.origin,
+            correlation: {
+              status: 'bound',
+              hostKind: 'codex',
+              rootSessionId: 'codex-root-session',
+              rolloutIdentity: 'codex-rollout',
+              logicalObservationKey: 'codex|codex-rollout|turn-revoked|user',
+              hostTurnId: 'turn-revoked',
+            },
+            evidenceClass: {
+              status: 'unavailable',
+              reason: variant.hasTombstone ? 'source_revoked' : 'trajectory_unavailable',
+            },
+          },
+        };
+        if (variant.hasTombstone) {
+          parentDiagnosticJson.sourceRevocation = {
+            schemaVersion: 1,
+            codex: { decidedAt: NOW, sweptAt: NOW, purgedEvidenceEntries: 0 },
+          };
+        }
+        const candidateId = await seedRound(ws, {
+          parent,
+          router,
+          round: 'r1',
+          parentDiagnosticJson,
+        });
+        const result = await evaluateAndPersistAdmissionFromStore(ws.manager, [candidateId], {
+          taskId: router,
+          sourceMaterialAuthorization: variant.authorization,
+        });
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.reason).toBe(variant.expectedReason);
+        await expectNoAdmissionWritten(ws, candidateId);
+      }
+    } finally {
+      await ws.manager.close().catch(() => undefined);
+    }
+  }, REAL_SQLITE_TIMEOUT_MS);
+
 });

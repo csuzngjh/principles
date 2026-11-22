@@ -19,6 +19,7 @@ import {
   recordPendingCorrectionReview,
   releasePendingCorrectionClaim,
   settlePendingCorrection,
+  verifyPendingClaimForClassification,
   type PendingCorrectionCandidate,
   type PendingReviewResult,
 } from './governance-signal-admission.js';
@@ -160,6 +161,33 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
           releaseClaim(candidate);
           skipped += 1;
           continue;
+        }
+        // PRI-1283 review round 2 (directive A5): the LAST authorization gate
+        // before the model request starts. Re-verifies claim ownership AND the
+        // row's live consent in one fresh read — after a revocation completes,
+        // no new classifier request may be started on the revoked source's
+        // text. The result of a request already in flight is fenced by
+        // recordPendingCorrectionReview (decision + claimToken CAS).
+        if (candidate.claimToken !== null) {
+          const verified = verifyPendingClaimForClassification({
+            workspaceDir: input.workspaceDir,
+            logicalObservationKey: candidate.logicalObservationKey,
+            claimToken: candidate.claimToken,
+          });
+          if (!verified.ok) {
+            degradations.push(`${candidate.logicalObservationKey}:claim_verify_failed:${verified.reason}`);
+            releaseClaim(candidate);
+            skipped += 1;
+            continue;
+          }
+          if (!verified.allowed) {
+            // Never start the model call; release so the next cycle's claim
+            // path terminates the row (A4) instead of re-claiming it.
+            releaseClaim(candidate);
+            degradations.push(`${candidate.logicalObservationKey}:classification_blocked:${verified.reason}`);
+            skipped += 1;
+            continue;
+          }
         }
         // AbortSignal.timeout (pi-ai-runtime-adapter startRun) rejects
         // fractional delays with ERR_OUT_OF_RANGE, and `remaining` is a

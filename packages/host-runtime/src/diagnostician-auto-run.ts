@@ -29,6 +29,7 @@ import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from './pd-config.js
 import { isAutomaticPainSubmissionAuthorized } from './auto-pain-authorization.js';
 import { createHostIntentDocReader } from './intent-doc-reader.js';
 import { createGovernanceTrajectoryTurnReader } from './governance-trajectory-turn-reader.js';
+import { createConsentLedgerSourceMaterialAuthorization } from './source-material-authorization.js';
 
 /** Quiet flag that owns the L3 half of the ladder. */
 export const DIAGNOSTICIAN_AUTO_RUN_FLAG = 'openclaw_diagnostician_consumer';
@@ -166,7 +167,9 @@ export async function runPendingDiagnosticianOnce(
         intentDocReader: createHostIntentDocReader({ workspaceDir: options.workspaceDir, effectiveConfig: config.effective }),
         // PRI-1265: the auto-run path sees the bound session's ORIGINAL turns
         // like every other diagnosis entry.
-        trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir: options.workspaceDir }),
+        trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir: options.workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(options.workspaceDir) }),
+        // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
+        sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(options.workspaceDir),
         // SPEC §9.6: lazy probe — a flag revoked between candidate pick and
         // execution still stops the run at the bridge boundary.
         isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(options.workspaceDir),

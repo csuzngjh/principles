@@ -55,6 +55,11 @@ export * from './trajectory-retention.js';
 // packages; a new host implements TranscriptSourceAdapter with zero changes
 // here.
 export * from './conversation-ingestion/index.js';
+// PRI-1283 R2: consent-ledger-backed source-material authorization port
+// implementation (the product adapter for the core port).
+export * from './source-material-authorization.js';
+// PRI-1283 R3: consent-revocation sweep over persisted source-material excerpts.
+export * from './source-revocation-sweep.js';
 export * from './governance-signal-admission.js';
 export * from './signal-classifier.js';
 export * from './adaptive-selection.js';

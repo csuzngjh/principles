@@ -14,7 +14,7 @@
  *   - current admitted → revalidated against the current persisted material
  *     (a changed material appends a NEW evaluation whose decision rules).
  */
-import type { RuntimeStateManager } from '@principles/core/runtime';
+import type { RuntimeStateManager, SourceMaterialAuthorizationPort } from '@principles/core/runtime';
 import {
   currentAdmissionEvaluation,
   evaluateAndPersistAdmissionFromStore,
@@ -35,7 +35,11 @@ export async function enforceFullAdmissionForWrite(
    * appending an admission version — a preview must not mutate the candidate's
    * persisted admission state (cli-4).
    */
-  options: { readonly persistReevaluation?: boolean } = {},
+  options: {
+    readonly persistReevaluation?: boolean;
+    /** PRI-1283 R2: admission re-verification port; absent = fail-closed. */
+    readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+  } = {},
 ): Promise<AdmissionWriteGateRefusal | null> {
   const admissionDocument = await stateManager.getAdmissionDocument(candidateId);
   if (admissionDocument.ok && admissionDocument.document !== null) {
@@ -75,6 +79,7 @@ export async function enforceFullAdmissionForWrite(
   const revalidated = await evaluateAndPersistAdmissionFromStore(stateManager, [candidateId], {
     taskId: candidate.taskId,
     ...(options.persistReevaluation === false ? { persist: false } : {}),
+    ...(options.sourceMaterialAuthorization !== undefined ? { sourceMaterialAuthorization: options.sourceMaterialAuthorization } : {}),
   });
   if (!revalidated.ok) {
     return { decision: 'needs_evidence', reason: `admission_revalidation_failed:${revalidated.reason}`, nextAction: revalidated.nextAction };

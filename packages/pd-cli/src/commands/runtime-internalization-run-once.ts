@@ -41,6 +41,7 @@ import { createEvaluatorRunnerDeps } from '../services/rulehost-pipeline-runner.
 // workspace host-tool-semantics resolver is the shared provenance source.
 import { createEvaluatorRuntimeContext, createRolloutGovernanceDeps, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 import type { RefinerRuleHostGateDeps } from '@principles/core/runtime';
+import { createConsentLedgerSourceMaterialAuthorization } from '@principles/host-runtime/source-material-authorization';
 
 interface RunOnceOptions {
   workspace?: string;
@@ -517,7 +518,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     try {
       await probeStateManager.initialize();
       const probeOrchestrator = new InternalizationOrchestrator(
-        { stateManager: probeStateManager },
+        { stateManager: probeStateManager, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) },
         { owner: OWNER, runtimeKind: RUNTIME_KIND, dryRun: true },
       );
       for (const kind of SUPPORTED_RUNNERS) {
@@ -620,7 +621,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
 
   try {
     const orchestrator = new InternalizationOrchestrator(
-      { stateManager },
+      { stateManager, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, dryRun: true },
     );
 

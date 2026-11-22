@@ -95,20 +95,25 @@ function parseDiagnosticJsonObject(raw: string | null | undefined): Record<strin
 }
 
 /**
- * PRI-1274 r2b: is this diagnostician task explicitly waiting for its named
- * target turn's text (the persisted admission disposition)? Read-only; a
- * malformed payload simply reads as "not waiting" — the admission gates
- * elsewhere fail closed on the same payload.
+ * Admission disposition gate for diagnostician tasks. Waiting tasks may be
+ * released by the target-evidence reconcile; consent-blocked tasks require a
+ * new authorized target turn and must never run on stale/empty evidence.
  */
-function waitingTargetEvidenceState(diagnosticJson: string | null | undefined): boolean {
+function diagnosisAdmissionBlockReason(diagnosticJson: string | null | undefined): string | null {
   const {recovery} = parseDiagnosticJsonObject(diagnosticJson);
-  if (typeof recovery !== 'object' || recovery === null || Array.isArray(recovery)) return false;
-  // runtime-contract-exempt: ERR-001 the guards above narrow `recovery` to a
+  if (typeof recovery !== 'object' || recovery === null || Array.isArray(recovery)) return null;
+  // runtime-contract-exempt: ERR-001 the guards above narrow recovery to a
   // non-null non-array object; the single field read below is typeof-checked.
-  const {state} = (recovery as Record<string, unknown>);
-  return state === 'waiting_for_target_evidence';
+  const {state, reasonCode} = (recovery as Record<string, unknown>);
+  if (state === 'waiting_for_target_evidence') {
+    return 'target_evidence_pending: the task waits for its named target turn text; the workspace worker reconcile flips it once the evidence exists';
+  }
+  if (state === 'blocked_by_source_material_consent') {
+    const reason = typeof reasonCode === 'string' ? reasonCode : 'source_material_consent_blocked';
+    return 'target_evidence_blocked_by_consent: ' + reason + '; re-submit with a newly authorized target turn';
+  }
+  return null;
 }
-
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === 'string');
@@ -269,29 +274,25 @@ export class SplitDiagnosticianRunner {
       return this.budgetExhaustedBeforeLeaseFailure(parentTaskId);
     }
 
-    // PRI-1274 r2b (devin finding 0003): a task explicitly waiting for its
-    // target turn's text is not admissible on ANY execution path. The
-    // bridge's executePendingDiagnosis refuses it for the automatic cycle;
-    // this runner is the other entry (manual `pd diagnose run` / split
-    // pipeline). Review round 2 (directives H1/H2/H4): the check below is a
-    // FAST-PATH refusal only; the AUTHORITATIVE judgment rides the lease
-    // acquisition itself — `refuseIf` evaluates the fresh row inside the
-    // acquisition's BEGIN IMMEDIATE transaction, closing the read→check→lease
-    // race where a recovery flips the task to waiting between this check and
-    // the lease. A store read failure here is FAIL-CLOSED: the runner refuses
-    // to execute against an unreadable authoritative state — no lease, no
-    // run, no provider call, structured storage error.
+    // PRI-1274 / PRI-1283: waiting and consent-blocked tasks are not
+    // admissible on ANY execution path. The bridge's automatic cycle and this
+    // manual/split entry both enforce the persisted admission disposition.
+    // The check below is a fast-path refusal only; the authoritative judgment
+    // also rides the lease acquisition transaction to close the race.
     try {
       const task = await this.stateManager.getTask(parentTaskId);
       // `undefined` is a test-double shape for "no row"; production reads
       // null — both mean "not waiting" here (the lease acquisition owns the
       // authoritative not-found path).
-      if (task !== null && task !== undefined && waitingTargetEvidenceState(task.diagnosticJson)) {
+      const admissionBlockReason = task === null || task === undefined
+        ? null
+        : diagnosisAdmissionBlockReason(task.diagnosticJson);
+      if (admissionBlockReason !== null) {
         return {
           status: 'failed',
           taskId: parentTaskId,
           errorCategory: 'input_invalid',
-          failureReason: 'target_evidence_pending: the task waits for its named target turn text; the workspace worker reconcile flips it once the evidence exists',
+          failureReason: admissionBlockReason,
           attemptCount: 0,
         };
       }
@@ -323,11 +324,9 @@ export class SplitDiagnosticianRunner {
         // resolved kind the stage runners also use), not a hardcoded label.
         runtimeKind: this.runtimeKind ?? 'openclaw',
         durationMs: this.executionTiming.leaseTtlMs,
-        // Directive H2: the FINAL waiting judgment, atomically inside the
+        // Directive H2: the FINAL admission judgment, atomically inside the
         // lease acquisition transaction (before the lease/generation/run).
-        refuseIf: (row) => (waitingTargetEvidenceState(row.diagnosticJson)
-          ? 'target_evidence_pending: the task waits for its named target turn text; the workspace worker reconcile flips it once the evidence exists'
-          : null),
+        refuseIf: (row) => diagnosisAdmissionBlockReason(row.diagnosticJson),
       });
       this.parentRunId = acquisition.runId;
       this.parentFence = leaseFenceOf(acquisition.task);

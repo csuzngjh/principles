@@ -443,6 +443,29 @@ export type {
 } from './pain-signal-bridge.js';
 export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
 export { evaluateAndPersistAdmissionFromStore } from './pain-signal-bridge.js';
+// PRI-1283 R2: source-material authorization port + pure shared gate helpers.
+// Barrel surface is limited to symbols with cross-package PRODUCTION
+// consumers (review round 2, directive F1 — test-only usage does not justify
+// a public export): the port types, the fail-closed default, the sourceRef
+// prefix constant, and the owner-explicit provenance classifiers. All other
+// helpers (authorizeSourceRef, filterEvidenceByAuthorization,
+// findUnauthorizedSourceRef, hostKindFromGovernanceSourceRef,
+// isGovernanceSourceRef, their result types, and
+// OWNER_EXPLICIT_CORRECTION_CHANNELS) stay core-internal relative imports —
+// core-side tests and the production consumers inside this package import
+// them directly.
+export {
+  GOVERNANCE_OBSERVATION_SOURCE_REF_PREFIX,
+  denyAllSourceMaterialAuthorization,
+  isOwnerExplicitStatementReason,
+  isOwnerManualCorrectionEvidence,
+} from './source-material-authorization.js';
+export type {
+  SourceMaterialHostKind,
+  SourceMaterialDenialReason,
+  SourceAuthorizationState,
+  SourceMaterialAuthorizationPort,
+} from './source-material-authorization.js';
 /** Deterministic diagnostician task id (`diagnosis_<painId>`) — the pain→task dedup key (Codex Governance Closure §13). */
 export { createDiagnosticianTaskId } from './pain-signal-bridge.js';
 /**
@@ -537,6 +560,7 @@ export {
   pendingOwnerDecision,
   appliedOwnerDecision,
   fingerprintMaterial as fingerprintAdmissionMaterial,
+  fingerprintStatement,
 } from './store/candidate/admission-document.js';
 export type {
   AdmissionEvaluationRecord,
