@@ -1023,7 +1023,13 @@ export async function runSourceRevocationSweep(options: RunSourceRevocationSweep
       apply,
       hosts: hostReports,
       reason: 'sweep_partial_failures: one or more purge steps failed',
-      nextAction: 'Inspect the per-host failures above; the sweep is idempotent — fix the cause (lock, permission, torn JSON) and rerun `pd consent sweep-revoked --apply` until it reports completed.',
+      // cli-6-output-next-action: the retry must name the same workspaceDir —
+      // omitting `--workspace` would silently retarget the command at the
+      // default workspace (PRI-1283 review). A failed PREVIEW re-previews;
+      // only a failed apply suggests `--apply`.
+      nextAction: apply
+        ? `Inspect the per-host failures above; the sweep is idempotent — fix the cause (lock, permission, torn JSON) and rerun \`pd consent sweep-revoked --workspace ${workspaceDir} --apply\` against the same workspace until it reports completed.`
+        : `Inspect the per-host failures above; fix the cause (lock, permission, torn JSON) and re-run the preview \`pd consent sweep-revoked --workspace ${workspaceDir}\` against the same workspace before applying.`,
     };
   }
   return { outcome, workspaceDir, ranAt, apply, hosts: hostReports, reason: null };

@@ -1041,10 +1041,36 @@ describe('PRI-1283 r2 E — dry run is truly read-only; per-table independence; 
     expect(report.outcome).toBe('partial');
     if (report.outcome === 'completed' || report.outcome === 'partial') {
       expect(report.hosts[0]?.failures.some((f) => f.startsWith('audit_write_failed'))).toBe(true);
+      // cli-6-output-next-action: a failed APPLY retries the apply against
+      // the same workspace — the hint must carry --workspace AND --apply.
+      expect(report.nextAction).toContain(`--workspace ${workspaceDir}`);
+      expect(report.nextAction).toContain('--apply');
     }
     // The purge itself still executed (best-effort observability, loud report).
     const obs = withTrajectory((db) => (db.prepare('SELECT visible_text FROM governance_observations WHERE host_kind = ?').get('codex') as { visible_text: string | null }).visible_text);
     expect(obs).toBeNull();
+  });
+
+  it('a failed PREVIEW names the same workspace and re-previews — never jumps to --apply', async () => {
+    writeConsent('codex', 'granted');
+    const { painId, evidenceSourceRef } = seedAdmittedCodexPain();
+    await seedDiagnosisTask({ painId, evidenceSourceRef });
+    await seedDiagnosisAndArtifactRows({ painId, evidenceSourceRef });
+    writeConsent('codex', 'revoked');
+    // Truncate evidence_json so it still LIKE-matches the sourceRef prefix but
+    // no longer parses — the sweep reports a read failure in preview too.
+    withState((db) => {
+      const row = db.prepare('SELECT id, evidence_json FROM pain_diagnoses').get() as { id: string; evidence_json: string };
+      db.prepare('UPDATE pain_diagnoses SET evidence_json = ? WHERE id = ?').run(row.evidence_json.slice(0, -2), row.id);
+    });
+
+    const report = await runSourceRevocationSweep({ workspaceDir, apply: false });
+    expect(report.outcome).toBe('partial');
+    if (report.outcome === 'completed' || report.outcome === 'partial') {
+      expect(report.hosts[0]?.failures.some((f) => f.startsWith('pain_diagnoses_'))).toBe(true);
+      expect(report.nextAction).toContain(`--workspace ${workspaceDir}`);
+      expect(report.nextAction).not.toContain('--apply');
+    }
   });
 
   it('re-grant after a completed sweep does not restore purged admission reasons', async () => {
