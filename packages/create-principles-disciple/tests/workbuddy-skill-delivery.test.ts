@@ -323,9 +323,9 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     expect(fs.existsSync(lab.cache)).toBe(false);
     expect(fs.readFileSync(olderFile, 'utf8')).toBe('Existing project/local version');
     // Still installed for those scopes, so the host-level entry stays at the
-    // declared default (install ≠ enable) instead of being deleted.
+    // declared default (PD ships defaultEnabled: true) instead of being deleted.
     const settings = JSON.parse(fs.readFileSync(lab.paths.settingsPath, 'utf8'));
-    expect(settings.enabledPlugins[pluginKey]).toBe(false);
+    expect(settings.enabledPlugins[pluginKey]).toBe(true);
     expect(result.preservedPaths).toContain(lab.paths.registryPath);
     expect(fs.readFileSync(lab.database, 'utf8')).toBe('Owner governance data');
   });
@@ -347,8 +347,9 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     expect(result.success, result.reason).toBe(true);
     const after = JSON.parse(fs.readFileSync(lab.paths.registryPath, 'utf8'));
     expect(after.plugins[pluginKey].map((record: { scope: string }) => record.scope)).toEqual(['project', 'local']);
-    // Non-user scopes survive; the host-level entry stays at the declared default.
-    expect(JSON.parse(fs.readFileSync(lab.paths.settingsPath, 'utf8')).enabledPlugins[pluginKey]).toBe(false);
+    // Non-user scopes survive; the host-level entry stays at the declared
+    // default (PD ships defaultEnabled: true).
+    expect(JSON.parse(fs.readFileSync(lab.paths.settingsPath, 'utf8')).enabledPlugins[pluginKey]).toBe(true);
     expect(fs.readFileSync(path.join(olderCache, 'project-owner.txt'), 'utf8')).toBe('Preserve project payload');
     expect(fs.existsSync(lab.paths.marketplaceRoot)).toBe(true);
     expect(result.reason).toContain('bypassed host-wide engine commands');
