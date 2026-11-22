@@ -83,9 +83,12 @@ export function establishHandoverContext(workspaceDir: string, input: HandoverCo
 }
 
 function wait(ms: number): Promise<void> {
+  // REF'd on purpose: these are operator-command orchestration waits (ack
+  // polling, resumption observation) with hard deadlines. An unref'd timer
+  // here let Node exit mid-await with a pending promise — transitions
+  // applied, stdout empty, exit 0 (found in Stage 9 acceptance).
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
+    setTimeout(resolve, ms);
   });
 }
 
