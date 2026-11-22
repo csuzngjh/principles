@@ -275,9 +275,22 @@ function taskActionsExec(xml: string): { ok: true; exec: string } | { ok: false;
   return { ok: true, exec: execBlocks[0] ?? '' };
 }
 
-/** All `<UserId>text</UserId>` values — a PD task declares exactly one. */
+/**
+ * `<UserId>` values inside `<LogonTrigger>` blocks only. PD declares the
+ * interactive principal in the LogonTrigger; a REAL Task Scheduler
+ * export ALSO carries a `<Principal><UserId>` (SID form) outside the
+ * trigger, so counting every UserId in the document wrongly rejects our
+ * own tasks (real-CI evidence: principal_mismatch count=2). Foreign
+ * ambiguity = zero or several UserIds *inside* the trigger.
+ */
 function taskPrincipalUsers(xml: string): string[] {
-  return [...xml.matchAll(/<UserId>([\s\S]*?)<\/UserId>/gi)].map((m) => unescapeXml(m[1] ?? '').trim());
+  const users: string[] = [];
+  for (const trigger of xml.matchAll(/<LogonTrigger\b[^>]*>([\s\S]*?)<\/LogonTrigger>/gi)) {
+    for (const user of (trigger[1] ?? '').matchAll(/<UserId>([\s\S]*?)<\/UserId>/gi)) {
+      users.push(unescapeXml(user[1] ?? '').trim());
+    }
+  }
+  return users;
 }
 
 interface PowerShellQueryBody {
@@ -488,8 +501,9 @@ export function createWindowsSchedulerAdapter(deps: WindowsSchedulerDeps): Sched
     const execMatches = execArgv.length === expectedArgv.length
       && execArgv.every((token, index) => token.toLowerCase() === expectedArgv[index]?.toLowerCase());
     const workDirMatches = workDir.toLowerCase() === registration.pdHome.toLowerCase();
-    // The task must run under exactly ONE non-empty interactive user
-    // principal — zero or several means a definition PD did not write.
+    // The task must declare exactly ONE non-empty interactive user
+    // principal on its logon trigger — zero or several inside the
+    // trigger means a definition PD did not write.
     const principalMatches = principals.length === 1 && (principals[0] ?? '') !== '';
     if (execMatches && workDirMatches && principalMatches) return { ours: true };
     const detail = [

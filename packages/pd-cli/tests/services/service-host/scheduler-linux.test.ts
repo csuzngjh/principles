@@ -998,8 +998,7 @@ describe('lifecycle reliability round 3 (verdict strictness / dual verification 
       cliEntry: `${homeDir}/rel/index.js`, nodePath: '/usr/bin/node',
       intervalMs: 120_000, identity: schedulerIdentityFor(pdHome),
     };
-    const serviceFile = `${homeDir}/.config/systemd/user/${registration.identity.linuxUnitBase}.service`;
-    const timerFile = `${homeDir}/.config/systemd/user/${registration.identity.linuxUnitBase}.timer`;
+    const { serviceFile } = unitPaths(registration);
     const { runner } = systemctlRunner({ enabled: false, active: false, managerSees: true });
     const fileIo = new FakeFileIo();
     const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
