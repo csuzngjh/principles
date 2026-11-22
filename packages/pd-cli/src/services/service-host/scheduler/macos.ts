@@ -30,6 +30,7 @@
  * NOT_VERIFIED until it runs on a real Darwin host.
  */
 import * as path from 'node:path';
+import plistLib from 'plist';
 import { schedulerInvocationArgs } from './contract.js';
 import type {
   SchedulerAdapter,
@@ -52,14 +53,7 @@ function escapeXml(value: string): string {
   });
 }
 
-function unescapeXml(value: string): string {
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&');
-}
+
 
 /** The LaunchAgent plist document. Exported for unit tests. */
 export function buildMacosLaunchAgentPlist(registration: SchedulerRegistration): string {
@@ -117,26 +111,77 @@ interface ParsedLaunchAgent {
 }
 
 /**
- * Minimal LaunchAgent plist reader (task §5 review): extracts Label, the
- * ProgramArguments array and WorkingDirectory from the plist's own XML
- * structure. A plist that does not parse yields null fields — and null
- * fields can never equal our registration, so it is FOREIGN.
+ * The complete set of keys a PD-built LaunchAgent may declare (see
+ * buildMacosLaunchAgentPlist). Any additional top-level key — an extra
+ * trigger like StartCalendarInterval, environment overrides, or an
+ * unexpected action — makes the plist FOREIGN: PD never claims a document
+ * that does more than the builder can emit.
  */
-function parseLaunchAgent(plist: string): ParsedLaunchAgent {
-  const labelMatch = /<key>Label<\/key>\s*<string>([\s\S]*?)<\/string>/i.exec(plist);
-  const programMatch = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/i.exec(plist);
-  const workDirMatch = /<key>WorkingDirectory<\/key>\s*<string>([\s\S]*?)<\/string>/i.exec(plist);
-  let programArguments: string[] | null = null;
-  if (programMatch !== null) {
-    programArguments = [...(programMatch[1] ?? '').matchAll(/<string>([\s\S]*?)<\/string>/g)]
-      .map((m) => unescapeXml(m[1] ?? ''));
+const LAUNCH_AGENT_KEYS: ReadonlySet<string> = new Set([
+  'Label',
+  'ProgramArguments',
+  'WorkingDirectory',
+  'RunAtLoad',
+  'StartInterval',
+  'StandardOutPath',
+  'StandardErrorPath',
+]);
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Structural LaunchAgent plist reader: parses the real plist document with
+ * the project-locked `plist` library, then verifies the result against the
+ * builder's key/type contract. A plist fails the parse (ok=false) when it
+ * is unparseable, has a non-dict root, declares an unknown top-level key,
+ * duplicates any of the required keys anywhere in the raw text (covers
+ * comment-forgery — the XML parser drops comments but the raw count
+ * still exposes the duplicate), or carries fields of the wrong type. A
+ * plist that fails the parse can never equal our registration, so it is
+ * FOREIGN.
+ */
+function parseLaunchAgent(plistText: string): { ok: true; parsed: ParsedLaunchAgent } | { ok: false } {
+  let root: unknown;
+  try {
+    root = plistLib.parse(plistText);
+  } catch {
+    return { ok: false };
   }
+  if (typeof root !== 'object' || root === null || Array.isArray(root)) {
+    return { ok: false };
+  }
+  const dict = root as Record<string, unknown>;
+  for (const key of Object.keys(dict)) {
+    if (!LAUNCH_AGENT_KEYS.has(key)) return { ok: false };
+    // Duplicate-key guard: the parsed value keeps only one instance, so
+    // count raw `<key>NAME</key>` occurrences — a comment- or nesting-forged
+    // duplicate still shows up in the raw text.
+    const occurrences = plistText.match(new RegExp(`<key>${escapeRegExp(key)}</key>`, 'g'));
+    if ((occurrences?.length ?? 0) > 1) return { ok: false };
+  }
+  const label = dict.Label;
+  const programArguments = dict.ProgramArguments;
+  const workingDirectory = dict.WorkingDirectory;
   return {
-    label: labelMatch === null ? null : unescapeXml(labelMatch[1] ?? ''),
-    programArguments,
-    workingDirectory: workDirMatch === null ? null : unescapeXml(workDirMatch[1] ?? ''),
+    ok: true,
+    parsed: {
+      label: typeof label === 'string' ? label : null,
+      programArguments:
+        Array.isArray(programArguments) && programArguments.every((a) => typeof a === 'string')
+          ? (programArguments)
+          : null,
+      workingDirectory: typeof workingDirectory === 'string' ? workingDirectory : null,
+    },
   };
 }
+
+/** launchctl print stderr/stdout patterns that definitively mean "not loaded". */
+const LAUNCHCTL_NOT_LOADED = /could not find|no such|not loaded|can't find|cannot find|does not exist/i;
+
+/** launchctl bootout stderr patterns that definitively mean "nothing to unload". */
+const LAUNCHCTL_NOT_LOADED_BOOTOUT = /no such process|not loaded|No process existing with specified identity/i;
 
 export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): SchedulerAdapter {
   const { runner, fileIo } = deps;
@@ -178,7 +223,9 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
     registration: SchedulerRegistration,
     plist: string,
   ): { ours: true } | { ours: false } {
-    const parsed = parseLaunchAgent(plist);
+    const result = parseLaunchAgent(plist);
+    if (!result.ok) return { ours: false };
+    const {parsed} = result;
     if (parsed.label !== registration.identity.macosLabel) return { ours: false };
     if (parsed.workingDirectory !== registration.pdHome) return { ours: false };
     const expected = [registration.nodePath, ...schedulerInvocationArgs(registration)];
@@ -188,6 +235,30 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
     return parsed.programArguments.every((token, index) => token === expected[index])
       ? { ours: true }
       : { ours: false };
+  }
+
+  /**
+   * Strict `launchctl print-disabled` reader: real macOS output is
+   * `disabled services = {` then one `"<label>" : true|false` entry per
+   * line then `}`. Only an exact label match decides the flag; a missing
+   * entry means not-disabled (launchd lists only overrides); ANY other
+   * non-empty, non-structural line makes the verdict UNKNOWN — never
+   * defaulted to enabled or disabled.
+   */
+  function parseDisabledFlag(stdout: string, label: string): { ok: true; disabled: boolean } | { ok: false } {
+    let flag = false;
+    for (const raw of stdout.split('\n')) {
+      const line = raw.trim();
+      if (line === '') continue;
+      if (/^disabled\s+services\s*=\s*\{?$/i.test(line) || /^\}$/.test(line)) continue;
+      const entry = /^"([^"]+)"\s*[:=]\s*(true|false|1|0)\s*$/i.exec(line);
+      if (entry === null) return { ok: false };
+      if (entry[1] === label) {
+        const value = entry[2] ?? '';
+        flag = value.toLowerCase() === 'true' || value === '1';
+      }
+    }
+    return { ok: true, disabled: flag };
   }
 
   async function run(command: string, args: readonly string[]): Promise<{ code: number | null; stdout: string; stderr: string; spawnError?: string; timedOut?: boolean }> {
@@ -219,9 +290,7 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
     // A failed print is only proof of "not loaded" when launchd says so;
     // any other failure (spawn, permission, timeout) leaves the loaded
     // state UNKNOWN — an unknown state must not drive bootout/delete.
-    const notFound = /could not find|no such|not loaded|can't find|cannot find|does not exist/i.test(
-      `${print.stderr}\n${print.stdout}`,
-    );
+    const notFound = LAUNCHCTL_NOT_LOADED.test(`${print.stderr}\n${print.stdout}`);
     const loadedKnown = loaded || notFound;
     if (!loaded && !notFound) {
       reasons.push(
@@ -236,12 +305,13 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
     const disabledList = await run('launchctl', ['print-disabled', domain.domain]);
     let disabled: boolean | null = null;
     if (disabledList.code === 0) {
-      const line = disabledList.stdout
-        .split('\n')
-        .find((l) => l.includes(`"${label}"`));
-      if (line !== undefined) disabled = /disabled\s*=>\s*true/i.test(line);
-      // A missing line means "not disabled" — launchd lists only overrides.
-      if (line === undefined) disabled = false;
+      const probe = parseDisabledFlag(disabledList.stdout, label);
+      const flag = probe.ok ? probe.disabled : null;
+      if (flag !== null) {
+        disabled = flag;
+      } else {
+        reasons.push('launchctl_print_disabled_unparseable');
+      }
     } else {
       reasons.push(
         `launchctl_print_disabled_failed:${disabledList.code ?? 'spawn'}:${(disabledList.spawnError ?? disabledList.stderr).trim().slice(0, 100)}`,
@@ -250,20 +320,26 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
     return { loaded, loadedKnown, disabledKnown: disabled !== null, disabled, lastResult, unreadableReasons: reasons };
   }
 
-  /** launchctl print confirms the job is no longer loaded. */
-  async function verifyUnloaded(label: string): Promise<boolean> {
+  /**
+   * launchctl print tri-state: 'loaded' only on exit 0; 'not_loaded' only
+   * on launchd's definitive not-found answer; anything else is 'unknown'
+   * and must fail closed — never treated as unloaded.
+   */
+  async function probeLoaded(label: string): Promise<{ state: 'loaded' | 'not_loaded' | 'unknown'; reason?: string }> {
     const domain = guiDomain();
-    if (!domain.ok) return false;
+    if (!domain.ok) return { state: 'unknown', reason: domain.reason };
     const print = await run('launchctl', ['print', `${domain.domain}/${label}`]);
-    return print.code !== 0;
+    if (print.code === 0) return { state: 'loaded' };
+    if (LAUNCHCTL_NOT_LOADED.test(`${print.stderr}\n${print.stdout}`)) return { state: 'not_loaded' };
+    return {
+      state: 'unknown',
+      reason: `launchctl_print_failed:${print.code ?? 'spawn'}:${(print.spawnError ?? print.stderr.trim() ?? print.stdout.trim()).slice(0, 100)}`,
+    };
   }
 
   /** launchctl print confirms the job is loaded. */
   async function verifyLoaded(label: string): Promise<boolean> {
-    const domain = guiDomain();
-    if (!domain.ok) return false;
-    const print = await run('launchctl', ['print', `${domain.domain}/${label}`]);
-    return print.code === 0;
+    return (await probeLoaded(label)).state === 'loaded';
   }
 
   function baseFacts(registration: SchedulerRegistration, fields: Partial<SchedulerFacts>): SchedulerFacts {
@@ -397,6 +473,23 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
         ? { ...registration, intervalMs: preservedInterval }
         : registration;
 
+      const label = registration.identity.macosLabel;
+      // Read launchd state BEFORE replacing the plist (review §4 matrix):
+      // a refresh whose enabled flag is UNREADABLE must refuse before any
+      // mutation — a blind swap could leave a still-enabled job firing a
+      // stale definition.
+      const state = await loadState(label);
+      if (refreshOnly && state.disabled === null) {
+        return {
+          ok: false,
+          kind: 'command_failed',
+          reason: `launchagent_disabled_state_unverified:${(state.unreadableReasons[0] ?? 'print_disabled_unreadable').slice(0, 100)}`,
+          nextAction: `print-disabled could not prove the enabled flag of the existing registration; ${plistFile} was NOT replaced. Fix the launchctl error above and retry pd service install.`,
+        };
+      }
+      const wasEnabled = refreshOnly && state.disabled === false;
+      const priorContent = existing.ok ? existing.content : null;
+
       const mkdir = fileIo.mkdirs(agentsDir);
       if (!mkdir.ok) {
         return { ok: false, kind: 'command_failed', reason: `launchagents_dir_unwritable:${mkdir.reason.slice(0, 80)}`, nextAction: `Could not create ${agentsDir}; check permissions and retry pd service install.` };
@@ -406,52 +499,86 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
         return { ok: false, kind: 'command_failed', reason: `launchagent_write_failed:${written.reason.slice(0, 80)}`, nextAction: `Could not write ${plistFile}; retry pd service install after fixing the filesystem issue.` };
       }
 
-      const state = await loadState(registration.identity.macosLabel);
-      const wasEnabled = refreshOnly && state.disabled === false;
-      // When the loaded state is UNKNOWN a possibly-loaded job must still be
-      // reloaded — bootout tolerates a definitive not-loaded answer, and a
-      // genuinely loaded job must not keep firing under the stale plist.
-      if (wasEnabled && (!state.loadedKnown || state.loaded)) {
-        // Refresh an ENABLED+loaded agent: reload the definition while the
-        // enabled flag stays enabled (task §15).
-        const bootout = await run('launchctl', ['bootout', `${domain.domain}/${registration.identity.macosLabel}`]);
-        if (bootout.code !== 0) {
-          const stderr = bootout.stderr.trim();
-          const notLoaded = bootout.spawnError === undefined
-            && /no such process|not loaded|No process existing with specified identity/i.test(stderr);
-          if (!notLoaded) {
-            return {
-              ok: false,
-              kind: 'command_failed',
-              reason: `launchctl_bootout_failed:${bootout.code ?? 'spawn'}:${(bootout.spawnError ?? stderr).slice(0, 120)}`,
-              nextAction: 'The refreshed plist could not replace the loaded job (bootout failed); the previous definition stays active. Inspect the stderr above and retry.',
-            };
+      /** Roll the plist back: fresh install removes the file it created; a
+       * refresh restores the pre-call content. The primary error stays —
+       * a rollback failure is appended, never hidden. */
+      const rollbackPlist = (reason: string): string => {
+        if (priorContent === null) {
+          const removed = fileIo.remove(plistFile);
+          return removed.ok ? reason : `${reason}+rollback_remove_failed:${removed.reason.slice(0, 60)}`;
+        }
+        const restored = fileIo.writeAtomic(plistFile, priorContent);
+        return restored.ok ? reason : `${reason}+rollback_restore_failed:${restored.reason.slice(0, 60)}`;
+      };
+
+      let pinnedDisabled = false;
+      if (wasEnabled) {
+        // When the loaded state is UNKNOWN a possibly-loaded job must still
+        // be reloaded — bootout tolerates a definitive not-loaded answer.
+        if (!state.loadedKnown || state.loaded) {
+          const bootout = await run('launchctl', ['bootout', `${domain.domain}/${label}`]);
+          if (bootout.code !== 0) {
+            const stderr = bootout.stderr.trim();
+            const notLoaded = bootout.spawnError === undefined && LAUNCHCTL_NOT_LOADED_BOOTOUT.test(stderr);
+            if (!notLoaded) {
+              return {
+                ok: false,
+                kind: 'command_failed',
+                reason: rollbackPlist(`launchctl_bootout_failed:${bootout.code ?? 'spawn'}:${(bootout.spawnError ?? stderr).slice(0, 120)}`),
+                nextAction: 'The refreshed plist could not replace the loaded job (bootout failed); the previous plist was restored and its definition stays active. Inspect the stderr above and retry.',
+              };
+            }
           }
         }
+        // Reload the definition while the enabled flag stays enabled: also
+        // covers enabled+unloaded — a confirmed-unloaded job is bootstrapped
+        // straight back (bootout is skipped, nothing to unload).
         const bootstrap = await run('launchctl', ['bootstrap', domain.domain, plistFile]);
-        if (bootstrap.code !== 0 || !(await verifyLoaded(registration.identity.macosLabel))) {
+        if (bootstrap.code !== 0 || !(await verifyLoaded(label))) {
           return {
             ok: false,
             kind: 'command_failed',
-            reason: bootstrap.code === 0 ? 'launchagent_reload_unverified' : `launchctl_bootstrap_failed:${bootstrap.code ?? 'spawn'}:${(bootstrap.spawnError ?? bootstrap.stderr).trim().slice(0, 120)}`,
-            nextAction: 'The refreshed plist was written but the job could not be reloaded — enabled state is preserved but the running definition may be stale. Run pd service status and retry.',
+            reason: rollbackPlist(bootstrap.code === 0 ? 'launchagent_reload_unverified' : `launchctl_bootstrap_failed:${bootstrap.code ?? 'spawn'}:${(bootstrap.spawnError ?? bootstrap.stderr).trim().slice(0, 120)}`),
+            nextAction: 'The refreshed plist could not be reloaded; the previous plist was restored but the job may now be unloaded — run pd service status, then retry (a retry re-bootstraps safely).',
           };
         }
-      } else if (!wasEnabled && state.disabled !== true) {
+      } else if (state.disabled !== true) {
         // installed_disabled (task §3): a never-disabled LaunchAgent
         // auto-loads at the next login and RunAtLoad would fire it — so
         // install explicitly pins the persistent disabled flag.
-        const disable = await run('launchctl', ['disable', `${domain.domain}/${registration.identity.macosLabel}`]);
+        const disable = await run('launchctl', ['disable', `${domain.domain}/${label}`]);
         if (disable.code !== 0) {
           return {
             ok: false,
             kind: 'command_failed',
-            reason: `launchctl_disable_failed:${disable.code ?? 'spawn'}:${(disable.spawnError ?? disable.stderr).trim().slice(0, 120)}`,
-            nextAction: `The plist was written but the persistent disable could not be verified — leaving the label enabled would fire it at the next login (RunAtLoad). Inspect the stderr above and re-run pd service install.`,
+            reason: rollbackPlist(`launchctl_disable_failed:${disable.code ?? 'spawn'}:${(disable.spawnError ?? disable.stderr).trim().slice(0, 120)}`),
+            nextAction: `The plist was written but the persistent disable could not be verified — the install was rolled back, leaving the label enabled would fire it at the next login (RunAtLoad). Inspect the stderr above and re-run pd service install.`,
+          };
+        }
+        pinnedDisabled = true;
+      }
+      if (!refreshOnly) {
+        // First install is transactional: the disabled pin must be PROVABLE.
+        // On any doubt, remove the plist this call created and restore the
+        // disable override to its pre-install value (pinned -> enable).
+        const verify = await loadState(label);
+        if (verify.disabled !== true) {
+          let reason = rollbackPlist(`launchagent_disable_unverified:${(verify.unreadableReasons[0] ?? 'flag_not_set').slice(0, 80)}`);
+          if (pinnedDisabled) {
+            const enable = await run('launchctl', ['enable', `${domain.domain}/${label}`]);
+            if (enable.code !== 0) {
+              reason += `+rollback_enable_failed:${(enable.spawnError ?? enable.stderr).trim().slice(0, 60)}`;
+            }
+          }
+          return {
+            ok: false,
+            kind: 'command_failed',
+            reason,
+            nextAction: 'The plist was written but the persistent disable could not be proven; the install was rolled back — the new plist was removed and the disable override restored. Inspect launchctl print-disabled and retry pd service install.',
           };
         }
       }
-      const after = await loadState(registration.identity.macosLabel);
+      const after = await loadState(label);
       return {
         ok: true,
         changed: !refreshOnly,
@@ -533,15 +660,18 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
           };
         }
       }
-      // Verify before reporting success (task §3): only a confirmed-loaded
-      // job is reported enabled.
-      const loaded = await verifyLoaded(label);
-      if (!loaded) {
+      // Verify before reporting success (task §3): a confirmed-loaded job
+      // AND a proven-clear disabled flag are both required — either
+      // UNKNOWN means the enable is unverified, never a success.
+      const postEnable = await loadState(label);
+      if (!postEnable.loaded || postEnable.disabled !== false) {
         return {
           ok: false,
           kind: 'command_failed',
-          reason: 'launchagent_enable_unverified',
-          nextAction: 'launchctl enable/bootstrap returned success but the job is not loaded in the gui domain. Run pd service status to inspect and retry.',
+          reason: postEnable.loaded
+            ? 'launchagent_enable_flag_unverified'
+            : 'launchagent_enable_unverified',
+          nextAction: 'launchctl enable/bootstrap returned success but the job is not provably loaded+enabled in the gui domain. Run pd service status to inspect and retry.',
         };
       }
       return {
@@ -602,11 +732,14 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
           };
         }
       }
-      if (state.loaded) {
+      // A possibly-loaded job (loaded state UNKNOWN) is bootout-ed too —
+      // the command tolerates a definitive not-loaded answer, and a stale
+      // loaded job must not keep firing under the disabled flag.
+      if (state.loaded || !state.loadedKnown) {
         const bootout = await run('launchctl', ['bootout', `${domain.domain}/${label}`]);
         if (bootout.code !== 0) {
           const stderr = bootout.stderr.trim();
-          if (bootout.spawnError !== undefined || !/no such process|not loaded|No process existing with specified identity/i.test(stderr)) {
+          if (bootout.spawnError !== undefined || !LAUNCHCTL_NOT_LOADED_BOOTOUT.test(stderr)) {
             return {
               ok: false,
               kind: 'command_failed',
@@ -616,14 +749,15 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
           }
         }
       }
-      // Prove it is unloaded before reporting stopped (task §3).
-      const unloaded = await verifyUnloaded(label);
-      if (!unloaded) {
+      // Prove it is unloaded before reporting stopped (task §3): UNKNOWN
+      // is a distinct, never-successful verdict.
+      const probe = await probeLoaded(label);
+      if (probe.state !== 'not_loaded') {
         return {
           ok: false,
           kind: 'command_failed',
-          reason: 'launchagent_disable_unverified',
-          nextAction: 'launchctl disable/bootout returned success but the job still reports loaded. Run pd service status to inspect and retry.',
+          reason: probe.state === 'unknown' ? `launchagent_disable_unverified:${(probe.reason ?? 'print_failed').slice(0, 80)}` : 'launchagent_disable_unverified',
+          nextAction: 'launchctl disable/bootout returned success but the job still reports loaded — or the loaded state could not be proven. Run pd service status to inspect and retry.',
         };
       }
       const after = await loadState(label);
@@ -689,13 +823,21 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
         };
       }
       if (state.disabled !== true) {
-        await run('launchctl', ['disable', `${domain.domain}/${label}`]);
+        const disable = await run('launchctl', ['disable', `${domain.domain}/${label}`]);
+        if (disable.code !== 0) {
+          return {
+            ok: false,
+            kind: 'command_failed',
+            reason: `launchctl_disable_failed:${disable.code ?? 'spawn'}:${(disable.spawnError ?? disable.stderr).trim().slice(0, 120)}`,
+            nextAction: 'launchctl disable failed; the job could re-load at the next login — the plist was NOT removed. Inspect the stderr above, then re-run pd service uninstall.',
+          };
+        }
       }
       if (state.loaded) {
         const bootout = await run('launchctl', ['bootout', `${domain.domain}/${label}`]);
         if (bootout.code !== 0) {
           const stderr = bootout.stderr.trim();
-          if (bootout.spawnError !== undefined || !/no such process|not loaded|No process existing with specified identity/i.test(stderr)) {
+          if (bootout.spawnError !== undefined || !LAUNCHCTL_NOT_LOADED_BOOTOUT.test(stderr)) {
             return {
               ok: false,
               kind: 'command_failed',
@@ -704,13 +846,13 @@ export function createMacosSchedulerAdapter(deps: MacosSchedulerDeps): Scheduler
             };
           }
         }
-        const unloaded = await verifyUnloaded(label);
-        if (!unloaded) {
+        const probe = await probeLoaded(label);
+        if (probe.state !== 'not_loaded') {
           return {
             ok: false,
             kind: 'command_failed',
-            reason: 'launchagent_unload_unverified',
-            nextAction: 'The job still reports loaded after bootout; the plist was NOT removed. Inspect with pd service status and retry.',
+            reason: probe.state === 'unknown' ? `launchagent_unload_unverified:${(probe.reason ?? 'print_failed').slice(0, 80)}` : 'launchagent_unload_unverified',
+            nextAction: 'The job still reports loaded after bootout — or the unload could not be proven; the plist was NOT removed. Inspect with pd service status and retry.',
           };
         }
       }

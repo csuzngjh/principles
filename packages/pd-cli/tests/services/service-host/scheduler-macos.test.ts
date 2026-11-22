@@ -75,10 +75,12 @@ function launchctlRunner(state: LaunchctlState, failures: Readonly<Record<string
             ? { code: 0, stdout: 'state = running\n\tlast exit code = 0\n', stderr: '' }
             : { code: 1, stdout: '', stderr: 'Could not find service' };
         case 'print-disabled': {
-          const lines = ['\t"com.apple.other" => disabled => false'];
+          // Real macOS format: `disabled services = {\n\t"label" : true\n}`
+          const lines = ['disabled services = {', '\t"com.apple.other" : false'];
           if (state.disabled !== null) {
-            lines.push(`\t"${state.label}" => disabled => ${state.disabled}`);
+            lines.push(`\t"${state.label}" : ${state.disabled}`);
           }
+          lines.push('}');
           return { code: 0, stdout: `${lines.join('\n')}\n`, stderr: '' };
         }
         case 'disable':
@@ -589,5 +591,184 @@ describe('createMacosSchedulerAdapter', () => {
     expect(result.reason).toBe('macos_uid_unavailable');
     expect(fileIo.writeLog).toHaveLength(0);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('lifecycle reliability round 3 (tri-state / transactional install / refresh matrix)', () => {
+  it('fresh-install rolls back when launchctl disable fails: plist removed', async () => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const plistFile = plistPathFor(registration);
+    const state: LaunchctlState = { label: registration.identity.macosLabel, loaded: false, disabled: null };
+    const { runner } = launchctlRunner(state, {
+      disable: { code: 1, stdout: '', stderr: 'Could not disable service' },
+    });
+    const fileIo = new FakeFileIo();
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('launchctl_disable_failed');
+    // Transactional rollback — no orphaned registration file.
+    expect(fileIo.files.has(plistFile)).toBe(false);
+    expect(fileIo.removeLog).toContain(plistFile);
+  });
+
+  it('fresh-install rolls back when the disabled pin cannot be verified: plist removed + enable restores override', async () => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const plistFile = plistPathFor(registration);
+    const state: LaunchctlState = { label: registration.identity.macosLabel, loaded: false, disabled: null };
+    const base = launchctlRunner(state);
+    // First print-disabled (pre-write loadState) succeeds; the verify
+    // probe after the pin fails → disabled UNKNOWN → rollback.
+    let printDisabledCalls = 0;
+    const calls = base.calls;
+    const runner: SchedulerCommandRunner = {
+      async run(command, args, env) {
+        if (args[0] === 'print-disabled') {
+          printDisabledCalls += 1;
+          if (printDisabledCalls > 1) return { code: 1, stdout: '', stderr: 'bus error' };
+        }
+        return base.runner.run(command, args, env);
+      },
+    };
+    const fileIo = new FakeFileIo();
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('launchagent_disable_unverified');
+    expect(fileIo.files.has(plistFile)).toBe(false);
+    // Rollback order: plist removal AND `launchctl enable` restoring the
+    // pre-install override state (disable pin undone).
+    const subs = subsOf(calls);
+    expect(subs).toContain('disable');
+    expect(subs.lastIndexOf('enable')).toBeGreaterThan(subs.lastIndexOf('disable'));
+  });
+
+  it('refresh refuses BEFORE writing when print-disabled is unreadable (UNKNOWN ≠ safe)', async () => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const plistFile = plistPathFor(registration);
+    const prior = buildMacosLaunchAgentPlist(registration);
+    const state: LaunchctlState = { label: registration.identity.macosLabel, loaded: true, disabled: false };
+    const { runner } = launchctlRunner(state, {
+      'print-disabled': { code: 1, stdout: '', stderr: 'Could not find service' },
+    });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(plistFile, prior);
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('launchagent_disabled_state_unverified');
+    // Refused before ANY destructive step — file untouched, no bootout.
+    expect(fileIo.writeLog).toHaveLength(0);
+    expect(fileIo.files.get(plistFile)).toBe(prior);
+  });
+
+  it('refresh re-bootstraps an ENABLED but UNLOADED agent (bootstrap without bootout)', async () => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const state: LaunchctlState = { label: registration.identity.macosLabel, loaded: false, disabled: false };
+    const { runner, calls } = launchctlRunner(state);
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(plistPathFor(registration), buildMacosLaunchAgentPlist(registration));
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBe(true);
+    expect(subsOf(calls)).toContain('bootstrap');
+    // Enabled but unloaded → no bootout needed; nothing was unloaded first.
+    expect(subsOf(calls)).not.toContain('bootout');
+  });
+
+  it('refresh restores the previous plist when the re-bootstrap fails', async () => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const plistFile = plistPathFor(registration);
+    const prior = buildMacosLaunchAgentPlist(registration);
+    const state: LaunchctlState = { label: registration.identity.macosLabel, loaded: true, disabled: false };
+    const { runner } = launchctlRunner(state, {
+      bootstrap: { code: 1, stdout: '', stderr: 'Bootstrap failed: 5' },
+    });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(plistFile, prior);
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('launchctl_bootstrap_failed');
+    // Original effective registration preserved — nothing lost.
+    expect(fileIo.files.get(plistFile)).toBe(prior);
+  });
+
+  it('status reports enabled=null when print-disabled output is unparseable (never coerced)', async () => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const state: LaunchctlState = { label: registration.identity.macosLabel, loaded: true, disabled: false };
+    const { runner } = launchctlRunner(state, {
+      'print-disabled': { code: 0, stdout: 'totally unexpected output\n', stderr: '' },
+    });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(plistPathFor(registration), buildMacosLaunchAgentPlist(registration));
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.status(registration);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.facts.enabled).toBeNull();
+    expect(result.facts.degradedReasons?.some((r) => r.includes('launchctl_print_disabled_unparseable'))).toBe(true);
+  });
+
+  it.each([
+    ['a comment-forged Label', (plist: string, label: string) =>
+      plist.replace('</dict>', `<!-- <key>Label</key><string>com.evil.x</string> -->\n</dict>`)],
+    ['a duplicate ProgramArguments key', (plist: string) =>
+      plist.replace('</dict>', `<key>ProgramArguments</key><array><string>/usr/bin/evil</string></array>\n</dict>`)],
+    ['a smuggled StartCalendarInterval key', (plist: string) =>
+      plist.replace('</dict>', `<key>StartCalendarInterval</key><integer>5</integer>\n</dict>`)],
+    ['a non-string Label', (plist: string, label: string) =>
+      plist.replace(`<string>${label}</string>`, '<integer>5</integer>')],
+  ])('install refuses %s in an existing plist (external_conflict)', async (_name, forge) => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const label = registration.identity.macosLabel;
+    const forged = forge(buildMacosLaunchAgentPlist(registration), label);
+    const { runner } = launchctlRunner({ label, loaded: true, disabled: false });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(plistPathFor(registration), forged);
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.install(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('external_conflict');
+  });
+
+  it('uninstall keeps the plist when launchctl disable fails (no silent removal)', async () => {
+    const home = tempHome();
+    const registration = makeRegistration(home);
+    const plistFile = plistPathFor(registration);
+    const state: LaunchctlState = { label: registration.identity.macosLabel, loaded: false, disabled: false };
+    const { runner } = launchctlRunner(state, {
+      disable: { code: 1, stdout: '', stderr: 'Operation not permitted' },
+    });
+    const fileIo = new FakeFileIo();
+    fileIo.files.set(plistFile, buildMacosLaunchAgentPlist(registration));
+    const adapter = createMacosSchedulerAdapter(makeDeps(runner, fileIo));
+
+    const result = await adapter.uninstall(registration);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('launchctl_disable_failed');
+    expect(fileIo.files.has(plistFile)).toBe(true);
   });
 });
