@@ -1,15 +1,8 @@
 /**
- * PRI-1274 review round 2 (directive H5): the waiting-for-target-evidence
- * gate on the manual/split diagnosis entry is ATOMIC with the lease
- * acquisition and FAIL-CLOSED on store read failures.
- *
- * The deterministic interleave: the runner's fast pre-check is fed a STALE
- * non-waiting snapshot (exactly what a recovery flipping the task between
- * the pre-check and the lease looks like from the runner's side), while the
- * authoritative row in the REAL store is already waiting. The acquisition's
- * in-transaction predicate (H2) must refuse: zero lease, zero generation
- * bump, zero run record, zero provider calls, task untouched.
- */
+ * PRI-1274 / PRI-1283: waiting and consent-blocked dispositions on the
+ * manual/split diagnosis entry are atomic with lease acquisition and
+ * fail-closed on store read failures.
+*/
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -63,6 +56,25 @@ const WAITING_JSON = JSON.stringify({
     schemaVersion: 1,
     state: 'waiting_for_target_evidence',
     reasonCode: 'target_turn_text_pending',
+    attemptCount: 1,
+    lastCheckedAt: '2026-11-22T10:00:00.000Z',
+  },
+  workspaceDir: null,
+});
+
+
+const BLOCKED_JSON = JSON.stringify({
+  sourcePainId: 'mcp_waiting_gate_1',
+  reasonSummary: 'target turn is unavailable after source revocation',
+  source: 'manual',
+  severity: 'moderate',
+  sessionIdHint: 's1',
+  provenance: 'host_context_bound',
+  evidence: [],
+  recovery: {
+    schemaVersion: 1,
+    state: 'blocked_by_source_material_consent',
+    reasonCode: 'target_turn_source_material_consent_revoked',
     attemptCount: 1,
     lastCheckedAt: '2026-11-22T10:00:00.000Z',
   },
@@ -137,6 +149,49 @@ describe('PRI-1274 r2 H — atomic waiting gate on the split/manual diagnosis en
     expect(task?.diagnosticJson).toBe(WAITING_JSON);
     const runs = await stateManager.getRunsByTask(PARENT_TASK_ID);
     expect(runs.length).toBe(0);
+  });
+
+  it('a consent-blocked task cannot lease or call providers even when the fast pre-check is stale', async () => {
+    await stateManager.createTask({
+      taskId: PARENT_TASK_ID,
+      taskKind: 'diagnostician',
+      inputRef: 'mcp_waiting_gate_1',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: BLOCKED_JSON,
+    });
+
+    const realGetTask = stateManager.getTask.bind(stateManager);
+    const staleTask = async (id: string): Promise<TaskRecord | null> => {
+      const observed = await realGetTask(id);
+      if (observed === null || id !== PARENT_TASK_ID) return observed;
+      return {
+        ...observed,
+        diagnosticJson: JSON.stringify({
+          ...JSON.parse(observed.diagnosticJson ?? '{}'),
+          recovery: undefined,
+        }),
+      };
+    };
+    const wrapped = Object.create(stateManager);
+    wrapped.getTask = vi.fn(staleTask);
+    const { runner, rootCause } = makeRunner(wrapped as RuntimeStateManager);
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.errorCategory).toBe('input_invalid');
+      expect(result.failureReason).toContain('target_evidence_blocked_by_consent');
+      expect(result.failureReason).toContain('target_turn_source_material_consent_revoked');
+      expect(result.attemptCount).toBe(0);
+    }
+    expect(rootCause.run).not.toHaveBeenCalled();
+    const task = await realGetTask(PARENT_TASK_ID);
+    expect(task?.status).toBe('pending');
+    expect(task?.leaseGeneration).toBe(0);
+    expect(task?.diagnosticJson).toBe(BLOCKED_JSON);
+    expect(await stateManager.getRunsByTask(PARENT_TASK_ID)).toEqual([]);
   });
 
   it('an unreadable authoritative task state fails CLOSED: no lease, no run, no provider', async () => {

@@ -27,6 +27,7 @@ import {
   validatePainSubmitReceipt,
   recoverTaskIdentityFromReceipt,
 } from '../pain-receipt-recovery.js';
+import { pickDiagnosticianCandidate } from '../diagnostician-candidate.js';
 
 let tmpDir: string;
 let stateManager: RuntimeStateManager;
@@ -515,6 +516,11 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4/T8/T9 negat
     const recovery = diagnostic.recovery as Record<string, unknown>;
     expect(recovery.state).toBe('blocked_by_consent');
     expect(recovery.reasonCode).toBe('minimal_identity_metadata_not_granted');
+
+    // This is the real PostToolUse receipt-recovery path, not a synthetic row:
+    // identity binding is blocked, but the owner-manual report remains eligible.
+    const candidate = await pickDiagnosticianCandidate(stateManager, 1, new Date().toISOString());
+    expect(candidate?.taskId).toBe(taskId);
   });
 
   it('T9: with the authorization OFF, ZERO identity metadata is persisted — no receiptRef, no toolCallId anywhere', async () => {

@@ -17,6 +17,7 @@ import {
   type SuggestedOwnerAction,
 } from '../diagnostician/diag-rootcause-output.js';
 import { normalizePainProvenance, type PainProvenance } from '../admission-gate.js';
+import { isOwnerManualCorrectionEvidence } from '../source-material-authorization.js';
 
 // PRI-469: re-export IntentTension so consumers can import it from the
 // evidence-chain module without reaching into the diagnostician package.
@@ -143,6 +144,13 @@ export interface CorrectionEvidence {
   /** Assistant turn this correction refers to (raw output can be shown verbatim). */
   referencesAssistantTurnId?: number;
   occurredAt?: string;
+  /**
+   * PRI-1283: Owner-source verdict computed from the PERSISTED evidence
+   * (channel + bound confirmation) by the shared judgment BEFORE this
+   * projection drops those provenance fields. `true` only for owner_manual;
+   * absent/false = agent-derived or unlabeled.
+   */
+  ownerManual?: boolean;
 }
 
 export const CorrectionEvidenceSchema = Type.Object({
@@ -151,6 +159,7 @@ export const CorrectionEvidenceSchema = Type.Object({
   turnIndex: Type.Optional(Type.Number()),
   referencesAssistantTurnId: Type.Optional(Type.Number()),
   occurredAt: Type.Optional(Type.String()),
+  ownerManual: Type.Optional(Type.Boolean()),
 });
 
 export const EvidenceChainRecordSchema = Type.Object({
@@ -417,6 +426,10 @@ export function validateCorrectionEvidence(value: unknown): CorrectionEvidence |
   if (!isString(text) || text.trim() === '') return undefined;
 
   const evidence: CorrectionEvidence = { text };
+  // Judge the RAW persisted object before this projection strips channel and
+  // the bound confirmation record — the projected fields alone can no longer
+  // distinguish an Owner-manual statement from an agent-derived one.
+  if (isOwnerManualCorrectionEvidence(value)) evidence.ownerManual = true;
   const sessionId = getOwnValue(value, 'sessionId');
   if (isString(sessionId) && sessionId.trim()) evidence.sessionId = sessionId;
   const turnIndex = getOwnValue(value, 'turnIndex');

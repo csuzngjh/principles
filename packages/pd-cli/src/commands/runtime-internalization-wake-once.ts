@@ -13,6 +13,7 @@ import * as path from 'path';
 import { RuntimeStateManager, InternalizationOrchestrator } from '@principles/core/runtime';
 import type { WakeOnceResult } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createConsentLedgerSourceMaterialAuthorization } from '@principles/host-runtime/source-material-authorization';
 
 interface WakeOnceOptions {
   workspace?: string;
@@ -58,7 +59,7 @@ export async function handleRuntimeInternalizationWakeOnce(opts: WakeOnceOptions
 
   try {
     const orchestrator = new InternalizationOrchestrator(
-      { stateManager },
+      { stateManager, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, dryRun: true },
     );
 

@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { getDefaultPdConfig } from '@principles/core/runtime';
+import { recordConversationIngestionConsent } from '@principles/host-runtime';
 import { writeCurrentTurnContext, TURN_CONTEXT_FILENAME_PREFIX } from '@principles/codex-adapter';
 import { processHookInvocation } from '@principles/codex-adapter/pd-hook';
 import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
@@ -25,6 +26,7 @@ const TURN_1 = '01a048ae-b344-7eb2-804b-a2fa34302fb3';
 const SESSION_B = '01b048ae-b2a5-71a1-9faf-0226980f98ff';
 const TURN_B = '01b048ae-b344-7eb2-804b-a2fa34302fb3';
 const OWNER_WORDS = '额度有限的任务应委派给低成本模型的子代理完成，而不是全部由高价模型自己执行';
+const OWNER_REQUEST_PREFIX = 'PD\u4ee3\u5f55\u75db\u82e6\uff1a';
 
 const dirs: string[] = [];
 
@@ -43,6 +45,13 @@ function makeWorkspace(): Workspace {
   };
   process.env.PD_PAIN_EXPLICIT_TEST_KEY = 'test-key';
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
+  const consent = recordConversationIngestionConsent(root, 'codex', {
+    decision: 'granted',
+    decidedVia: 'pd_codex_setup',
+    decidedAt: new Date().toISOString(),
+    disclosureVersion: 'g2b-2026-11-12',
+  });
+  if (!consent.ok) throw new Error(consent.reason);
   const trajectory = new Database(path.join(root, '.state', 'trajectory.db'));
   trajectory.exec('CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)');
   trajectory.exec('CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL)');
@@ -88,9 +97,9 @@ function turnContextFile(root: string, sessionId = ROOT_SESSION): string {
   return path.join(root, '.state', `${TURN_CONTEXT_FILENAME_PREFIX}${sessionKey}.json`);
 }
 
-function publishTurnContext(ws: Workspace, sessionId = ROOT_SESSION, turnId = TURN_1): void {
+function publishTurnContext(ws: Workspace, sessionId = ROOT_SESSION, turnId = TURN_1, prompt = OWNER_REQUEST_PREFIX + OWNER_WORDS): void {
   const write = writeCurrentTurnContext({
-    rawPayload: { session_id: sessionId, turn_id: turnId, transcript_path: ws.transcriptPath },
+    rawPayload: { session_id: sessionId, turn_id: turnId, transcript_path: ws.transcriptPath, prompt },
     workspaceDir: ws.root,
     env: { CODEX_HOME: ws.codexHome },
   });
@@ -129,6 +138,19 @@ describe('pd pain explicit (json output contract, cli-1/cli-2)', () => {
     const tasks = stateDb.prepare("SELECT task_id FROM tasks WHERE task_kind = 'diagnostician'").all() as { task_id: string }[];
     stateDb.close();
     expect(tasks).toHaveLength(1);
+  });
+
+  it('refuses an agent invocation without a current Owner intent marker', () => {
+    const ws = makeWorkspace();
+    publishTurnContext(ws, ROOT_SESSION, TURN_1, 'analyze this conversation');
+    const run = runCli(['pain', 'explicit', '--statement', OWNER_WORDS, '--workspace', ws.root, '--json']);
+    expect(run.code).toBe(1);
+    const result = JSON.parse(run.stdout) as { status: string; reason: string };
+    expect(result.status).toBe('failed');
+    expect(result.reason).toBe('owner_intent_missing');
+    const trajectory = new Database(path.join(ws.root, '.state', 'trajectory.db'), { readonly: true });
+    expect((trajectory.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(0);
+    trajectory.close();
   });
 
   it('fails closed with a structured reason when no live turn context exists', () => {
@@ -188,7 +210,7 @@ describe('pd pain explicit (host-bound session isolation)', () => {
       model: 'gpt-5.6-sol',
       permission_mode: 'bypassPermissions',
       hook_event_name: event,
-      prompt: `显式反馈：${OWNER_WORDS}`,
+      prompt: OWNER_REQUEST_PREFIX + OWNER_WORDS,
       stop_hook_active: false,
     });
 

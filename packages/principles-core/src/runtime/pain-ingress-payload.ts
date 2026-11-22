@@ -51,6 +51,14 @@ export type PainIngressOriginV1 =
         // conversation. Neither a CLI statement nor a fake host session.
         | 'mcp_agent_assisted';
     }
+  | {
+      // Owner explicitly requested the Codex agent to register a pain, but
+      // the submitted wording was not verified verbatim against the Owner's
+      // transcript. It is agent-reported/Owner-authorized, not Owner-authored
+      // and not an automatic hook.
+      kind: 'agent_assisted';
+      channel: 'codex_explicit_agent';
+    }
   | { kind: 'automatic_hook'; source: string };
 
 export type PainIngressCorrelationV1 =
@@ -89,7 +97,9 @@ export type PainIngressEvidenceClassV1 =
         | 'evidence_read_failed'
         | 'evidence_invalid'
         /** Unbound Owner reports never consult a trajectory — no evidence is sought. */
-        | 'not_applicable_unbound';
+        | 'not_applicable_unbound'
+        /** PRI-1283 R3: evidence purged because its source's consent was revoked. */
+        | 'source_revoked';
     };
 
 export type PainEvidenceUnavailableReason =
@@ -99,7 +109,9 @@ export type PainEvidenceUnavailableReason =
   | 'evidence_read_failed'
   | 'evidence_invalid'
   /** Unbound Owner reports never consult a trajectory — no evidence is sought. */
-  | 'not_applicable_unbound';
+  | 'not_applicable_unbound'
+  /** PRI-1283 R3: evidence purged because its source's consent was revoked. */
+  | 'source_revoked';
 
 export interface IngressEvidenceEntry {
   kind: 'behavior_trace' | 'system_event';
@@ -173,6 +185,9 @@ export function parseOrigin(value: unknown): PainOrigin | null {
     }
     return null;
   }
+  if (value.kind === 'agent_assisted' && value.channel === 'codex_explicit_agent') {
+    return { kind: 'agent_assisted', channel: 'codex_explicit_agent' };
+  }
   if (value.kind === 'automatic_hook' && typeof value.source === 'string' && value.source.length > 0) {
     return { kind: 'automatic_hook', source: value.source };
   }
@@ -235,6 +250,9 @@ const EVIDENCE_UNAVAILABLE_REASONS = [
   'evidence_read_failed',
   'evidence_invalid',
   'not_applicable_unbound',
+  // PRI-1283 R3: the evidence existed but its source's consent was revoked —
+  // the persisted excerpts were purged by the revocation sweep.
+  'source_revoked',
 ] as const;
 
 type EvidenceUnavailableReason = (typeof EVIDENCE_UNAVAILABLE_REASONS)[number];
@@ -318,7 +336,7 @@ export function parsePainIngressReport(input: unknown): PainIngressParseResult {
   if (!hasOwnString(input, 'reason')) return { ok: false, reasonCode: 'reason_invalid', message: 'reason is required' };
 
   const origin = parseOrigin(input.origin);
-  if (origin === null) return { ok: false, reasonCode: 'origin_invalid', message: 'origin must be owner_manual{channel} or automatic_hook{source}' };
+  if (origin === null) return { ok: false, reasonCode: 'origin_invalid', message: 'origin must be owner_manual{channel}, agent_assisted{channel}, or automatic_hook{source}' };
 
   const correlation = parseCorrelation(input.correlation);
   if (correlation.error !== undefined) {
@@ -380,6 +398,11 @@ export function validateOriginCorrelationInvariant(
   origin: PainOrigin,
   correlation: PainCorrelation,
 ): string | null {
+  if (origin.kind === 'agent_assisted') {
+    return correlation.status === 'bound' && correlation.hostKind === 'codex'
+      ? null
+      : 'origin_correlation_mismatch';
+  }
   if (origin.kind !== 'owner_manual') return null;
   if (origin.channel === 'external_cli_unbound' && correlation.status === 'bound') {
     return 'origin_correlation_mismatch';
@@ -560,6 +583,7 @@ export function deriveProvenanceFromIngressFacts(
   correlation: PainIngressCorrelationV1,
 ): PainProvenance {
   if (origin.kind === 'automatic_hook') return 'automatic_hook';
+  if (origin.kind === 'agent_assisted') return 'agent_reported_owner_approved';
   // Agent observed the behaviour, Owner authorized the submission
   // (SPEC v0.8 §6.6.3). This is NOT "Owner reported": the Owner did not
   // observe the behaviour and must never be shown as its author.

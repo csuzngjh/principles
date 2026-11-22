@@ -48,6 +48,7 @@ import {
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
   createGovernanceTrajectoryTurnReader,
+  createConsentLedgerSourceMaterialAuthorization,
   createHostIntentDocReader,
   isAutomaticPainSubmissionAuthorized,
   saveHostToolDeclaration,
@@ -401,7 +402,9 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
             intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
             // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
             // turns from the workspace's own consent-tiered governance store.
-            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
+            // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
+            sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
             // SPEC §9.6: lazy probe — a revoked flag stops persisted
             // automatic_hook tasks at the bridge's execution boundary.
             isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),

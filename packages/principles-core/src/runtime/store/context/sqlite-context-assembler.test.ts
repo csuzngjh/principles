@@ -102,7 +102,15 @@ function createFixture(tasks?: Map<string, DiagnosticianTaskRecord>, options?: {
     ? new SqliteSourceTraceLocator(taskStore, new SqliteTrajectoryLocator(connection))
     : undefined;
   const trajectoryTurnReader = options?.trajectoryTurnReader;
-  const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator, trajectoryTurnReader });
+  // PRI-1283 R2: promoted-window reads are authorization-gated; these
+  // mechanics tests run in the all-hosts-authorized state (the gate matrix
+  // lives in __tests__/source-material-authorization.test.ts and the
+  // host-runtime source-revocation-safety suite).
+  const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {
+    sourceTraceLocator,
+    trajectoryTurnReader,
+    sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: true }) },
+  });
   return { tmpDir, connection, sqliteTaskStore, runStore, historyQuery, sourceTraceLocator, taskStore, taskMap, assembler, trajectoryTurnReader };
 }
 
@@ -1771,6 +1779,7 @@ function seedGovernanceObservations(workspaceDir: string, rows: SeededObservatio
   try {
     db.exec(`CREATE TABLE governance_observations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      host_kind TEXT NOT NULL DEFAULT 'codex',
       kind TEXT NOT NULL,
       visible_text TEXT,
       source_order INTEGER,
@@ -1780,8 +1789,8 @@ function seedGovernanceObservations(workspaceDir: string, rows: SeededObservatio
       promotion_ref TEXT
     )`);
     const insert = db.prepare(`INSERT INTO governance_observations
-      (kind, visible_text, source_order, observed_at, sanitized_tool_facts_json, retention_class, promotion_ref)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      (host_kind, kind, visible_text, source_order, observed_at, sanitized_tool_facts_json, retention_class, promotion_ref)
+      VALUES ('codex', ?, ?, ?, ?, ?, ?, ?)`);
     for (const row of rows) {
       insert.run(
         row.kind,

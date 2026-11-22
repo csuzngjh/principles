@@ -22,6 +22,10 @@
     "./pd-config": {
       "types": "./dist/pd-config.d.ts",
       "default": "./dist/pd-config.js"
+    },
+    "./source-material-authorization": {
+      "types": "./dist/source-material-authorization.d.ts",
+      "default": "./dist/source-material-authorization.js"
     }
   },
   "files": [

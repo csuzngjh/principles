@@ -10,6 +10,12 @@ import { Value } from '@sinclair/typebox/value';
 import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evidence-guards.js';
 import {
+  denyAllSourceMaterialAuthorization,
+  findUnauthorizedSourceRef,
+  isOwnerManualCorrectionEvidence,
+  type SourceMaterialAuthorizationPort,
+} from './source-material-authorization.js';
+import {
   ADMISSION_POLICY_VERSION,
   fingerprintMaterial,
   fingerprintStatement,
@@ -490,7 +496,7 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     ...(data.painIngress ? { painIngress: data.painIngress } : {}),
     // PRI-1274 (B1 / P1-3): the SAME `recovery` block the receipt fallback
     // writes — submit-time it marks `waiting_for_target_evidence`, which the
-    // candidate picker's SQL excludes and the worker reconcile flips.
+    // candidate picker excludes; only waiting tasks are worker-reconciled.
     ...(data.admissionDisposition ? { recovery: data.admissionDisposition } : {}),
   });
 }
@@ -643,7 +649,7 @@ async function resolveCandidateRunOutput(
 export async function evaluateAndPersistAdmissionFromStore(
   stateManager: Pick<RuntimeStateManager, 'getTask' | 'getRunsByTask' | 'getRun' | 'getArtifact' | 'getCandidatesByTaskId' | 'appendAdmissionEvaluation'>,
   candidateIds: readonly string[],
-  input: { taskId: string; persist?: boolean },
+  input: { taskId: string; persist?: boolean; /** PRI-1283 R2: admission re-verification port; absent = fail-closed for governance-sourced material. */ sourceMaterialAuthorization?: SourceMaterialAuthorizationPort },
 ): Promise<
   { ok: true; decisions: Map<string, { decision: AdmissionDecision; reason: string; nextAction: string }> }
   | { ok: false; reason: string; nextAction: string }
@@ -674,6 +680,129 @@ export async function evaluateAndPersistAdmissionFromStore(
   const reentry = validatePersistedIngressFacts(ingressTask.diagnosticJson);
   if (reentry.errorCode !== null) {
     return { ok: false, reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; re-run the diagnosis before intake' };
+  }
+  // PRI-1283 R2 — admission's LAST authorization re-verification. The
+  // ingress evidence (task input) AND every candidate's own diagnostic output
+  // evidence are re-checked against the LATEST consent state right before any
+  // admission verdict is computed or persisted. Governed-but-unauthorized
+  // material refuses the intake (fail closed); the R3 sweep cleans the
+  // persisted copies so a re-run sees empty, not revoked, evidence.
+  const authorization = input.sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization;
+  {
+    let ingressPayload: Record<string, unknown> | null = null;
+    try {
+      const parsed: unknown = JSON.parse(ingressTask.diagnosticJson ?? '{}');
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const record: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(parsed)) record[key] = value;
+        ingressPayload = record;
+      }
+    } catch {
+      ingressPayload = null;
+    }
+    const ingressEvidence: unknown = ingressPayload?.evidence;
+    const ingressRefs = Array.isArray(ingressEvidence)
+      ? ingressEvidence.map((entry) => (typeof entry === 'object' && entry !== null && !Array.isArray(entry) && typeof (entry as { sourceRef?: unknown }).sourceRef === 'string' ? (entry as { sourceRef: string }).sourceRef : ''))
+      : [];
+    const ingressBlocked = findUnauthorizedSourceRef(ingressRefs, authorization);
+    if (ingressBlocked !== null) {
+      return {
+        ok: false,
+        reason: `source_authorization_revoked:${ingressBlocked.reason}`,
+        nextAction: `ingress evidence sourceRef '${ingressBlocked.sourceRef}' (host ${ingressBlocked.hostKind ?? 'unknown'}) is no longer authorized; run 'pd consent sweep-revoked --apply' and re-run the diagnosis before intake`,
+      };
+    }
+    // PRI-1283 review round 2 (directive D2): the ingress ORIGIN is the
+    // durable source attribution. After the R3 sweep removes the revoked
+    // evidence excerpts, `painIngress.origin` (kept by the sweep) is what
+    // still identifies the candidate's material as originating from a host
+    // whose consent is no longer granted — such a diagnosis must never re-
+    // enter internalization or downstream model stages, no matter how old its
+    // admission verdict is. `origin.kind === 'owner_manual'` (explicit Owner
+    // submission) is an Owner act and stays allowed (directive B).
+    const ingressOriginNested: unknown = ingressPayload !== null && isRecord(ingressPayload.painIngress)
+      ? ingressPayload.painIngress.origin
+      : undefined;
+    const ingressOrigin = isRecord(ingressOriginNested) ? ingressOriginNested : null;
+    const painIngress = ingressPayload !== null && isRecord(ingressPayload.painIngress)
+      ? ingressPayload.painIngress
+      : null;
+    const ingressCorrelation = painIngress !== null && isRecord(painIngress.correlation)
+      ? painIngress.correlation
+      : null;
+    const sourceRevocation = ingressPayload !== null && isRecord(ingressPayload.sourceRevocation)
+      ? ingressPayload.sourceRevocation
+      : null;
+    const codexRevocationTombstone = sourceRevocation !== null && isRecord(sourceRevocation.codex);
+    const codexEvidenceRevoked = painIngress !== null
+      && isRecord(painIngress.evidenceClass)
+      && painIngress.evidenceClass.status === 'unavailable'
+      && painIngress.evidenceClass.reason === 'source_revoked';
+    const correctionIsOwnerManual = isOwnerManualCorrectionEvidence(ingressPayload?.correctionEvidence);
+    const isCodexIngress = ingressPayload?.hostKind === 'codex' || ingressCorrelation?.hostKind === 'codex';
+    const agentDerivedCodexIngress = isCodexIngress
+      && !correctionIsOwnerManual
+      && (
+        ingressOrigin?.kind === 'agent_assisted'
+        || (ingressOrigin?.kind === 'owner_manual' && ingressOrigin.channel === 'codex_explicit_agent')
+        || codexRevocationTombstone
+        || codexEvidenceRevoked
+      );
+    if (agentDerivedCodexIngress) {
+      // The sweep tombstone is irreversible for this persisted payload. A
+      // later grant authorizes NEW material; it cannot revive purged wording.
+      if (codexRevocationTombstone || codexEvidenceRevoked) {
+        return {
+          ok: false,
+          reason: 'source_authorization_revoked:agent_assisted_source_revoked',
+          nextAction: 'this Agent-derived Codex correction was purged after source revocation; re-grant does not revive the old payload. Re-register from a newly authorized Owner turn',
+        };
+      }
+      if (!authorization.isHostSourceMaterialAuthorized('codex').authorized) {
+        return {
+          ok: false,
+          reason: 'source_authorization_revoked:ingress_origin_host_codex',
+          nextAction: 'the Agent-derived Codex correction is no longer authorized; run the revocation sweep and create a new diagnosis from a newly authorized Owner turn',
+        };
+      }
+    }
+    if (ingressOrigin !== null && ingressOrigin.kind === 'automatic_hook' && typeof ingressOrigin.source === 'string') {
+      const sourcePrefix = ingressOrigin.source.split(':')[0] ?? '';
+      if ((sourcePrefix === 'codex' || sourcePrefix === 'workbuddy')
+        && !authorization.isHostSourceMaterialAuthorized(sourcePrefix).authorized) {
+        return {
+          ok: false,
+          reason: `source_authorization_revoked:ingress_origin_host_${sourcePrefix}`,
+          nextAction: `the diagnosis material originates from host '${sourcePrefix}' whose conversation-ingestion consent is no longer granted; intake is refused (the R3 sweep keeps this attribution even after excerpts are purged)`,
+        };
+      }
+    }
+    const correctionBlockedByChannel = (() => {
+      const correction = reentry.correctionEvidence;
+      if (correction === undefined) return false;
+      const channel = typeof (correction as { channel?: unknown }).channel === 'string' ? (correction as { channel: string }).channel : '';
+      // PRI-1283 review round 3 (owner_manual ruling): credibly
+      // Owner-authored statements — a direct Owner channel, or an
+      // agent-assisted channel with a bound Owner confirmation record —
+      // are Owner acts: not governed by the conversation-ingestion consent
+      // ledger, surviving a revocation. An unconfirmed codex_explicit_agent
+      // record is Agent-derived and stays governed below.
+      if (isOwnerManualCorrectionEvidence(correction)) return false;
+      const ingressHost = typeof ingressPayload?.hostKind === 'string' ? ingressPayload.hostKind : '';
+      if (channel.startsWith('codex')) return !authorization.isHostSourceMaterialAuthorized('codex').authorized;
+      if (channel.startsWith('workbuddy')) return !authorization.isHostSourceMaterialAuthorized('workbuddy').authorized;
+      if (channel.length === 0 && (ingressHost === 'codex' || ingressHost === 'workbuddy')) {
+        return !authorization.isHostSourceMaterialAuthorized(ingressHost).authorized;
+      }
+      return false;
+    })();
+    if (correctionBlockedByChannel) {
+      return {
+        ok: false,
+        reason: 'source_authorization_revoked:correction_evidence',
+        nextAction: 'the correction evidence originates from a host whose consent is no longer granted; run the revocation sweep and re-run the diagnosis before intake',
+      };
+    }
   }
   const ownerStatementPresent = isOwnerStatementEvidence(reentry.correctionEvidence);
   const candidates = (await stateManager.getCandidatesByTaskId(ingressTask.taskId))
@@ -720,6 +849,19 @@ export async function evaluateAndPersistAdmissionFromStore(
     const round = resolvedRounds.get(candidate.candidateId);
     if (round === undefined) continue;
     const {output} = round;
+    // PRI-1283 R2: the candidate's OWN output evidence gets the final check
+    // (its notes quote source material resolved from this very run).
+    const outputBlocked = findUnauthorizedSourceRef(
+      Array.isArray(output.evidence) ? output.evidence.map((entry) => entry.sourceRef) : [],
+      authorization,
+    );
+    if (outputBlocked !== null) {
+      return {
+        ok: false,
+        reason: `source_authorization_revoked:${outputBlocked.reason}`,
+        nextAction: `candidate ${candidate.candidateId} output evidence sourceRef '${outputBlocked.sourceRef}' is no longer authorized; intake is refused (PRI-1283 R2)`,
+      };
+    }
     // The fingerprint is computed from THIS candidate's own material, so two
     // rounds never collide on the same idempotency key.
     const materialFingerprint = fingerprintMaterial([
@@ -1201,8 +1343,14 @@ export class PainSignalBridge {
     // a manual run may diagnose it on OTHER turns' text. The worker
     // reconcile flips the disposition once the authorized target evidence
     // exists; until then this is a skip, never a failure.
-    if (readRecoveryState(task.diagnosticJson) === 'waiting_for_target_evidence') {
+    const recoveryState = readRecoveryState(task.diagnosticJson);
+    if (recoveryState === 'waiting_for_target_evidence') {
       return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'target_evidence_pending' };
+    }
+    // Consent-blocked tasks are not worker-reconciled: only a newly authorized
+    // target turn may replace the denied source material.
+    if (recoveryState === 'blocked_by_source_material_consent') {
+      return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'target_evidence_blocked_by_consent' };
     }
 
     // PRI-642 SPEC §9: re-entry validates the persisted rev-2 facts BEFORE
