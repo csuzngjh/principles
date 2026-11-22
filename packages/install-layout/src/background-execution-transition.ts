@@ -460,12 +460,6 @@ function resolveOwnershipIdentity(args: {
   return { registeredAliases, records, conflicting: records.length > 1 };
 }
 
-/** The workspaces[] key a NEW record for this real directory is written under. */
-function ownershipWriteKey(identity: OwnershipIdentityResolution, canonical: string): string {
-  if (identity.records[0] !== undefined) return identity.records[0].key;
-  if (identity.registeredAliases.includes(canonical)) return canonical;
-  return identity.registeredAliases[0] ?? canonical;
-}
 
 const OWNER_ALIAS_CONFLICT_NEXT_ACTION =
   'Two registered path spellings of the same directory carry DIFFERENT ownership records; a writer must reconcile ~/.pd/install.json (remove the duplicate workspace entry / record) before background execution decisions.';
@@ -711,11 +705,15 @@ export function transitionWorkspaceBackgroundExecution(
     const platform = input.platform ?? process.platform;
     const pathApi = platform === 'win32' ? path.win32 : path.posix;
     const canonical = pathApi.resolve(input.workspaceDir);
+    const realpath = input.realpath ?? defaultRealpath;
+    // The real directory the caller's path resolves to — records are pinned
+    // to THIS, never to a registered alias spelling that could repoint.
+    const realDir = pathApi.resolve(realpath(canonical) ?? canonical);
 
     // Identity is the REAL directory: the record may live under any
     // workspaces[] spelling of it (PRI-1282 review). Conflicting records
     // under one real directory refuse — never guess which alias wins.
-    const identity = resolveOwnershipIdentity({ manifest, workspaceDir: canonical, platform, realpath: input.realpath ?? defaultRealpath });
+    const identity = resolveOwnershipIdentity({ manifest, workspaceDir: canonical, platform, realpath });
     if (identity.conflicting) {
       return {
         ok: false,
@@ -740,7 +738,8 @@ export function transitionWorkspaceBackgroundExecution(
     }
 
     const spec = TRANSITION_SPECS[input.kind];
-    const recordKey = ownershipWriteKey(identity, canonical);
+    const recordKey = realDir;
+    const priorKey = identity.records[0]?.key;
     const currentRecord = identity.records[0]?.record;
     const currentState: BackgroundExecutionState = currentRecord?.state ?? 'legacy_owned';
     const currentGeneration = currentRecord?.generation ?? 0;
@@ -803,9 +802,14 @@ export function transitionWorkspaceBackgroundExecution(
     });
 
     // Mutate the RAW object (unknown top-level fields survive) using the same
-    // single-key authority helper the schema exposes. The record key keeps
-    // the established workspaces[] spelling for this real directory.
+    // single-key authority helper the schema exposes. The record key is the
+    // REAL directory; a record persisting under an alias spelling migrates
+    // onto it in the same write so a repointed symlink cannot carry this
+    // workspace's ownership to another directory (PRI-1282 review).
     const nextRecords = setInstallManifestBackgroundExecution(manifest, { workspaceDir: recordKey, platform }, target);
+    if (priorKey !== undefined && priorKey !== recordKey) {
+      delete nextRecords[priorKey];
+    }
     if (Object.keys(nextRecords).length > 0) {
       raw.backgroundExecutions = nextRecords;
     } else {
@@ -813,8 +817,17 @@ export function transitionWorkspaceBackgroundExecution(
     }
     // Migrate the legacy single-key spelling away in the same write.
     delete raw.backgroundExecution;
-    if (input.kind === 'begin_handover' && input.registerWorkspace === true && !registered) {
-      raw.workspaces = mergeInstallManifestWorkspaces(manifest, canonical, platform);
+    // The record key MUST be a workspaces[] member or it cannot parse back:
+    // the real directory registers in the same CAS — on begin_handover for
+    // a new workspace, on any later transition that migrated an alias-keyed
+    // record (PRI-1282 review).
+    const registeredKeys = manifest.workspaces ?? [];
+    const recordKeyRegistered = registeredKeys.some((entry) => pathApi.resolve(entry) === recordKey);
+    if (!recordKeyRegistered) {
+      raw.workspaces = mergeInstallManifestWorkspaces(manifest, recordKey, platform);
+      raw.hosts = installManifestHostsForPersist(manifest);
+    } else if (input.kind === 'begin_handover' && input.registerWorkspace === true && !registered) {
+      raw.workspaces = mergeInstallManifestWorkspaces(manifest, recordKey, platform);
       raw.hosts = installManifestHostsForPersist(manifest);
     }
 

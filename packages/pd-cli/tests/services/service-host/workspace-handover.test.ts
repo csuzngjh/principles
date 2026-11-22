@@ -270,6 +270,65 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
     expect(evidence?.steps.find((step) => step.step === 'already_service_host_owned')?.outcome).toBe('verify_only_continuation_by_intent');
   }, 60_000);
 
+  it('refuses to resume while the workspace run mutex shows a live worker (crashed coordinator leaves a consumer running)', async () => {
+    writeGatewayQuiesceAck({
+      workspaceDir: workspace, state: 'handover_preparing', operationId: 'op-live-1', generation: 1,
+      inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
+    });
+    const first = await runWorkspaceHandover(workspace, {
+      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-live-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+    });
+    expect(first.ok).toBe(true);
+    // Simulate the crash: the evidence never landed (the intent did).
+    const realWs = fs.realpathSync(workspace);
+    fs.rmSync(path.join(home, '.pd', 'service', 'handover', realWs.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-120), 'op-live-1.json'));
+
+    // The orphaned consumer: a LIVE pid holding the workspace run mutex —
+    // exactly what a SIGKILLed coordinator leaves behind when its worker
+    // child is in a separate process group (PRI-1282 review).
+    const { acquireWorkspaceServiceRunLock, releaseServiceRunLock } = await import('../../../src/services/service-host/locking/service-run-lock.js');
+    const held = acquireWorkspaceServiceRunLock(path.join(home, '.pd'), workspace);
+    expect(held.ok).toBe(true);
+    try {
+      const resumed = await runWorkspaceHandover(workspace, {
+        pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-live-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      });
+      expect(resumed).toMatchObject({ ok: false, outcome: 'blocked', reason: 'service_host_worker_still_running', operationId: 'op-live-1' });
+    } finally {
+      if (held.ok) releaseServiceRunLock(held.handle);
+    }
+    // Once the old worker provably stopped, the SAME resume proceeds.
+    const after = await runWorkspaceHandover(workspace, {
+      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-live-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+    });
+    expect(after).toMatchObject({ ok: true, outcome: 'completed', operationId: 'op-live-1' });
+  }, 60_000);
+
+  it('resumes the same operation whether invoked by the symlinked or the real workspace path', async () => {
+    const link = path.join(home, 'ws-alias');
+    try {
+      fs.symlinkSync(workspace, link);
+    } catch {
+      return; // platform without symlink privileges
+    }
+    writeGatewayQuiesceAck({
+      workspaceDir: workspace, state: 'handover_preparing', operationId: 'op-alias-1', generation: 1,
+      inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
+    });
+    // Initiate via the ALIAS — the intent and records pin to the real dir.
+    const first = await runWorkspaceHandover(link, {
+      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-alias-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+    });
+    expect(first.ok).toBe(true);
+    const realWs = fs.realpathSync(workspace);
+    fs.rmSync(path.join(home, '.pd', 'service', 'handover', realWs.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-120), 'op-alias-1.json'));
+    // Resume via the REAL path — finds the same intent, same operation.
+    const resumed = await runWorkspaceHandover(workspace, {
+      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-alias-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+    });
+    expect(resumed).toMatchObject({ ok: true, outcome: 'completed', operationId: 'op-alias-1' });
+  }, 60_000);
+
   it('abort restores legacy from a stuck preparing state', async () => {
     await runWorkspaceHandover(workspace, {
       pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-stuck-1', ackWaitMs: 1 });
@@ -318,6 +377,21 @@ describe('runWorkspaceRollback', () => {
     fs.writeFileSync(path.join(logsDir, 'SYSTEM_2026-11-22.log'), '[2026-11-22T00:00:00Z] [INTERNALIZATION_CONSUMER_RESUMED] test\n', 'utf8');
     const result = await runWorkspaceRollback(workspace, { pdHomeOverride: home, env: env(), ackWaitMs: 5_000 });
     expect(result).toMatchObject({ ok: true, gatewayResumption: 'observed' });
+  });
+
+  it('refuses while a worker still holds the workspace run mutex', async () => {
+    await completeHandoverFirst('op-rb-live-1');
+    const { acquireWorkspaceServiceRunLock, releaseServiceRunLock } = await import('../../../src/services/service-host/locking/service-run-lock.js');
+    const held = acquireWorkspaceServiceRunLock(path.join(home, '.pd'), workspace);
+    expect(held.ok).toBe(true);
+    try {
+      const result = await runWorkspaceRollback(workspace, { pdHomeOverride: home, env: env(), ackWaitMs: 150 });
+      expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: 'service_host_worker_still_running' });
+      // Ownership untouched — no rollback transition ran.
+      expect(ownership()).toMatchObject({ status: 'service_host_owned' });
+    } finally {
+      if (held.ok) releaseServiceRunLock(held.handle);
+    }
   });
 
   it('refuses while a service run-once holds the install lock', async () => {

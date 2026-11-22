@@ -43,7 +43,7 @@ import {
 } from '@principles/install-layout';
 import { resolveCoordinatorInstallIdentity } from './install-identity.js';
 import { collectHostWorkspaceClaimsFor } from './handover-claims.js';
-import { acquireServiceRunLock, releaseServiceRunLock } from './locking/service-run-lock.js';
+import { acquireServiceRunLock, probeServiceRunLockState, releaseServiceRunLock, workspaceServiceRunLockPath } from './locking/service-run-lock.js';
 import { runSchedulerLifecycle } from './scheduler/index.js';
 import { readActiveReleaseFacts } from './status/service-run-status.js';
 import { buildWorkerEnvironment } from './worker-env.js';
@@ -93,6 +93,16 @@ export function establishHandoverContext(workspaceDir: string, input: HandoverCo
     workspace = path.resolve(workspaceDir);
   } catch {
     return { ok: false, reason: 'workspace_path_invalid', nextAction: 'Pass an absolute canonical workspace directory.' };
+  }
+  // Pin the workspace to its REAL directory: intent files, evidence files,
+  // the worker launch and the workspace run mutex are all keyed off this
+  // spelling, so a symlinked and a real-path invocation meet the SAME
+  // operation and either spelling resumes it (PRI-1282 review).
+  try {
+    workspace = fs.realpathSync.native(workspace);
+  } catch {
+    // Unresolvable target: keep the lexical spelling — the readiness probe
+    // reports the missing directory as the honest failure.
   }
   return { ok: true, pdHome: identity.identity.pdHome, homeDir: identity.identity.homeDir, manifestPath, workspaceDir: workspace };
 }
@@ -277,6 +287,17 @@ export function readHandoverEvidence(pdHome: string, canonicalDir: string, opera
  * unattributable and unresumable. The intent is the auditable "this
  * operation committed generation N" fact the resume path verifies against
  * workspace + operationId + committed generation.
+ *
+ * Lifecycle / versioning policy (PRI-1282 review — the intent file IS
+ * persisted state and must be declared): one `<opId>.intent.json` per
+ * operation lives next to that operation's evidence document under
+ * `<pdHome>/service/handover/<wskey>/`; it is retained with the evidence
+ * directory for audit, and `schemaVersion` (`pd.service-handover-intent.v1`)
+ * is the compatibility contract — a reader ignores files whose
+ * schemaVersion it does not know, and a format change bumps the suffix
+ * rather than mutating in place. The intent is process EVIDENCE, never an
+ * ownership authority: deleting it only loses resumability attribution,
+ * never ownership (the install manifest stays the single source).
  */
 export interface HandoverCommitIntent {
   schemaVersion: typeof HANDOVER_INTENT_SCHEMA;
@@ -412,6 +433,38 @@ function verifiedCycleOutcome(result: AdapterCycleResult): boolean {
   return result.cycleOutcome === 'cycle_completed' || result.cycleOutcome === 'cycle_completed_without_business_progress';
 }
 
+/**
+ * The consuming Worker child holds the per-workspace run mutex for its
+ * whole cycle — the lock survives the coordinator's own death because the
+ * CHILD is the recorded holder. Before launching (or rolling back around)
+ * a worker we probe that mutex: a live holder means the old cycle is still
+ * running and overlapping it would create two consumers on one workspace
+ * (PRI-1282 review). Returns the blocked/failed verdict or null to proceed.
+ */
+function refuseWhileWorkerRunning(
+  context: { pdHome: string; workspaceDir: string },
+  operationId: string,
+): { ok: false; outcome: 'blocked'; reason: string; nextAction: string; operationId: string } | null {
+  const probe = probeServiceRunLockState(workspaceServiceRunLockPath(context.pdHome, context.workspaceDir));
+  if (probe.state === 'free') return null;
+  if (probe.state === 'held') {
+    return {
+      ok: false,
+      outcome: 'blocked',
+      reason: 'service_host_worker_still_running',
+      nextAction: 'A worker cycle is still consuming this workspace (its process holds the workspace run mutex); wait for it to finish — cycles are bounded — and rerun the operation.',
+      operationId,
+    };
+  }
+  return {
+    ok: false,
+    outcome: 'blocked',
+    reason: `service_host_worker_lock_unverifiable:${probe.detail ?? 'unknown'}`,
+    nextAction: 'The workspace run mutex could not be verified; refusing to risk overlapping a still-running worker. Repair or remove the stale lock under <pdHome>/service/workspace-runs/ and rerun.',
+    operationId,
+  };
+}
+
 function parseWorkerJson(stdout: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(stdout);
@@ -482,6 +535,11 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
       && priorIntent.committedGeneration === initial.generation;
     if (priorOp !== '' && (priorEvidence?.outcome === 'completed' || intentMatches)) {
       record('already_service_host_owned', intentMatches && priorEvidence?.outcome !== 'completed' ? 'verify_only_continuation_by_intent' : 'verify_only_continuation');
+      // A crashed run may have left its Worker child alive in its own
+      // process group — the child still holds the workspace run mutex, so
+      // resuming without this probe would overlap two consumers (PRI-1282).
+      const stillRunning = refuseWhileWorkerRunning(context, priorOp);
+      if (stillRunning !== null) return stillRunning;
       // The re-verification cycle joins the same install-level run mutex as
       // the scheduler and rollback — a concurrent managed run must not
       // overlap this verification (PRI-1282 review).
@@ -704,6 +762,10 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
     };
   }
   try {
+    // The workspace mutex still held means a Worker child outlived its
+    // coordinator — refuse before flipping rather than overlap it.
+    const stillRunning = refuseWhileWorkerRunning(context, operationId);
+    if (stillRunning !== null) return stillRunning;
     // Persist the commit intent BEFORE the flip: the steady-state marker
     // clears operationId, so a crash between flip and evidence write would
     // leave the commit unattributable without it (PRI-1282 review).
@@ -834,6 +896,10 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
     // ── 4-6. begin_rollback → complete_rollback (CAS back to legacy). ──
     const resumeOp = initial.status === 'rollback_pending' ? initial.record.operationId : undefined;
     const operationId = resumeOp ?? `rollback-${crypto.randomUUID()}`;
+    // A still-running worker keeps consuming after the CAS back to legacy —
+    // the rollback refuses until the workspace mutex proves it stopped.
+    const stillRunning = refuseWhileWorkerRunning(context, operationId);
+    if (stillRunning !== null) return stillRunning;
     const begin = transitionWorkspaceBackgroundExecution({
       manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'begin_rollback', operationId,
     });

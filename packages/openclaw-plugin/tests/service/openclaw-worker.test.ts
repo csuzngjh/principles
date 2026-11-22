@@ -142,6 +142,54 @@ describe('runOpenClawWorkspaceWorkerCycle — real bounded cycle', () => {
 });
 
 describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
+  it('requires the credential of the profile the diagnostician ACTUALLY binds — not any configured one (PRI-1282 review)', () => {
+    // Two profiles: pd.a's secret IS exported, pd.b's is not. The
+    // diagnostician binds pd.b, so the workspace is NOT ready even though a
+    // configured credential exists (the consuming cycle would hit
+    // runtime_config_error on pd.b).
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), [
+      'version: 1',
+      'features:',
+      '  internalization_auto_consumer: { category: quiet, enabled: true }',
+      'runtimeProfiles:',
+      "  pd.a: { type: pi-ai, provider: p, model: m, apiKeyEnv: PD_TEST_BOUND_A_KEY, baseUrl: 'http://127.0.0.1/v1' }",
+      "  pd.b: { type: pi-ai, provider: p, model: m, apiKeyEnv: PD_TEST_UNBOUND_B_KEY, baseUrl: 'http://127.0.0.1/v1' }",
+      'internalAgents:',
+      "  defaultRuntime: pd.b",
+      '  agents:',
+      '    diagnostician: { enabled: true }',
+      '',
+    ].join('\n'));
+    process.env.PD_TEST_BOUND_A_KEY = 'a-secret';
+    delete process.env.PD_TEST_UNBOUND_B_KEY;
+    try {
+      const readiness = computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
+      expect(readiness.checks.credentials).toBe(false);
+
+      // Rebind the diagnostician to pd.a — now readiness answers for the
+      // credential the cycle will actually use.
+      fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), [
+        'version: 1',
+        'features:',
+        '  internalization_auto_consumer: { category: quiet, enabled: true }',
+        'runtimeProfiles:',
+        "  pd.a: { type: pi-ai, provider: p, model: m, apiKeyEnv: PD_TEST_BOUND_A_KEY, baseUrl: 'http://127.0.0.1/v1' }",
+        "  pd.b: { type: pi-ai, provider: p, model: m, apiKeyEnv: PD_TEST_UNBOUND_B_KEY, baseUrl: 'http://127.0.0.1/v1' }",
+        'internalAgents:',
+        "  defaultRuntime: pd.a",
+        '  agents:',
+        '    diagnostician: { enabled: true }',
+        '',
+      ].join('\n'));
+      const rebound = computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
+      expect(rebound.checks.credentials).toBe(true);
+    } finally {
+      delete process.env.PD_TEST_BOUND_A_KEY;
+      delete process.env.PD_TEST_UNBOUND_B_KEY;
+    }
+  });
+
+
   it('is degraded while the workspace has no declaration / trajectory / credentials', () => {
     const readiness = computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
     expect(readiness.mode).toBe('degraded');

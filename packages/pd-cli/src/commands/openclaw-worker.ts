@@ -22,6 +22,8 @@
  */
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { resolvePdHome } from '@principles/install-layout';
+import { acquireWorkspaceServiceRunLock, releaseServiceRunLock } from '../services/service-host/locking/service-run-lock.js';
 
 interface OpenClawWorkerOptions {
   workspace?: string;
@@ -157,9 +159,53 @@ export async function handleOpenClawWorker(options: OpenClawWorkerOptions): Prom
     return;
   }
 
-  const result: OpenClawWorkerCycleResultShape = await workerModule.runOpenClawWorkspaceWorkerCycle({ workspaceDir: workspace });
-  printCycleReport(result, options.json === true);
-  if (result.mode === 'degraded') process.exitCode = 1;
+  // The consuming child holds the per-workspace run mutex for its whole
+  // cycle: a handover resume / rollback proves "the old worker is still
+  // running" by this lock's holder-PID liveness instead of trusting that a
+  // crashed coordinator killed its process group (PRI-1282 review). The
+  // pdHome comes from the coordinator-pinned env first (never inherited —
+  // buildWorkerEnvironment strips it), then the trusted resolvePdHome chain.
+  const pinnedPdHome = process.env.PD_SERVICE_PD_HOME;
+  const home = pinnedPdHome !== undefined && pinnedPdHome.trim().length > 0
+    ? { ok: true as const, pdHome: pinnedPdHome }
+    : resolvePdHome();
+  if (!home.ok) {
+    const refusal = {
+      workspaceDir: workspace,
+      mode: 'degraded' as const,
+      reason: `pd_home_resolution_refused:${home.reason}`,
+      nextAction: home.nextAction ?? 'Fix the PD home resolution (experiment root) before running the OpenClaw worker.',
+    };
+    if (options.json === true) console.log(JSON.stringify(refusal));
+    else console.error(`[PD:OpenClawWorker] ${refusal.reason} — ${refusal.nextAction}`);
+    process.exitCode = 1;
+    return;
+  }
+  const workspaceLock = acquireWorkspaceServiceRunLock(home.pdHome, workspace);
+  if (!workspaceLock.ok) {
+    // 'held' means a live worker already consumes this workspace — paused,
+    // not degraded: the mutex kept the second consumer out, nothing broke.
+    const held = workspaceLock.kind === 'held';
+    const refusal = {
+      workspaceDir: workspace,
+      mode: held ? ('paused' as const) : ('degraded' as const),
+      reason: held ? 'openclaw_worker_run_in_progress' : `workspace_run_lock_unavailable:${workspaceLock.kind}`,
+      nextAction: held
+        ? 'Another worker cycle is still consuming this workspace; wait for it to finish (cycles are bounded) and retry.'
+        : 'The workspace run mutex could not be verified; refusing to start a second consumer. Check the lock file under <pdHome>/service/workspace-runs/.',
+    };
+    if (options.json === true) console.log(JSON.stringify(refusal));
+    else console.error(`[PD:OpenClawWorker] ${refusal.reason} — ${refusal.nextAction}`);
+    if (!held) process.exitCode = 1;
+    return;
+  }
+  try {
+    const result: OpenClawWorkerCycleResultShape = await workerModule.runOpenClawWorkspaceWorkerCycle({ workspaceDir: workspace });
+    printCycleReport(result, options.json === true);
+    if (result.mode === 'degraded') process.exitCode = 1;
+  } finally {
+    releaseServiceRunLock(workspaceLock.handle);
+  }
 }
 
 /** Canonical absolute form for help/nextAction text. */

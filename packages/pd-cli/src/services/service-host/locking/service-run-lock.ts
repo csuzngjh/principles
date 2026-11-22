@@ -86,7 +86,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 
 /**
@@ -111,6 +111,29 @@ const RELEASE_MAX_ATTEMPTS = 2;
 /** The one lock file per install: `<pdHome>/service/service-run.lock`. */
 export function serviceRunLockPath(pdHome: string): string {
   return path.join(pdHome, 'service', 'service-run.lock');
+}
+
+/**
+ * The per-workspace consumer mutex: `<pdHome>/service/workspace-runs/<hash>.lock`.
+ *
+ * A consuming Worker child holds this for the whole cycle, so an
+ * orchestrator (handover resume / rollback) can prove "an old worker is
+ * still running on THIS workspace" by holder-PID liveness instead of
+ * guessing from the coordinator's own lock. The workspace is addressed by
+ * its canonical real directory — the same spelling-or-alias identity rule
+ * the §8.4 ownership projection uses — so either path spelling reaches the
+ * same mutex (PRI-1282 review).
+ */
+export function workspaceServiceRunLockPath(pdHome: string, workspaceDir: string): string {
+  let canonical = path.resolve(workspaceDir);
+  try {
+    canonical = fs.realpathSync.native(canonical);
+  } catch {
+    // Missing/unresolvable directory: the lexical spelling still keys ONE
+    // mutex — better than diverging aliases while the dir is absent.
+  }
+  const key = createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+  return path.join(pdHome, 'service', 'workspace-runs', `${key}.lock`);
 }
 
 /**
@@ -607,20 +630,19 @@ export function holdsServiceRunLock(handle: ServiceRunLockHandle): boolean {
 }
 
 /**
- * Acquire the install-level single-instance run lock. Every decision —
- * evaluate, stale takeover, create — runs inside the arbitration gate
- * (§P1-4 round 4), immediate verdicts, no wait loop (`already_running`
- * semantics, §8.2). A stale takeover additionally requires the recorded
- * holder PID to be demonstrably DEAD; a live, unknown or unverifiable
- * holder is NEVER taken over, and the verify→delete→create sequence is
- * serialized by the same transaction that a second contender's BEGIN
- * cannot enter.
+ * Shared lock engine behind {@link acquireServiceRunLock} and
+ * {@link acquireWorkspaceServiceRunLock}. Every decision — evaluate, stale
+ * takeover, create — runs inside the arbitration gate (§P1-4 round 4),
+ * immediate verdicts, no wait loop (`already_running` semantics, §8.2). A
+ * stale takeover additionally requires the recorded holder PID to be
+ * demonstrably DEAD; a live, unknown or unverifiable holder is NEVER taken
+ * over, and the verify→delete→create sequence is serialized by the same
+ * transaction that a second contender's BEGIN cannot enter.
  */
-export function acquireServiceRunLock(
-  pdHome: string,
+function acquireLockAt(
+  lockPath: string,
   options?: { staleMs?: number; probes?: ServiceRunLockProbes },
 ): AcquireServiceRunLockResult {
-  const lockPath = serviceRunLockPath(pdHome);
   const staleMs = options?.staleMs ?? SERVICE_RUN_LOCK_STALE_MS;
   const processAlive = options?.probes?.processAlive ?? defaultProcessAlive;
   const takeoverSync = options?.probes?.takeoverSync;
@@ -719,6 +741,58 @@ export function acquireServiceRunLock(
       : { ok: false, kind: 'unwritable', detail: gated.detail };
   }
   return gated.value;
+}
+
+/** Acquire the install-level single-instance run lock (see {@link acquireLockAt}). */
+export function acquireServiceRunLock(
+  pdHome: string,
+  options?: { staleMs?: number; probes?: ServiceRunLockProbes },
+): AcquireServiceRunLockResult {
+  return acquireLockAt(serviceRunLockPath(pdHome), options);
+}
+
+/**
+ * Acquire the per-workspace consumer mutex (see
+ * {@link workspaceServiceRunLockPath}). Same protocol as the install-level
+ * lock; the Worker child holds it for its whole consuming cycle so a
+ * handover resume / rollback can prove the old worker is still running
+ * (PRI-1282 review).
+ */
+export function acquireWorkspaceServiceRunLock(
+  pdHome: string,
+  workspaceDir: string,
+  options?: { staleMs?: number; probes?: ServiceRunLockProbes },
+): AcquireServiceRunLockResult {
+  return acquireLockAt(workspaceServiceRunLockPath(pdHome, workspaceDir), options);
+}
+
+/**
+ * Non-mutating liveness probe: is a CONSUMING worker holding this lock
+ * right now? 'free' means no holder or a provably-dead one (recoverable);
+ * 'held' means a live or inconclusive holder — an orchestrator must refuse
+ * to overlap it; 'corrupt' means the body cannot be verified (fail-closed).
+ */
+export function probeServiceRunLockState(
+  lockPath: string,
+  options?: { staleMs?: number; probes?: ServiceRunLockProbes },
+): { state: 'free' | 'held' | 'corrupt'; detail?: string } {
+  const evaluation = evaluateLock(
+    lockPath,
+    options?.staleMs ?? SERVICE_RUN_LOCK_STALE_MS,
+    options?.probes?.processAlive ?? defaultProcessAlive,
+  );
+  switch (evaluation.kind) {
+    case 'absent':
+    case 'dead':
+      return { state: 'free' };
+    case 'fresh':
+    case 'stale-alive':
+      return { state: 'held' };
+    case 'stale-unreadable':
+      return { state: 'corrupt', detail: 'lock body unreadable beyond the stale window' };
+    case 'stale-anonymous':
+      return { state: 'corrupt', detail: `lock body carries no verifiable holder identity: ${bodyEcho(evaluation.body)}` };
+  }
 }
 
 /**

@@ -191,6 +191,58 @@ describe('transitionWorkspaceBackgroundExecution — rollback sequence', () => {
   });
 });
 
+describe('real-directory ownership pinning (PRI-1282 review)', () => {
+  it('migrates an alias-keyed record onto the real directory in the same CAS, registers the real dir, and a repointed alias cannot inherit ownership', () => {
+    const real = path.join(tmpRoot, 'ws-real-target');
+    const other = path.join(tmpRoot, 'ws-other-target');
+    const link = path.join(tmpRoot, 'ws-link');
+    fs.mkdirSync(real, { recursive: true });
+    fs.mkdirSync(other, { recursive: true });
+    try {
+      fs.symlinkSync(real, link);
+    } catch {
+      return; // platform without symlink privileges (unprivileged Windows)
+    }
+    const realpath = (target: string): string | undefined => {
+      try {
+        return fs.realpathSync.native(target);
+      } catch {
+        return undefined;
+      }
+    };
+    const realKey = path.resolve(fs.realpathSync.native(real));
+    // An ownership record registered under the ALIAS spelling — the legacy
+    // shape a repointable symlink could carry to another workspace.
+    const file = seedManifest('alias-pin', {
+      workspaces: [link],
+      backgroundExecutions: {
+        [link]: { state: 'service_host_owned', effectiveOwner: 'service_host', generation: 5, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-22T00:00:00.000Z' },
+      },
+    });
+
+    const res = transitionWorkspaceBackgroundExecution({
+      manifestPath: file, workspaceDir: real, kind: 'begin_rollback', operationId: 'rb-alias-1', realpath,
+    });
+    expect(res.ok).toBe(true);
+    const raw = readRaw(file);
+    const records = raw.backgroundExecutions as Record<string, { state: string }>;
+    // The record moved onto the REAL directory; the alias key is gone.
+    expect(records[realKey]).toMatchObject({ state: 'rollback_pending' });
+    expect(records[link]).toBeUndefined();
+    // …and the real directory is registered so the key parses back.
+    expect(raw.workspaces).toContain(realKey);
+
+    // Repoint the link at ANOTHER workspace: the new target must not
+    // inherit the first workspace's ownership.
+    fs.rmSync(link);
+    fs.symlinkSync(other, link);
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: link, realpath }))
+      .toMatchObject({ status: 'legacy_owned' });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: real, realpath }))
+      .toMatchObject({ status: 'rollback_pending' });
+  });
+});
+
 describe('fencing, registration, and side-effect isolation', () => {
   it('a stale observed generation never writes', () => {
     const file = seedManifest('fence-stale');

@@ -39,6 +39,7 @@ const POINTER_ENV_VARS = [
   'OPENCLAW_HOME',
   'PD_COMPANION_WORKER_IPC',
   'PD_INVOCATION_SOURCE',
+  'PD_SERVICE_PD_HOME',
   'HOME',
   'USERPROFILE',
   'CODEX_HOME',
@@ -238,6 +239,10 @@ export function buildWorkerEnvironment(args: {
   // Identity/host-root pins from the TRUSTED coordinator identity — never the
   // inherited values (a forged CODEX_HOME / HOME cannot survive this boundary).
   env.PD_INVOCATION_SOURCE = 'service_host';
+  // The consuming child keys its per-workspace run mutex off THIS pdHome —
+  // pinning it keeps the child's lock in the same install the coordinator
+  // verified, never an inherited/PD_EXPERIMENT_ROOT-shaped one (PRI-1282).
+  env.PD_SERVICE_PD_HOME = args.identity.pdHome;
   env.HOME = args.identity.homeDir;
   env.USERPROFILE = args.identity.homeDir;
   if (args.hostKind === 'codex') {
@@ -245,7 +250,7 @@ export function buildWorkerEnvironment(args: {
   } else {
     env.WORKBUDDY_CONFIG_DIR = args.identity.hostRoots.workbuddyConfigDir;
   }
-  const pinned = ['PD_INVOCATION_SOURCE', 'HOME', 'USERPROFILE', args.hostKind === 'codex' ? 'CODEX_HOME' : 'WORKBUDDY_CONFIG_DIR'];
+  const pinned = ['PD_INVOCATION_SOURCE', 'PD_SERVICE_PD_HOME', 'HOME', 'USERPROFILE', args.hostKind === 'codex' ? 'CODEX_HOME' : 'WORKBUDDY_CONFIG_DIR'];
   // F13: the invocation id is coordinator-scoped run metadata, not identity —
   // pinned explicitly so the worker's liveness record can be correlated back
   // to THIS invocation (TD §5.2 显式传入 invocationId).
