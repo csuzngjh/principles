@@ -110,9 +110,13 @@
 | 文件 | 导出 | 职责 | 首个调用方 |
 | --- | --- | --- | --- |
 | `scripts/dev/pd-lab/experiment-config.mjs` | `loadExperimentConfig(file)` | 读取、校验并冻结实验配置；失败时抛出带 `problems[]` 的错误 | `ab-lib.mjs` 及各 `ab-*.mjs` 入口 |
-| `scripts/dev/pd-lab/alignment-report.mjs` | `mergeJudgments(input)`、`buildAlignmentReport(input)` | 裁判记录归并；按计划聚合、算缺失界、给出判定。纯函数，无 I/O | `build-decision-input.mjs` |
+| `scripts/dev/pd-lab/alignment-report.mjs` | `mergeJudgments(input)`、`buildAlignmentReport(input)`、`twoSidedThreshold(n, alpha)` | 裁判记录归并；按计划聚合、算缺失界、给出判定。纯函数，无 I/O。`twoSidedThreshold` 是 CONTRACT §6.5 双侧阈值的唯一统计权威（PRI-1258 起导出给资格引擎复用） | `build-decision-input.mjs`、`t6-qualification.mjs` |
 | `scripts/dev/pd-lab/build-decision-input.mjs` | CLI | 读取一次运行的计划、评审结果和管道指标，写出 `decision-input.json` | `npm run lab:card` |
 | `scripts/dev/pd-lab/admission-probe.mjs` | CLI | 只读打开快照，对每个样本输出准入结果和问题代码，不输出正文 | `npm run lab:probe` |
+| `scripts/dev/pd-lab/judge-protocol.mjs` | `JUDGE_PROTOCOL_REF`、`judgeProtocolDigest()`、`parseJudgeResponse(rawText)`、`buildJudgePackage(input)`、`swapJudgePackage(...)`、`checkPackageForLeaks(pkg)`、`comparisonInputDigestOf(pkg, identityMap)`、`buildProtocolRecord(input)`、`validateProtocolRecord(record)`、`restoreDisplayVerdict(...)` 及协议常量 | CONTRACT §5.1 版本化 Judge Protocol：协议定义与 digest、四值严格解析（非法拒绝绝不转 TIE）、盲评包组装与泄漏扫描、A/B 位置交换与受控身份还原、记录 schema 校验。纯函数，无 I/O（真实模型调用属 D2，不在本模块） | `judge-protocol-validate.mjs`、`t6-qualification.mjs`、测试 |
+| `scripts/dev/pd-lab/judge-protocol-validate.mjs` | CLI | 对合成协议 bundle（盲包+绑定+原始响应+记录+仲裁）做机械复核：digest 重算、泄漏重扫、交换一致性、失败 attempt 保留、位置翻转率披露 | `npm run lab:judge-validate` |
+| `scripts/dev/pd-lab/t6-qualification.mjs` | `nMinForAlpha(alpha)`、`validateQualificationInput(input)`、`qualifyT6(input)` | T6 三态资格引擎（BLOCKED / EXPLORATORY_ONLY / CONFIRMATORY_READY）：n、D2 冻结参数、授权与校准状态的纯函数判定；无 D2 的模型调用/无 D5 的盲评为违规披露。纯函数，无 I/O | `t6-qualify.mjs`、测试 |
+| `scripts/dev/pd-lab/t6-qualify.mjs` | CLI | 读取资格输入记录，写出机械可复算的 `qualification.json`（BLOCKED 是合法计算结果，不是 CLI 失败） | `npm run lab:qualify` |
 
 接口形状以 CONTRACT §2.4（准入结果）、§5（归并）、§6（聚合与判定）为准。本表的文件名是实施约定；如仓库惯例要求改名，在对应任务的 PR 里同时改本表。
 

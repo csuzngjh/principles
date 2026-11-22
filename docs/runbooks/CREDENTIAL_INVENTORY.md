@@ -52,7 +52,6 @@
 | `NPM_TOKEN` | GitHub → npm | 发布到 npm registry | GitHub Secret | npm publish（rw） | Owner 手动 |
 | `NPM_READ_TOKEN` | GitHub → npm | CI 只读安装 | GitHub Secret | 意图只读（实际粒度 UNKNOWN） | Owner 手动（UNK-02） |
 | `CLAWHUB_TOKEN` | GitHub → ClawHub | 同步 ClawHub marketplace | GitHub Secret | ClawHub API token | Owner 手动 |
-| `CODECOV_TOKEN` | GitHub → Codecov | 上传覆盖率 | GitHub Secret | Codecov 项目级 | Owner 手动 |
 | `SENSENOVA_API_KEY` | GitHub → LLM | E2E nightly LLM 调用 | GitHub Secret | API key（计费面） | Owner 手动 |
 | `E2E_LLM_MODEL` | GitHub | E2E 模型名（**非敏感**） | GitHub Secret | N/A | 建议降级为普通变量（P2-04） |
 | `CLOUDFLARE_API_TOKEN` | GitHub → Cloudflare | `deploy-website.yml` Pages 部署 | GitHub Secret | Cloudflare API token | Owner 手动 |
