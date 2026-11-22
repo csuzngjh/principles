@@ -15,7 +15,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChildProcess } from 'node:child_process';
-import { reconcileServiceHostScheduler, runServiceHostCli } from '../src/service-host-bridge.js';
+import { reconcileServiceHostScheduler, maybeSchedulerRegistrationExists, runServiceHostCli } from '../src/service-host-bridge.js';
 
 const dirs: string[] = [];
 function tempHome(prefix = 'cpd-sh-bridge-'): string {
@@ -259,6 +259,18 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('stays DISABLED');
     expect(warnings[0]).toContain('AccessDenied');
+  });
+
+  it('the file probe: a MISSING platform dir is a clean false (fresh install); artifacts present is true (ENOENT regression)', async () => {
+    const home = tempHome();
+    // No dir at all — the fresh-install case. This MUST be false without
+    // falling into the catch-all (the first CI run regressed here: ENOENT
+    // hit the fallback and every install spawned a full CLI boot, pushing
+    // the suite past the job timeout).
+    expect(maybeSchedulerRegistrationExists(home)).toBe(false);
+    // With an artifact, true.
+    fakeRegistrationArtifact(home);
+    expect(maybeSchedulerRegistrationExists(home)).toBe(true);
   });
 
   it('an unreadable scheduler state (artifact present) is a warning, never a thrown error', async () => {

@@ -200,6 +200,7 @@ export async function runServiceHostCli(pdHome: string, args: readonly string[],
 export function maybeSchedulerRegistrationExists(homeDir: string): boolean {
   try {
     if (process.platform === 'win32') {
+      // existsSync: a missing dir/file is a clean false — nothing was ever registered.
       return fs.existsSync(path.join(homeDir, '.pd', 'service', 'scheduler-registration-win.xml'));
     }
     if (process.platform === 'darwin') {
@@ -211,9 +212,12 @@ export function maybeSchedulerRegistrationExists(homeDir: string): boolean {
       return fs.readdirSync(units).some((name) => name.startsWith('pd-service-host-') && name.endsWith('.timer'));
     }
     return false;
-  } catch {
-    // An unreadable directory proves nothing either way — keep the honest
+  } catch (error) {
+    // A MISSING directory proves "never registered" cleanly (the common
+    // fresh-install case); anything else (permissions) keeps the honest
     // (slower) path: ask the CLI.
+    const {code} = (error as Error & { code?: string });
+    if (code === 'ENOENT') return false;
     return true;
   }
 }
