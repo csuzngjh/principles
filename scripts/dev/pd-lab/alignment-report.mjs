@@ -9,9 +9,10 @@
 // input objects always produce identical output objects, including digests.
 // The CLI wrapper (build-decision-input.mjs) owns all I/O.
 //
-// Exports exactly two functions:
+// Exports exactly three functions:
 //   mergeJudgments(input)        -> CONTRACT section 5.2 FinalComparison[]
 //   buildAlignmentReport(input)  -> CONTRACT sections 6.2 + 6.5 report
+//   twoSidedThreshold(n, alpha)  -> CONTRACT section 6.5 k(n, alpha) or null
 //
 // Input shapes (synthetic research fixtures; see scripts/__tests__/):
 //
@@ -1319,7 +1320,7 @@ function binomialTailAtLeast(n, k) {
  * which is the value every plan author and the CONTRACT table mean, and
  * parsed into an exact integer fraction.
  */
-function twoSidedThreshold(n, alpha) {
+export function twoSidedThreshold(n, alpha) {
   // Exact: P(X >= k) <= alpha/2  <=>  tail * (2 * alphaDen) <= 2^n * alphaNum.
   // Pure BigInt on BOTH sides — no Number conversion of huge integers.
   const alphaFraction = decimalToFraction(alpha);
