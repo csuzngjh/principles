@@ -110,18 +110,18 @@ scopes. `verify-merge` (the required branch-protection check),
 `telemetry-guard` always run, so docs-only PRs execute just those four.
 
 1. `verify-merge` - Canonical merge gate (`npm run verify:merge`) — always runs
-2. `test-principles-core` - Core tests with coverage — always runs (required check)
+2. `test-principles-core` - Core tests — always runs (required check)
 3. `impact` / `telemetry-guard` - CI impact gate (always) + telemetry union advisory (always)
 4. `codex-plugin-delivery` - Published runtime pin probe (gated: plugin)
 5. `test-pd-mcp-server` - MCP server tests (gated: mcp server scope)
 6. `test-pd-cli` - CLI tests (gated: cli)
-7. `test-pd-console` - Console tests with coverage (gated: console)
+7. `test-pd-console` - Console tests (gated: console)
 8. `test-create-principles-disciple` - Installer fast suite (gated: installer)
 9. `skill-render-contract` - pd-skills single-source render check (gated: installer)
 10. `smoke-packaged-install` - Installer packaged-install smoke (gated: release)
 11. `test-shared-runtime` - scripts + root guard contracts + host-runtime + host parity + codex-adapter + pd-companion (gated: hostRuntime/installLayout/codexAdapter/plugin/companion; root `scripts/**` changes broaden to all)
 12. `test-workbuddy-adapter` - WorkBuddy adapter tests on Windows fixtures (gated: workbuddy adapter)
-13. `test-openclaw-plugin-coverage` - Full build + TypeScript check + `npm pack --dry-run` publish evidence + plugin unit/integration tests with coverage in ONE job (gated: plugin; the default vitest collection runs the full suite — the former separate unit/integration jobs were subsets of it and were removed 2026-10-27; `build-openclaw-plugin` was folded in 2026-11-18 — same `scopes.plugin` gate, same install, same `npm run build`)
+13. `test-openclaw-plugin-coverage` - Full build + TypeScript check + `npm pack --dry-run` publish evidence + plugin unit/integration tests in ONE job (gated: plugin; the default vitest collection runs the full suite — the former separate unit/integration jobs were subsets of it and were removed 2026-10-27; `build-openclaw-plugin` was folded in 2026-11-18 — same `scopes.plugin` gate, same install, same `npm run build`; the `coverage` job-id suffix is retained for required-check stability after Codecov was removed 2026-11-22)
 
 > 2026-11-18 (CI runtime): every job that needs a workspace install now uses the
 > local composite action `.github/actions/restore-node-modules`, which restores
@@ -154,16 +154,14 @@ scopes. `verify-merge` (the required branch-protection check),
 
 ## Quality Infrastructure
 
-### Codecov Coverage Upload
+### Codecov Coverage Upload (retired)
 
-CI uploads coverage reports to [Codecov](https://codecov.io) for the following packages:
-- `principles-core` (flag: `principles-core`)
-- `openclaw-plugin` (flag: `openclaw-plugin`)
-- `pd-console` (flag: `pd-console`)
-
-Coverage reports use `json` and `lcov` formats. Uploads use `codecov/codecov-action@v4` with `fail_ci_if_error: false` (coverage service failures do not block CI).
-
-**Setup required:** Add `CODECOV_TOKEN` secret in GitHub repository settings.
+Removed 2026-11-22: no in-repo consumer of the uploaded Codecov report was
+found, and coverage is only needed by the on-demand quality-report script.
+The three per-package test jobs still run their full suites; coverage can be
+collected locally with `npm run test -- --coverage` when a quality report needs
+it. Do not re-add the upload step without naming a consumer and showing the CI
+time it costs.
 
 ### Performance Benchmark (retired)
 

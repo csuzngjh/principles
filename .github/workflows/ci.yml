@@ -366,17 +366,9 @@ jobs:
       # real startup cost, and the cap closes both the CPU-starvation and the
       # I/O-contention window. 2 workers keeps this job near 3.5 min against
       # the 15-min budget (observed: 2.2–2.6 min uncapped).
-      - name: Test with coverage
+      - name: Test principles-core
         working-directory: packages/principles-core
-        run: npm run test -- --coverage --maxWorkers=2
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./packages/principles-core/coverage/coverage-final.json
-          flags: principles-core
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+        run: npm run test -- --maxWorkers=2
 
   test-pd-mcp-server:
     name: Test pd-mcp-server
@@ -553,17 +545,9 @@ jobs:
       - name: Build dependencies
         run: npm run build
 
-      - name: Test with coverage
+      - name: Test pd-console
         working-directory: packages/pd-console
-        run: npm run test -- --coverage
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./packages/pd-console/coverage/coverage-final.json
-          flags: pd-console
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+        run: npm run test
 
   # The two heavy smoke suites (real npm pack → real install → real release
   # asset build) are ~97% of this package's test wall time. They run as
@@ -844,9 +828,15 @@ jobs:
 
   # Consolidated 2026-10-27 (CI slimming): the former separate (unit) and
   # (integration) jobs each ran a SUBSET of this job's default vitest
-  # collection — `npx vitest run --coverage` already executes every test
-  # file (see vitest.config.ts layering: unit globs + integration globs).
-  # The two redundant jobs were removed; coverage + Codecov upload unchanged.
+  # collection — `npx vitest run` already executes every test file (see
+  # vitest.config.ts layering: unit globs + integration globs). The two
+  # redundant jobs were removed.
+  #
+  # 2026-11-22 (CI slimming): Codecov upload and the `--coverage` collector
+  # were removed — no in-repo consumer of the uploaded report was found, and
+  # coverage is only needed by the on-demand quality-report script. The job
+  # id/name keep the "coverage" suffix to avoid invalidating required-check
+  # configuration; the tests themselves are unchanged.
   #
   # Merged with `build-openclaw-plugin` (2026-11-18 CI runtime work): both jobs
   # were gated by the SAME scope (`scopes.plugin`), ran the SAME install and the
@@ -910,13 +900,6 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npm run build:production
 
-      - name: Run tests with coverage
+      - name: Run plugin tests
         working-directory: packages/openclaw-plugin
-        run: npx vitest run --coverage
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./packages/openclaw-plugin/coverage/coverage-final.json
-          flags: openclaw-plugin
-          fail_ci_if_error: false
+        run: npx vitest run
