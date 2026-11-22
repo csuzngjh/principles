@@ -631,3 +631,27 @@ export function checkIngressTopLevelConsistency(input: {
 
   return null;
 }
+
+// ── Requested target-turn id normalization (PRI-1274 review round 2, I) ─────
+
+export type NormalizedTargetTurnId =
+  | { readonly ok: true; readonly value: string }
+  | { readonly ok: false; readonly reason: 'empty' | 'too_long' | 'control_chars' };
+
+/**
+ * The ONE normalization rule for a requested target-turn identifier (directive
+ * I1), shared by the submit capability (persist-time, I2) and the receipt
+ * recovery (historical read, I3): outer whitespace is trimmed (a whitespace-
+ * only value is "no target"), the length bound matches the host-id contract
+ * (200), and control characters (C0/C1) are refused. Case and inner bytes are
+ * NEVER altered — a turn id is an opaque host identifier, not text to munge.
+ */
+export function normalizeRequestedTargetTurnId(value: unknown): NormalizedTargetTurnId {
+  if (typeof value !== 'string') return { ok: false, reason: 'empty' };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { ok: false, reason: 'empty' };
+  if (trimmed.length > 200) return { ok: false, reason: 'too_long' };
+  // eslint-disable-next-line no-control-regex -- C0 (U+0000–U+001F) and C1 (U+007F–U+009F) are exactly what is rejected here.
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(trimmed)) return { ok: false, reason: 'control_chars' };
+  return { ok: true, value: trimmed };
+}

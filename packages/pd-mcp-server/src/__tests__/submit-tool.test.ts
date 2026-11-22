@@ -888,3 +888,168 @@ describe('transport budget degradation (§5.4.3, T14b)', () => {
     expect(parsed.error?.code).toBe('response_budget_exceeded');
   });
 });
+
+// ── PRI-1274 review round 2 (directive K3): structured target-turn evidence degradation ──
+
+describe('target-turn evidence read classification (K)', () => {
+  async function kWorkspace(flags: { readonly minimalMetadata: boolean }, withObservation: boolean, corruptDb = false): Promise<string> {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'pd-k3-'));
+    const config = getDefaultPdConfig();
+    if (flags.minimalMetadata) config.features.host_identity_minimal_metadata.enabled = true;
+    await mkdir(join(workspaceDir, '.pd'), { recursive: true });
+    await writeFile(join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    await mkdir(join(workspaceDir, '.state'), { recursive: true });
+    if (corruptDb) {
+      // Not a database: the store open fails — the read_failed classification.
+      await writeFile(join(workspaceDir, '.state', 'trajectory.db'), 'definitely not sqlite');
+      return workspaceDir;
+    }
+    await writeFile(join(workspaceDir, '.state', 'trajectory.db'), '');
+    if (withObservation) {
+      const ingested = ingestGovernanceObservations({
+        workspaceDir,
+        observations: [{
+          hostKind: 'codex',
+          rolloutIdentity: 'thread-k',
+          rootSessionId: 'thread-k',
+          hostTurnId: 'turn-target',
+          kind: 'user_turn',
+          logicalObservationKey: 'thread-k|turn-target|user',
+          visibleText: 'The exact target turn text',
+          source: 'live_hook',
+          completeness: 'complete',
+          observedAt: new Date().toISOString(),
+        }],
+      });
+      if (!ingested.ok) throw new Error(ingested.reason);
+    }
+    return workspaceDir;
+  }
+
+  const K_ARGS = {
+    reason: 'The target turn was never fulfilled.',
+    anchorType: 'owner_expectation',
+    anchorRef: 'Owner request in the preceding turn',
+    painType: 'user_frustration',
+  };
+
+  it('available: an existing target turn feeds evidence into the verified submission', async () => {
+    const workspaceDir = await kWorkspace({ minimalMetadata: true }, true);
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: { ...K_ARGS, targetTurnId: 'turn-target' },
+          _meta: { threadId: 'thread-k', 'x-codex-turn-metadata': { turn_id: 'turn-submit' } },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toMatchObject({ status: 'verified', targetTurnId: 'turn-target' });
+        if (result.taskId === null) throw new Error('missing task id');
+        const task = await state.getTask(result.taskId);
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic.evidence).toEqual([
+          { sourceRef: 'governance_observation:thread-k|turn-target|user', note: 'The exact target turn text' },
+        ]);
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('not_found: a missing target turn keeps the submission legal with EMPTY evidence (no fabrication, no session loss)', async () => {
+    const workspaceDir = await kWorkspace({ minimalMetadata: true }, false);
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: { ...K_ARGS, targetTurnId: 'turn-nowhere' },
+          _meta: { threadId: 'thread-k', 'x-codex-turn-metadata': { turn_id: 'turn-submit' } },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        // Session binding survives; evidence is honestly EMPTY.
+        expect(result.sessionAssociation).toMatchObject({ status: 'verified', sessionId: 'thread-k', targetTurnId: 'turn-nowhere' });
+        if (result.taskId === null) throw new Error('missing task id');
+        const task = await state.getTask(result.taskId);
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic.sessionIdHint).toBe('thread-k');
+        expect(diagnostic.evidence).toEqual([]);
+        // The waiting semantics own completion — no fabricated evidence.
+        expect(diagnostic.painIngress.evidenceClass.status).toBe('unavailable');
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('read_failed: a broken store degrades the ENRICHMENT only — submission still succeeds, degradation observable', async () => {
+    const workspaceDir = await kWorkspace({ minimalMetadata: true }, false, true);
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const errors: string[] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        errors.push(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
+      };
+      let assembly;
+      try {
+        assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      } finally {
+        console.error = originalError;
+      }
+      if (!assembly.ok || assembly.call === undefined) throw new Error('capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        console.error = (...args: unknown[]) => {
+          errors.push(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
+        };
+        let result: PainSubmitReceipt;
+        try {
+          result = parseReceipt(await h.client.callTool({
+            name: SUBMIT_TOOL_NAME,
+            arguments: { ...K_ARGS, targetTurnId: 'turn-target' },
+            _meta: { threadId: 'thread-k', 'x-codex-turn-metadata': { turn_id: 'turn-submit' } },
+          }));
+        } finally {
+          console.error = originalError;
+        }
+        // K2: the ORIGINAL pain/task submission is never aborted by the
+        // optional read; the session binding and the task survive intact.
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toMatchObject({ status: 'verified', sessionId: 'thread-k' });
+        if (result.taskId === null) throw new Error('missing task id');
+        const task = await state.getTask(result.taskId);
+        expect(task).not.toBeNull();
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic.evidence).toEqual([]);
+        // K1: the degraded read is OBSERVABLE (structured stderr note), never
+        // a silent empty success.
+        expect(errors.some((line) => line.includes('target-turn evidence read degraded') && line.includes('read_failed'))).toBe(true);
+      } finally {
+        console.error = originalError;
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      // A failed SQLite open on the corrupt db can hold the file briefly on
+      // Windows — retry the temp cleanup (the dir is disposable either way).
+      await rm(workspaceDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
+    }
+  });
+});

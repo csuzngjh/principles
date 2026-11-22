@@ -31,7 +31,7 @@ import {
   type PainIngressReport,
   type PainDeviationAnchor,
 } from './pain-ingress-payload.js';
-import { deriveProvenanceFromIngressFacts } from './pain-ingress-payload.js';
+import { deriveProvenanceFromIngressFacts, normalizeRequestedTargetTurnId } from './pain-ingress-payload.js';
 // PRI-1274: leaf import — the disposition schema version lives beside its
 // types, with no cycle back into this module.
 import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, targetEvidenceWaitRequired } from './pain-admission-disposition.js';
@@ -525,17 +525,24 @@ export async function submitPainCapability(
       lastCheckedAt: new Date().toISOString(),
     }
     : undefined;
-  // PRI-1274 r2b (devin finding 0001): an UNBOUND submission keeps its
-  // explicit target as a shape-validated, explicitly-UNVERIFIED hint inside
-  // the versioned ingress block — the receipt recovery honors it after the
-  // host-authoritative session binding. Absent when the caller named no
-  // target; never written on the verified path (the trusted
-  // verifiedHostSession.targetTurnId is the authority there).
-  const requestedTargetTurnId = sessionAssociation.status !== 'verified'
-    && typeof input.targetTurnId === 'string'
-    && input.targetTurnId.trim().length > 0
-    && input.targetTurnId.length <= 200
-    ? input.targetTurnId
+  // PRI-1274 r2b (devin finding 0001) + review round 2 (directives I2/J2):
+  // an UNBOUND submission keeps its explicit target as a NORMALIZED,
+  // explicitly-UNVERIFIED hint inside the versioned ingress block — the
+  // shared normalizeRequestedTargetTurnId rule (trim/empty/length/control
+  // chars; never case-munged) applies at PERSIST time so ` turn-10 ` cannot
+  // be stored as a different identifier than `turn-10`. Two hard exclusions:
+  //   - a CONSENT-BLOCKED submission (blocked_by_consent) persists NO host
+  //     identity metadata at all — the model-named turn id is not Owner
+  //     business input and must not survive into the task (J2);
+  //   - the verified path never writes the hint (the trusted
+  //     verifiedHostSession.targetTurnId is the authority there).
+  const consentBlocked = sessionAssociation.status === 'unverified' && sessionAssociation.detail === 'blocked_by_consent';
+  const requestedTargetTurnId = sessionAssociation.status !== 'verified' && !consentBlocked
+    && input.targetTurnId !== undefined
+    ? (() => {
+      const normalized = normalizeRequestedTargetTurnId(input.targetTurnId);
+      return normalized.ok ? normalized.value : undefined;
+    })()
     : undefined;
 
   const anchorCheck = validateSubmissionAnchor({

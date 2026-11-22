@@ -68,6 +68,26 @@ function readHostId(value: unknown): string | undefined {
 }
 
 /**
+ * PRI-1274 review round 2 (directive K1): the target-turn evidence read is
+ * STRUCTURED, not a silent empty array. The classification rides the existing
+ * evidence-availability vocabulary of the ingress contract (`available` /
+ * `unavailable` with a reason code); causes:
+ *   - available      — turn rows with readable text were collected;
+ *   - not_found      — the store read succeeded but carries no readable text
+ *                      for that (session, turn): an honest "not yet there"
+ *                      (the waiting/recovery semantics own completion);
+ *   - read_failed    — the store read itself failed (structured stderr note;
+ *                      the original submission stays legal — the enrichment
+ *                      is optional and never aborts the Pain/Task write).
+ * A missing turn and a failed read are DIFFERENT facts; conflating them hid
+ * permanently broken stores behind an eternal "waiting" state (rc-9).
+ */
+type TargetTurnEvidenceRead =
+  | { readonly status: 'available'; readonly entries: PainEvidenceEntry[] }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'read_failed'; readonly reason: string };
+
+/**
  * PRI-1274: opportunistic target-turn evidence. BOUNDED read of this
  * workspace's authorized governance observations for the target turn — used
  * ONLY as an enrichment when the turn text happens to already exist. Its
@@ -76,22 +96,24 @@ function readHostId(value: unknown): string | undefined {
  *
  * Review round 2: the host kind is the assembly's OWN validated startup
  * host (never a fixed 'codex' — a non-Codex submission must never read, or
- * collide with, Codex's observations), and an unreadable store degrades to
- * an empty enrichment — the original Pain/Task write is never aborted by an
- * optional read.
+ * collide with, Codex's observations).
  */
 function readTargetTurnEvidence(input: {
   readonly workspaceDir: string;
   readonly host: PdMcpHost;
   readonly sessionId: string;
   readonly targetTurnId: string;
-}): PainEvidenceEntry[] {
+}): TargetTurnEvidenceRead {
   try {
     const result = listGovernanceObservations({
       workspaceDir: input.workspaceDir, hostKind: input.host, rolloutIdentity: input.sessionId, hostTurnId: input.targetTurnId, limit: 64,
     });
-    if (!result.ok) return [];
-    return result.observations.flatMap((row) =>
+    if (!result.ok) {
+      // Degraded read — observable, never silent (rc-9).
+      console.error(`[pd-submit] target-turn evidence read degraded: read_failed (${result.reason}) — submission continues without turn evidence`);
+      return { status: 'read_failed', reason: result.reason };
+    }
+    const entries = result.observations.flatMap((row) =>
       (row.kind === 'user_turn' || row.kind === 'assistant_turn')
         && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
         && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
@@ -100,11 +122,15 @@ function readTargetTurnEvidence(input: {
       // Rows come back in id (capture) order: slice(0, 12) keeps the EARLIEST
       // texts and drops the turn's final answer on long turns — keep the last.
     ).slice(-12);
-  } catch {
+    return entries.length > 0
+      ? { status: 'available', entries }
+      : { status: 'not_found' };
+  } catch (error) {
     // Optional enrichment: a throwing store read must not abort the original
-    // submission write. The empty result keeps the submission legal and
-    // unbound-from-evidence; diagnosis-side reads surface their own notes.
-    return [];
+    // submission write. The failure is OBSERVABLE (structured stderr, no raw
+    // exception text) and classified — never a silent empty success.
+    console.error('[pd-submit] target-turn evidence read degraded: read_failed (store exception) — submission continues without turn evidence');
+    return { status: 'read_failed', reason: error instanceof Error ? error.message.slice(0, 120) : 'store_exception' };
   }
 }
 
@@ -228,9 +254,16 @@ export function assembleSubmitCapability(
     // submission turn and without an explicit target the target stays
     // unknown — the session binding survives (SPEC §G2).
     const targetTurnId = requestedTurnId ?? context.submissionTurnId;
-    const inputEvidence = targetTurnId === undefined
-      ? []
+    // Directive K2: the read result is classified; only `available` carries
+    // entries. not_found / read_failed keep the submission legal with EMPTY
+    // evidence — the honest waiting/recovery semantics apply (a missing turn
+    // and a broken store are different facts, K1).
+    const evidenceRead = targetTurnId === undefined
+      ? undefined
       : readTargetTurnEvidence({ workspaceDir, host, sessionId: context.sessionId, targetTurnId });
+    const inputEvidence = evidenceRead !== undefined && evidenceRead.status === 'available'
+      ? evidenceRead.entries
+      : [];
 
     return {
       status: 'verified',

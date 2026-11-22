@@ -28,6 +28,16 @@ export interface AcquireLeaseOptions {
   owner: string;
   durationMs?: number;
   runtimeKind: string;
+  /**
+   * PRI-1274 review round 2 (directive H2): an admissibility predicate the
+   * acquisition evaluates INSIDE its BEGIN IMMEDIATE transaction, after the
+   * fresh row read and BEFORE any mutation (no lease, no generation bump, no
+   * run record). A non-null return is the refusal reason; the acquisition
+   * throws PDRuntimeError('input_invalid', reason). This is the FINAL
+   * judgment for entry gates that must not race a read→check→lease window —
+   * the caller's earlier pre-checks remain fast-path conveniences only.
+   */
+  refuseIf?: (taskRow: { status: string; attemptCount: number; leaseGeneration: number; diagnosticJson: string | null }) => string | null;
 }
 
 /**
@@ -146,7 +156,7 @@ export class DefaultLeaseManager implements LeaseManager {
     // connections racing for the same task cannot both observe 'pending'.
     const tx = db.transaction((): { attemptNumber: number; runId: string; leaseGeneration: number } => {
       const row = db.prepare(
-        'SELECT task_id, status, attempt_count, lease_generation FROM tasks WHERE task_id = ?',
+        'SELECT task_id, status, attempt_count, lease_generation, diagnostic_json FROM tasks WHERE task_id = ?',
       ).get(taskId) as Record<string, unknown> | undefined;
 
       if (!row) {
@@ -159,6 +169,22 @@ export class DefaultLeaseManager implements LeaseManager {
           'lease_conflict',
           `Task ${taskId} is ${currentStatus}, expected pending/retry_wait`,
         );
+      }
+
+      // Directive H2: the caller's admissibility predicate runs on the FRESH
+      // row inside the SAME serialized unit — before the lease, the
+      // generation bump and the run record. A refusal leaves the task row
+      // byte-untouched (the reconcile path stays the owner of the state).
+      if (options.refuseIf !== undefined) {
+        const refusal = options.refuseIf({
+          status: currentStatus,
+          attemptCount: Number(row.attempt_count ?? 0),
+          leaseGeneration: Number(row.lease_generation ?? 0),
+          diagnosticJson: typeof row.diagnostic_json === 'string' ? row.diagnostic_json : null,
+        });
+        if (refusal !== null) {
+          throw new PDRuntimeError('input_invalid', refusal);
+        }
       }
 
       const nowIso = new Date().toISOString();

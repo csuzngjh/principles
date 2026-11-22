@@ -723,3 +723,166 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4/T8/T9 negat
     expect(Object.hasOwn(diagnostic, 'recovery')).toBe(false);
   });
 });
+
+// ── Review round 2 (directive G4): lease-generation ABA fencing ─────────────
+
+describe('recoverTaskIdentityFromReceipt — G: lease_generation CAS fencing (real SQLite)', () => {
+  it('the store primitive defeats the ABA cycle (acquire→release restores status/owner/expires, NOT generation)', async () => {
+    const painId = 'mcp_1700000000031_7a000031';
+    const taskId = await persistUnboundPain(painId);
+    // Snapshot BEFORE any takeover — the recovery's read-time view.
+    const snapshot = await stateManager.getTask(taskId);
+    if (snapshot === null) throw new Error('task missing');
+    expect(snapshot.status).toBe('pending');
+
+    // Worker B takes the lease over and releases it: status, owner and
+    // expiresAt cycle back to the snapshot's values — the classic ABA shape.
+    const leased = await stateManager.acquireLease({ taskId, owner: 'worker-b', runtimeKind: 'test-double', durationMs: 60_000 });
+    const generationAfterTakeover = leased.leaseGeneration ?? 0;
+    expect(generationAfterTakeover).toBeGreaterThan(snapshot.leaseGeneration ?? 0);
+    await stateManager.releaseLease({ taskId, owner: 'worker-b', leaseGeneration: generationAfterTakeover });
+
+    // The generation-aware CAS (what the recovery now sends) LOSES — the
+    // fencing token moved even though every legacy column matches.
+    const fenced = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      snapshot.diagnosticJson,
+      { diagnosticJson: JSON.stringify({ ...JSON.parse(snapshot.diagnosticJson ?? '{}'), abTest: true }) },
+      {
+        expectedStatus: snapshot.status,
+        expectedLeaseOwner: snapshot.leaseOwner ?? null,
+        expectedLeaseExpiresAt: snapshot.leaseExpiresAt ?? null,
+        expectedLeaseGeneration: snapshot.leaseGeneration ?? 0,
+        expectedAttemptCount: snapshot.attemptCount,
+      },
+    );
+    expect(fenced).toBeNull();
+
+    // Negative control (documents the pre-fix hole): WITHOUT the generation
+    // precondition the same stale snapshot WOULD have won — exactly the ABA
+    // bug directive G closes.
+    const unfenced = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      snapshot.diagnosticJson,
+      { diagnosticJson: JSON.stringify({ ...JSON.parse(snapshot.diagnosticJson ?? '{}'), abTest: true }) },
+      {
+        expectedStatus: snapshot.status,
+        expectedLeaseOwner: snapshot.leaseOwner ?? null,
+        expectedLeaseExpiresAt: snapshot.leaseExpiresAt ?? null,
+      },
+    );
+    expect(unfenced).not.toBeNull();
+  });
+
+  it('a stale-worker write with an old generation is rejected after a takeover', async () => {
+    const painId = 'mcp_1700000000032_7a000032';
+    const taskId = await persistUnboundPain(painId);
+    // Worker A acquires (generation 1), then releases; B takes over
+    // (generation 2) — the takeover shape A's stale fence must lose to.
+    const aLease = await stateManager.acquireLease({ taskId, owner: 'worker-a', runtimeKind: 'test-double', durationMs: 60_000 });
+    const aSnapshot = await stateManager.getTask(taskId);
+    if (aSnapshot === null) throw new Error('task missing');
+    await stateManager.releaseLease({ taskId, owner: 'worker-a', leaseGeneration: aLease.leaseGeneration ?? 0 });
+    await stateManager.acquireLease({ taskId, owner: 'worker-b', runtimeKind: 'test-double', durationMs: 60_000 });
+    // Worker A submits with its OLD generation — rejected.
+    const aWrite = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      aSnapshot.diagnosticJson,
+      { diagnosticJson: JSON.stringify({ ...JSON.parse(aSnapshot.diagnosticJson ?? '{}'), staleWorker: true }) },
+      {
+        expectedStatus: aSnapshot.status,
+        expectedLeaseOwner: aSnapshot.leaseOwner ?? null,
+        expectedLeaseExpiresAt: aSnapshot.leaseExpiresAt ?? null,
+        expectedLeaseGeneration: aLease.leaseGeneration ?? 0,
+        expectedAttemptCount: aSnapshot.attemptCount,
+      },
+    );
+    expect(aWrite).toBeNull();
+  });
+
+  it('recovery after an ABA cycle re-reads the fresh state and decides on CURRENT facts', async () => {
+    const painId = 'mcp_1700000000033_7a000033';
+    const taskId = await persistUnboundPain(painId);
+    // An ABA cycle completes BEFORE the recovery starts: the recovery's own
+    // fresh read sees generation 1, asserts it, and its CAS succeeds.
+    const leased = await stateManager.acquireLease({ taskId, owner: 'worker-b', runtimeKind: 'test-double', durationMs: 60_000 });
+    await stateManager.releaseLease({ taskId, owner: 'worker-b', leaseGeneration: leased.leaseGeneration ?? 0 });
+
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+    });
+    expect(outcome.status).toBe('recovered');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.sessionIdHint).toBe('codex-rollout-r1');
+  });
+});
+
+// ── Review round 2 (directive I3): historical requestedTargetTurnId normalization ──
+
+describe('recoverTaskIdentityFromReceipt — I: the historical target hint passes the shared normalization', () => {
+  it('a whitespace-padded historical hint binds the trimmed turn; a malformed hint never guesses', async () => {
+    const painId = 'mcp_1700000000034_7a000034';
+    // Persist an unbound pain whose historical hint carries outer whitespace.
+    const bridge = makeBridge();
+    await bridge.submitPainSignal({
+      painId,
+      painType: 'principle_deviation',
+      source: 'mcp_agent_assisted',
+      reason: 'hint normalization fixture',
+      provenance: 'agent_reported_owner_approved',
+      hostKind: 'codex',
+      evidence: [],
+      painIngress: { ...unboundMcpIngress(0), requestedTargetTurnId: ' turn-42 ' },
+    });
+
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity({ submissionTurnId: 'turn-99' }),
+      authorization: authorize(true),
+      // Target text availability is only consulted for the RESOLVED target.
+      targetTurnTextAvailable: (sessionId, turnId) => {
+        expect(sessionId).toBe('codex-rollout-r1');
+        // The padded historical hint must resolve to the TRIMMED id.
+        expect(turnId).toBe('turn-42');
+        return true;
+      },
+    });
+    expect(outcome.status).toBe('recovered');
+    if (outcome.status !== 'recovered') return;
+    expect(outcome.disposition.state).toBe('ready_for_diagnosis');
+
+    // A malformed historical hint (control characters) is discarded — the
+    // documented default (the event's submission turn) applies, never a
+    // guess at the corrupt value.
+    const painId2 = 'mcp_1700000000035_7a000035';
+    await bridge.submitPainSignal({
+      painId: painId2,
+      painType: 'principle_deviation',
+      source: 'mcp_agent_assisted',
+      reason: 'hint normalization fixture 2',
+      provenance: 'agent_reported_owner_approved',
+      hostKind: 'codex',
+      evidence: [],
+      painIngress: { ...unboundMcpIngress(0), requestedTargetTurnId: 'bad\u0007turn' },
+    });
+    const validated2 = validatePainSubmitReceipt(receiptJson(painId2, tmpDir), { workspaceDir: tmpDir });
+    if (!validated2.ok) throw new Error('fixture receipt 2 invalid');
+    let observedTurn: string | null = null;
+    const outcome2 = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated2.receipt,
+      identity: identity({ submissionTurnId: 'turn-7' }),
+      authorization: authorize(true),
+      targetTurnTextAvailable: (_sessionId, turnId) => {
+        observedTurn = turnId;
+        return true;
+      },
+    });
+    expect(outcome2.status).toBe('recovered');
+    expect(observedTurn).toBe('turn-7');
+  });
+});

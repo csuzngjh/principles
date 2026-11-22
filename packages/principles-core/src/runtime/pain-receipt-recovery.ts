@@ -35,7 +35,7 @@
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import type { TaskRecord } from './task-status.js';
 import { createDiagnosticianTaskId } from './pain-signal-bridge.js';
-import { isSentinelSessionId } from './pain-ingress-payload.js';
+import { isSentinelSessionId, normalizeRequestedTargetTurnId } from './pain-ingress-payload.js';
 import {
   SUBMIT_PAIN_CAPABILITY_ID,
   SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
@@ -315,14 +315,19 @@ function mergeDisposition(diagnostic: ParsedDiagnosticJson, disposition: PainRec
   return JSON.stringify({ ...diagnostic.record, recovery: disposition });
 }
 
-/** The read-time task snapshot the CAS write re-asserts atomically (P1-4):
- * a worker that acquires a lease or pushes the task to a terminal state in
+/** The read-time task snapshot the CAS write re-asserts atomically (P1-4 +
+ * review round 2 directive G): a worker that acquires a lease (minting a NEW
+ * lease_generation), releases it, or pushes the task to a terminal state in
  * the read→write window defeats the UPDATE in the SAME statement as the
- * diagnostic_json comparison — the check-then-write race is closed. */
+ * diagnostic_json comparison — including the ABA shape where status/owner/
+ * expiresAt cycle back to the observed values but the generation moved. */
 interface TaskCasPreconditions {
   readonly expectedStatus: string;
   readonly expectedLeaseOwner: string | null;
   readonly expectedLeaseExpiresAt: string | null;
+  /** Fencing token: every lease takeover mints a new one (directive G1). */
+  readonly expectedLeaseGeneration: number;
+  readonly expectedAttemptCount: number;
 }
 
 /**
@@ -348,6 +353,11 @@ function evaluateRecoveryPass(input: {
     expectedStatus: task.status,
     expectedLeaseOwner: task.leaseOwner ?? null,
     expectedLeaseExpiresAt: task.leaseExpiresAt ?? null,
+    // Directive G2: the FULL snapshot the decision depends on — generation
+    // (legacy rows read 0 through the TaskRecord mapping, which IS the
+    // pre-takeover state) and the task's own attempt counter.
+    expectedLeaseGeneration: task.leaseGeneration ?? 0,
+    expectedAttemptCount: task.attemptCount,
   };
 
   if (task.inputRef !== receipt.painId) {
@@ -421,17 +431,20 @@ function evaluateRecoveryPass(input: {
     // block; without it this is not that task — fail closed, no mutation.
     return { action: 'report', outcome: { status: 'rejected', reasonCode: 'diagnostic_payload_invalid:pain_ingress_missing', painId: receipt.painId, taskId: receipt.taskId } };
   }
-  // P1-3 (r2b, devin finding 0001): the target is the original submission's
-  // EXPLICIT request when it named one (persisted as the unverified
-  // `requestedTargetTurnId` hint), else the host event's submission turn (the
-  // tool's documented default). Never inferred further — no target turn
-  // means session-level policy.
+  // P1-3 (r2b, devin finding 0001) + review round 2 (directive I3): the
+  // target is the original submission's EXPLICIT request when it named one
+  // (persisted as the unverified `requestedTargetTurnId` hint), else the host
+  // event's submission turn (the tool's documented default). The historical
+  // hint passes through the SAME shared normalization the submit path used —
+  // a malformed historical value (too long / control characters) is never
+  // guessed at or bound to another turn: it is discarded as unusable and the
+  // documented default applies, exactly like its absence. Never inferred
+  // further — no target turn means session-level policy.
   const requestedRaw = isRecord(diagnostic.record.painIngress)
     ? diagnostic.record.painIngress.requestedTargetTurnId
     : undefined;
-  const requestedTargetTurnId = typeof requestedRaw === 'string' && requestedRaw.trim().length > 0 && requestedRaw.length <= 200
-    ? requestedRaw
-    : undefined;
+  const requestedNormalized = requestedRaw !== undefined ? normalizeRequestedTargetTurnId(requestedRaw) : undefined;
+  const requestedTargetTurnId = requestedNormalized !== undefined && requestedNormalized.ok ? requestedNormalized.value : undefined;
   const targetTurnId = requestedTargetTurnId ?? identity.submissionTurnId;
   const evidenceCount = countEvidence(diagnostic);
   // r2b (devin finding 0004): the SAME waiting rule the submit path applies
@@ -558,6 +571,8 @@ export async function recoverTaskIdentityFromReceipt(
           expectedStatus: evaluation.preconditions.expectedStatus,
           expectedLeaseOwner: evaluation.preconditions.expectedLeaseOwner,
           expectedLeaseExpiresAt: evaluation.preconditions.expectedLeaseExpiresAt,
+          expectedLeaseGeneration: evaluation.preconditions.expectedLeaseGeneration,
+          expectedAttemptCount: evaluation.preconditions.expectedAttemptCount,
         },
       );
       if (updated !== null) return evaluation.outcome;

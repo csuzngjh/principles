@@ -66,6 +66,7 @@ export class MemoryTaskStore implements TaskStore {
       readonly expectedMaxAttempts?: number;
       readonly expectedLeaseOwner?: string | null;
       readonly expectedLeaseExpiresAt?: string | null;
+      readonly expectedLeaseGeneration?: number;
     },
   ): Promise<TaskRecord | null> {
     const existing = this.tasks.get(taskId);
@@ -80,6 +81,9 @@ export class MemoryTaskStore implements TaskStore {
     if (options?.expectedMaxAttempts !== undefined && existing.maxAttempts !== options.expectedMaxAttempts) return null;
     if (options?.expectedLeaseOwner !== undefined && (existing.leaseOwner ?? null) !== options.expectedLeaseOwner) return null;
     if (options?.expectedLeaseExpiresAt !== undefined && (existing.leaseExpiresAt ?? null) !== options.expectedLeaseExpiresAt) return null;
+    // PRI-1274 review round 2 (directive G1): generation fencing parity —
+    // legacy rows without a generation read as 0 through TaskRecord.
+    if (options?.expectedLeaseGeneration !== undefined && (existing.leaseGeneration ?? 0) !== options.expectedLeaseGeneration) return null;
     return this.updateTask(taskId, patch);
   }
 
