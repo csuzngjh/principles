@@ -121,3 +121,35 @@ export function loadFeatureFlagFromConfig(
   }
   return { enabled: flag?.enabled ?? false, source: result.source };
 }
+
+/**
+ * Env-var NAMES the workspace's runtime profiles reference for credentials
+ * (`runtimeProfiles.*.apiKeyEnv`). One collector for every consumer that
+ * must know which env names are credential-bearing (the Service Host worker
+ * environment allowlist, PRI-1280 Phase 2; the OpenClaw worker readiness
+ * credential check, PRI-1282 Phase 4). Names only — values never pass
+ * through here. Unreadable/malformed config yields [] and the caller's own
+ * degraded path reports the config problem (never a guess).
+ */
+export function collectWorkspaceCredentialEnvNames(effective: unknown): readonly string[] {
+  if (typeof effective !== 'object' || effective === null || Array.isArray(effective)) return [];
+  const record = effective as Record<string, unknown>;
+  const candidates: unknown[] = [
+    record.config,
+    record.runtimeProfiles !== undefined ? { runtimeProfiles: record.runtimeProfiles } : undefined,
+  ];
+  const names = new Set<string>();
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) continue;
+    const profiles: unknown = (candidate as Record<string, unknown>).runtimeProfiles;
+    if (typeof profiles !== 'object' || profiles === null || Array.isArray(profiles)) continue;
+    for (const profile of Object.values(profiles as Record<string, unknown>)) {
+      if (typeof profile !== 'object' || profile === null || Array.isArray(profile)) continue;
+      const apiKeyEnv: unknown = (profile as Record<string, unknown>).apiKeyEnv;
+      if (typeof apiKeyEnv !== 'string' || apiKeyEnv.length === 0 || apiKeyEnv.length > 64) continue;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(apiKeyEnv)) continue;
+      names.add(apiKeyEnv);
+    }
+  }
+  return [...names];
+}

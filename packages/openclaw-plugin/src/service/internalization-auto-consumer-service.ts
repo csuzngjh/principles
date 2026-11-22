@@ -8,6 +8,19 @@
  * implementation. This module keeps only what is genuinely OpenClaw-specific:
  * the service lifecycle (timer chain per workspace), the OpenClaw tool
  * catalog, the plugin logger, and SystemLogger event emission.
+ *
+ * PRI-1282 (Phase 4) — §8.4 ownership gate: the install manifest's
+ * `backgroundExecutions` record is the ONLY consumption authority for this
+ * service. The marker is read (a) before the service arms a workspace's
+ * timer chain, and (b) before EVERY tick; any state other than
+ * `legacy_owned` — including an UNREADABLE manifest — fails closed: no new
+ * consumption cycle starts. When a blocking state is observed the workspace
+ * quiesces: in-flight cycles are awaited (bounded), a persisted
+ * `pd.gateway-quiesce.v1` acknowledgment is written (the auditable "the old
+ * consumer stopped" evidence the handover command waits for), and the timer
+ * slot degrades into a slow ownership watch that re-arms normal consumption
+ * only when the marker returns to `legacy_owned` (rollback) — one timer
+ * chain per workspace at all times, never a second resident loop.
  */
 import type { OpenClawPluginServiceContext, PluginLogger } from '../openclaw-sdk.js';
 import { READ_ONLY_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, AGENT_TOOL_NAMES } from '../constants/tools.js';
@@ -28,12 +41,31 @@ import path from 'node:path';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { describeExperimentWorkspaceViolation } from '../core/experiment-workspace-guard.js';
+import { readOpenClawWorkspaceOwnership } from '../openclaw-worker.js';
+import { writeGatewayQuiesceAck, type GatewayQuiesceAck } from './gateway-quiesce-ack.js';
 
 // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: the interval is no longer
 // a fixed constant. The FIRST cycle keeps its original delay; every later delay
 // is decided by the pure `nextConsumerDelay` policy from the facts the previous
 // cycle observed (empty queue → the baseline 120s sleep, backlog → shorter).
 const INTERNALIZATION_AUTO_CONSUMER_INITIAL_DELAY_MS = 30_000;
+
+/**
+ * PRI-1282: bounded wait for an in-flight cycle to end before the quiesce
+ * acknowledgment is written. Covers the longest expected cycle (diagnostician
+ * execution) with margin; exceeding it is recorded honestly as
+ * `in_flight_timeout` — the handover then fails closed instead of assuming
+ * cancellation. The eventual natural completion still lands (cycles are
+ * bounded by design) and the ownership watch keeps the chain parked.
+ */
+const GATEWAY_QUIESCE_WAIT_MS = 10 * 60_000;
+/**
+ * While a workspace is blocked, its ONE timer slot ticks this slowly,
+ * re-reading the marker: rollback (legacy_owned) re-arms consumption; a new
+ * operation identity gets a fresh ack. Not a second loop — the consumer
+ * chain itself is parked.
+ */
+const OWNERSHIP_WATCH_INTERVAL_MS = 30_000;
 
 export interface InternalizationAutoConsumerServiceShape {
   id: string;
@@ -43,7 +75,12 @@ export interface InternalizationAutoConsumerServiceShape {
 
 interface WorkspaceConsumerState {
   stopped: boolean;
+  quiescing: boolean;
   timeoutId: ReturnType<typeof setTimeout> | null;
+  /** The in-flight runCycle promise — quiesce waits for this (bounded). */
+  inFlight: Promise<void> | null;
+  /** Identity of the operation last acked (avoids duplicate acks while watching). */
+  ackedOperation: { state: string; operationId: string | null; generation: number } | null;
   /** Adaptive-scheduler inputs, owned by this workspace's timer chain only. */
   consecutiveEmptyCycles: number;
   consecutiveFailures: number;
@@ -58,7 +95,10 @@ function getWorkspaceState(workspaceDir: string): WorkspaceConsumerState {
   if (!state) {
     state = {
       stopped: false,
+      quiescing: false,
       timeoutId: null,
+      inFlight: null,
+      ackedOperation: null,
       consecutiveEmptyCycles: 0,
       consecutiveFailures: 0,
       lastCycleDurationMs: null,
@@ -71,6 +111,27 @@ function getWorkspaceState(workspaceDir: string): WorkspaceConsumerState {
 
 function formatRunOnceCommand(workspaceDir: string): string {
   return `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`;
+}
+
+/** Marker states that forbid new consumption cycles (§8.4). */
+type BlockingOwnership =
+  | { blocked: true; state: 'handover_preparing' | 'service_host_owned' | 'rollback_pending'; operationId: string | null; generation: number }
+  | { blocked: true; state: 'manifest_unreadable'; operationId: null; generation: -1 };
+
+function evaluateOwnershipForConsumption(workspaceDir: string): BlockingOwnership | { blocked: false } {
+  const ownership = readOpenClawWorkspaceOwnership(workspaceDir);
+  if (ownership.status === 'legacy_owned') return { blocked: false };
+  if (ownership.status === 'manifest_unreadable') {
+    return { blocked: true, state: 'manifest_unreadable', operationId: null, generation: -1 };
+  }
+  return { blocked: true, state: ownership.status, operationId: ownership.record.operationId, generation: ownership.generation };
+}
+
+function delayMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 }
 
 /**
@@ -232,13 +293,27 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
       return;
     }
 
+    // ── PRI-1282 §8.4 marker gate (service-start read point). ──
+    const startOwnership = evaluateOwnershipForConsumption(workspaceDir);
+    if (startOwnership.blocked) {
+      state.stopped = false;
+      state.quiescing = true;
+      logOwnershipBlocked(workspaceDir, startOwnership, logger, 'service_start');
+      // A fresh Gateway process that refuses to consume is itself quiesce
+      // evidence for the in-flight operation (no cycles can exist from THIS
+      // process; the ack still binds operationId + generation).
+      void quiesceAndWatch(workspaceDir, state, startOwnership, logger, 'service_start');
+      return;
+    }
+
     state.stopped = false;
+    state.quiescing = false;
     state.consecutiveEmptyCycles = 0;
     state.consecutiveFailures = 0;
     state.lastCycleDurationMs = null;
 
     function scheduleNext(decision: AdaptiveConsumerScheduleDecision): void {
-      if (state.stopped) return;
+      if (state.stopped || state.quiescing) return;
       state.lastDecision = decision;
       state.timeoutId = setTimeout(runCycle, decision.delayMs);
       state.timeoutId?.unref();
@@ -270,57 +345,88 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     // Mirror correction-observer: catch inside the cycle, log
     // on both channels (rc-9), and let reschedule run on BOTH paths.
     async function runCycle(): Promise<void> {
-      if (state.stopped) return;
+      if (state.stopped || state.quiescing) return;
+      // ── PRI-1282 §8.4 marker gate (per-tick read point). ──
+      const tickOwnership = evaluateOwnershipForConsumption(workspaceDir);
+      if (tickOwnership.blocked) {
+        state.quiescing = true;
+        logOwnershipBlocked(workspaceDir, tickOwnership, logger, 'timer_tick');
+        void quiesceAndWatch(workspaceDir, state, tickOwnership, logger, 'timer_tick');
+        return;
+      }
       const startedAtMs = Date.now();
       const outcomeHolder: { current: InternalizationConsumerCycleOutcome | undefined } = { current: undefined };
-      try {
-        await runConsumerCycle(workspaceDir, logger, (cycleOutcome) => {
-          outcomeHolder.current = cycleOutcome;
-        });
-        const outcome = outcomeHolder.current;
-        if (outcome?.ran === true && outcome.runStatus === 'succeeded') {
-          state.consecutiveFailures = 0;
-        } else if (outcome?.runStatus === 'failed') {
+      const cycle: Promise<void> = (async () => {
+        try {
+          await runConsumerCycle(workspaceDir, logger, (cycleOutcome) => {
+            outcomeHolder.current = cycleOutcome;
+          });
+          const outcome = outcomeHolder.current;
+          if (outcome?.ran === true && outcome.runStatus === 'succeeded') {
+            state.consecutiveFailures = 0;
+          } else if (outcome?.runStatus === 'failed') {
+            state.consecutiveFailures += 1;
+          } else if (outcome?.runStatus === 'retried') {
+            // A retried task is a failure of this attempt but not a provider
+            // cooldown signal — keep the counter convergent instead of clearing it.
+            state.consecutiveFailures = Math.max(1, state.consecutiveFailures);
+          }
+          if (outcome?.ran === true) {
+            state.consecutiveEmptyCycles = 0;
+          } else {
+            state.consecutiveEmptyCycles += 1;
+          }
+        } catch (err) {
           state.consecutiveFailures += 1;
-        } else if (outcome?.runStatus === 'retried') {
-          // A retried task is a failure of this attempt but not a provider
-          // cooldown signal — keep the counter convergent instead of clearing it.
-          state.consecutiveFailures = Math.max(1, state.consecutiveFailures);
-        }
-        if (outcome?.ran === true) {
           state.consecutiveEmptyCycles = 0;
-        } else {
-          state.consecutiveEmptyCycles += 1;
+          const message = `Internalization consumer cycle failed: ${err instanceof Error ? err.message : String(err)}`;
+          logger.error(`[PD:AutoConsumer] ${message}`);
+          SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_CYCLE_FAILED', message);
         }
-      } catch (err) {
-        state.consecutiveFailures += 1;
-        state.consecutiveEmptyCycles = 0;
-        const message = `Internalization consumer cycle failed: ${err instanceof Error ? err.message : String(err)}`;
-        logger.error(`[PD:AutoConsumer] ${message}`);
-        SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_CYCLE_FAILED', message);
+        const durationMs = Math.max(0, Date.now() - startedAtMs);
+        state.lastCycleDurationMs = durationMs;
+        // ── PRI-1282 §8.4 post-cycle ownership gate: a handover may have
+        // opened WHILE this cycle ran. The chain reschedules only here, so
+        // without this check the flip would stay unobserved until the next
+        // tick; with it, the just-finished cycle parks the chain (and acks)
+        // immediately. The detached quiesce resolves after this closure
+        // returns and the tracked in-flight promise clears. ──
+        const postCycle = evaluateOwnershipForConsumption(workspaceDir);
+        if (postCycle.blocked) {
+          state.quiescing = true;
+          logOwnershipBlocked(workspaceDir, postCycle, logger, 'timer_tick');
+          void quiesceAndWatch(workspaceDir, state, postCycle, logger, 'timer_tick');
+          return;
+        }
+        const signals = buildSignals(outcomeHolder.current, durationMs);
+        const decision = nextConsumerDelay(signals);
+        // Structured, greppable evidence for "why is the next cycle in N ms".
+        SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SCHEDULE', JSON.stringify({
+          state: decision.state,
+          delayMs: decision.delayMs,
+          reason: decision.reason,
+          cycleDurationMs: durationMs,
+          readyQueueDepth: signals.readyQueueDepth,
+          retryQueueDepth: signals.retryQueueDepth,
+          oldestReadyAgeMs: signals.oldestReadyAgeMs,
+          consecutiveEmptyCycles: signals.consecutiveEmptyCycles,
+          consecutiveFailures: signals.consecutiveFailures,
+          providerLimited: signals.providerLimited,
+          recovered: signals.recoveredLastCycle,
+          ...(outcomeHolder.current?.taskId !== undefined ? { taskId: outcomeHolder.current.taskId } : {}),
+          ...(outcomeHolder.current?.taskKind !== undefined ? { taskKind: outcomeHolder.current.taskKind } : {}),
+          ...(outcomeHolder.current?.errorCategory !== undefined ? { errorCategory: outcomeHolder.current.errorCategory } : {}),
+        }));
+        scheduleNext(decision);
+      })();
+      state.inFlight = cycle;
+      try {
+        await cycle;
+      } finally {
+        // Only clear when THIS cycle is still the tracked one — a late
+        // orphaned cycle (stop() deleted the state) must not clobber it.
+        if (state.inFlight === cycle) state.inFlight = null;
       }
-      const durationMs = Math.max(0, Date.now() - startedAtMs);
-      state.lastCycleDurationMs = durationMs;
-      const signals = buildSignals(outcomeHolder.current, durationMs);
-      const decision = nextConsumerDelay(signals);
-      // Structured, greppable evidence for "why is the next cycle in N ms".
-      SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SCHEDULE', JSON.stringify({
-        state: decision.state,
-        delayMs: decision.delayMs,
-        reason: decision.reason,
-        cycleDurationMs: durationMs,
-        readyQueueDepth: signals.readyQueueDepth,
-        retryQueueDepth: signals.retryQueueDepth,
-        oldestReadyAgeMs: signals.oldestReadyAgeMs,
-        consecutiveEmptyCycles: signals.consecutiveEmptyCycles,
-        consecutiveFailures: signals.consecutiveFailures,
-        providerLimited: signals.providerLimited,
-        recovered: signals.recoveredLastCycle,
-        ...(outcomeHolder.current?.taskId !== undefined ? { taskId: outcomeHolder.current.taskId } : {}),
-        ...(outcomeHolder.current?.taskKind !== undefined ? { taskKind: outcomeHolder.current.taskKind } : {}),
-        ...(outcomeHolder.current?.errorCategory !== undefined ? { errorCategory: outcomeHolder.current.errorCategory } : {}),
-      }));
-      scheduleNext(decision);
     }
 
     const initialDecision = nextConsumerDelay({
@@ -376,3 +482,130 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     }
   },
 };
+
+function logOwnershipBlocked(
+  workspaceDir: string,
+  ownership: BlockingOwnership,
+  logger: PluginLogger,
+  observedVia: 'service_start' | 'timer_tick',
+): void {
+  const payload = JSON.stringify({
+    reason: ownership.state === 'manifest_unreadable'
+      ? 'background_executions_manifest_unreadable'
+      : `background_execution_state_${ownership.state}`,
+    observedVia,
+    ...(ownership.operationId !== null ? { operationId: ownership.operationId } : {}),
+    ...(ownership.generation >= 0 ? { generation: ownership.generation } : {}),
+    nextAction: ownership.state === 'manifest_unreadable'
+      ? 'Restore ~/.pd/install.json; consumption stays refused until the ownership record is readable (fail-closed).'
+      : 'This workspace is being handed over to (or rolled back by) the PD Service Host; the Gateway will resume automatically when the marker returns to legacy_owned.',
+  });
+  SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_OWNERSHIP_BLOCKED', payload);
+  logger.warn(`[PD:AutoConsumer] Consumption blocked for workspace ${workspaceDir}: ${payload}`);
+}
+
+/**
+ * Quiesce protocol (§8.4 handover evidence): park the workspace's ONE timer
+ * slot, await the in-flight cycle (bounded), persist the
+ * `pd.gateway-quiesce.v1` acknowledgment, then degrade the slot into the
+ * ownership watch. Runs detached (`void`) — callers are timer callbacks.
+ */
+async function quiesceAndWatch(
+  workspaceDir: string,
+  state: WorkspaceConsumerState,
+  ownership: BlockingOwnership,
+  logger: PluginLogger,
+  startedVia: 'service_start' | 'timer_tick',
+): Promise<void> {
+  let outcome: GatewayQuiesceAck['outcome'] = 'quiesced';
+  let inFlightCycles = 0;
+  if (state.inFlight !== null) {
+    const tracked = state.inFlight;
+    let completed = false;
+    tracked.then(() => { completed = true; }).catch(() => { completed = true; });
+    await Promise.race([tracked.catch(() => undefined), delayMs(GATEWAY_QUIESCE_WAIT_MS)]);
+    if (!completed) {
+      outcome = 'in_flight_timeout';
+      inFlightCycles = 1;
+      logger.warn(`[PD:AutoConsumer] Quiesce wait exceeded ${GATEWAY_QUIESCE_WAIT_MS}ms for ${workspaceDir}; recording in_flight_timeout — the handover must fail closed.`);
+    }
+  }
+  if (ownership.state !== 'manifest_unreadable') {
+    writeGatewayQuiesceAck({
+      workspaceDir,
+      state: ownership.state,
+      operationId: ownership.operationId,
+      generation: ownership.generation,
+      inFlightCycles,
+      outcome,
+      startedVia,
+    });
+    state.ackedOperation = { state: ownership.state, operationId: ownership.operationId, generation: ownership.generation };
+  }
+  armOwnershipWatch(workspaceDir, state, logger);
+}
+
+function armOwnershipWatch(workspaceDir: string, state: WorkspaceConsumerState, logger: PluginLogger): void {
+  if (state.stopped) return;
+  state.timeoutId = setTimeout(() => {
+    void watchOwnership(workspaceDir, state, logger).catch((err: unknown) => {
+      logger.error(`[PD:AutoConsumer] Ownership watch failed: ${String(err)}`);
+      armOwnershipWatch(workspaceDir, state, logger);
+    });
+  }, OWNERSHIP_WATCH_INTERVAL_MS);
+  state.timeoutId?.unref();
+}
+
+/**
+ * The parked slot's slow tick: re-read the marker. `legacy_owned` re-arms
+ * normal consumption (rollback completed — §8.4 step 8 without a Gateway
+ * restart); a NEW operation identity gets a fresh ack; anything else
+ * (including unreadable) keeps watching — never consuming.
+ */
+async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerState, logger: PluginLogger): Promise<void> {
+  if (state.stopped) return;
+  const ownership = evaluateOwnershipForConsumption(workspaceDir);
+  if (!ownership.blocked) {
+    state.quiescing = false;
+    state.ackedOperation = null;
+    SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RESUMED', JSON.stringify({
+      reason: 'background_execution_state_legacy_owned',
+    }));
+    logger.info(`[PD:AutoConsumer] Resuming consumption for workspace: ${workspaceDir} (ownership returned to legacy_owned).`);
+    // Clear the fired watch handle and drop the parked state FIRST — the
+    // service's own idempotency check ("Already started") keys on a live
+    // timeoutId, so re-entering start() without this would silently no-op.
+    if (state.timeoutId) clearTimeout(state.timeoutId);
+    state.timeoutId = null;
+    state.stopped = true; // retire the parked entry; start() builds a fresh one
+    workspaceStates.delete(workspaceDir);
+    // Restart the normal chain through the service's public entry so the
+    // adaptive counters and the initial-delay semantics reset cleanly.
+    InternalizationAutoConsumerService.start({
+      config: undefined,
+      workspaceDir,
+      stateDir: path.join(workspaceDir, '.state'),
+      logger,
+    } as OpenClawPluginServiceContext);
+    return;
+  }
+  if (ownership.state !== 'manifest_unreadable') {
+    const changed = state.ackedOperation === null
+      || state.ackedOperation.state !== ownership.state
+      || state.ackedOperation.operationId !== ownership.operationId
+      || state.ackedOperation.generation !== ownership.generation;
+    if (changed) {
+      writeGatewayQuiesceAck({
+        workspaceDir,
+        state: ownership.state,
+        operationId: ownership.operationId,
+        generation: ownership.generation,
+        inFlightCycles: state.inFlight !== null ? 1 : 0,
+        outcome: 'quiesced',
+        startedVia: 'timer_tick',
+      });
+      state.ackedOperation = { state: ownership.state, operationId: ownership.operationId, generation: ownership.generation };
+    }
+  }
+  armOwnershipWatch(workspaceDir, state, logger);
+}
