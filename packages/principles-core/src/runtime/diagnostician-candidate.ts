@@ -40,10 +40,27 @@ export async function pickDiagnosticianCandidate(
   limit: number,
   nowIso: string,
 ): Promise<TaskRecord | null> {
-  const pending = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', orderBy: 'updated_at_asc', limit });
+  // PRI-1274 (B1 / P1-3): tasks explicitly waiting for their target turn's
+  // text are excluded INSIDE the store query (SQL WHERE / memory-store
+  // equivalent, before ORDER BY + LIMIT) — a waiting task must never
+  // consume the bounded candidate window or be diagnosed on other turns'
+  // text. The worker reconcile flips the state once evidence exists.
+  const pending = await stateManager.listTasks({
+    taskKind: 'diagnostician',
+    status: 'pending',
+    orderBy: 'updated_at_asc',
+    limit,
+    excludeRecoveryStates: ['waiting_for_target_evidence'],
+  });
   const [pendingTask] = pending;
   let retryTask: TaskRecord | null = null;
-  const retrying = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'retry_wait', orderBy: 'updated_at_asc', limit });
+  const retrying = await stateManager.listTasks({
+    taskKind: 'diagnostician',
+    status: 'retry_wait',
+    orderBy: 'updated_at_asc',
+    limit,
+    excludeRecoveryStates: ['waiting_for_target_evidence'],
+  });
   for (const candidate of retrying) {
     if (isRetryWaitBackoffElapsed(candidate.status, candidate.leaseExpiresAt)) {
       retryTask = candidate;

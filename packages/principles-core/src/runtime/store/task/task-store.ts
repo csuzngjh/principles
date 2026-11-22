@@ -25,6 +25,20 @@ export interface TaskStoreFilter {
    * selected orderBy. Requires orderBy to be set.
    */
   afterCursor?: { updatedAt: string; taskId: string };
+  /**
+   * PRI-1274 (B1 / P1-3): match tasks whose `diagnostic_json.recovery.state`
+   * equals this value (e.g. `waiting_for_target_evidence`). Applied in the
+   * SAME WHERE clause as status/kind — before any ORDER BY/LIMIT — so the
+   * candidate picker never spends its bounded window on ineligible rows.
+   */
+  recoveryState?: string;
+  /**
+   * PRI-1274 (B1 / P1-3): exclude tasks whose `diagnostic_json.recovery.state`
+   * is one of these values. Applied in the SAME WHERE clause — before any
+   * ORDER BY/LIMIT — so a waiting task cannot displace an admissible one
+   * inside the picker's bounded LIMIT window.
+   */
+  excludeRecoveryStates?: readonly string[];
 }
 
 /** Narrow patch type — only the fields that are mutable in practice.
@@ -91,6 +105,8 @@ export interface TaskStore {
       readonly expectedMaxAttempts?: number;
       readonly expectedLeaseOwner?: string | null;
       readonly expectedLeaseExpiresAt?: string | null;
+      /** PRI-1274 review round 2 (directive G1): lease generation fencing. */
+      readonly expectedLeaseGeneration?: number;
     },
   ): Promise<TaskRecord | null>;
 
