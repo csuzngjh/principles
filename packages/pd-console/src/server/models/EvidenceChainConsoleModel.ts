@@ -32,7 +32,6 @@ import {
   SqliteConnection,
   sanitizeString,
   assembleEvidenceChain,
-  isOwnerManualCorrectionEvidence,
 } from '@principles/core/runtime';
 import { openTrajectoryDbReadonly } from '@principles/core/trajectory-store';
 import { readSourceMaterialAuthorization } from '@principles/host-runtime';
@@ -487,13 +486,14 @@ export class EvidenceChainConsoleModel {
     if (blockedHosts.size > 0) {
       for (const record of response.records) {
         if (record.hostKind !== undefined && blockedHosts.has(record.hostKind)) {
-          // Only the STRUCTURED correction evidence is a credible Owner
-          // provenance record: a record's summary is pain text/reason —
-          // conversation-derived content an automatic signal could spoof,
-          // so a marker substring can never lift the redaction. Agent-
-          // derived submissions (no bound Owner confirmation) are withheld
-          // the same way as any other governed material.
-          if (record.correctionEvidence !== undefined && isOwnerManualCorrectionEvidence(record.correctionEvidence)) continue;
+          // `ownerManual` is the verdict the shared judgment computed at
+          // assembly time over the PERSISTED evidence (channel + bound
+          // confirmation) before the public projection stripped those fields
+          // — neither the projected record nor the spoofable summary marker
+          // can stand in for it. Agent-derived submissions (no bound Owner
+          // confirmation) are withheld the same way as any other governed
+          // material.
+          if (record.correctionEvidence?.ownerManual === true) continue;
           record.summary = `[source consent not granted — conversation-derived excerpt withheld (PRI-1283 R2)]`;
           if (record.correctionEvidence !== undefined) {
             record.correctionEvidence = undefined;

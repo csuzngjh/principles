@@ -7,6 +7,7 @@ import {
   admitGovernanceSignals,
   buildSharedSeedKeywordStore,
   claimPendingCorrectionCandidates,
+  ensureGovernanceDiagnosticianTask,
   recordPendingCorrectionReview,
   verifyPendingClaimForClassification,
   type GovernanceCorrectionCandidate,
@@ -30,6 +31,7 @@ import {
   createDiagnosticianTaskId,
   denyAllSourceMaterialAuthorization,
   fingerprintStatement,
+  getDefaultPdConfig,
   isOwnerManualCorrectionEvidence,
 } from '@principles/core/runtime';
 
@@ -1269,5 +1271,59 @@ describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', (
     const parsed = JSON.parse(task.diagnostic_json) as { correctionEvidence?: unknown };
     expect(parsed.correctionEvidence).toBeUndefined();
     expect(task.diagnostic_json).not.toContain(SECRET);
+  });
+
+  it('H. 撤回授权后任务恢复拒绝重持久化受管摘录; owner_manual 仍豁免', async () => {
+    writeConsent('codex', 'granted');
+    // Config for the real task-creation path (mirrors explicit-ingress tests).
+    const config = getDefaultPdConfig();
+    (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {
+      type: 'pi-ai', provider: 'rev-prov', model: 'rev-model', apiKeyEnv: 'REV_TEST_KEY', baseUrl: 'http://127.0.0.1:1/v1',
+    };
+    config.internalAgents.defaultRuntime = 'pd.default';
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    process.env.REV_TEST_KEY = 'test-key';
+
+    const agentPainId = seedAgentChannelPain({ text: `${SECRET} agent relay`, turnId: 'turn-h', confirmed: false });
+    writeConsent('codex', 'revoked');
+
+    // Governed agent-derived marker: recovery must refuse to copy excerpts.
+    const refused = await ensureGovernanceDiagnosticianTask({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-1|turn-h|user',
+      canonicalPainId: agentPainId,
+    });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.reason).toBe('source_authorization_revoked');
+    // No task link was written for the refused marker.
+    const link = withTrajectory((db) => db.prepare('SELECT diagnostician_task_id FROM governance_signal_admissions WHERE canonical_pain_id = ?').get(agentPainId) as { diagnostician_task_id: string | null });
+    expect(link.diagnostician_task_id).toBeNull();
+
+    // Owner-manual submission: still exempt — an explicit Owner act is not
+    // conversation ingestion and survives the revocation.
+    seedCodexObservation({ logicalKey: 'codex|rollout-1|turn-h2|user', turnId: 'turn-h2' });
+    const ownerCandidate: GovernanceCorrectionCandidate = {
+      kind: 'user_correction',
+      hostKind: 'codex',
+      logicalObservationKey: 'codex|rollout-1|turn-h2|user',
+      rolloutIdentity: 'rollout-1',
+      rootSessionId: 'root-session-1',
+      hostTurnId: 'turn-h2',
+      text: `PD记录痛苦：${SECRET} owner direct`,
+      observedAt: NOW.toISOString(),
+      explicitOwnerStatement: true,
+      explicitChannel: 'codex_explicit_prefix',
+    };
+    const admitted = admitGovernanceSignals({ workspaceDir, candidates: [ownerCandidate], now: NOW, keywordStore: buildSharedSeedKeywordStore() });
+    if (!('ok' in admitted) || !admitted.ok || admitted.outcomes[0]?.disposition !== 'admitted') throw new Error('owner admission failed');
+    const ownerPainId = admitted.outcomes[0].canonicalPainId;
+    const ensured = await ensureGovernanceDiagnosticianTask({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-1|turn-h2|user',
+      canonicalPainId: ownerPainId,
+    });
+    if (!ensured.ok) throw new Error(`owner-manual recovery refused: ${ensured.reason}`);
+    expect(ensured.created).toBe(true);
   });
 });

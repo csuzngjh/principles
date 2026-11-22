@@ -449,8 +449,7 @@
       "kind": "value",
       "consumers": [
         "packages/host-runtime/src/source-revocation-sweep.ts",
-        "packages/host-runtime/src/governance-signal-admission.ts",
-        "packages/pd-console/src/server/models/EvidenceChainConsoleModel.ts"
+        "packages/host-runtime/src/governance-signal-admission.ts"
       ],
       "whyNotInternal": "Owner manual-vs-agent-derived classification is ONE judgment shared by the revocation sweep, task-payload validation, console redaction and every read gate; duplicating it per package would fork the Owner's classification ruling.",
       "alternativeConsidered": "A narrow subpath export, rejected because the sibling classification helpers already live behind ./runtime and splitting one judgment across two entries invites drift.",
