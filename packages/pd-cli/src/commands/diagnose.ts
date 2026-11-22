@@ -41,7 +41,7 @@ import {
   type DreamerSeedSuppression,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
-import { createGovernanceTrajectoryTurnReader, createHostIntentDocReader } from '@principles/host-runtime';
+import { createGovernanceTrajectoryTurnReader, createConsentLedgerSourceMaterialAuthorization, createHostIntentDocReader } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -395,9 +395,15 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // with stored turns gets its ORIGINAL text in the diagnosis context window
     // (same adapter the OpenClaw hook path uses, over the workspace's own
     // consent-tiered governance store).
+    // PRI-1283 R2: one port per command invocation; every consumption
+    // surface below (assembler + all three stage runners) shares it.
+    const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {
       sourceTraceLocator,
-      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization }),
+      // PRI-1283 R2: latest-consent gate — governance-sourced evidence and
+      // conversation material are filtered at assembly time.
+      sourceMaterialAuthorization,
     });
 
     // PRI-939 Option A: workspace-scoped sink — allowlisted critical events
@@ -553,15 +559,15 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       // host reader (same Core semantics as every entry point). A task with
       // a persisted snapshot keeps using it — the runner never re-reads
       // INTENT.md for an already-captured task (SPEC §6.6).
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }) },
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }), sourceMaterialAuthorization },
       { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
     const distillerRunner = new DiagDistillerRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), sourceMaterialAuthorization },
       { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
     const routerRunner = new DiagRouterRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, trustedPrincipleSource: ledgerAdapter },
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, trustedPrincipleSource: ledgerAdapter, sourceMaterialAuthorization },
       { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
 
@@ -721,7 +727,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         // cli-6-output-next-action: refusal result carries admissionBlock.nextAction.
         // SPEC review round-3 P1: the FULL write gate (persisted disposition /
         // re-evaluation), not the confidence/kind-only partial check.
-        const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId)) ?? checkAdmissionGate(candidate);
+        const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization })) ?? checkAdmissionGate(candidate);
         if (admissionBlock) {
           intakeFailed = true;
           intakeResults.push({

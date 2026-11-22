@@ -1,6 +1,6 @@
 /**
  * Live-turn context bridge for agent-assisted explicit Owner pain
- * registration (no `PD记录痛苦：` prefix).
+ * registration gated by a host-derived current-turn Owner-intent marker.
  *
  * The hook writes the CURRENT turn's host-verified identity — session id,
  * turn id, transcript path, CODEX_HOME, workspace — to a file partitioned by
@@ -15,9 +15,9 @@
  * the transcript path (existence + CODEX_HOME containment + rollout identity)
  * at registration time. A cleared or stale context fails closed.
  *
- * Privacy: each file carries identifiers and paths only — never prompt text,
- * never transcript content. Session ids are hashed in filenames. The
- * conversation-ingestion flag does not gate context publication.
+ * Privacy: each file carries identifiers, paths and a closed-set intent marker only.
+ * It never persists prompt text or transcript content; session ids are hashed in filenames.
+ * The conversation-ingestion flag does not gate context publication.
  */
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -29,7 +29,7 @@ import { extractFields, isRecord } from './ingestion-fields.js';
 import { recordExplicitOwnerStatement, MAX_OWNER_STATEMENT_CHARS, type RecordOwnerStatementResult } from './explicit-owner-statement.js';
 
 export const TURN_CONTEXT_FILENAME_PREFIX = 'pd_current_turn_context_';
-export const TURN_CONTEXT_SCHEMA_VERSION = 1;
+export const TURN_CONTEXT_SCHEMA_VERSION = 2;
 
 /**
  * Staleness bound for the turn context. Stop/SessionStart withdraw the file,
@@ -41,7 +41,7 @@ export const TURN_CONTEXT_SCHEMA_VERSION = 1;
  */
 export const TURN_CONTEXT_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 
-/** Host-written identity of the CURRENT Codex turn. Ids and paths only. */
+/** Host-written identity of the CURRENT Codex turn: ids, paths and one closed-set intent marker. */
 export interface CodexTurnContext {
   readonly schemaVersion: number;
   readonly writtenAt: string;
@@ -50,6 +50,8 @@ export interface CodexTurnContext {
   readonly transcriptPath: string;
   readonly codexHome: string;
   readonly workspaceDir: string;
+  /** Host-derived from a direct current-turn Owner request; never caller-supplied. */
+  readonly ownerIntent: 'explicit_pain_registration' | null;
 }
 
 interface CodexCallerEnvironment {
@@ -145,6 +147,16 @@ const CLEAR_FAILURE_NEXT_ACTION = 'The previous turn context could not be withdr
  * carries full lineage". Fail-open: a write failure degrades the
  * agent-assisted entry only (the prefix entry never needed this file).
  */
+const OWNER_PAIN_REQUEST_PREFIXES = ['PD代录痛苦：', 'PD代录痛苦:', 'PD记录痛苦：', 'PD记录痛苦:'] as const;
+
+function resolveOwnerPainIntent(rawPayload: unknown): CodexTurnContext['ownerIntent'] {
+  if (!isRecord(rawPayload) || typeof rawPayload.prompt !== 'string') return null;
+  const prompt = rawPayload.prompt.trimStart();
+  return OWNER_PAIN_REQUEST_PREFIXES.some((prefix) =>
+    prompt.startsWith(prefix) && prompt.slice(prefix.length).trim().length > 0,
+  ) ? 'explicit_pain_registration' : null;
+}
+
 export function writeCurrentTurnContext(args: {
   rawPayload: unknown;
   workspaceDir: string;
@@ -177,6 +189,7 @@ export function writeCurrentTurnContext(args: {
     transcriptPath: fields.transcriptPath,
     codexHome: home.home,
     workspaceDir: args.workspaceDir,
+    ownerIntent: resolveOwnerPainIntent(args.rawPayload),
   };
   const target = turnContextPath(args.workspaceDir, fields.sessionId);
   const temp = `${target}.tmp-${process.pid}`;
@@ -201,7 +214,7 @@ export type RegisterCurrentTurnResult =
   | RecordOwnerStatementResult
   | {
     status: 'rejected';
-    reason: 'turn_context_missing' | 'turn_context_invalid' | 'turn_context_stale' | 'turn_context_workspace_mismatch' | 'turn_context_session_mismatch' | 'caller_session_missing' | 'caller_session_conflict' | 'conversation_ingestion_config_invalid';
+    reason: 'turn_context_missing' | 'turn_context_invalid' | 'turn_context_stale' | 'turn_context_workspace_mismatch' | 'turn_context_session_mismatch' | 'caller_session_missing' | 'caller_session_conflict' | 'conversation_ingestion_config_invalid' | 'owner_intent_missing';
     nextAction: string;
   };
 
@@ -209,6 +222,12 @@ function requireStringField(record: Record<string, unknown>, key: string): strin
   const value = Object.hasOwn(record, key) ? record[key] : undefined;
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
+
+/**
+ * A tool invocation is not proof that the Owner requested it. The UserPromptSubmit
+ * hook records only this closed-set marker from the current Owner message. It
+ * deliberately stores no prompt text and does not inspect historical turns.
+ */
 
 function readTurnContext(workspaceDir: string, sessionId: string): CodexTurnContext | { error: 'turn_context_missing' | 'turn_context_invalid' | 'turn_context_stale' } {
   let raw: string;
@@ -230,6 +249,10 @@ function readTurnContext(workspaceDir: string, sessionId: string): CodexTurnCont
   const transcriptPath = requireStringField(parsed, 'transcriptPath');
   const codexHome = requireStringField(parsed, 'codexHome');
   const contextWorkspaceDir = requireStringField(parsed, 'workspaceDir');
+  const {ownerIntent} = parsed;
+  if (!Object.hasOwn(parsed, 'ownerIntent') || (ownerIntent !== null && ownerIntent !== 'explicit_pain_registration')) {
+    return { error: 'turn_context_invalid' };
+  }
   if (writtenAt === null || contextSessionId === null || turnId === null || transcriptPath === null || codexHome === null || contextWorkspaceDir === null) {
     return { error: 'turn_context_invalid' };
   }
@@ -244,15 +267,17 @@ function readTurnContext(workspaceDir: string, sessionId: string): CodexTurnCont
     transcriptPath,
     codexHome,
     workspaceDir: contextWorkspaceDir,
+    ownerIntent,
   };
 }
 
 /**
  * Register one explicit Owner statement through the LIVE turn context — the
- * agent-assisted counterpart of the prefix entry. The statement must be the
- * Owner's verbatim words from the CURRENT conversation turn (1–500 chars,
- * rejected when over the limit — never truncated); lineage comes exclusively
- * from the host-written context file, never from caller-supplied ids.
+ * agent-assisted counterpart of the prefix entry. The current Owner turn
+ * must explicitly request this registration. Supplied wording is Agent-derived
+ * unless a consent-authorized transcript match verifies it as Owner-verbatim.
+ * The intent marker authorizes this submission, not authorship. Lineage comes
+ * only from the host-written context file.
  */
 export async function registerCurrentTurnOwnerStatement(args: {
   workspaceDir: string;
@@ -293,6 +318,13 @@ export async function registerCurrentTurnOwnerStatement(args: {
       status: 'rejected',
       reason: 'turn_context_session_mismatch',
       nextAction: 'The turn context does not belong to this host-bound Codex session; nothing was recorded. Retry from the session that supplied the Owner statement.',
+    };
+  }
+  if (context.ownerIntent !== 'explicit_pain_registration') {
+    return {
+      status: 'rejected',
+      reason: 'owner_intent_missing',
+      nextAction: 'An agent/tool invocation is not Owner approval. The current Owner message must begin with PD代录痛苦：<request> (or PD记录痛苦：<Owner words> for direct submission). Start a new Owner turn with that explicit prefix; no history was read and nothing was recorded.',
     };
   }
   const statement = args.statementText.trim();

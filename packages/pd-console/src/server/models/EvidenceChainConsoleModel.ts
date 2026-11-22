@@ -34,6 +34,7 @@ import {
   assembleEvidenceChain,
 } from '@principles/core/runtime';
 import { openTrajectoryDbReadonly } from '@principles/core/trajectory-store';
+import { readSourceMaterialAuthorization } from '@principles/host-runtime';
 import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 import type {
   EvidenceChainState,
@@ -465,6 +466,38 @@ export class EvidenceChainConsoleModel {
         );
         if (record.intentTension.intentDocHash) {
           record.intentTension.intentDocHash = sanitizeString(record.intentTension.intentDocHash, this.workspaceDir);
+        }
+      }
+    }
+
+    // ── 6. PRI-1283 R2: source-material authorization redaction ────────
+    // Console read models must not re-serve conversation-derived excerpts of
+    // a host whose conversation-ingestion consent is not granted — UI hiding
+    // is NOT cleanup (R3 owns the persisted copies), but the READ path must
+    // still refuse them. IDs, states, timestamps and model-authored fields
+    // survive; conversation-derived text is replaced with a visible marker.
+    // Review round 2 (directive B): an EXPLICIT Owner submission (explicit
+    // correction channel or the explicit reason marker in the summary) is an
+    // Owner act, not conversation ingestion — it stays fully visible.
+    const blockedHosts = new Set<string>(
+      (['codex', 'workbuddy'] as const)
+        .filter((host) => readSourceMaterialAuthorization({ workspaceDir: this.workspaceDir, hostKind: host }).status === 'blocked'),
+    );
+    if (blockedHosts.size > 0) {
+      for (const record of response.records) {
+        if (record.hostKind !== undefined && blockedHosts.has(record.hostKind)) {
+          // `ownerManual` is the verdict the shared judgment computed at
+          // assembly time over the PERSISTED evidence (channel + bound
+          // confirmation) before the public projection stripped those fields
+          // — neither the projected record nor the spoofable summary marker
+          // can stand in for it. Agent-derived submissions (no bound Owner
+          // confirmation) are withheld the same way as any other governed
+          // material.
+          if (record.correctionEvidence?.ownerManual === true) continue;
+          record.summary = `[source consent not granted — conversation-derived excerpt withheld (PRI-1283 R2)]`;
+          if (record.correctionEvidence !== undefined) {
+            record.correctionEvidence = undefined;
+          }
         }
       }
     }

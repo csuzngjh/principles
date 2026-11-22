@@ -32,6 +32,7 @@ import {
   loadPdConfigForPlugin,
   readConversationIngestionConsent,
   recordConversationIngestionConsent,
+  runSourceRevocationSweep,
   type ConversationIngestionConsentState,
 } from '@principles/host-runtime';
 import { computeEffectivePdConfig, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime';
@@ -424,11 +425,29 @@ export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Prom
     return;
   }
   const stateAfter = deriveConversationIngestionConsentState(recorded.record, targetFlag);
+  // PRI-1283 R3: revocation triggers the immediate excerpt sweep. The decline
+  // decision itself is already durable; a sweep that cannot complete is a
+  // loud, retryable warning ('pd consent sweep-revoked --apply').
+  const warnings: string[] = decision === 'granted' && !hostEnabled
+    ? ['host.workbuddy is off: no transcript will be read until the host master switch is enabled.']
+    : [];
+  if (decision === 'revoked') {
+    try {
+      const sweep = await runSourceRevocationSweep({ workspaceDir: workspace, apply: true });
+      if (sweep.outcome === 'partial') {
+        warnings.push(`source-revocation sweep partial: ${sweep.hosts.map((h) => `${h.hostKind}:${h.failures.length} failures`).join('; ')} — rerun 'pd consent sweep-revoked --apply'`);
+      } else if (sweep.outcome === 'failed') {
+        warnings.push(`source-revocation sweep failed: ${sweep.reason} — rerun 'pd consent sweep-revoked --apply'`);
+      }
+    } catch (error) {
+      warnings.push(`source-revocation sweep error: ${error instanceof Error ? error.message.slice(0, 160) : String(error).slice(0, 160)} — rerun 'pd consent sweep-revoked --apply'`);
+    }
+  }
   finish({
     generatedAt, host: 'workbuddy', workspace, status: 'ok', decision,
     consentStateBefore: stateBefore, consentState: stateAfter,
     disclosureVersion: WORKBUDDY_INGESTION_DISCLOSURE_VERSION,
     ingestionFlag: { name: FLAG_ID, enabled: targetFlag }, hostWorkbuddyFlagEnabled: hostEnabled,
-    warnings: decision === 'granted' && !hostEnabled ? ['host.workbuddy is off: no transcript will be read until the host master switch is enabled.'] : [],
+    warnings,
   });
 }

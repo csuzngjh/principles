@@ -170,12 +170,20 @@ function toEntry(row: unknown): HistoryQueryEntry | null {
  * Missing database, missing `governance_observations` table or any query error
  * is reported as `unavailable` with a reason — never thrown and never silently
  * treated as "no evidence" (rc-3/rc-9).
+ *
+ * PRI-1283 R2: `authorizedHostKinds` excludes rows of hosts whose
+ * conversation-ingestion consent is no longer granted AT THE QUERY BOUNDARY —
+ * revoked conversation material must not be read into the window at all. An
+ * empty array therefore yields an empty window (all hosts unauthorized);
+ * omitting the option preserves the pre-R2 behavior (test seams only).
  */
 export function readPromotedEvidenceWindow(input: {
   readonly workspaceDir: string;
   readonly painId: string;
   /** Context budget for entries; the most recent entries are kept. */
   readonly maxEntries: number;
+  /** PRI-1283 R2: only these host kinds' rows may be read; absent = all. */
+  readonly authorizedHostKinds?: readonly string[];
 }): PromotedEvidenceReadResult {
   let db: ReturnType<typeof openTrajectoryDbReadonly>;
   try {
@@ -187,17 +195,27 @@ export function readPromotedEvidenceWindow(input: {
   try {
     // Inner DESC + LIMIT keeps the END of the transcript window when a pain has
     // more rows than the hard cap; the outer ASC restores reading order.
+    // PRI-1283 R2 + SEC-BASE-4: the host authorization filter is a FIXED SQL
+    // shape with three bind slots (one per governance host); an unauthorized
+    // host binds NULL, and `host_kind = NULL` is never true — an explicitly
+    // EMPTY authorized list therefore yields zero rows without dynamic SQL.
+    // An ABSENT list preserves the pre-R2 contract (no host filter — test
+    // seams only), so all three slots bind to their host kind.
+    const hostSlots: readonly (string | null)[] = ['codex', 'workbuddy', 'openclaw'].map(
+      (host) => (input.authorizedHostKinds === undefined || input.authorizedHostKinds.includes(host) ? host : null),
+    );
     const rows: unknown[] = db.prepare(`
       SELECT id, kind, visible_text, source_order, observed_at, sanitized_tool_facts_json
       FROM (
         SELECT id, kind, visible_text, source_order, observed_at, sanitized_tool_facts_json
         FROM governance_observations
         WHERE retention_class = 'promoted' AND promotion_ref = ?
+          AND (host_kind = ? OR host_kind = ? OR host_kind = ?)
         ORDER BY source_order IS NULL DESC, source_order DESC, observed_at DESC, id DESC
         LIMIT ?
       )
       ORDER BY source_order IS NULL, source_order ASC, observed_at ASC, id ASC
-    `).all(input.painId, MAX_HISTORY_PAGE_SIZE);
+    `).all(input.painId, ...hostSlots, MAX_HISTORY_PAGE_SIZE);
 
     const mapped = rows.map(toEntry);
     const entries = mapped.filter((entry): entry is HistoryQueryEntry => entry !== null);

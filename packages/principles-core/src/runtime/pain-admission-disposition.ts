@@ -21,10 +21,13 @@
 
 /** Recovery/admission disposition states (SPEC TD §1.3 "Recovery disposition"). */
 export type PainRecoveryState =
+  // blocked_by_consent remains the minimal-identity-metadata disposition;
+  // source-material denial has its own non-reconcilable diagnosis gate.
   | 'waiting_for_receipt'
   | 'waiting_for_target_evidence'
   | 'ready_for_diagnosis'
   | 'blocked_by_consent'
+  | 'blocked_by_source_material_consent'
   | 'ambiguous_receipt'
   | 'recovery_exhausted'
   | 'unrecoverable';

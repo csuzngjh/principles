@@ -19,6 +19,7 @@ import { isOwnerStatementEvidence } from '../evidence-guards.js';
 import {
   appendAdmissionEvaluation,
   currentEvaluation,
+  fingerprintStatement,
   parseAdmissionDocument,
   type AdmissionEvaluationRecord,
 } from '../store/candidate/admission-document.js';
@@ -88,10 +89,23 @@ describe('CR-02 admission gate: explicit owner statement', () => {
     );
   });
 
-  it('classification guard: only owner_statement-classified correction evidence counts', () => {
+  it('classification guard: credibly Owner-authored correction evidence counts (PRI-1283 r3 owner_manual)', () => {
     expect(isOwnerStatementEvidence({ text: 'owner words' })).toBe(false);
     expect(isOwnerStatementEvidence({ text: 'owner words', classification: 'behavior_trace' })).toBe(false);
-    expect(isOwnerStatementEvidence({ text: 'owner words', classification: 'owner_statement' })).toBe(true);
+    // A bare self-declared classification (no credible channel) is Agent-derived.
+    expect(isOwnerStatementEvidence({ text: 'owner words', classification: 'owner_statement' })).toBe(false);
+    // Direct Owner channel: the channel itself is the trusted record.
+    expect(isOwnerStatementEvidence({ text: 'owner words', classification: 'owner_statement', channel: 'codex_explicit_prefix' })).toBe(true);
+    // Agent-assisted channel without a bound Owner confirmation is Agent-derived.
+    expect(isOwnerStatementEvidence({ text: 'owner words', classification: 'owner_statement', channel: 'codex_explicit_agent' })).toBe(false);
+    // Agent-assisted + bound confirmation = owner_manual.
+    const text = 'owner words';
+    expect(isOwnerStatementEvidence({
+      text,
+      classification: 'owner_statement',
+      channel: 'codex_explicit_agent',
+      ownerConfirmation: { kind: 'owner_verbatim_turn_match', statementFingerprint: fingerprintStatement(text) },
+    })).toBe(true);
     expect(isOwnerStatementEvidence(null)).toBe(false);
   });
 });

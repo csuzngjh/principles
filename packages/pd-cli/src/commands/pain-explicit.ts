@@ -1,7 +1,7 @@
 /**
  * pd pain explicit — agent-assisted explicit Owner pain registration from the
- * LIVE Codex turn context (no `PD记录痛苦：` prefix).
- *
+ * LIVE Codex turn context. The current Owner message must begin with
+ * the explicit PD agent-registration prefix to authorize this action.
  * Usage:
  *   pd pain explicit --statement "<Owner 原文>" [--workspace <path>] [--json]
  *
@@ -31,6 +31,7 @@ const FAILURE_MESSAGES: Record<string, string> = {
   statement_empty: 'The Owner statement is empty; nothing was recorded.',
   statement_too_long: `The Owner statement exceeds ${MAX_OWNER_STATEMENT_CHARS} characters; nothing was recorded (never truncated).`,
   turn_context_missing: 'No live Codex turn context: the turn already completed, the session restarted, or the PD hook did not run.',
+  owner_intent_missing: 'The current Owner turn did not explicitly authorize agent-assisted pain registration.',
   turn_context_stale: 'The live Codex turn context is stale — the turn is treated as ended; nothing was recorded.',
   turn_context_invalid: 'The Codex turn context file is malformed or unsupported; nothing was recorded.',
   turn_context_workspace_mismatch: 'The live turn context belongs to a different PD workspace; nothing was recorded.',

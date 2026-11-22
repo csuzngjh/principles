@@ -19,15 +19,115 @@
  *   - No LLM runs here: admission + durable enqueue only, well inside the
  *     5s hook budget; the receipt carries painId/taskId.
  */
+import fs from 'node:fs';
 import {
   admitGovernanceSignals,
   ensureGovernanceDiagnosticianTask,
   promoteAdmittedGovernanceEvidence,
+  readSourceMaterialAuthorization,
   type GovernanceSignalCandidate,
 } from '@principles/host-runtime';
 import { resolveCodexHome } from './codex-home.js';
-import { validateCodexTranscriptPath } from './transcript-path.js';
+import { validateCodexTranscriptPath, type TranscriptPathValidation } from './transcript-path.js';
 import { extractFields } from './ingestion-fields.js';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function own(value: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(value, key) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
+}
+
+/** Bounded tail read: the current turn's user record sits at the end. */
+const VERBATIM_VERIFY_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * PRI-1283 round 3 (owner_manual ruling): the trusted Owner interaction
+ * record for the agent-assisted (`pd pain explicit`) channel. The submitted
+ * statement is confirmed ONLY when it appears VERBATIM inside the CURRENT
+ * turn's genuine user message in the host-validated transcript — i.e. the
+ * Owner typed exactly those words, so the final submitted content is what
+ * the Owner wrote, not an agent's paraphrase, summary or invention.
+ *
+ * Reads the same two user-turn record shapes the governance decoder
+ * projects (response_item user.text / event_msg UserMessage item_completed)
+ * so the confirmation is anchored on the SAME host-written substrate —
+ * never on anything the agent claimed. Transcript CONTENT is only read here
+ * under the conversation-ingestion consent (callers pass the flag); the
+ * check fails closed (no confirmation) on any read/parse problem.
+ */
+function verifyOwnerVerbatimTurnMatch(args: {
+  validated: Extract<TranscriptPathValidation, { ok: true }>;
+  turnId: string;
+  statementText: string;
+}): boolean {
+  const needle = args.statementText;
+  if (needle.length === 0) return false;
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(args.validated.canonicalPath, 'r');
+    const stat = fs.fstatSync(fd);
+    // Post-open revalidation: same physical file the path validator proved.
+    if (stat.dev !== args.validated.identity.dev || stat.ino !== args.validated.identity.ino) return false;
+    const start = Math.max(0, stat.size - VERBATIM_VERIFY_MAX_BYTES);
+    const length = Math.min(VERBATIM_VERIFY_MAX_BYTES, stat.size);
+    const buffer = Buffer.alloc(length);
+    const read = fs.readSync(fd, buffer, 0, length, start);
+    const text = buffer.subarray(0, read).toString('utf8');
+    const lines = text.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) continue;
+      let record: unknown;
+      try {
+        record = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      if (!isRecord(record)) continue;
+      const payload = own(record, 'payload');
+      if (!isRecord(payload)) continue;
+      const recordType = own(record, 'type');
+      if (recordType === 'response_item' && own(payload, 'type') === 'message' && own(payload, 'role') === 'user') {
+        const passthrough = own(payload, 'internal_chat_message_metadata_passthrough');
+        if (!isRecord(passthrough) || own(passthrough, 'turn_id') !== args.turnId) continue;
+        const kinds = own(passthrough, 'content_item_kinds');
+        if (!Array.isArray(kinds) || kinds[0] !== 'user.text') continue;
+        const content = own(payload, 'content');
+        if (!Array.isArray(content)) continue;
+        const parts: string[] = [];
+        for (const item of content) {
+          if (isRecord(item) && own(item, 'type') === 'input_text' && typeof own(item, 'text') === 'string') parts.push(own(item, 'text') as string);
+        }
+        if (parts.join('').includes(needle)) return true;
+        continue;
+      }
+      if (recordType === 'event_msg' && own(payload, 'type') === 'item_completed' && own(payload, 'turn_id') === args.turnId) {
+        const item = own(payload, 'item');
+        if (!isRecord(item) || own(item, 'type') !== 'UserMessage') continue;
+        const content = own(item, 'content');
+        if (!Array.isArray(content)) continue;
+        const parts: string[] = [];
+        for (const entry of content) {
+          if (isRecord(entry) && (own(entry, 'type') === 'text' || own(entry, 'type') === 'Text') && typeof own(entry, 'text') === 'string') parts.push(own(entry, 'text') as string);
+        }
+        if (parts.join('').includes(needle)) return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // best-effort close
+      }
+    }
+  }
+}
 
 export { OWNER_STATEMENT_PREFIX as CODEX_OWNER_STATEMENT_PREFIX, MAX_OWNER_STATEMENT_CHARS, parseOwnerStatementPrefix, type OwnerStatementPrefixParse } from '@principles/host-runtime';
 
@@ -115,6 +215,21 @@ export async function recordExplicitOwnerStatement(args: {
     observedAt: new Date().toISOString(),
     explicitOwnerStatement: true,
     ...(args.explicitChannel !== undefined ? { explicitChannel: args.explicitChannel } : {}),
+    // PRI-1283 round 3 (owner_manual ruling): an agent-assisted statement is
+    // owner_manual ONLY when the submitted text matches the Owner's own words
+    // in the current turn's transcript record. The check reads transcript
+    // CONTENT, so it runs only under the conversation-ingestion consent;
+    // when consent is off (or the match fails) the statement persists as
+    // Agent-derived — classified down, never rejected outright.
+    ...(args.explicitChannel === 'codex_explicit_agent' && args.conversationIngestionEnabled
+      // Transcript content is consent-governed material: the feature flag
+      // alone is not the authority — the consent ledger must still grant
+      // codex ingestion before any confirmation reads transcript content
+      // (a revoked-but-still-flagged workspace must not mint exemptions).
+      && readSourceMaterialAuthorization({ workspaceDir: args.workspaceDir, hostKind: 'codex' }).status === 'authorized'
+      && verifyOwnerVerbatimTurnMatch({ validated, turnId: fields.turnId, statementText: args.statementText })
+      ? { ownerVerbatimConfirmed: true }
+      : {}),
   };
 
   const admitted = admitGovernanceSignals({ workspaceDir: args.workspaceDir, candidates: [candidate] });
