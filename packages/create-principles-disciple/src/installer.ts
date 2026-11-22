@@ -47,6 +47,7 @@ import type { HostInstallContext, HostInstallResult } from '@principles/core/hos
 import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, resolvePdHome } from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
+import { reconcileServiceHostScheduler } from './service-host-bridge.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -6562,6 +6563,24 @@ export async function install(
       } catch (resolutionError) {
         logger.warn(`Could not record recovery resolution for ${pendingId} (alarm stays): ${resolutionError instanceof Error ? resolutionError.message : String(resolutionError)}`);
       }
+    }
+
+    // PRI-1281 Phase 3 (task §6): user-level OS scheduler reconciliation.
+    // POST-COMMIT by design — the runtime transaction is already confirmed,
+    // so every bridge failure is a WARNING, never a reported install failure
+    // (ERR-197). Consent-gated registration; upgrades only refresh an
+    // EXISTING registration (enabled state preserved) and never create one
+    // silently. Identity comes from the installer's own authoritative pdHome.
+    try {
+      await reconcileServiceHostScheduler({
+        pdHome: getPdDir(),
+        registerServiceHost: options.enableServiceHost === true || options.registerServiceHost === true,
+        enableServiceHost: options.enableServiceHost === true,
+        warn: (message) => logger.warn(message),
+        info: (message) => logger.info(message),
+      });
+    } catch (bridgeError) {
+      logger.warn(`Service Host scheduler reconciliation threw (${bridgeError instanceof Error ? bridgeError.message : String(bridgeError)}) — the install itself is unaffected; run pd service status manually.`);
     }
     if (spinner) {
       // rc-9: the runtime transaction IS committed here, but a pending host
