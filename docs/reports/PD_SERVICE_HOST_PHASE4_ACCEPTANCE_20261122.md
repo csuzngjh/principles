@@ -10,6 +10,9 @@
 | SHA | 内容 |
 |---|---|
 | 3a3faf7d0 | Stage 0/1：源码审计 + 技术设计增量（CAS 阶段归属修正） |
+| 67f6c2ff3 / 1cf193220 | CI round 1：registry 窗口 feature-detect、门禁测试 seam、runtime-writers allowlist、杂散报告清理 |
+| e0374f6c6 | CI round 2：changeset 补 create-principles-disciple（N-3） |
+| 9399f2126 | CI round 3：rc-2 类型守卫替换 5 处 as 断言 |
 | 43e60e429 | install-layout：§8.4 CAS/transition 原语 + 只读投影（18 用例） |
 | 22d9f683f | installer/update：install.json 写者统一走 CAS 锁（ERR-168，3 用例走真实调用路径） |
 | 4ef25bc7d | openclaw-plugin：`openclaw-worker` 子路径（cycle/readiness/liveness）+ Gateway marker 门禁与 quiesce（21 用例含运行时 parity） |
@@ -30,7 +33,14 @@
 
 ## 3. CI
 
-PR 创建后运行仓库必需检查（见 PR 状态；本报告不预先宣称绿）。本机已过：全部涉及包 tsc --noEmit、eslint（改动文件零告警）、根 build。
+**最终 head `9399f2126`（round 3）：全部 checks success**——含 Verify Merge Gate（N-3 changeset 守卫、check-runtime-contract 0 违规、error-handbook、repo-hygiene、全部 typecheck/build/test 子门）、CodeQL、全部包测试 lane、packaged-install registry-parity smoke、e2e。
+
+收敛过程（三轮，全部根因归档）：
+1. **round 1（67f6c2ff3）**：a) `create-principles-disciple` 测试 typecheck——我的夹具用了非法 channel 字面量 `beta`（合法集 `stable|candidate`）；b) 插件既有 timer-chain 测试——新 §8.4 门禁的**真实** reader 在 CI 临时目录上 fail-closed（设计使然），在该套件的 import seam 上 mock 至 legacy 默认（门禁自身行为由专项套件覆盖）；c) `check-runtime-writers`——三个新写盘点（CAS 锁目录、worker liveness、handover 证据）按 ERR-146 以验证过的理由加入 allowlist；d) packaged-install smoke——registry 解析的旧版 install-layout 无新导出 → installer/update 侧对 `withInstallManifestWriteLock` 做 feature-detect（cohort 发布前的释放窗口保持既有行为）。
+2. **round 2（e0374f6c6）**：N-3——installer 锁接线是 create-principles-disciple 的 release-affecting 改动，changeset 补第五个包（minor）。
+3. **round 3（9399f2126）**：`check-runtime-contract` 5 个 ERR-001（JSON 解析点 `as` 断言）——全部改为真类型守卫/字段级验证（含 evidence 文档的完整 parse 函数：schema/kind/steps/ownership + 内嵌 record 构造器）；另有杂散 vitest json 报告清理 + `.vitest/` ignore 规则（1cf193220）。
+
+本机已过：全部涉及包 tsc --noEmit、eslint（改动文件零告警）、根 build、runtime-contract/runtime-writers 守卫（提交树）。
 
 ## 4. 真实安装态验收（Stage 9，隔离 sandbox `D:\Code\.pd-tmp\principles\pri1282-acceptance-home`）
 
