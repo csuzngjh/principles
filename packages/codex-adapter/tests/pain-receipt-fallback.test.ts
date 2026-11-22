@@ -215,6 +215,46 @@ describe('attemptPainReceiptFallback — envelope decode and recovery', () => {
     expect(result.outcome.reasonCode).toBe('event_identity_invalid');
   });
 
+  it('T4: trims padded host event ids before real SQLite recovery', async () => {
+    const ws = workspace();
+    const painId = 'mcp_1700000000041_aa000041';
+    const taskId = await persistUnboundPain(ws, painId);
+    const result = await attemptPainReceiptFallback({
+      workspaceDir: ws,
+      toolName: REAL_TOOL_NAME,
+      toolResponse: envelopeReceipt(painId, ws),
+      identity: {
+        sessionId: ` ${EVENT_IDENTITY.sessionId} `,
+        turnId: ` ${EVENT_IDENTITY.turnId} `,
+        toolCallId: ` ${EVENT_IDENTITY.toolCallId} `,
+      },
+      minimalMetadataGranted: true,
+    });
+    expect(result.status).toBe('attempted');
+    if (result.status !== 'attempted') return;
+    expect(result.outcome.status).toBe('recovered');
+    if (result.outcome.status !== 'recovered') return;
+    expect(result.outcome.taskId).toBe(taskId);
+
+    const mgr = new RuntimeStateManager({ workspaceDir: ws });
+    await mgr.initialize();
+    try {
+      const task = await mgr.getTask(taskId);
+      if (task === null) throw new Error('task missing');
+      const diagnostic = JSON.parse(task.diagnosticJson);
+      expect(diagnostic.sessionIdHint).toBe(EVENT_IDENTITY.sessionId);
+      expect(diagnostic.painIngress.verifiedHostSession).toEqual({
+        status: 'verified',
+        sessionId: EVENT_IDENTITY.sessionId,
+        submissionTurnId: EVENT_IDENTITY.turnId,
+        targetTurnId: EVENT_IDENTITY.turnId,
+      });
+      expect(diagnostic.recovery.receiptRef.toolCallId).toBe(EVENT_IDENTITY.toolCallId);
+    } finally {
+      await mgr.close();
+    }
+  });
+
   it('T4: a workspace spelled with a trailing "/." normalizes to the same workspace', async () => {
     const ws = workspace();
     const painId = 'mcp_1700000000027_9d000027';

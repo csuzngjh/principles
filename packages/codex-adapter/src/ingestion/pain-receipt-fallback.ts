@@ -77,13 +77,15 @@ function extractReceiptText(toolResponse: unknown): { ok: true; text: string } |
   return { ok: true, text };
 }
 
-/** Unified host-id format check (P2): trimmed, 1..200 chars, never a
- * sentinel spelling — the same rule the trusted `_meta` path applies. */
-function isUsableEventId(value: string | undefined, opts: { readonly allowEmpty: boolean }): boolean {
-  if (value === undefined) return true;
+/** Normalize host ids at the adapter boundary, matching the trusted `_meta`
+ * reader. `null` means malformed; `undefined` means absent (or an empty
+ * optional id). Only the normalized value may cross into Core. */
+function normalizeEventId(value: unknown, opts: { readonly allowEmpty: boolean }): string | undefined | null {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return null;
   const id = value.trim();
-  if (opts.allowEmpty && id.length === 0) return true;
-  return id.length > 0 && id.length <= 200 && !isSentinelSessionId(id);
+  if (opts.allowEmpty && id.length === 0) return undefined;
+  return id.length > 0 && id.length <= 200 && !isSentinelSessionId(id) ? id : null;
 }
 
 export interface PainReceiptFallbackInput {
@@ -142,13 +144,16 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
   if (!isPainSubmitPostToolUseToolName(input.toolName)) {
     return { status: 'not_applicable' };
   }
-  // P2: unified format + sentinel validation on the event identity fields.
-  if (!isUsableEventId(input.identity.sessionId, { allowEmpty: false })
-    || !isUsableEventId(input.identity.toolCallId, { allowEmpty: false })
-    || !isUsableEventId(input.identity.turnId, { allowEmpty: true })) {
+  // P2: validate AND normalize at the host boundary. Validating a trimmed
+  // copy while forwarding the raw value would create a second identity
+  // spelling in Core/SQLite (and make exact target-turn joins miss).
+  const sessionId = normalizeEventId(input.identity.sessionId, { allowEmpty: false });
+  const toolCallId = normalizeEventId(input.identity.toolCallId, { allowEmpty: false });
+  const turnId = normalizeEventId(input.identity.turnId, { allowEmpty: true });
+  if (sessionId === null || toolCallId === null || turnId === null) {
     return { status: 'attempted', outcome: { status: 'rejected', reasonCode: 'event_identity_invalid' } };
   }
-  if (input.identity.sessionId.trim().length === 0 || input.identity.toolCallId.trim().length === 0) {
+  if (sessionId === undefined || toolCallId === undefined) {
     return { status: 'attempted', outcome: { status: 'rejected', reasonCode: 'event_identity_missing' } };
   }
   const envelope = extractReceiptText(input.toolResponse);
@@ -180,21 +185,18 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
   if (!validated.ok) {
     return { status: 'attempted', outcome: { status: 'rejected', reasonCode: validated.reasonCode } };
   }
-  const turnId = input.identity.turnId !== undefined && input.identity.turnId.trim().length > 0
-    ? input.identity.turnId
-    : undefined;
   const outcome = await recoverTaskIdentityFromReceipt({
     workspaceDir: normalizedWorkspace,
     hostKind: 'codex',
     receipt: validated.receipt,
     identity: {
-      sessionId: input.identity.sessionId,
+      sessionId,
       ...(turnId === undefined ? {} : { submissionTurnId: turnId }),
-      toolCallId: input.identity.toolCallId,
+      toolCallId,
     },
     authorization: { minimalMetadataGranted: input.minimalMetadataGranted },
-    targetTurnTextAvailable: (sessionId, targetTurnId) =>
-      codexTargetTurnTextAvailable(normalizedWorkspace, sessionId, targetTurnId),
+    targetTurnTextAvailable: (hostSessionId, targetTurnId) =>
+      codexTargetTurnTextAvailable(normalizedWorkspace, hostSessionId, targetTurnId),
     ...(input.now !== undefined ? { now: input.now } : {}),
   });
   return { status: 'attempted', outcome };
