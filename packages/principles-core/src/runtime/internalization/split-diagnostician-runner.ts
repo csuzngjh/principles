@@ -283,7 +283,10 @@ export class SplitDiagnosticianRunner {
     // run, no provider call, structured storage error.
     try {
       const task = await this.stateManager.getTask(parentTaskId);
-      if (task !== null && waitingTargetEvidenceState(task.diagnosticJson)) {
+      // `undefined` is a test-double shape for "no row"; production reads
+      // null — both mean "not waiting" here (the lease acquisition owns the
+      // authoritative not-found path).
+      if (task !== null && task !== undefined && waitingTargetEvidenceState(task.diagnosticJson)) {
         return {
           status: 'failed',
           taskId: parentTaskId,
