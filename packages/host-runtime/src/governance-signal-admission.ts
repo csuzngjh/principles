@@ -2433,27 +2433,6 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       };
     }
 
-    // PRI-1283 round 4 (SEC finding): after the host's ingestion consent
-    // left granted, recovering this marker must not re-persist governed
-    // conversation material into a NEW diagnostic task — the copy would
-    // outlive the pending sweep. An owner-manual statement is exempt (an
-    // explicit submission is not conversation ingestion); already-linked
-    // tasks were handled by the recovery branch above.
-    if ((markerHostKind === 'codex' || markerHostKind === 'workbuddy')
-      && !isOwnerManualCorrectionEvidence(payloadParsed.correctionEvidence)) {
-      // A MISSING ledger is not a revocation (the sweep treats it the same);
-      // refuse only on a recorded non-granted decision or an unreadable one.
-      const authz = readSourceMaterialAuthorization({ workspaceDir, hostKind: markerHostKind });
-      if (authz.status === 'blocked'
-        && authz.reason !== 'consent_missing') {
-        return {
-          ok: false,
-          reason: 'source_authorization_revoked',
-          nextAction: `purge persisted copies first: pd consent sweep-revoked --apply (host: ${markerHostKind})`,
-        };
-      }
-    }
-
     const taskId = createDiagnosticianTaskId(input.canonicalPainId);
 
     // Cross-store crash recovery (SPEC §13): a task may already exist from a
@@ -2466,6 +2445,28 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       await stateManager.initialize();
       let existing = await stateManager.getTask(taskId);
       if (existing === null) {
+        // PRI-1283 round 4 (SEC finding): after the host's ingestion consent
+        // left granted, recovering this marker must not re-persist governed
+        // conversation material into a NEW diagnostic task — the copy would
+        // outlive the pending sweep. An owner-manual statement is exempt (an
+        // explicit submission is not conversation ingestion). The check runs
+        // only on the create path: a task already persisted before the
+        // crash still gets its link repaired above/below.
+        if ((markerHostKind === 'codex' || markerHostKind === 'workbuddy')
+          && !isOwnerManualCorrectionEvidence(payloadParsed.correctionEvidence)) {
+          // A MISSING ledger is not a revocation (the sweep treats it the
+          // same); refuse only on a recorded non-granted decision or an
+          // unreadable one.
+          const authz = readSourceMaterialAuthorization({ workspaceDir, hostKind: markerHostKind });
+          if (authz.status === 'blocked'
+            && authz.reason !== 'consent_missing') {
+            return {
+              ok: false,
+              reason: 'source_authorization_revoked',
+              nextAction: `purge persisted copies first: pd consent sweep-revoked --apply (host: ${markerHostKind})`,
+            };
+          }
+        }
         const stateDir = path.join(workspaceDir, '.state');
         const config = loadPdConfigForPlugin(workspaceDir);
         if (!config.ok) {

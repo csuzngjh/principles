@@ -1285,8 +1285,34 @@ describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', (
     fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
     process.env.REV_TEST_KEY = 'test-key';
 
+    // Crash-after-create: an agent-derived marker whose task was persisted
+    // while authorized, but whose link write was lost.
+    const relinkPainId = seedAgentChannelPain({ text: `${SECRET} agent relay pre-revoke`, turnId: 'turn-h0', confirmed: false });
+    const linked = await ensureGovernanceDiagnosticianTask({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-1|turn-h0|user',
+      canonicalPainId: relinkPainId,
+    });
+    if (!linked.ok) throw new Error(`pre-revoke ensure failed: ${linked.reason}`);
+    const relinkTaskId = linked.taskId;
+    withTrajectory((db) => db.prepare('UPDATE governance_signal_admissions SET diagnostician_task_id = NULL WHERE canonical_pain_id = ?').run(relinkPainId));
+
     const agentPainId = seedAgentChannelPain({ text: `${SECRET} agent relay`, turnId: 'turn-h', confirmed: false });
     writeConsent('codex', 'revoked');
+
+    // Post-revocation relink: the ALREADY-persisted task is re-linked —
+    // no new task is created, no excerpts re-copied.
+    const repaired = await ensureGovernanceDiagnosticianTask({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-1|turn-h0|user',
+      canonicalPainId: relinkPainId,
+    });
+    if (!repaired.ok) throw new Error(`post-revoke relink refused: ${repaired.reason}`);
+    expect(repaired.created).toBe(false);
+    expect(repaired.linkRepaired).toBe(true);
+    expect(repaired.taskId).toBe(relinkTaskId);
+    const taskCount = withState((db) => db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE task_id = ?').get(relinkTaskId) as { n: number });
+    expect(taskCount.n).toBe(1);
 
     // Governed agent-derived marker: recovery must refuse to copy excerpts.
     const refused = await ensureGovernanceDiagnosticianTask({
