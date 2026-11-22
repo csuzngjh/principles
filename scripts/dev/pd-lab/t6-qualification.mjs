@@ -105,6 +105,15 @@ export const EVIDENCE_ARTIFACT_KEYS = Object.freeze([
 const APPROVAL_KEYS = ["d2", "d5", "d6"];
 const EVIDENCE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 
+// Producer reports use bare lowercase SHA-256 hex while evidence bindings
+// use the canonical `sha256:<hex>` form. Compare their digest bytes, not the
+// transport prefix; malformed values remain non-matching.
+function sha256HexOf(value) {
+  if (typeof value !== "string") return null;
+  const match = /^(?:sha256:)?([0-9a-f]{64})$/.exec(value);
+  return match?.[1] ?? null;
+}
+
 // Closed reason-code set (ERR-146: every code is triggerable in tests, no
 // unlisted code is ever emitted).
 export const QUALIFICATION_REASON_CODES = Object.freeze([
@@ -117,6 +126,9 @@ export const QUALIFICATION_REASON_CODES = Object.freeze([
   "D6_NOT_APPROVED",
   "MODEL_CALIBRATION_NOT_RUN",
   "MODEL_CALIBRATION_FAILED",
+  // D5 cannot be satisfied when no determinate position-exchange outcome
+  // exists from which to recompute the flip-rate denominator.
+  "POSITION_FLIP_RATE_UNMEASURED",
   // Authorization violations (task stop conditions, fail-loud disclosures).
   "UNAUTHORIZED_MODEL_CALLS_RECORDED",
   "UNAUTHORIZED_OWNER_BLIND_REVIEW_RECORDED",
@@ -293,6 +305,11 @@ export function validateQualificationInput(input) {
     if (!isNonNegativeInteger(calibration.modelCallCount)) {
       complain(
         "judgeModelCalibration.modelCallCount must be an integer >= 0 (the ACTUAL real model call count; 0 without D2)",
+      );
+    }
+    if (calibration.auditCallCount !== undefined) {
+      complain(
+        "judgeModelCalibration.auditCallCount is derived from the bound calibration evidence and must not be supplied as input",
       );
     }
   }
@@ -961,8 +978,15 @@ function deriveDataPathAuthorization(
     return false;
   // Decision-record identity: the probe's echoed decision digest must match
   // the bound D6 artifact's verified digest.
-  const echoedDecisionSha = admissionDoc.realDataProbe.d6Decision?.sha256 ?? null;
-  return echoedDecisionSha !== null && echoedDecisionSha === d6BindingSha256;
+  const echoedDecisionSha = sha256HexOf(
+    admissionDoc.realDataProbe.d6Decision?.sha256,
+  );
+  const boundDecisionSha = sha256HexOf(d6BindingSha256);
+  return (
+    echoedDecisionSha !== null &&
+    boundDecisionSha !== null &&
+    echoedDecisionSha === boundDecisionSha
+  );
 }
 
 // Data integrity is proven only by a verified admission report whose
@@ -1215,9 +1239,18 @@ export function qualifyT6(input, resolvedEvidence = null) {
   // registration file's digest, the bound artifact must be exactly that
   // file; without the binding the limitation is disclosed.
   if (d2Params !== null) {
-    const preregDigest = evidenceBindings.preregistration?.sha256 ?? null;
+    const preregDigest = sha256HexOf(
+      evidenceBindings.preregistration?.sha256 ?? null,
+    );
     if (d2Params.preregistrationSha256 !== undefined) {
-      if (preregDigest !== d2Params.preregistrationSha256)
+      const frozenPreregDigest = sha256HexOf(
+        d2Params.preregistrationSha256,
+      );
+      if (
+        preregDigest === null ||
+        frozenPreregDigest === null ||
+        preregDigest !== frozenPreregDigest
+      )
         parameterMismatch(
           `D2 froze preregistration ${d2Params.preregistrationSha256} but the bound registration is ${preregDigest ?? "absent"}`,
         );
@@ -1260,7 +1293,17 @@ export function qualifyT6(input, resolvedEvidence = null) {
       );
   }
   // D5 <-> the judge calibration's position-flip metric (the D5 gate on the
-  // judge side of the calibration).
+  // judge side of the calibration). A PASSED report with no determinate
+  // exchange outcomes has no denominator, so the approved threshold was not
+  // actually measured and cannot be treated as satisfied.
+  if (
+    d5Params !== null &&
+    calibrationFacts !== null &&
+    calibrationFacts.interpretable &&
+    calibrationFacts.status === "PASSED" &&
+    calibrationFacts.positionFlipRate === null
+  )
+    addBlocked("POSITION_FLIP_RATE_UNMEASURED");
   if (
     d5Params !== null &&
     calibrationFacts !== null &&
@@ -1357,11 +1400,20 @@ export function qualifyT6(input, resolvedEvidence = null) {
     addBlocked("OWNER_REVIEW_STATUS_COUNT_CONFLICT");
 
   // ── Evidence-vs-claim checks for the report-bearing facts ────────────────
-  const checkClaim = (label, entryKey, declared, facts, pickStatus, pickCount) => {
+  const checkClaim = (
+    label,
+    entryKey,
+    declared,
+    facts,
+    pickStatus,
+    pickDeclaredCount,
+    pickDerivedCount = pickDeclaredCount,
+  ) => {
+    const declaredCount = pickDeclaredCount(declared);
     const boundEntry = bound(entryKey);
     if (evidenceBindings[entryKey] === undefined) {
       const affirmative =
-        pickStatus(declared) !== "NOT_RUN" || pickCount(declared) > 0;
+        pickStatus(declared) !== "NOT_RUN" || declaredCount > 0;
       if (affirmative) addBlocked("EVIDENCE_MISSING_FOR_CLAIM");
       evidenceCheck.artifacts[label] = { bound: false, verdict: "not_bound" };
       return;
@@ -1376,6 +1428,7 @@ export function qualifyT6(input, resolvedEvidence = null) {
       evidenceCheck.artifacts[label] = { bound: true, verdict: "artifact_invalid" };
       return;
     }
+    const derivedCount = pickDerivedCount(facts);
     const statusCheck = compare(
       label,
       pickStatus(declared),
@@ -1384,8 +1437,8 @@ export function qualifyT6(input, resolvedEvidence = null) {
     );
     const countCheck = compare(
       label,
-      pickCount(declared),
-      pickCount(facts),
+      declaredCount,
+      derivedCount,
       true,
     );
     if (statusCheck.verdict === "mismatch" || countCheck.verdict === "mismatch")
@@ -1394,8 +1447,8 @@ export function qualifyT6(input, resolvedEvidence = null) {
       bound: true,
       declaredStatus: pickStatus(declared),
       derivedStatus: pickStatus(facts),
-      declaredCount: pickCount(declared),
-      derivedCount: pickCount(facts),
+      declaredCount,
+      derivedCount,
       verdict:
         statusCheck.verdict === "mismatch" || countCheck.verdict === "mismatch"
           ? "mismatch"
@@ -1408,11 +1461,11 @@ export function qualifyT6(input, resolvedEvidence = null) {
     calibration,
     calibrationFacts,
     (c) => c.status,
-    // CR6: the declared count is the ACTUAL call total (successes AND
-    // failures — the calls really happened); the recomputed audit total is
-    // its counterpart. Success sufficiency is proven separately by the
-    // recomputed precision (a zero-success denominator claims nothing).
-    (c) => (c.auditCallCount !== undefined ? c.auditCallCount : c.modelCallCount),
+    // CR6: the declared count is modelCallCount from the input contract;
+    // the derived total is recomputed from raw succeeded + failed invocations.
+    // A caller-supplied auditCallCount is rejected during input validation.
+    (c) => c.modelCallCount,
+    (f) => f.auditCallCount,
   );
   checkClaim(
     "ownerBlindReview",

@@ -59,7 +59,7 @@
 | lossyInput | PASS（截断→标记+位置事实；有损判胜=非法记录；交换后截断侧随内容移动；完整输入不得标记有损） |
 | 复现性 | PASS（同一 bundle 两次校验输出逐字节一致；协议 digest 稳定） |
 
-统计与资格测试：`scripts/__tests__/pd-lab-t6-qualification.test.ts`，74 用例全部通过（见第 8、10、13 节）。`pd-lab-admission-probe.test.ts` 154 用例全绿（含 D6 正向/负向路径 7 例——RAN_WITH_D6 只能经有效 `--d6-decision` 到达，scope/批准/datasetSha256/参数缺失/过期授权全部 fail-closed）。
+统计与资格测试：`scripts/__tests__/pd-lab-t6-qualification.test.ts`，84 用例通过（另 1 个环境条件 skip）。`pd-lab-admission-probe.test.ts` 156 用例通过（另 1 个环境条件 skip；D6 正向/负向路径现为 8 例，包含 WAL 快照 pin 不匹配时拒绝且不遗留 staging 副本）。两套完整测试合计 240 passed、2 skipped、0 failed。
 
 ## 7. 输入完整性
 

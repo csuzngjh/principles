@@ -573,7 +573,7 @@ describe('source groups', () => {
     expect(out.groups.groups.S02).not.toBe(out.groups.groups.S01);
     expect(out.report.sourceGroups.groupCount).toBe(2);
     expect(out.report.counts).toMatchObject({ painCount: 3, caseCount: 3, sessionCount: 2 });
-    for (const groupId of new Set(Object.values(out.groups.groups))) {
+    for (const groupId of new Set<string>(Object.values(out.groups.groups) as string[])) {
       expect(out.groups.rationales[groupId]).toBeTruthy();
     }
   });
@@ -781,7 +781,10 @@ describe('path classification and counts', () => {
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--authorizations', authFile]);
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
-    const counts = out.report.counts as { paths: Record<string, Record<string, number>> };
+    const counts = out.report.counts as {
+      paths: Record<string, Record<string, number>>;
+      problemCodes: unknown[];
+    };
     // r7: prefix UNKNOWN does not block path readiness — S01's actual inputs
     // are complete (READY), S02 has an observed no-rows gap (BLOCKED); r8
     // P1-01: session-bound codex S03 is no longer NOT_EVALUATED — its
@@ -1684,6 +1687,52 @@ describe('P2-4 WAL production read-only discipline (real CLI subprocess)', () =>
     assertNoStagingLeftovers();
 
     writer.close();
+  });
+
+  it('C. a mismatched D6 trajectory pin is rejected before WAL staging leaves a private copy', () => {
+    const world = buildWorld('p24-d6-mismatch', {
+      journalMode: 'wal',
+      keepOpen: true,
+      sessions: [{ sessionId: 'sess-d6-wal', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'D6-WAL-01', sessionId: 'sess-d6-wal' }],
+    });
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    try {
+      assertWalHeader(dbPath);
+      const datasetSha = sha256File(world.datasetPath);
+      const decisionFile = writeJson(world.root, 'd6-pinned.json', {
+        kind: 'owner-decision',
+        approved: true,
+        decidedBy: 'O1',
+        decidedAt: '2026-11-22T00:00:00Z',
+        scope: 'd6',
+        parameters: {
+          datasetSha256: datasetSha,
+          sampleRange: 'synthetic-fixture-1',
+          storageScope: 'artifacts/pd-lab',
+          dataSource: 't1-synthetic-snapshot',
+          retentionDays: 90,
+          trajectoryDbSha256: 'e'.repeat(64),
+        },
+      });
+      const stagingBefore = new Set(
+        fs.readdirSync(tmpRoot()).filter((name) => name.startsWith('pd-lab-probe-stage-')),
+      );
+      const run = runProbe([
+        '--dataset', world.datasetPath,
+        '--snapshot', world.snapshotDir,
+        '--out', world.outDir,
+        '--d6-decision', decisionFile,
+      ]);
+      expect(run.status).toBe(1);
+      expect(stderrReason(run).reason).toBe('d6_decision_invalid');
+      const stagingAfter = fs.readdirSync(tmpRoot()).filter(
+        (name) => name.startsWith('pd-lab-probe-stage-') && !stagingBefore.has(name),
+      );
+      expect(stagingAfter).toEqual([]);
+    } finally {
+      world.db.close();
+    }
   });
 });
 

@@ -188,3 +188,41 @@ Revert 本 PR 的新增/修改文件；`alignment-report.mjs`/`admission-probe.m
 | CR11 | 结构验证先于证据读取 | CLI 解析后立即 `validateQualificationInput` exit 1 | 既有 P2-4 用例 |
 
 全部 19 线程已逐条回复并 resolve（引用 `d544a8e26`）。测试总量：judge-protocol 79、t6 82（+1 环境性 skip）、admission-probe 155（+1 环境性 skip）。真实研究状态不变（D2/D5/D6 未批准、真实调用 0、盲评 0、真实资格 BLOCKED）。
+
+
+# 15. 第五轮：HEAD `8dab3755f` 复审新发现修复（2026-11-22）
+
+第四轮交付后，Devin 在最新 HEAD 上提出 5 项新 finding。本轮直接修改本地工作树，不再把整改委托给本地 AI；修复范围限定在 T6 资格判定、D6 快照读取、对应回归测试及测试类型检查。
+
+| Finding | 根因 | 修复 | 回归证据 |
+|---|---|---|---|
+| D2 preregistration digest 不一致 | Owner 决策记录使用 64 位 bare hex，证据 binding 使用 `sha256:<hex>`；原比较把两种编码当成不同摘要 | 增加严格的 SHA-256 hex 提取器，只接受小写 64 位 bare hex 或规范 `sha256:` 前缀；D2 冻结摘要与 binding 按摘要字节比较 | 新增 bare-hex D2 正向用例；原 HEAD 下该用例失败 |
+| D6 decision digest 不一致 | admission-probe 回显 D6 决策文件摘要为 bare hex，T6 binding 为带前缀格式；原始字符串比较拒绝真实生产格式 | `deriveDataPathAuthorization` 对回显值与 binding 摘要做同一严格规范化；不接受 malformed digest | 原有真实 `RAN_WITH_D6` 正向路径在原 HEAD 下失败，修复后通过 |
+| D6 mismatch 的 WAL staging 残留 | 原流程先创建 WAL staging、打开 SQLite，之后才比较 Owner pin；fail-fast 退出绕过 staging 清理 | 在任何 staging/SQLite open 前核验 D6 pin；`stageWalSnapshot` 在创建临时目录前再次核验 main-file digest；对实际打开文件记录摘要，post-open 失败先 close 并清理 staging；报告绑定实际打开文件摘要 | 新增真实 CLI WAL mismatch 用例；原 HEAD 下留下 `pd-lab-probe-stage-*`，修复后无残留 |
+| D5 position-flip rate 未测量 | 所有 judge verdict 均为 UNKNOWN 时，翻转率分母为 0、派生值为 null；原逻辑只比较非 null 数值，等同于把未测量当作满足阈值 | 新增 `POSITION_FLIP_RATE_UNMEASURED`；D5 已批准且校准报告 PASSED、但无任何 determinate position-exchange outcome 时，T6 fail-closed | 新增全 UNKNOWN 用例；原 HEAD 下缺少该阻断码，修复后 BLOCKED |
+| CR6 auditCallCount 可掩盖声明调用数 | 输入侧可提供 `auditCallCount`，并优先于 `modelCallCount` 参与声明值比较 | 输入拒绝调用方自报 `auditCallCount`；声明值固定取 `modelCallCount`，派生值从绑定原始 invocation 重算为 succeeded + failed 总数 | 新增独立 mask 用例；固定 D6 格式避免跨 finding 干扰；原 HEAD 下该断言失败，修复后输入校验拒绝 |
+
+## 15.1 测试与静态检查
+
+- 两个完整套件：`pd-lab-t6-qualification.test.ts` + `pd-lab-admission-probe.test.ts`，**240 passed / 2 skipped / 0 failed**。
+- `npm run typecheck:pd-lab-tests`：通过。新增 `scripts/tsconfig.pd-lab-tests.json`，并把该检查接入根 `verify:merge`，避免这两份 TypeScript 测试文件只经 Vitest transpile 而不做类型检查。
+- `npm run lint`：13/13 packages 通过，0 errors（仓库现有 warnings 保留）。
+- `git diff --check`：通过。
+- EP-09 mutation check：临时用原 HEAD 生产源码运行新增回归用例，T6 4 项用例失败，WAL staging 用例 1 项失败；恢复后两份生产源码与修改前备份逐字节一致。
+
+## 15.2 Error Context 路由结果
+
+按仓库要求实际运行 preflight 与 diff 模式：
+
+- Preflight：EP-09 HIGH（score 4），EP-10 HIGH（score 4）。
+- Post-diff：EP-09 HIGH（score 23）、EP-10 HIGH（score 14）、EP-02 HIGH（score 9）、EP-14 HIGH（score 8）、EP-01 HIGH（score 6）、EP-03 HIGH（score 6）。
+- EP-09：已用原 HEAD mutation 证明新回归测试确实能捕获修复前行为；D6 WAL 测试走真实 CLI 子进程，不是 source-string assertion。
+- EP-02：D6 WAL 拒绝与 staging 清理通过 admission-probe 真实 CLI 入口验证；T6 证据判定通过资格引擎及 CLI 既有集成路径验证。
+- EP-14：新增专用 TypeScript test config 和 `typecheck:pd-lab-tests`，并接入 `verify:merge`。
+- EP-10：路由由 `scripts/dev` 路径信号触发；本轮没有修改 worktree 删除/清理逻辑，也没有声称任何 CI 失败是 main 预存问题，因此该模式的 worktree-cleanup 专项要求不适用。
+
+## 15.3 真实研究状态与合并状态
+
+真实研究事实不变：D2/D5/D6 仍无真实 Owner 批准；真实模型调用 0、Owner 盲评 0、真实数据探测未执行；T6 仍必须保持 BLOCKED。所有新增正向测试均使用合成证据/隔离快照。
+
+本轮修复已完成本地验证；**PR 尚未合并**。合并前必须以包含本轮修复的最新 PR HEAD 的 GitHub CI、评审及分支保护状态为准；本地通过不能替代远端门禁。

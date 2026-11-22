@@ -783,7 +783,7 @@ function removeStagingRoot(root) {
 /** Stage a fingerprint-verified point-in-time snapshot of a WAL-mode db.
  * Returns { ok: true, root } or { ok: false }. The original is only ever
  * READ (fingerprint streaming), never opened by SQLite. */
-function stageWalSnapshot(sourceDbPath) {
+function stageWalSnapshot(sourceDbPath, expectedMainSha256 = null) {
   let root = null;
   let verified = false;
   try {
@@ -792,6 +792,17 @@ function stageWalSnapshot(sourceDbPath) {
     const walFingerprint = fingerprintFile(walPath);
     const walState = classifyWalSidecar(walFingerprint);
     if (mainFingerprint.state !== 'present') return { ok: false, reason: 'main_unreadable' };
+    // Check the Owner-pinned main-file digest before creating any staging
+    // directory. If it differs, the failure path has no temp state to leak.
+    if (
+      expectedMainSha256 !== null &&
+      mainFingerprint.hash !== expectedMainSha256
+    )
+      return {
+        ok: false,
+        reason: 'd6_snapshot_digest_mismatch',
+        actual: mainFingerprint.hash,
+      };
     if (walState === 'unverifiable') return { ok: false, reason: 'wal_unverifiable' };
     const copyWal = walState === 'active'; // quiet/absent: main alone is complete
 
@@ -827,7 +838,24 @@ function stageWalSnapshot(sourceDbPath) {
  * handle plus the audit record for the report (which plan was used and how
  * the staged copy was cleaned up).
  */
-function openTrajectoryReadonly(file) {
+function openTrajectoryReadonly(file, expectedSha256 = null) {
+  // Verify the D6 pin before opening SQLite or creating a WAL staging copy.
+  // WAL staging repeats this comparison against its own initial fingerprint
+  // to close the check-to-copy window.
+  if (expectedSha256 !== null) {
+    const beforeOpen = fingerprintFile(file);
+    if (
+      beforeOpen.state !== 'present' ||
+      beforeOpen.hash !== expectedSha256
+    ) {
+      structuralFailure('d6_decision_invalid', 'the D6 decision pins a different trajectory.db snapshot; refusing to open or stage this database', {
+        artifact: 'trajectory.db',
+        authorized: expectedSha256,
+        actual: beforeOpen.hash ?? null,
+        fingerprintState: beforeOpen.state,
+      });
+    }
+  }
   const plan = planReadonlyOpen(file);
   if (plan === 'unverifiable') {
     structuralFailure('trajectory_db_unavailable', 'trajectory.db exists but its header cannot be read; the read plan is undecidable and the probe refuses to guess', { file });
@@ -836,8 +864,15 @@ function openTrajectoryReadonly(file) {
   let openPath = file;
   let staged = null;
   if (plan === 'stage') {
-    const stagedOutcome = stageWalSnapshot(file);
+    const stagedOutcome = stageWalSnapshot(file, expectedSha256);
     if (!stagedOutcome.ok) {
+      if (stagedOutcome.reason === 'd6_snapshot_digest_mismatch') {
+        structuralFailure('d6_decision_invalid', 'the D6-pinned trajectory.db changed before its WAL snapshot could be staged; refusing to read a different snapshot', {
+          artifact: 'trajectory.db',
+          authorized: expectedSha256,
+          actual: stagedOutcome.actual ?? null,
+        });
+      }
       // Cannot prove a safe read of a WAL-mode store → fail closed (P2-4).
       structuralFailure('trajectory_db_unavailable', 'trajectory.db is WAL-mode but a fingerprint-verified staged snapshot could not be taken; reading the original directly would violate the read-only contract', {
         file,
@@ -863,6 +898,39 @@ function openTrajectoryReadonly(file) {
       cause: String(error?.message ?? error),
     });
   }
+  // Hash the exact path SQLite opened (the staged copy for WAL mode, not
+  // the mutable source path). If a post-open check fails, close SQLite and
+  // remove the staged copy BEFORE structuralFailure exits the process.
+  const openedFingerprint = fingerprintFile(openPath);
+  if (openedFingerprint.state !== 'present') {
+    try {
+      db.close();
+    } catch {
+      // close best-effort before the fail-closed exit
+    }
+    if (staged !== null) removeStagingRoot(staged.root);
+    structuralFailure('trajectory_db_unavailable', 'the opened trajectory.db bytes could not be fingerprinted; refusing to report an unverifiable snapshot', {
+      artifact: 'trajectory.db',
+      fingerprintState: openedFingerprint.state,
+    });
+  }
+  if (
+    expectedSha256 !== null &&
+    openedFingerprint.hash !== expectedSha256
+  ) {
+    try {
+      db.close();
+    } catch {
+      // close best-effort before the fail-closed exit
+    }
+    if (staged !== null) removeStagingRoot(staged.root);
+    structuralFailure('d6_decision_invalid', 'the bytes opened by SQLite do not match the D6-pinned trajectory.db digest', {
+      artifact: 'trajectory.db',
+      authorized: expectedSha256,
+      actual: openedFingerprint.hash,
+    });
+  }
+
   const missing = [];
   try {
     for (const table of REQUIRED_TRAJECTORY_TABLES) {
@@ -899,7 +967,12 @@ function openTrajectoryReadonly(file) {
       missingTables: missing,
     });
   }
-  return { db, plan, staged };
+  return {
+    db,
+    plan,
+    staged,
+    openedSha256: openedFingerprint.hash,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2475,25 +2548,20 @@ function main() {
       : 'pd-lab-admission-probe'; // this CLI's own declared purpose; an authorization must match it
     const evaluatedAtMs = Date.now();
     const evaluatedAtIso = new Date(evaluatedAtMs).toISOString();
-    const dbAccess = openTrajectoryReadonly(trajectoryDbPath);
+    const expectedTrajectoryDbSha256 =
+      d6Grant !== null
+        ? (d6Grant.parameters.trajectoryDbSha256 ?? null)
+        : null;
+    const dbAccess = openTrajectoryReadonly(
+      trajectoryDbPath,
+      expectedTrajectoryDbSha256,
+    );
     const db = dbAccess.db;
 
-    const trajectorySha256 = sha256FileOrFailure('trajectory_db', trajectoryDbPath);
+    // Bind the report to the exact file SQLite opened (the staged copy when
+    // WAL mode requires one), not to a source path that may have changed.
+    const trajectorySha256 = dbAccess.openedSha256;
     const blobManifestSha256 = sha256FileOrFailure('blob_manifest', blobManifestPath);
-    // DV8: a snapshot-pinned D6 decision must cover the trajectory.db this
-    // run is about to read — a mismatch is out-of-scope data access and
-    // fails closed before any report is written.
-    if (
-      d6Grant !== null &&
-      d6Grant.parameters.trajectoryDbSha256 !== undefined &&
-      d6Grant.parameters.trajectoryDbSha256 !== trajectorySha256
-    ) {
-      structuralFailure('d6_decision_invalid', 'the D6 decision pinned a different trajectory snapshot (trajectoryDbSha256 mismatch) — reading this snapshot would exceed the granted data scope', {
-        file: d6Grant.file,
-        authorized: d6Grant.parameters.trajectoryDbSha256,
-        actual: trajectorySha256,
-      });
-    }
 
     const perSample = [];
     const blobHashCache = new Map(); // ref -> safety-verified read outcome ({ok,sha256}|{ok:false,reason,detail})

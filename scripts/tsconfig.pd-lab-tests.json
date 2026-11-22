@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": false,
+    "strict": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "types": ["node"],
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "__tests__/pd-lab-t6-qualification.test.ts",
+    "__tests__/pd-lab-admission-probe.test.ts"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/dist"
+  ]
+}

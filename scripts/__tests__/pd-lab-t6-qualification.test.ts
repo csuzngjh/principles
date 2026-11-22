@@ -205,7 +205,9 @@ function resolvedFor(input: Record<string, any>, opts: { exploratory?: boolean }
           status: "RAN_WITH_D6",
           d6Decision: {
             file: "d6.json",
-            sha256: FAKE_SHA,
+            // admission-probe emits the bare 64-char hex digest; evidence
+            // bindings use the sha256: prefix. Exercise the producer format.
+            sha256: FAKE_SHA.slice("sha256:".length),
             decidedBy: "O1",
             decidedAt: "2026-11-21T00:00:00Z",
             datasetSha256: DATASET_SHA,
@@ -775,7 +777,15 @@ describe("qualifyT6 states", () => {
       ev.preregistration.document.analysisPolicy.alpha = 0.01;
       return ev;
     };
-    const fixtures: Array<[ReturnType<typeof grantedInput>, unknown]> = [
+    const unmeasurablePositionFlip = (input: ReturnType<typeof grantedInput>) => {
+      const ev = resolvedFor(input) as Record<string, any>;
+      for (const invocation of ev.judgeCalibration.document.invocations) {
+        invocation.judgeVerdict = "UNKNOWN";
+        invocation.referenceVerdict = "UNKNOWN";
+      }
+      return ev;
+    };
+    const fixtures: Array<[Record<string, any>, unknown]> = [
       [notRunInput(), null],
       [
         setPath(
@@ -859,6 +869,7 @@ describe("qualifyT6 states", () => {
       [grantedInput(), invalidReview],
       [grantedInput(), mismatchedCalibration],
       [grantedInput(), driftedPrereg],
+      [grantedInput(), unmeasurablePositionFlip],
       [setPath(grantedInput(), "authorization.d6Approved", false), "resolved"],
       // N_MIN_ALPHA_SEARCH_EXHAUSTED: an alpha so small no k <= n exists
       // inside the search cap must fail closed as BLOCKED, never coerced.
@@ -1673,6 +1684,18 @@ describe("review round-4 hardening (Devin/CodeRabbit)", () => {
     ).toContain("position-flip rate");
   });
 
+  it("DV3: all UNKNOWN outcomes leave the D5 position-flip rate unmeasured and block T6", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    for (const invocation of ev.judgeCalibration.document.invocations) {
+      invocation.judgeVerdict = "UNKNOWN";
+      invocation.referenceVerdict = "UNKNOWN";
+    }
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("BLOCKED");
+    expect(result.blockedReasons).toContain("POSITION_FLIP_RATE_UNMEASURED");
+  });
+
   it("DV4/CR7: reviewing the SAME package in the SAME order twice does not add sample pairs", () => {
     const input = grantedInput({ ownerBlindReview: { status: "PASSED", sampleCount: 40 } });
     const ev = resolvedFor(input) as Record<string, any>;
@@ -1724,6 +1747,9 @@ describe("review round-4 hardening (Devin/CodeRabbit)", () => {
   it("CR6: the declared call count is the ACTUAL total — successes AND failures", () => {
     const input = grantedInput();
     const ev = resolvedFor(input) as Record<string, any>;
+    // Isolate CR6 from the separately-tested D6 producer digest format.
+    ev.admissionReport.document.realDataProbe.d6Decision.sha256 =
+      ev.approvals.d6.sha256;
     const invocations = ev.judgeCalibration.document.invocations;
     // 39 succeeded + 1 failed, input declares 40 total calls: the audit
     // total matches (the old succeeded-only comparison rejected this).
@@ -1738,6 +1764,22 @@ describe("review round-4 hardening (Devin/CodeRabbit)", () => {
     under.judgeModelCalibration.modelCallCount = 39;
     const underResult = qualifyT6(under, ev as never);
     expect(underResult.blockedReasons).toContain("EVIDENCE_CLAIM_MISMATCH");
+
+    // An untrusted auditCallCount input must never override the declared
+    // modelCallCount. The derived audit total comes only from raw invocations.
+    const masked = JSON.parse(JSON.stringify(input));
+    masked.judgeModelCalibration.modelCallCount = 39;
+    masked.judgeModelCalibration.auditCallCount = 40;
+    // Keep this CR6 assertion isolated from the separate D6 digest-format
+    // regression: the pre-fix comparison expected the prefixed form here.
+    const maskedEvidence = JSON.parse(JSON.stringify(ev));
+    maskedEvidence.admissionReport.document.realDataProbe.d6Decision.sha256 =
+      maskedEvidence.approvals.d6.sha256;
+    const maskedResult = qualifyT6(masked, maskedEvidence as never);
+    expect(maskedResult.ok).toBe(false);
+    expect(maskedResult.inputProblems.join(" ")).toContain(
+      "auditCallCount is derived from the bound calibration evidence",
+    );
   });
 
   it("DV8: a D6 decision pinning a trajectory snapshot rejects a report read from another snapshot", () => {
@@ -1753,6 +1795,16 @@ describe("review round-4 hardening (Devin/CodeRabbit)", () => {
     expect(
       result.evidenceCheck.approvalParameterBinding.findings.join(" "),
     ).toContain("pinned trajectory snapshot");
+  });
+
+  it("CR10: a D2 preregistration digest in bare hex matches the prefixed evidence binding", () => {
+    const input = grantedInput();
+    const ev = resolvedFor(input) as Record<string, any>;
+    ev.approvals.d2.document.parameters.preregistrationSha256 =
+      FAKE_SHA.slice("sha256:".length);
+    const result = qualifyT6(input, ev as never);
+    expect(result.status).toBe("CONFIRMATORY_READY");
+    expect(result.blockedReasons).not.toContain("APPROVAL_PARAMETER_MISMATCH");
   });
 
   it("CR10: a D2 decision that freezes the preregistration digest rejects a swapped registration", () => {
@@ -1919,9 +1971,8 @@ describe("t6-qualify CLI", () => {
         .digest("hex")}`;
       binding.sha256 = actual;
     };
-    // Approvals first: the admission report's RAN_WITH_D6 echo must cite the
-    // REAL d6 decision-file digest (DV5/CR9 decision-identity binding), so
-    // the d6 artifact is written before the admission report that cites it.
+    // Approvals first: the admission report echoes the D6 file digest in
+    // the producer's bare-hex format; evidence bindings retain sha256: prefix.
     for (const key of ["d2", "d5", "d6"]) {
       if (input.evidence?.approvals?.[key])
         bind(input.evidence.approvals[key], resolved.approvals[key].document);
@@ -1931,7 +1982,7 @@ describe("t6-qualify CLI", () => {
       resolved.admissionReport.document.realDataProbe?.status === "RAN_WITH_D6"
     ) {
       resolved.admissionReport.document.realDataProbe.d6Decision.sha256 =
-        input.evidence.approvals.d6.sha256;
+        input.evidence.approvals.d6.sha256.slice("sha256:".length);
     }
     for (const key of [
       "sourceGroups",
@@ -2103,7 +2154,7 @@ describe("t6-qualify CLI input-structure gates (P2-3, P2-4)", () => {
       resolved.admissionReport.document.realDataProbe?.status === "RAN_WITH_D6"
     ) {
       resolved.admissionReport.document.realDataProbe.d6Decision.sha256 =
-        input.evidence.approvals.d6.sha256;
+        input.evidence.approvals.d6.sha256.slice("sha256:".length);
     }
     for (const key of [
       "sourceGroups",
