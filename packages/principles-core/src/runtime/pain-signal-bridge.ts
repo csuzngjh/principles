@@ -1349,7 +1349,7 @@ export class PainSignalBridge {
     }
     // Consent-blocked tasks are not worker-reconciled: only a newly authorized
     // target turn may replace the denied source material.
-    if (recoveryState === 'blocked_by_consent') {
+    if (recoveryState === 'blocked_by_source_material_consent') {
       return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'target_evidence_blocked_by_consent' };
     }
 

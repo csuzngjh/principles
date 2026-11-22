@@ -49,7 +49,7 @@ export async function pickDiagnosticianCandidate(
     status: 'pending',
     orderBy: 'updated_at_asc',
     limit,
-    excludeRecoveryStates: ['waiting_for_target_evidence', 'blocked_by_consent'],
+    excludeRecoveryStates: ['waiting_for_target_evidence', 'blocked_by_source_material_consent'],
   });
   const [pendingTask] = pending;
   let retryTask: TaskRecord | null = null;
@@ -58,7 +58,7 @@ export async function pickDiagnosticianCandidate(
     status: 'retry_wait',
     orderBy: 'updated_at_asc',
     limit,
-    excludeRecoveryStates: ['waiting_for_target_evidence', 'blocked_by_consent'],
+    excludeRecoveryStates: ['waiting_for_target_evidence', 'blocked_by_source_material_consent'],
   });
   for (const candidate of retrying) {
     if (isRetryWaitBackoffElapsed(candidate.status, candidate.leaseExpiresAt)) {

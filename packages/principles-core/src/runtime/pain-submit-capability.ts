@@ -506,7 +506,7 @@ export async function submitPainCapability(
 
   // PRI-1274 / PRI-1283: one target-evidence rule shared with receipt
   // recovery. Missing-but-collectable text waits; consent-denied text becomes
-  // blocked_by_consent and cannot enter the diagnostician queue. An explicit
+  // blocked_by_source_material_consent and cannot enter the diagnostician queue. An explicit
   // Owner statement anchor remains independently admissible and never waits
   // for optional target-turn enrichment.
   const submittedTurnEvidenceCount = verification?.status === 'verified' && verification.inputEvidence !== undefined
@@ -526,7 +526,7 @@ export async function submitPainCapability(
   const admissionDisposition: PainDetectedData['admissionDisposition'] = blockedByTargetEvidenceConsent
     ? {
       schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
-      state: 'blocked_by_consent',
+      state: 'blocked_by_source_material_consent',
       reasonCode: 'target_turn_source_material_' + targetEvidenceBlockedReason,
       attemptCount: 1,
       lastCheckedAt: new Date().toISOString(),

@@ -73,7 +73,7 @@ const BLOCKED_JSON = JSON.stringify({
   evidence: [],
   recovery: {
     schemaVersion: 1,
-    state: 'blocked_by_consent',
+    state: 'blocked_by_source_material_consent',
     reasonCode: 'target_turn_source_material_consent_revoked',
     attemptCount: 1,
     lastCheckedAt: '2026-11-22T10:00:00.000Z',

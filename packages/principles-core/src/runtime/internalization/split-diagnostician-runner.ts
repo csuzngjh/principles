@@ -108,7 +108,7 @@ function diagnosisAdmissionBlockReason(diagnosticJson: string | null | undefined
   if (state === 'waiting_for_target_evidence') {
     return 'target_evidence_pending: the task waits for its named target turn text; the workspace worker reconcile flips it once the evidence exists';
   }
-  if (state === 'blocked_by_consent') {
+  if (state === 'blocked_by_source_material_consent') {
     const reason = typeof reasonCode === 'string' ? reasonCode : 'source_material_consent_blocked';
     return 'target_evidence_blocked_by_consent: ' + reason + '; re-submit with a newly authorized target turn';
   }

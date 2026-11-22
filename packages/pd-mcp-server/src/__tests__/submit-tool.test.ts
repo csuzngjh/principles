@@ -1110,7 +1110,7 @@ describe('target-turn evidence read classification (K)', () => {
         const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
         expect(diagnostic.evidence).toEqual([]);
         expect(diagnostic.recovery).toMatchObject({
-          state: 'blocked_by_consent',
+          state: 'blocked_by_source_material_consent',
           reasonCode: 'target_turn_source_material_consent_missing',
         });
         expect(task?.diagnosticJson).not.toContain('The exact target turn text');
@@ -1171,7 +1171,7 @@ describe('target-turn evidence read classification (K)', () => {
         });
         expect(diagnostic.evidence).toEqual([]);
         expect(diagnostic.recovery).toMatchObject({
-          state: 'blocked_by_consent',
+          state: 'blocked_by_source_material_consent',
           reasonCode: 'target_turn_source_material_consent_revoked',
         });
         expect(task?.diagnosticJson).not.toContain('The exact target turn text');

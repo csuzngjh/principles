@@ -134,7 +134,7 @@ describe('P1-3.4 — candidate picker excludes inadmissible tasks before ORDER B
         evidence: [],
         recovery: {
           schemaVersion: 1,
-          state: 'blocked_by_consent',
+          state: 'blocked_by_source_material_consent',
           reasonCode: 'target_turn_source_material_consent_revoked',
           attemptCount: 1,
           lastCheckedAt: new Date().toISOString(),
@@ -161,8 +161,34 @@ describe('P1-3.4 — candidate picker excludes inadmissible tasks before ORDER B
     // The positive filter finds the waiting task for the reconcile.
     const waiting = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', recoveryState: 'waiting_for_target_evidence', limit: 5 });
     expect(waiting.map((task) => task.taskId)).toEqual([createDiagnosticianTaskId('mcp_1700000000043_3c000043')]);
-    const blocked = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', recoveryState: 'blocked_by_consent', limit: 5 });
+    const blocked = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', recoveryState: 'blocked_by_source_material_consent', limit: 5 });
     expect(blocked.map((task) => task.taskId)).toEqual(['diagnosis_blocked_by_consent_1']);
+  });
+
+  it('the candidate picker preserves legacy minimal-identity blocked_by_consent tasks', async () => {
+    await stateManager.createTask({
+      taskId: 'diagnosis_identity_metadata_blocked_1',
+      taskKind: 'diagnostician',
+      inputRef: 'pain_identity_metadata_blocked_1',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        sourcePainId: 'pain_identity_metadata_blocked_1',
+        reasonSummary: 'minimal identity metadata was not authorized',
+        provenance: 'owner_reported_no_host_trace',
+        evidence: [],
+        recovery: {
+          schemaVersion: 1,
+          state: 'blocked_by_consent',
+          reasonCode: 'minimal_identity_metadata_not_granted',
+          attemptCount: 1,
+          lastCheckedAt: new Date().toISOString(),
+        },
+      }),
+    });
+    const picked = await pickDiagnosticianCandidate(stateManager, 1, new Date().toISOString());
+    expect(picked?.taskId).toBe('diagnosis_identity_metadata_blocked_1');
   });
 
   it('executePendingDiagnosis refuses a waiting task even when invoked directly (manual runs too)', async () => {
@@ -197,7 +223,7 @@ describe('P1-3.4 — candidate picker excludes inadmissible tasks before ORDER B
         evidence: [],
         recovery: {
           schemaVersion: 1,
-          state: 'blocked_by_consent',
+          state: 'blocked_by_source_material_consent',
           reasonCode: 'target_turn_source_material_consent_revoked',
           attemptCount: 1,
           lastCheckedAt: new Date().toISOString(),
@@ -214,6 +240,40 @@ describe('P1-3.4 — candidate picker excludes inadmissible tasks before ORDER B
     const result = await bridge.executePendingDiagnosis({ taskId });
     expect(result.status).toBe('skipped');
     expect(result.message).toBe('target_evidence_blocked_by_consent');
+  });
+
+  it('the direct bridge does not confuse minimal-identity blocked_by_consent with source-material denial', async () => {
+    const painId = 'mcp_1700000000047_7a000047';
+    const taskId = createDiagnosticianTaskId(painId);
+    await stateManager.createTask({
+      taskId,
+      taskKind: 'diagnostician',
+      inputRef: painId,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        sourcePainId: painId,
+        reasonSummary: 'Owner-provided pain without host identity metadata',
+        provenance: 'owner_reported_no_host_trace',
+        evidence: [],
+        recovery: {
+          schemaVersion: 1,
+          state: 'blocked_by_consent',
+          reasonCode: 'minimal_identity_metadata_not_granted',
+          attemptCount: 1,
+          lastCheckedAt: new Date().toISOString(),
+        },
+      }),
+    });
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: { run: async () => { throw new Error('legacy blocked_by_consent is still diagnosable'); } } satisfies DiagnosticianRunnerLike,
+      workspaceDir: tmpDir,
+      intakeService: {} as never,
+      ledgerAdapter: { register: () => undefined, existsForCandidate: () => undefined, getEntries: () => [] } as never,
+    });
+    await expect(bridge.executePendingDiagnosis({ taskId })).rejects.toThrow('legacy blocked_by_consent is still diagnosable');
   });
 });
 
