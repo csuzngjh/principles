@@ -107,6 +107,26 @@ function withState<T>(fn: (db: Database.Database) => T): T {
   }
 }
 
+function trackObservationReads(): { databaseFactory: (dbPath: string) => Database.Database; count: () => number } {
+  let count = 0;
+  const databaseFactory = (dbPath: string): Database.Database => {
+    const db = new Database(dbPath);
+    return new Proxy(db, {
+      get(target, property) {
+        if (property === 'prepare') {
+          return (sql: string) => {
+            if (/^\s*SELECT\s+visible_text\s+FROM\s+governance_observations/i.test(sql)) count += 1;
+            return target.prepare(sql);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as Database.Database;
+  };
+  return { databaseFactory, count: () => count };
+}
+
 function seedCodexObservation(overrides: { logicalKey?: string; visibleText?: string; turnId?: string } = {}): void {
   ingestGovernanceObservations({
     workspaceDir,
@@ -1350,6 +1370,7 @@ describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', (
       type: 'pi-ai', provider: 'rev-prov', model: 'rev-model', apiKeyEnv: 'REV_TEST_KEY', baseUrl: 'http://127.0.0.1:1/v1',
     };
     config.internalAgents.defaultRuntime = 'pd.default';
+    config.features = { ...config.features, automatic_pain_submission: { category: 'quiet', enabled: true } };
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
     process.env.REV_TEST_KEY = 'test-key';
@@ -1371,15 +1392,30 @@ describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', (
 
     // Post-revocation relink: the ALREADY-persisted task is re-linked —
     // no new task is created, no excerpts re-copied.
+    const observationReads = trackObservationReads();
     const repaired = await ensureGovernanceDiagnosticianTask({
       workspaceDir,
       logicalObservationKey: 'codex|rollout-1|turn-h0|user',
       canonicalPainId: relinkPainId,
+      databaseFactory: observationReads.databaseFactory,
     });
     if (!repaired.ok) throw new Error(`post-revoke relink refused: ${repaired.reason}`);
     expect(repaired.created).toBe(false);
     expect(repaired.linkRepaired).toBe(true);
     expect(repaired.taskId).toBe(relinkTaskId);
+    expect(observationReads.count()).toBe(0);
+    const duplicate = await ensureGovernanceDiagnosticianTask({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-1|turn-h0|user',
+      canonicalPainId: relinkPainId,
+      databaseFactory: observationReads.databaseFactory,
+    });
+    expect(duplicate.ok).toBe(true);
+    if (duplicate.ok) {
+      expect(duplicate.taskId).toBe(relinkTaskId);
+      expect(duplicate.linkRepaired).toBe(false);
+    }
+    expect(observationReads.count()).toBe(0);
     const taskCount = withState((db) => db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE task_id = ?').get(relinkTaskId) as { n: number });
     expect(taskCount.n).toBe(1);
 
@@ -1388,9 +1424,14 @@ describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', (
       workspaceDir,
       logicalObservationKey: 'codex|rollout-1|turn-h|user',
       canonicalPainId: agentPainId,
+      databaseFactory: observationReads.databaseFactory,
     });
     expect(refused.ok).toBe(false);
-    if (!refused.ok) expect(refused.reason).toBe('source_authorization_revoked');
+    if (!refused.ok) {
+      expect(refused.reason).toBe('source_authorization_revoked');
+      expect(refused.nextAction).toContain(`--workspace "${workspaceDir}" --apply`);
+    }
+    expect(observationReads.count()).toBe(0);
     // No task link was written for the refused marker.
     const link = withTrajectory((db) => db.prepare('SELECT diagnostician_task_id FROM governance_signal_admissions WHERE canonical_pain_id = ?').get(agentPainId) as { diagnostician_task_id: string | null });
     expect(link.diagnostician_task_id).toBeNull();
@@ -1417,8 +1458,27 @@ describe('PRI-1283 r3 — Owner Statement 来源语义 (owner_manual ruling)', (
       workspaceDir,
       logicalObservationKey: 'codex|rollout-1|turn-h2|user',
       canonicalPainId: ownerPainId,
+      databaseFactory: observationReads.databaseFactory,
     });
     if (!ensured.ok) throw new Error(`owner-manual recovery refused: ${ensured.reason}`);
     expect(ensured.created).toBe(true);
+    expect(observationReads.count()).toBe(0);
+
+    // A missing ledger is not a revocation, but it still does not authorize
+    // historical observation reads. Agent-derived admission must fail closed
+    // with no Task created; Owner Manual submissions above remain independent.
+    const missingConsentPainId = seedAgentChannelPain({ text: `${SECRET} agent relay missing consent`, turnId: 'turn-h-missing', confirmed: false });
+    fs.rmSync(path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'), { force: true });
+    const missingConsent = await ensureGovernanceDiagnosticianTask({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-1|turn-h-missing|user',
+      canonicalPainId: missingConsentPainId,
+      databaseFactory: observationReads.databaseFactory,
+    });
+    expect(missingConsent.ok).toBe(false);
+    if (!missingConsent.ok) expect(missingConsent.reason).toMatch(/^pain_ingress_/);
+    expect(observationReads.count()).toBe(0);
+    const missingConsentTaskCount = withState((db) => db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE task_id = ?').get(`diagnosis_${missingConsentPainId}`) as { n: number });
+    expect(missingConsentTaskCount.n).toBe(0);
   });
 });

@@ -2343,6 +2343,54 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       return { ok: false, reason: 'admission_task_payload_invalid', nextAction: 're-admit the signal or run reconciliation after repairing the workspace state' };
     }
 
+    const hasExistingTaskLink = typeof existingTaskId === 'string' && existingTaskId.length > 0;
+    const markerHostKind = payloadParsed.hostKind;
+    const ownerManual = isOwnerManualCorrectionEvidence(payloadParsed.correctionEvidence);
+    const sourceAuthorization = markerHostKind === 'codex' || markerHostKind === 'workbuddy'
+      ? readSourceMaterialAuthorization({ workspaceDir, hostKind: markerHostKind })
+      : undefined;
+    // Every blocked authorization state (including a missing ledger) forbids
+    // historical observation reads. A missing ledger is not a revocation, so
+    // it is handled by the ingress evidence gate below rather than the sweep
+    // remediation branch.
+    const sourceMaterialReadable = sourceAuthorization === undefined
+      || sourceAuthorization.status !== 'blocked';
+
+    // A linked task remains idempotently reportable after revocation, but the
+    // marker must not trigger a historical observation read on that path.
+    if (hasExistingTaskLink && !sourceMaterialReadable) {
+      return { ok: true, taskId: existingTaskId, created: false, duplicate: true, linkRepaired: false };
+    }
+
+    // After revocation, repair a crash-after-create task link without reading
+    // the historical observation. If the deterministic task does not exist,
+    // refuse before any governance_observations.visible_text query.
+    if (!ownerManual && sourceAuthorization?.status === 'blocked'
+      && sourceAuthorization.reason !== 'consent_missing') {
+      const taskId = createDiagnosticianTaskId(input.canonicalPainId);
+      const stateManager = new RuntimeStateManager({ workspaceDir });
+      try {
+        await stateManager.initialize();
+        const existing = await stateManager.getTask(taskId);
+        if (existing !== null) {
+          db.prepare('UPDATE governance_signal_admissions SET diagnostician_task_id = ?, updated_at = ? WHERE logical_observation_key = ?')
+            .run(taskId, new Date().toISOString(), input.logicalObservationKey);
+          return { ok: true, taskId, created: false, duplicate: true, linkRepaired: true };
+        }
+      } finally {
+        await stateManager.close().catch(() => undefined);
+      }
+      return {
+        ok: false,
+        reason: 'source_authorization_revoked',
+        nextAction: sourceAuthorization.reason === 'consent_unreadable'
+          ? 'repair the consent ledger first (<workspace>/.state/conversation-ingestion-consent.json is unreadable); the sweep refuses to run until the authority is readable'
+          : sourceAuthorization.reason === 'consent_revoked'
+            ? `purge persisted copies first: pd consent sweep-revoked --workspace "${workspaceDir}" --apply (host: ${markerHostKind})`
+            : `resolve the pending or failed conversation-ingestion consent decision for ${markerHostKind} in "${workspaceDir}" before retrying; a revocation sweep is only appropriate after the ledger records a revocation`,
+      };
+    }
+
     // SPEC v0.3.1 §1.2: provenance is DERIVED from the marker's ingress facts,
     // never hardcoded. The marker is host-context-bound by construction, and
     // its payload carries the evidence entries that make this a `submit`.
@@ -2351,7 +2399,6 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
     const hostTurnId = payloadParsed.hostKind === 'codex'
       ? (markerKey.split('|')[2] ?? markerKey)
       : (markerKey.lastIndexOf('|') > 0 ? markerKey.slice(0, markerKey.lastIndexOf('|')) : markerKey);
-    const markerHostKind = payloadParsed.hostKind;
     // P1 review round 3: never trust the payload's evidence list — re-derive it
     // from trajectory.db with the full lineage tuple. A marker that references a
     // non-existent observation (or a WorkBuddy automatic correction) evaluates
@@ -2361,16 +2408,18 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
     // run for it. Only corrections are gated on a real observation.
     const isCorrectionPayload = payloadParsed.painType !== 'tool_failure';
     const ingressEvidence: IngressEvidenceEntry[] = isCorrectionPayload && (markerHostKind === 'codex' || markerHostKind === 'workbuddy')
-      ? correctionIngressEvidence({
-        db,
-        hostKind: markerHostKind,
-        logicalObservationKey: markerKey,
-        rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
-        rootSessionId: payloadParsed.sessionId,
-        hostTurnId,
-        text: payloadParsed.reason,
-        workspaceDir,
-      })
+      ? (sourceMaterialReadable
+        ? correctionIngressEvidence({
+          db,
+          hostKind: markerHostKind,
+          logicalObservationKey: markerKey,
+          rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
+          rootSessionId: payloadParsed.sessionId,
+          hostTurnId,
+          text: payloadParsed.reason,
+          workspaceDir,
+        })
+        : [])
       : payloadParsed.evidence.map((entry) => ({
         kind: 'behavior_trace' as const,
         sourceRef: entry.sourceRef,
@@ -2383,7 +2432,7 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       // source. An explicit Owner statement is owner_manual (manual_pain_id,
       // correctionEvidence channel); everything else is the automatic hook.
       const ownerChannel = payloadParsed.correctionEvidence?.channel;
-      const ingressDecision = ownerChannel !== undefined
+      const ingressDecision = ownerManual && ownerChannel !== undefined
         ? evaluatePainIngress(buildOwnerCorrectionIngressReport({
           hostKind: markerHostKind,
           channel: ownerChannel,
@@ -2426,9 +2475,9 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       provenance = 'host_context_bound';
     }
 
-    // Recovery path: a task link already exists. The ingress decision above
-    // still ran, so an inconsistent admitted marker fails closed instead of
-    // being reported as a healthy duplicate.
+    // Preserve the existing fail-closed validation for linked tasks while
+    // consent is readable. The revoked path above returns without transcript
+    // access because the already-linked task is durable.
     if (typeof existingTaskId === 'string' && existingTaskId.length > 0) {
       return {
         ok: true,
@@ -2473,7 +2522,7 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
         // only on the create path: a task already persisted before the
         // crash still gets its link repaired above/below.
         if ((markerHostKind === 'codex' || markerHostKind === 'workbuddy')
-          && !isOwnerManualCorrectionEvidence(payloadParsed.correctionEvidence)) {
+          && !ownerManual) {
           // A MISSING ledger is not a revocation (the sweep treats it the
           // same); refuse only on a recorded non-granted decision or an
           // unreadable one.
@@ -2488,7 +2537,9 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
               // repair FIRST instead of a command that cannot run.
               nextAction: authz.reason === 'consent_unreadable'
                 ? `repair the consent ledger first (<workspace>/.state/conversation-ingestion-consent.json is unreadable); the sweep refuses to run until the authority is readable`
-                : `purge persisted copies first: pd consent sweep-revoked --apply (host: ${markerHostKind})`,
+                : authz.reason === 'consent_revoked'
+                  ? `purge persisted copies first: pd consent sweep-revoked --workspace "${workspaceDir}" --apply (host: ${markerHostKind})`
+                  : `resolve the pending or failed conversation-ingestion consent decision for ${markerHostKind} in "${workspaceDir}" before retrying; a revocation sweep is only appropriate after the ledger records a revocation`,
             };
           }
         }

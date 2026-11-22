@@ -27,6 +27,8 @@ import {
 } from '../src/governance-signal-admission.js';
 import { EARNED_PRECISION_MIN_TP } from '../src/index.js';
 import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime';
+import { recordConversationIngestionConsent } from '../src/conversation-ingestion/consent.js';
+import { CODEX_INGESTION_DISCLOSURE_VERSION } from '../src/codex-disclosure.js';
 import type { LlmClassificationResult } from '@principles/core/runtime';
 
 const BASELINE_DDL = [
@@ -71,6 +73,13 @@ let workspaceDir: string;
 beforeEach(() => {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pending-review-'));
   fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+  const consent = recordConversationIngestionConsent(workspaceDir, 'codex', {
+    decision: 'granted',
+    decidedVia: 'pd_codex_setup',
+    decidedAt: NOW.toISOString(),
+    disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
+  });
+  if (!consent.ok) throw new Error(`Codex test consent setup failed: ${consent.reason}`);
   const sqlite = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
   for (const statement of BASELINE_DDL) sqlite.prepare(statement).run();
   sqlite.close();

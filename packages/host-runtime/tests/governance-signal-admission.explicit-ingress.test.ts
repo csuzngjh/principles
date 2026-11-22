@@ -19,7 +19,9 @@ import {
   ensureGovernanceDiagnosticianTask,
   type GovernanceCorrectionCandidate,
 } from '../src/governance-signal-admission.js';
-import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime';
+import { fingerprintStatement, getDefaultPdConfig, invalidatePainSignalBridge, isOwnerManualCorrectionEvidence } from '@principles/core/runtime';
+import { recordConversationIngestionConsent } from '../src/conversation-ingestion/consent.js';
+import { CODEX_INGESTION_DISCLOSURE_VERSION } from '../src/codex-disclosure.js';
 
 const BASELINE_DDL = [
   'CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
@@ -60,6 +62,13 @@ let workspaceDir: string;
 beforeEach(() => {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-explicit-ingress-'));
   fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+  const consent = recordConversationIngestionConsent(workspaceDir, 'codex', {
+    decision: 'granted',
+    decidedVia: 'pd_codex_setup',
+    decidedAt: NOW.toISOString(),
+    disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
+  });
+  if (!consent.ok) throw new Error(`Codex test consent setup failed: ${consent.reason}`);
   const sqlite = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
   for (const statement of BASELINE_DDL) sqlite.prepare(statement).run();
   sqlite.close();
@@ -184,6 +193,45 @@ function admit(candidate: GovernanceCorrectionCandidate, options: { withObservat
   return outcome.canonicalPainId;
 }
 
+function agentAssistedCorrection(turnId: string, confirmed: boolean, text: string): GovernanceCorrectionCandidate {
+  return {
+    kind: 'user_correction',
+    hostKind: 'codex',
+    logicalObservationKey: `codex|rollout-agent|${turnId}|user`,
+    rolloutIdentity: 'rollout-agent',
+    rootSessionId: 'session-agent',
+    hostTurnId: turnId,
+    text,
+    observedAt: NOW.toISOString(),
+    explicitOwnerStatement: true,
+    explicitChannel: 'codex_explicit_agent',
+    ...(confirmed ? { ownerVerbatimConfirmed: true } : {}),
+  };
+}
+
+function readAdmissionPayload(logicalObservationKey: string): Record<string, unknown> {
+  const sqlite = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  try {
+    const row: unknown = sqlite.prepare('SELECT task_payload_json FROM governance_signal_admissions WHERE logical_observation_key = ?').get(logicalObservationKey);
+    if (!isRecord(row) || typeof row.task_payload_json !== 'string') throw new Error('admission payload missing');
+    const parsed: unknown = JSON.parse(row.task_payload_json);
+    if (!isRecord(parsed)) throw new Error('admission payload is not an object');
+    return parsed;
+  } finally {
+    sqlite.close();
+  }
+}
+
+function writeAdmissionPayload(logicalObservationKey: string, payload: Record<string, unknown>): void {
+  const sqlite = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+  try {
+    sqlite.prepare('UPDATE governance_signal_admissions SET task_payload_json = ? WHERE logical_observation_key = ?')
+      .run(JSON.stringify(payload), logicalObservationKey);
+  } finally {
+    sqlite.close();
+  }
+}
+
 describe('Owner Manual vs Automatic Hook ingress (P1-2)', () => {
   it('Codex explicit Owner statement WITHOUT a persisted observation degrades honestly (no fabricated trace)', async () => {
     // Ingestion OFF: the Owner statement still produces a Pain + task, but there
@@ -262,6 +310,70 @@ describe('Owner Manual vs Automatic Hook ingress (P1-2)', () => {
     const diagnostic = readDiagnosticJson();
     expect(diagnostic.provenance).toBe('automatic_hook');
     expect(diagnostic.correctionEvidence).toBeUndefined();
+  });
+
+  it('confirmed codex_explicit_agent is Owner Manual only with the registration-bound fingerprint', async () => {
+    const candidate = agentAssistedCorrection('turn-agent-confirmed', true, 'Owner words transcribed verbatim');
+    const painId = admit(candidate);
+    const payload = readAdmissionPayload(candidate.logicalObservationKey);
+    expect(isOwnerManualCorrectionEvidence(payload.correctionEvidence)).toBe(true);
+
+    const ensured = await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: candidate.logicalObservationKey, canonicalPainId: painId });
+    if (!ensured.ok) throw new Error(`${ensured.reason} / ${ensured.nextAction}`);
+    const diagnostic = readDiagnosticJson();
+    expect(diagnostic.provenance).toBe('host_context_bound');
+    expect(diagnostic.correctionEvidence).toMatchObject({ classification: 'owner_statement', channel: 'codex_explicit_agent' });
+  });
+
+  it.each([
+    ['Agent paraphrase', 'turn-agent-paraphrase'],
+    ['Agent summary', 'turn-agent-summary'],
+  ])('%s on codex_explicit_agent remains Agent-derived', async (label, turnId) => {
+    const candidate = agentAssistedCorrection(turnId, false, `${label}: Owner wanted a different result`);
+    const painId = admit(candidate);
+    const payload = readAdmissionPayload(candidate.logicalObservationKey);
+    expect(isOwnerManualCorrectionEvidence(payload.correctionEvidence)).toBe(false);
+
+    const ensured = await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: candidate.logicalObservationKey, canonicalPainId: painId });
+    if (!ensured.ok) throw new Error(`${ensured.reason} / ${ensured.nextAction}`);
+    const diagnostic = readDiagnosticJson();
+    expect(diagnostic.provenance).toBe('automatic_hook');
+    expect(diagnostic.correctionEvidence).toMatchObject({ channel: 'codex_explicit_agent' });
+    expect((diagnostic.correctionEvidence as Record<string, unknown>).classification).toBeUndefined();
+  });
+
+  it('a self-declared confirmation with a mismatched fingerprint stays Agent-derived', async () => {
+    const candidate = agentAssistedCorrection('turn-agent-forged', false, 'Agent supplied a confirmation claim');
+    const painId = admit(candidate);
+    const payload = readAdmissionPayload(candidate.logicalObservationKey);
+    const correction = payload.correctionEvidence as Record<string, unknown>;
+    correction.classification = 'owner_statement';
+    correction.ownerConfirmation = {
+      kind: 'owner_verbatim_turn_match',
+      statementFingerprint: fingerprintStatement('not the persisted statement'),
+    };
+    writeAdmissionPayload(candidate.logicalObservationKey, payload);
+    expect(isOwnerManualCorrectionEvidence(readAdmissionPayload(candidate.logicalObservationKey).correctionEvidence)).toBe(false);
+
+    const ensured = await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: candidate.logicalObservationKey, canonicalPainId: painId });
+    expect(ensured.ok).toBe(false);
+    if (!ensured.ok) expect(ensured.reason).toBe('admission_task_payload_invalid');
+    expect(fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'))).toBe(false);
+  });
+
+  it('a confirmation fingerprint for different final text stays Agent-derived', async () => {
+    const candidate = agentAssistedCorrection('turn-agent-fingerprint-mismatch', true, 'Owner words before final edit');
+    const painId = admit(candidate);
+    const payload = readAdmissionPayload(candidate.logicalObservationKey);
+    const correction = payload.correctionEvidence as Record<string, unknown>;
+    correction.text = 'Owner words after an unconfirmed edit';
+    writeAdmissionPayload(candidate.logicalObservationKey, payload);
+    expect(isOwnerManualCorrectionEvidence(readAdmissionPayload(candidate.logicalObservationKey).correctionEvidence)).toBe(false);
+
+    const ensured = await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: candidate.logicalObservationKey, canonicalPainId: painId });
+    expect(ensured.ok).toBe(false);
+    if (!ensured.ok) expect(ensured.reason).toBe('admission_task_payload_invalid');
+    expect(fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'))).toBe(false);
   });
 
   it('an inconsistent admitted marker fails closed during recovery (no silent automatic_hook fallback)', async () => {
