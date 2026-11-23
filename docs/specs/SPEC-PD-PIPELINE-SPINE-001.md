@@ -1,28 +1,31 @@
 # SPEC-PD-PIPELINE-SPINE-001 — PD 核心管道主干收敛规范
 
-- **版本**：v0.2
+- **版本**：v0.3
 - **日期**：2026-11-23
-- **状态**：Draft for Owner Review（未批准；未开始实现）
-- **v0.2 对抗式自审修订**：
-  1. 修正 v0.1 将 `runtimeKind`（模型执行后端）误读为 `hostKind`（宿主归属）的事实错误；移除“强制 `hostKind` 必填”的错误设计（手动无会话 CLI 录入合法状态即为无 `hostKind`）。
-  2. 按 P2.1（先连接、再创造）砍掉新建顶层门面 `createPipelineRuntime`：复用 `@principles/core` 既有写入门面 `PainToPrincipleService` 与 `@principles/host-runtime` 既有周期函数，改为提供单一宿主协作者装配函数并收编 3 个手搓 Runner 的 CLI 入口。
-  3. 用“探针值端到端一致性测试（Canary Spine Test）”替代“静态字段清单 + AST 键名扫描”，避免制造第二份真相（P4）。
-  4. 砍掉对 `PITaskMetadata` 28 个字段的三分组重排（`serializePITaskMetadata` / `mergePITaskMetadata` 已集中收口，拆子对象只有测试夹具改动成本、无故障收益），改为只收口真实双轨字段与后继血缘不变量。
-  5. 补入自审新核实的 4 个现存断线缺陷（§3.2 D1–D4），并提前到 Phase 1B 止血；修正 PRI-1267 已修复 `candidate internalize` 准入检查但仍缺账本入库检查的精确现状；修复附录 A 复跑命令的未加引号展开问题。
+- **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
+- **修订记录**：
+  - **v0.3（PR #2763 独立技术评审修订）**：
+    1. **撤销原 D3 误诊**：核实 `resolveExecutionTiming()` 已提供默认 `leaseTtlMs = 120_000`、`heartbeatIntervalMs = 40_000`，`BasePeerRunner` 与 `SplitDiagnosticianRunner` 在未显式传参时均已启动 `LeaseHeartbeat`；现存确认断线修正为 **3 项（D1、D2、D4）**，`createDiagnosticianRunnerBundle` 保留但定位为消除重复装配与防协作者漂移。
+    2. **补全 D1 全仓 5 处 `PainToPrincipleService` 构造点盘点**：补入 v0.2 遗漏的同步入口 `packages/openclaw-plugin/src/commands/pain.ts:333`；同步模式在类型层要求显式注入授权与轨迹依赖，并将 `new PainToPrincipleService(` 纳入架构回归守卫。
+    3. **修正 D2 测试入口幻觉**：移除当前 CLI 不存在的 `--deviated-principle` 表述，改为覆盖真实的 `evaluatePainIngress({ painType: 'principle_deviation', deviationAnchor })` 与历史仅含 `deviationAnchor` 的任务恢复。
+    4. **重构 D4 账本门禁与 `nextAction`**：正式确定采用**严格拒绝**策略；修正 `nextAction` 为真实 CLI 签名 `pd candidate intake --candidate-id <id> --workspace "<path>"`（无 `--confirm`）；门禁移至可内化路由判定之后，改用单次文件快照权威 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`，同时保留 `rule` 候选先跑 Dreamer/Philosopher、在 `ScribeRunner` 预检等待 `owner_rule_binding` 的既有生产语义，并拦截 `principle_reuse` 候选重复播种。
+    5. **重设计 Phase 3 血缘收紧**：严格限定于 `PeerRunnerKind` 内化阶段（绝不套用到 `DiagnosticianStageKind` 子任务）；改为带 `getTask` 的有界父链回溯校验器，同时满足父子一致性校验与历史无 `correlationId` 在途后代链恢复。
+    6. **加固 Phase 0 快照与 Phase 1 测试包边界**：Phase 0 复用 `pain-recall-read-model.ts` 的 `stageWalSnapshot`（WAL 双文件前后指纹校验暂存快照），消除裸拷贝竞争风险；Phase 1 探针测试按单向包依赖拆分为 `host-runtime`（分 `prompt` 与 `code_tool_hook` 两文件）、`pd-cli`、`openclaw-plugin` 三层；统一 Complexity Delta（3 个跨包内部导出函数）并同步基线至 `origin/main@e9ace1ac5`。
+  - **v0.2（对抗式自审修订）**：修正 `runtimeKind` / `hostKind` 混淆；按 P2.1 删除 `createPipelineRuntime` 大门面；用探针值端到端测试替代静态字段清单；删除 `PITaskMetadata` 三分组重排。
 - **范围**：Pain → 诊断 → 候选准入与账本入库 → 内化 → 激活 → 注入/拦截 → 行为证据 这条核心链路的协作者装配、跨跳数据连通性与有效性闭环
-- **事实基线**：`origin/main@5e3b8d53d`。§3 的全部数字与代码锚点均在该基线上实测，复跑命令见附录 A。
-- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
+- **事实基线**：`origin/main@e9ace1ac5`。§3 的全部数字与代码锚点均在该基线上实测，复跑命令见附录 A。
+- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.3）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
 - **不改变**：Pain 语义、诊断/内化业务规则、Owner 审批权、任务状态机（`MVP_CORE_LOOP_CONTRACT` INV-01..08）、物理数据库布局、Workspace 数据归属
 - **关联**：
   - `docs/architecture/MVP_CORE_LOOP_CONTRACT.md`（语义基线，本 SPEC 不修改）
   - `docs/plans/2026-11-10-architecture-complexity-remediation-plan.md`（存储端口 / 配置 / 判定原因；本 SPEC 不重复）
-  - `docs/architecture/principle-identity-reconciliation.md`（I2/I3 已落地，本 SPEC 只堵剩余旁路）
-  - `docs/specs/SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001-v1.0.md`（租约与心跳已合入工厂，本 SPEC 补齐绕过工厂的 CLI 入口）
+  - `docs/architecture/principle-identity-reconciliation.md`（I2/I3 已落地，本 SPEC 堵住 `candidate internalize` 旁路并收紧内化后继血缘）
+  - `docs/specs/SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001-v1.0.md`（租约与心跳默认契约已生效，本 SPEC 收编绕过工厂的 CLI 重复装配）
   - `docs/specs/SPEC-PD-SERVICE-HOST-001.md`（后台生命周期调度；Phase 2–4 已合入 `pd-cli/src/services/service-host/`，本 SPEC 不触碰调度所有权）
 
 > **一句话结论**
 >
-> PD 核心管道的业务阶段、序列化器与身份盖章主体都已存在；真正让维护困难、让断线反复发生的，是**各入口各自拼装可选协作者**、**3 个 CLI 命令绕过共享工厂手搓 Runner**、以及**缺少一条用非默认探针值跑穿全链的端到端测试**。本 SPEC 不新建顶层门面、不重排表结构，通过“先红探针测试 → 修现存 4 处断线 → 收口协作者与手搓入口”把复杂度增量做到 **≤ 0**。
+> PD 核心管道的业务阶段、序列化器、默认租约心跳与身份盖章主体都已存在；真正让维护困难、让断线反复发生的，是**各入口各自拼装可选协作者**、**3 个 CLI 命令绕过共享组装手搓 Runner**、以及**缺少按生产组合根分层的探针值端到端测试**。本 SPEC 不新建顶层门面、不重排表结构，通过“WAL 安全漏斗基线 → 分层探针测试先红 → 修复已核实的 3 处现存断线（D1/D2/D4）→ 收口协作者与手搓入口 → 收紧内化链血缘”使主干可机械验证。
 
 ---
 
@@ -43,75 +46,87 @@ Owner 当前面临两个核心痛点：
 
 | ID | 目标 | 可验证的验收结果 |
 |---|---|---|
-| G1 | “有没有漏接字段/依赖”由 CI 自动回答 | 一条探针值端到端测试（Canary Spine Test）覆盖 `prompt` 与 `code_tool_hook` 两条主路径；任一必达探针未进入下游模型请求体或落库记录，CI 立即变红 |
-| G2 | 止住当前已核实的 4 处真实断线 | §3.2 的 D1–D4 全部先红后绿修复 |
-| G3 | 宿主协作者只在一处组装，不再可选漏传 | `host-runtime` 提供单一 `resolveWorkspacePipelineHostDeps`（字段全必填）；所有宿主 worker、OpenClaw hook、CLI 命令共用它 |
+| G1 | “有没有漏接字段/依赖”由 CI 自动回答 | 分层探针测试（`host-runtime` 双渠道主干 + `pd-cli` 命令入口 + `openclaw-plugin` hook/command 双入口）覆盖真实生产组合根；任一必达探针未进入下游模型请求体或落库记录，CI 立即变红 |
+| G2 | 止住当前已核实的 3 处真实断线 | §3.2 的 D1、D2、D4 全部先红后绿修复 |
+| G3 | 宿主协作者只在一处组装，同步路径编译期防漏 | `host-runtime` 提供单一 `resolveWorkspacePipelineHostDeps`（5 字段全必填）；`PainToPrincipleService` 同步路径要求显式传入授权与轨迹依赖；全仓构造点由架构回归测试守卫 |
 | G4 | 消除生产代码中的野生 Runner 组装 | `diagnose.ts`、`pain-retry.ts`、`runtime-internalization-run-once.ts` 不再手搓 Runner；CI 守卫锁死构造点白名单 |
-| G5 | 消除跨跳双轨字段与无账本孤儿链 | `deviationAnchor` 收敛到单一 `anchor`；未入账本（Ledger）的候选不得排入 `dreamer` 任务；后继任务强制继承 `correlationId` |
-| G6 | 闭合“原则是否有效”的观测回路 | 每条已激活原则一个派生读模型：注入次数、遵循/违反证据数、激活后同类 Pain 复发数（证据不足报 `unknown`） |
+| G5 | 消除跨跳双轨字段与无身份/重复播种旁路 | `deviationAnchor` 收敛到单一 `anchor`；`pd candidate internalize` 接入 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`；内化链（`PeerRunnerKind`）后继强制校验父链 `correlationId` 一致性 |
+| G6 | 闭合“原则是否有效”的观测回路（远期门控） | 每条已激活原则一个只读派生读模型：注入次数、遵循/偏离证据数、激活后同锚点 Pain 复发数（证据不足报 `insufficient_evidence`） |
 
 ### 2.2 非目标
 
 - 不重写管道，不新增业务阶段，不新增顶层门面类（复用 `PainToPrincipleService`、`createPainSignalBridge`、`runPendingDiagnosticianOnce`、`runInternalizationConsumerCycle`）。
 - 不把 `PITaskMetadata` 的 28 个字段拆成嵌套子对象（`serializePITaskMetadata` 与 `mergePITaskMetadata` 已集中收口，改形状只制造测试夹具噪音）。
-- 不合并 `state.db` 与 `trajectory.db`，不做存量数据迁移。
+- 不新增 CLI 命令行参数（例如不为 D2 额外发明 `--deviated-principle`）。
+- 不合并 `state.db` 与 `trajectory.db`，不做存量物理表迁移。
 - 不按行数拆大文件（如 `evaluator-runner.ts` 4104 行）。
 - 不新增特性开关（`mvp-q-3-how-disabled`）。
 - 不重复 11-10 整改计划已覆盖的存储端口、配置校验与 UI 校验器生成化。
 
 ### 2.3 Complexity Delta（AGENTS §13）
 
+> 注：提交本 SPEC 的文档 PR（#2763）自身运行时 Complexity Delta 全项为 `NO`。下表评估的是**按本 SPEC 全量落地 Phase 0–3 后的目标系统复杂度变化**。
+
 ```text
-Complexity Delta
+Complexity Delta (Target Architecture across Phase 0–3)
 
 New durable source of truth: NO
 New persisted schema/state: NO
 New subsystem/service/background process: NO
-New public abstraction/interface: YES (1 pure dependency-bundle builder `resolveWorkspacePipelineHostDeps` in `@principles/host-runtime`, replacing 8 ad-hoc wiring blocks; net -3 Runner assembly sites)
+New public abstraction/interface: YES (3 internal cross-package factory/executor exports:
+  1. `@principles/host-runtime`: `resolveWorkspacePipelineHostDeps`
+  2. `@principles/host-runtime`: `executeSelectedInternalizationTask`
+  3. `@principles/core/runtime`: `createDiagnosticianRunnerBundle`
+  plus reusing existing WAL snapshot logic via exported read-only helper for Phase 0;
+  net removes 3 hand-rolled Runner assembly switches and 8 ad-hoc collaborator wiring blocks)
 New runtime feature flag: NO
 New cross-package dependency: NO (`pd-cli`, `openclaw-plugin`, `codex-adapter`, `workbuddy-adapter` already depend on `@principles/host-runtime` and `@principles/core`)
 New host/platform-specific behavior: NO
 New external/network capability: NO
 ```
 
-对唯一一项 `YES` 的说明：
-1. **为何现有模块未覆盖**：`host-runtime` 已有各单个协作者工厂（`createHostIntentDocReader`、`createGovernanceTrajectoryTurnReader`、`createConsentLedgerSourceMaterialAuthorization`、`createWorkspaceTelemetryEmitter`、`isAutomaticPainSubmissionAuthorized`），但没有把它们打包成不可漏项的整体，导致每个入口手写一套，反复漏项（PRI-1265、本次 D1）。
-2. **隐藏了什么复杂度**：隐藏“5 个宿主侧协作者如何按同一份工作区与授权台账联动构造”（例如 `trajectoryTurnReader` 与 `contextAssembler` 必须共享同一个 `sourceMaterialAuthorization` 实例）。
-3. **为何不能更小**：不抽这个包函数，8 个入口仍需各自传 5 个参数，无法在编译期阻止第 9 个入口漏传。
-4. **如何验证**：编译期全必填 + Phase 1A 探针测试 + CI 构造点守卫。
-5. **如何回退**：内联回调用点即可，无持久化影响。
+对唯一一项 `YES` 的必要性说明：
+1. **`resolveWorkspacePipelineHostDeps`**：把 5 个宿主协作者按同一 `workspaceDir` 与同一 `sourceMaterialAuthorization` 实例打包为全必填返回结构，替代 8 处分散拼装（已造成 PRI-1230/1233、PRI-1265 与本次 D1）。
+2. **`createDiagnosticianRunnerBundle`**：从 `createPainSignalBridge` 内部原位抽出**不写 `bridgeCache`** 的诊断 Runner 组装器，供缓存版 Bridge 与带 `--runtime test-double` / `--no-intake` 覆盖需求的 `diagnose.ts`、`pain-retry.ts` 共用，删除约 100 行重复 Runner 构造且不污染进程级缓存。
+3. **`executeSelectedInternalizationTask`**：从 `runInternalizationConsumerCycle` 内部原位抽出单步 Peer Runner 执行器，供后台周期与 `runtime-internalization-run-once.ts` 共用，删除 CLI 中约 135 行 6 分支 Runner switch。
 
 ---
 
-## 3. 当前事实（`origin/main@5e3b8d53d` 实测）
+## 3. 当前事实（`origin/main@e9ace1ac5` 实测）
 
-### 3.1 装配面盘点
+### 3.1 装配面全量盘点
 
-| 层 / 能力 | 既有权威入口 | 绕过权威入口的手搓点 / 分散点 | 实测后果 |
-|---|---|---|---|
-| Pain 写入与同步触发 | `@principles/core` `PainToPrincipleService`（公开桶标注唯一写入入口，架构测试保护） | `PainToPrincipleService`、`codex` worker（2 处）、`workbuddy` worker、`diagnostician-auto-run`、`openclaw hooks/pain.ts`、`pain-record.ts` 各自拼装协作者 | 新增协作者时总有入口漏传（见 D1） |
-| 诊断三阶段执行 | `@principles/core` `createPainSignalBridge`（`pain-signal-runtime-factory.ts:808-835`） | `pd-cli/src/commands/diagnose.ts:557-584`、`pd-cli/src/commands/pain-retry.ts:695-725`（另有 2 个实验 runner：`synthetic-baseline-runner.ts`、`pain-flood-simulation-runner.ts`） | 两个生产 CLI 手搓 `Diag*Runner + SplitDiagnosticianRunner`，**漏配了工厂已有的租约心跳**（见 D3） |
-| 内化单轮消费 | `@principles/host-runtime` `runInternalizationConsumerCycle`（`internalization-consumer-cycle.ts:941-1068`） | `pd-cli/src/commands/runtime-internalization-run-once.ts:720-830` 手搓 6 个 Runner；`pd-cli/src/services/rulehost-pipeline-runner.ts:338-508` 同步直连 Runner（不走租约编排器） | 同一 Runner 的构造参数（如 `ledgerIdentity`、`hostSemantics`、预检门）在 3 个文件里人工同步 |
-| 编排器构造 | `InternalizationOrchestrator` | 5 处：`internalization-consumer-cycle.ts`、`runtime-internalization-run-once.ts`（2 处）、`runtime-internalization-wake-once.ts`、`runtime-internalization-enqueue-successors.ts` | 每次新增门禁端口（如 `sourceMaterialAuthorization`）需改 5 处 |
+1. **`new PainToPrincipleService(` 全仓共 5 处生产调用点**：
+   - **同步可达路径（3 处，执行诊断，必须具备完整宿主协作者）**：
+     1. `packages/pd-cli/src/commands/pain-record.ts:452`（`--wait` 或 `diagnostician_async_cli=false` 时同步执行；当前漏 `trajectoryTurnReader`、`sourceMaterialAuthorization`）
+     2. `packages/openclaw-plugin/src/hooks/pain.ts:57`（`diagnostician_async_hook=false` 时同步执行；当前已传进程内 `trajectoryTurnReader`，漏 `sourceMaterialAuthorization`、`telemetrySink`）
+     3. `packages/openclaw-plugin/src/commands/pain.ts:333`（未传 `asyncMode`，**恒为同步执行**；当前漏 `trajectoryTurnReader`、`sourceMaterialAuthorization`、`telemetrySink`）
+   - **纯异步落库路径（2 处，`asyncMode: true` 仅写 `tasks` 表，不构造 `SqliteContextAssembler`）**：
+     4. `packages/host-runtime/src/governance-signal-admission.ts:2589`（治理信号恢复入库）
+     5. `packages/principles-core/src/runtime/pain-submit-capability.ts:620`（MCP 提交入库，位于 `core` 内，不依赖 `host-runtime`）
+2. **后台与 CLI 诊断执行点**：
+   - 共享工厂：`packages/principles-core/src/runtime/pain-signal-runtime-factory.ts:808-835`（被 `diagnostician-auto-run.ts`、`codex` worker 2 处、`workbuddy` worker、`PainToPrincipleService` 同步路径调用）。
+   - 绕过工厂的手搓 CLI：`packages/pd-cli/src/commands/diagnose.ts:557-584`、`packages/pd-cli/src/commands/pain-retry.ts:695-725`（另有 2 个实验 runner：`synthetic-baseline-runner.ts`、`pain-flood-simulation-runner.ts`）。
+3. **内化单轮消费点**：
+   - 权威入口：`packages/host-runtime/src/internalization-consumer-cycle.ts:941-1068`。
+   - 重复手搓点：`packages/pd-cli/src/commands/runtime-internalization-run-once.ts:720-855`（6 分支手搓 Runner）；另有显式同步对抗算子 `packages/pd-cli/src/services/rulehost-pipeline-runner.ts:338-508`。
 
-### 3.2 本次源码核查确认的 4 个现存断线缺陷
+### 3.2 本次源码核查确认的 3 个现存断线缺陷（及 1 项已撤销误诊）
 
-以下 4 项均已在当前 `origin/main@5e3b8d53d` 代码上核实，不是历史报告转述：
-
-| ID | 位置 | 事实证据 | 实际影响 |
-|---|---|---|---|
-| **D1** | `pain-to-principle-service.ts:42-78, 276-290`；`pain-record.ts:452-473` | PRI-1283 R2 为 `createPainSignalBridge`、`SqliteContextAssembler` 与诊断三阶段 Runner 增加了 `sourceMaterialAuthorization` 门，未传时默认 `denyAllSourceMaterialAuthorization`（`sqlite-context-assembler.ts:143`）。但 `PainToPrincipleServiceOptions` **未声明该字段**，调用 `createPainSignalBridge` 时未传；同时 `pain-record.ts`（`--wait` 同步诊断路径）也未传 `trajectoryTurnReader` | 任何经 `PainToPrincipleService` 同步跑诊断的路径，都会把已获授权的 `governance_observation:` 证据与提升窗口按“未授权”过滤掉；`pd pain record --wait` 绑定的会话原文也读不到 |
-| **D2** | 写：`pain-ingress.ts:141`、`pain-record.ts:490`、`pain-signal-bridge.ts:484`；读：`sqlite-context-assembler.ts:663-684` | MCP 提交（`pain-submit-capability.ts:583-592`）同时写 `anchor` 与 `deviationAnchor`；但 `pain-ingress.ts` 与 `pain-record.ts` 只写 `deviationAnchor`，而 `SqliteContextAssembler.reconstructDiagnosticianRecord` **只读 `parsed.anchor`，完全不读 `parsed.deviationAnchor`** | 经 `pain-ingress` / `pain-record` 提交的 `deviationAnchor` 落进了 `diagnostic_json`，但在诊断上下文装配时丢失，Stage A 模型看不到 |
-| **D3** | `diagnose.ts:557-584`、`pain-retry.ts:695-725` vs `pain-signal-runtime-factory.ts:795-807` | `SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001` 在共享工厂里接入了 `resolveExecutionTiming`（向各阶段传入 `leaseTtlMs` 与 `heartbeatIntervalMs`），但 `diagnose.ts` 与 `pain-retry.ts` 手搓 Runner 时未传这两个参数 | 手动执行 `pd diagnose` 或 `pd pain retry` 时，子阶段退回默认租约窗口，长耗时诊断仍存在租约过期风险 |
-| **D4** | `pd-cli/src/commands/candidate.ts:394-524` | PRI-1267 已为 `handleCandidateInternalize` 补上 `enforceFullAdmissionForWrite`（准入未过会拒绝），但它**不检查候选是否已写入原则账本（Ledger Intake）** | 对 `pd diagnose --no-intake` 留下的未入账本候选执行 `pd candidate internalize`，会直接创建 `dreamer` 任务，跑完多轮 LLM 后在激活边界因账本无对应原则被拒 |
+| ID | 状态 | 位置 | 事实证据 | 实际影响 |
+|---|---|---|---|---|
+| **D1** | **已确认（P1）** | `pain-to-principle-service.ts:42-78, 276-290`；`pain-record.ts:452`；`openclaw-plugin/src/hooks/pain.ts:57`；`openclaw-plugin/src/commands/pain.ts:333` | `PainToPrincipleServiceOptions` 未声明 PRI-1283 R2 的 `sourceMaterialAuthorization`，调 `createPainSignalBridge` 时未传（默认回退 `denyAllSourceMaterialAuthorization`）；同时 `pain-record.ts`（`--wait`）与 `openclaw-plugin/src/commands/pain.ts`（恒同步）均未传 `trajectoryTurnReader` | 经 `PainToPrincipleService` 同步跑诊断的 3 条入口会把已获授权的 `governance_observation:` 证据按“未授权”过滤；`pain record --wait` 与 OpenClaw `/pd` 命令绑定的会话原文无法进入诊断 |
+| **D2** | **已确认（P2）** | 写：`pain-ingress.ts:141`、`pain-signal-bridge.ts:484`；读：`sqlite-context-assembler.ts:663-684` | MCP 提交（`pain-submit-capability.ts:583-592`）同时写 `anchor` 与 `deviationAnchor`；但 `evaluatePainIngress` 的 `buildLegacy`（`pain-ingress.ts:141`）在 `painType === 'principle_deviation'` 时只写 `deviationAnchor`，而 `reconstructDiagnosticianRecord` 只读 `parsed.anchor` | 经 `pain-ingress` 提交的原则偏离信号及历史仅含 `deviationAnchor` 的任务无法在 Stage A 恢复原则锚点 |
+| ~~**D3**~~ | **v0.3 已撤销（误诊）** | `execution-timing.ts:49-54`、`base-peer-runner.ts:133`、`split-diagnostician-runner.ts:244` | v0.2 误认为 `diagnose.ts` / `pain-retry.ts` 未显式传 `leaseTtlMs` 会退回无心跳状态；核实 `resolveExecutionTiming()` 默认即提供 `120_000ms` 租约与 `40_000ms` 心跳，子阶段与父任务均已自动启动 `LeaseHeartbeat` | 无现存心跳缺失故障；两个 CLI 的手搓 Runner 归入 Phase 2A 纯架构去重收编 |
+| **D4** | **已确认（P1）** | `pd-cli/src/commands/candidate.ts:394-524` | PRI-1267 已为 `handleCandidateInternalize` 补上准入检查，但它既未调用 `resolveCandidatePrincipleIdentity` 校验账本身份（对 `--no-intake` 留下的未入账本 `principle` 候选仍直接创建 `dreamer` 任务），也未接入同文件其他子命令已有的 `evaluateDreamerSeedSuppression`（对已复用 `principle_reuse` 或待 Owner 裁决候选仍会重复创建 `dreamer` 任务） | 未入账本 `principle` 候选空耗多轮 LLM 后在激活边界失败；已复用既有原则或待 Owner 裁决的候选通过该命令会被重复播种 |
 
 ### 3.3 已就位、无需重造的机制（防止过度设计）
 
-1. **元数据序列化已集中**：`pitask-metadata.ts:778-857` 的 `serializePITaskMetadata` 与 `mergePITaskMetadata` 已统一管理全部 28 个字段（其中 23 个可选），不存在多处手写 spread 漏拷字段的问题。
-2. **播种与 Scribe 身份盖章已就位**：`buildDreamerTaskSeed`（`intake-to-internalization-bridge.ts:271`）已固定写入 `correlationId: input.candidateId`；`ScribeRunner`（`scribe-runner.ts:695-744`）已实现 I2 链式盖章（账本瞬时不可读时 fail-soft 留空并打事件，由激活边界 `ledger-identity.ts` 按 `candidate_lineage` 兜底解析；`code_tool_hook` 渠道身份异常已 fail-closed 转 `needs_human_review`）。
-3. **父 run 的 `runtimeKind` 已修复**：`split-diagnostician-runner.ts:325` 的 `this.runtimeKind ?? 'openclaw'` 是模型执行适配器标识（如 `'pi-ai'`），且生产构造点均已显式传入 `runtimeKind`；不是 `GovernanceHostKind`。
-4. **规模与开关基线**：特性开关注册 55 个（`feature-flag-contract.ts`）；`internalization/` 非测试源码 94 个文件；建表定义 44 张唯一表；引用原则账本的非测试源码 77 个文件。
-5. **未测量的事实**：当前生产工作区近 30 天的真实漏斗转化率本次**未测**（9 月审计 `pd-pipeline-health-audit-v1.md` 的“121 工件 1 激活”不能代表现状），由 Phase 0 只读补测。
+1. **WAL 安全只读暂存快照已就位**：`pain-recall-read-model.ts:475-529` 的 `stageWalSnapshot` 已实现 `main + -wal` 双文件 T0/T1（`main → wal → main` 线性化点）SHA-256 指纹校验暂存拷贝，并有 `pain-recall-readonly.test.ts` 全套竞态注入测试保护，Phase 0 直接复用。
+2. **元数据序列化已集中**：`pitask-metadata.ts:778-857` 的 `serializePITaskMetadata` 与 `mergePITaskMetadata` 已统一管理全部 28 个字段（其中 23 个可选）。
+3. **账本身份单快照权威与播种抑制已就位**：`PrincipleTreeLedgerAdapter.resolveCandidatePrincipleIdentity`（`principle-tree-ledger-adapter.ts:145-190`）与 `evaluateDreamerSeedSuppression`（`candidate-seed-suppression.ts:39-77`）已在 `PainSignalBridge` 与 `diagnose.ts` 上线，D4 直接复用，绝不另写 `isAvailable() + listForCandidate()` 双读逻辑。
+4. **Scribe 身份预检与盖章已就位**：`ScribeRunner`（`scribe-runner.ts:232-278, 695-744`）对 `rule` 候选在生成前执行 `preflight_before_generation`（未绑定时停靠 `needs_human_review / awaiting_owner_binding`，0 次模型调用），对 `principle` 候选执行 I2 链式盖章与 `ledger-identity.ts` 激活边界校验。
+5. **规模与开关基线**：特性开关注册 55 个（`feature-flag-contract.ts`）；`internalization/` 非测试源码 94 个文件；建表定义 44 张唯一表；引用原则账本的非测试源码 77 个文件。
 
 ---
 
@@ -121,140 +136,118 @@ New external/network capability: NO
 
 | # | 原则 | 具体做法 |
 |---|---|---|
-| C1 | **探针先行，测真实边界** | 不维护脱离代码的字段登记表；用非默认探针值跑穿生产入口，在假模型收到的实际请求体与数据库落盘记录上断言 |
-| C2 | **补齐既有门面，不建第二门面** | 写入与同步诊断走 `PainToPrincipleService`；后台诊断走 `runPendingDiagnosticianOnce`；内化走 `runInternalizationConsumerCycle`（及从中抽出的单任务执行函数）；只在 `host-runtime` 增加一个全必填的宿主协作者打包函数 |
-| C3 | **单轨字段 + 单一入队闸门** | 锚点统一为 `anchor`（读侧兼容历史 `deviationAnchor`）；播种 `dreamer` 前强制满足“准入通过 **且** 原则账本条目已存在” |
-| C4 | **分批逆序可回退** | 每阶段独立成 PR、先红后绿；按逆序回退，不新增开关，不改 SQLite 表结构 |
+| C1 | **按真实包边界分层探针先行** | 不维护脱离代码的静态字段表，也不跨包反向引用测试；按 `host-runtime`、`pd-cli`、`openclaw-plugin` 三层真实生产入口注入非默认探针值，在假模型请求体与落盘记录上直接断言 |
+| C2 | **补齐既有门面，同步路径类型防漏** | 写入与同步诊断走 `PainToPrincipleService`（同步模式类型级要求授权与轨迹依赖）；后台周期走 `runPendingDiagnosticianOnce` 与 `runInternalizationConsumerCycle`；宿主协作者统一由 `resolveWorkspacePipelineHostDeps` 全必填打包 |
+| C3 | **复用单一身份与抑制权威** | 锚点统一为 `anchor`（读侧兼容历史 `deviationAnchor`）；`candidate internalize` 直接复用 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`，严格与 `PainSignalBridge` / `diagnose.ts` 播种语义对齐 |
+| C4 | **内化血缘有界回溯、隔离诊断子链** | `correlationId = candidateId` 严格限定为 `PeerRunnerKind` 内化任务不变量（不触碰 `DiagnosticianStageKind`），通过有界父链回溯校验父子一致性并兼容历史在途链 |
 
-### 4.2 宿主协作者单一打包入口（消除漏传）
+### 4.2 宿主协作者单一打包与同步入口类型约束（消除漏传）
 
-在 `@principles/host-runtime` 提供唯一协作者构造函数：
-
-```ts
-export interface WorkspacePipelineHostDeps {
-  readonly intentDocReader: IntentDocReader;
-  readonly trajectoryTurnReader: TrajectoryTurnReader;
-  readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
-  readonly telemetrySink: { emitTelemetry: (event: TelemetryEvent) => void };
-  readonly isAutoPainSubmissionAuthorized: () => boolean;
-}
-
-export function resolveWorkspacePipelineHostDeps(input: {
-  readonly workspaceDir: string;
-  readonly effectiveConfig: EffectivePdConfig;
-  /** OpenClaw 进程内已有 WorkspaceContext.trajectory 时传入；其余入口统一走 governance store reader */
-  readonly trajectoryTurnReaderOverride?: TrajectoryTurnReader;
-}): WorkspacePipelineHostDeps;
-```
-
-关键约束：
-1. **返回对象的 5 个属性全部必填（无 `?`）**，且内部保证 `trajectoryTurnReader` 与返回给调用方的 `sourceMaterialAuthorization` 共享同一授权判定逻辑。
-2. `PainToPrincipleServiceOptions` 补齐 `sourceMaterialAuthorization?: SourceMaterialAuthorizationPort` 并透传给 `createPainSignalBridge`（core 层保持纯端口类型，不反向依赖 `host-runtime`）。
-3. `hostKind` 保持按真实来源可选传入（`GovernanceHostKind | undefined`）：绑定了宿主会话时必填，无会话的手动 CLI 录入保持 `undefined`，绝不伪造。
-4. 若某个协作者在当前环境下无数据可读（如无 `INTENT.md`、无轨迹记录、授权已撤回），由该协作者实现按既有 `rc-9` 规则产生 `ambiguityNotes` 或结构化降级事件，而不是在入口传 `undefined`。
+1. 在 `@principles/host-runtime` 提供唯一协作者构造函数 `resolveWorkspacePipelineHostDeps`（返回对象的 `intentDocReader`、`trajectoryTurnReader`、`sourceMaterialAuthorization`、`telemetrySink`、`isAutoPainSubmissionAuthorized` **5 个属性全部必填、无 `?`**，且内部保证默认 `trajectoryTurnReader` 与返回给调用方的 `sourceMaterialAuthorization` 绑定同一授权实例）。
+2. **`PainToPrincipleServiceOptions` 区分同步与异步契约**：
+   - 当 `asyncMode: true` 时：仅持久化待诊断任务，`trajectoryTurnReader` 与 `sourceMaterialAuthorization` 可选；
+   - 当同步模式（`asyncMode?: false`）时：`sourceMaterialAuthorization` 与 `trajectoryTurnReader` 在生产构造接口上设为**必填**（单测辅助构造可显式传入 `denyAllSourceMaterialAuthorization` 或空读取器，禁止生产代码用 `undefined` 隐式滑落）。
+3. **OpenClaw 插件双入口收口**：`openclaw-plugin/src/hooks/pain.ts` 与 `openclaw-plugin/src/commands/pain.ts` 共用同一个插件内工厂函数 `createPluginPainToPrincipleService(wctx)`，内部统一调用 `resolveWorkspacePipelineHostDeps`（以 `wctx.trajectory` 作为 `trajectoryTurnReaderOverride`），消除两处配置不一致。
+4. `hostKind` 保持按真实来源可选传入（`GovernanceHostKind | undefined`）：无会话手动 CLI 录入合法状态即为 `undefined`，绝不伪造（`rc-9`）。
 
 ### 4.3 收编 3 个手搓 Runner 的 CLI 入口
 
-1. **`pd diagnose` 与 `pd pain retry`**：删除两个文件内手搓 `DiagRootCauseRunner / DiagDistillerRunner / DiagRouterRunner / SplitDiagnosticianRunner` 的重复装配块；给 core 的诊断工厂增加可选的 `runtimeAdapterOverride`（供 CLI `--runtime test-double` 与命令行覆盖参数使用），使 CLI 与后台 worker 100% 共用同一套阶段装配、同一套 `resolveExecutionTiming` 租约心跳与同一套 `sourceMaterialAuthorization`。
-2. **`pd runtime internalization run-once`**：从 `host-runtime/src/internalization-consumer-cycle.ts` 抽出单步已选任务执行函数 `executeSelectedInternalizationTask(...)`，供 `runInternalizationConsumerCycle` 与 `runtime-internalization-run-once.ts` 共用，删除 CLI 里 150 行 `if (runnerKind === ...)` 的重复 Runner 构造。
-3. **`rulehost-pipeline-runner.ts` 与实验 runner**：`synthetic-baseline-runner.ts`、`pain-flood-simulation-runner.ts`、`rulehost-pipeline-runner.ts` 明确归入 operator/lab 显式白名单；CI 守卫禁止在白名单之外新增任何 `new *Runner(`、`new SplitDiagnosticianRunner(`、`new PainSignalBridge(`。
+1. **`pd diagnose` 与 `pd pain retry`**：从 `pain-signal-runtime-factory.ts` 抽出**不进 `bridgeCache`** 的 `createDiagnosticianRunnerBundle`，明确资源所有权契约（外部传入 `stateManager` 时 `dispose()` 绝不重复关闭连接；内部自建时负责关闭），收编两个 CLI 中约 100 行手搓 `Diag*Runner + SplitDiagnosticianRunner` 代码，完整保留 `--no-intake`、`--runtime test-double` 与死信重放语义。
+2. **`pd runtime internalization run-once`**：从 `host-runtime/src/internalization-consumer-cycle.ts` 抽出 `executeSelectedInternalizationTask(...)`，收编 CLI 中 6 分支 Runner switch，并补齐 6 种 Runner（尤其 `ArtificerRunner` 的宿主工具目录、语义注册表、`trustedFacts`、`artificerEvidence`）的行为等价测试。
+3. **全仓构造点架构守卫**：在 `architecture-regression.test.ts` 同时守卫 `new *Runner(`、`new PainSignalBridge(` 与 **`new PainToPrincipleService(`** 的全部生产文件白名单；未列入白名单的新入口在 CI 直接失败。
 
-### 4.4 单轨字段与单一播种闸门
+### 4.4 单轨字段、权威身份播种门禁与内化父链血缘
 
 1. **`deviationAnchor` 收敛为 `anchor`（修 D2）**：
-   - 读侧（`SqliteContextAssembler.reconstructDiagnosticianRecord`）：当 `parsed.anchor` 缺失且 `parsed.deviationAnchor` 合法时，按 `established_principle` 锚点解析并附一条可观测兼容记录，保证存量任务不丢数据。
-   - 写侧（`pain-ingress.ts`、`pain-record.ts`）：统一同时产出标准 `anchor: { type: 'established_principle', ... }`；后续版本在确认无内部读者后再退役冗余顶层写键。
-2. **准入 + 账本入库 → 播种单一闸门（修 D4）**：
-   - `handleCandidateInternalize` 在准入通过后，若候选尚未写入原则账本（`listForCandidate(candidateId)` 为空），必须拒绝并给出明确 `nextAction: 'Run pd candidate intake <candidateId> --confirm first'`（或显式提供先 intake 再播种的组合流，不在未入账本状态下直接写 `dreamer` 任务）。
-3. **后继血缘不变量**：
-   - `IntakeToInternalizationBridge` 播种时已写 `correlationId = candidateId`；在 `InternalizationOrchestrator` 生成后继任务提议与 reopen 修订任务时，断言 `correlationId` 非空且与父任务一致，缺失即 fail-closed（`rc-6`），确保任意深度的内化任务都能 O(1) 反查回 `candidateId → taskId → sourcePainId`。
+   - 写侧（`pain-ingress.ts`、`pain-signal-bridge.ts`）：当存在合法 `deviationAnchor` 时，同步经 `deviationAnchorToPainAnchor` 产出规范 `anchor: { type: 'established_principle', ref: '<id>@<ver>' }`。
+   - 读侧（`SqliteContextAssembler.reconstructDiagnosticianRecord`）：当 `parsed.anchor` 缺失且存在 `deviationAnchor` 时兼容还原；格式非法时写入 `ambiguityNotes`（`rc-9`）。
+2. **`handleCandidateInternalize` 权威身份与抑制门禁（修 D4，采用严格拒绝策略）**：
+   - 门禁置于准入检查与 `decideInternalizationRoute` / 可生成 Dreamer seed 判定**之后**、`createTask` **之前**（`defer` / `implementation` 等本来不可内化的候选维持既有 `no_task_created` 返回，不被误报为账本缺失）。
+   - 单次快照调用 `identity = ledgerAdapter.resolveCandidatePrincipleIdentity(candidateId, candidate.recommendationKind ?? 'principle')`，并调用 `evaluateDreamerSeedSuppression({ identity, processing, pendingOwnerDecision })`：
+     - 若命中抑制（`reuse_resolved_to_existing_principle` / `reuse_park_pending_owner` / `owner_decision_pending`）：结构化 `refused` 并给出对应 `nextAction`，禁止重复创建 Dreamer 任务；
+     - 若 `identity.status === 'unresolved'`：
+       - `ledger_unavailable` / `ledger_corrupt` / `ambiguous` / `conflicting_authorities` / `binding_revoked` / `target_missing` / `target_ineligible` / `candidate_kind_invalid` → 一律 fail-closed `refused`；
+       - `reason === 'missing'` 且 `candidate.recommendationKind !== 'rule'`（例如 `--no-intake` 留下的 `principle` 候选）→ **严格拒绝**（不做隐式账本写入），返回 `reason: 'candidate_not_in_ledger'` 与真实可执行命令：`pd candidate intake --candidate-id <id> --workspace "<workspaceDir>"`；
+       - `reason === 'missing'` 且 `candidate.recommendationKind === 'rule'` → 与 `PainSignalBridge` / `diagnose.ts` 自动主干保持一致，允许创建 `dreamer` 任务，由下游 `ScribeRunner` 预检停靠 `awaiting_owner_binding` 等待 Owner 绑定。
+3. **内化链 `correlationId` 父子一致性与历史恢复（Phase 3）**：
+   - **作用域隔离**：严格限定在 `isPeerRunnerKind(taskKind)` 内化任务（`dreamer → philosopher → scribe → artificer → evaluator → rollout_reviewer` 及其修订/修复循环）；**`DiagnosticianStageKind`（`diag_rootcause → diag_distiller → diag_router`）保持既有 `parentTaskId + dependencyTaskIds` 机制，绝不套用 `correlationId` 门禁**。
+   - **有界父链回溯校验**：通过 `resolveAuthoritativeCorrelationId(piTask, getTask)` 沿 `parentTaskId` 有界向上回溯（上限 10 跳，带环检测）：
+     - 若链上任意父子节点的非空 `correlationId` 互相冲突（如父为 `cand-A`、子为 `cand-B`），立即返回 `conflict` 并 fail-closed 拒绝生成后继；
+     - 若历史在途链（含已走到 `philosopher` / `scribe` 的后代任务）全链未写 `correlationId`，但可沿 `parentTaskId` 唯一追溯到根 `dreamer` 任务并经 `candidateIdFromDreamerSeed` / `candidateIdFromDreamerTaskId` 恢复出 `candidateId`，则采纳该根身份并写入新后继任务；
+     - 无法唯一定位根身份或超出跳数上限时 fail-closed 拒绝（`rc-6`）。
 
-### 4.5 Canary Spine Test（探针值端到端一致性测试）
+### 4.5 分层 Canary Spine 与入口组合根测试架构（遵守单向包依赖）
 
-新增一套不依赖真实外网 LLM、但走真实 SQLite（临时工作区）+ 真实生产入口的端到端测试：
+为严格遵守 `pd-cli / openclaw-plugin → host-runtime → principles-core` 单向依赖并覆盖真实入口 wiring（EP-02），测试拆分为三层：
 
-1. **输入探针包（全为非默认特征值，绝不与默认值撞车）**：
-   - `reason`: `'CANARY_REASON_9f3a'`
-   - `correctionEvidence`: `{ text: 'CANARY_OWNER_CORRECTION_7b2c', classification: 'owner_statement', channel: 'cli_owner_statement' }`
-   - `anchor` / `--deviated-principle`: `'P_CANARY_ANCHOR_4d1e'`
-   - 授权轨迹库预置一条 `codex` 会话原文 `'CANARY_TURN_TEXT_8e5f'` 与一条 `governance_observation:codex|...` 证据引用，并授予 `codex` 采集授权
-   - 工作区预置 `INTENT.md`（含 `'CANARY_INTENT_2a6d'`）并开启 `intent_engineering`
-   - 非默认 `timeoutMs: 432_100`
-2. **两条路径全覆盖**：
-   - 路径 A（`prompt` 短链）：`PainToPrincipleService.recordPain` → 诊断三阶段（A/B/C）→ 准入与账本 Intake → `runInternalizationConsumerCycle`（Dreamer → Philosopher → Scribe → RolloutReviewer）→ 自动激活 → `prompt-injection-projection` 构造出的系统提示文本。
-   - 路径 B（`code_tool_hook` 全链）：同上进入 Artificer → Evaluator（含沙箱重放）→ RolloutReviewer → Approval → Shadow → Promote Live → `production-rulehost-gate` 拦截回执。
-3. **逐跳硬断言**：
-   - 在假模型服务收到的**每一次 LLM 请求消息全文**中，断言该阶段应见的探针字符串真实出现（例如 Stage A 请求体必须同时包含 `CANARY_TURN_TEXT_8e5f`、`CANARY_OWNER_CORRECTION_7b2c`、`P_CANARY_ANCHOR_4d1e`、`CANARY_INTENT_2a6d`；Scribe / Evaluator 请求体必须包含 formation context 投影出的诊断根因与来源）。
-   - 撤回 `codex` 授权后重跑同一装配，断言 `CANARY_TURN_TEXT_8e5f` **不再出现**且 `ambiguityNotes` 含 `consent_revoked`（同时锁死连通性与隐私撤回安全门）。
-   - 断言最终 `pi_artifacts.source_principle_id`、`activations.target_ref`、`principle_applications.principle_id` 三者与账本原则 UUID 完全一致。
-
-> 验证能力对照：在当前未修改的 `origin/main` 上，这套测试会在 D1（`PainToPrincipleService` 过滤掉授权证据）和 D2（CLI `deviationAnchor` 未进 Stage A 请求体）上**直接变红**，满足 AGENTS §0 第 3 条“先红回归测试”要求。
+1. **Layer A — `packages/host-runtime/tests/` 核心主干端到端探针（2 个独立文件）**：
+   - `pipeline-spine-prompt-canary.e2e.test.ts`（轻量常驻主干）：真实临时工作区 SQLite + `resolveWorkspacePipelineHostDeps` + 满足各阶段业务校验器与准入规则的录制型 Fake Runtime Adapter。注入非默认探针包（`CANARY_REASON_9f3a`、`CANARY_OWNER_CORRECTION_7b2c`、`evaluatePainIngress` 产出的 `principle_deviation` 锚点 `P_CANARY_ANCHOR_4d1e@1`、已授权 `codex` 会话原文 `CANARY_TURN_TEXT_8e5f`、`INTENT.md` 的 `CANARY_INTENT_2a6d`），跑穿 `PainToPrincipleService.recordPain`（同步）→ Stage A/B/C → 准入与账本 Intake → `runInternalizationConsumerCycle`（`prompt` 短链）→ 自动激活 → `prompt-injection-projection`；并含**撤回 `codex` 授权负向用例**（断言 `CANARY_TURN_TEXT_8e5f` 消失且 `ambiguityNotes` 含 `consent_revoked`）。
+   - `pipeline-spine-rulecode-canary.e2e.test.ts`（高风险渠道集成探针）：覆盖 `code_tool_hook` 全链（Owner 规则绑定 → Scribe → Artificer → Evaluator 沙箱重放 → RolloutReviewer → 审批 → Shadow/Live → `production-rulehost-gate` 拦截回执），断言 `pi_artifacts.source_principle_id`、`activations.target_ref`、`principle_applications.principle_id` 与账本原则 UUID 完全一致。
+2. **Layer B — `packages/pd-cli/tests/commands/` CLI 组合根与 D4 门禁测试**：
+   - 覆盖真实 CLI 处理器：`pain-record --wait`（证明接入 `trajectoryTurnReader` + `sourceMaterialAuthorization`）、`diagnose`、`pain-retry`、`candidate internalize`（证明未入账本 `principle` 候选被严格拒绝、已复用候选被抑制、未绑定 `rule` 候选不被误杀、`defer` 候选维持 `no_task_created`）。
+3. **Layer C — `packages/openclaw-plugin/tests/` 插件双入口协作者测试**：
+   - 同时覆盖 `src/hooks/pain.ts` 与 `src/commands/pain.ts` 两条入口，验证二者均注入同一工作区 `sourceMaterialAuthorization` 与 `WorkspaceContext.trajectory` 读取器。
 
 ---
 
-## 5. 核心跨跳契约核对表（已按源码核实）
+## 5. 核心跨跳契约核对表（`origin/main@e9ace1ac5`）
 
 | 跳点 | 关键数据 / 字段 | 权威载体 | 当前状态 |
 |---|---|---|---|
-| 入口 → 诊断任务 | `sourcePainId`、`provenance`、`hostKind`、`sessionIdHint`、`evidence[]`、`correctionEvidence`、`painIngress`、`recovery` | `tasks.diagnostic_json`（`buildDiagnosticJson`） | **已接通**（`PainToPrincipleService` 侧缺 `sourceMaterialAuthorization` 导致读取被拒，归 **D1**） |
-| 入口 → 诊断任务 | `anchor` vs `deviationAnchor` | `tasks.diagnostic_json` → `SqliteContextAssembler` | **断线（D2）**：CLI/ingress 只写 `deviationAnchor`，装配器只读 `anchor` |
-| 诊断执行租约 | `stageTimeoutMs`、`leaseTtlMs`、`heartbeatIntervalMs` | `pain-signal-runtime-factory.ts` → Runner | **部分断线（D3）**：共享工厂已接通；`diagnose.ts` / `pain-retry.ts` 手搓 Runner 漏接 |
-| 诊断 → 候选准入 | `recommendation_kind`、`confidence`、`trigger_pattern`、`action`、`admission_json` | `principle_candidates` | **已接通**（PRI-1267 已补齐 `candidate internalize` 准入门） |
-| 候选 → 账本 → 播种 | 账本原则条目 + `dreamer-<candidateId>-<channel>` + `correlationId` | `ledger.json` + `tasks.diagnostic_json` | **旁路缺口（D4）**：`candidate internalize` 未校验账本条目存在即可排任务 |
-| 内化链跨跳上下文 | `inputArtifactRefs`、`sourceTrace`、`lineage_artifact_ids` → `formationContext` | `pi_artifacts` + `formation-context.ts` | **已接通**（PRI-838/839/843 已覆盖 Scribe / Artificer / Evaluator / Owner 决策） |
-| 内化 → 激活身份 | `pi_artifacts.source_principle_id` → `activations.target_ref` → `principle_applications.principle_id` | `scribe-runner.ts`（I2）+ `ledger-identity.ts`（I3） | **已接通**（堵住 D4 后即可消除新孤儿链） |
-| 激活 → 有效性反馈 | 注入回执、RuleHost 拦截、干预证据、同类 Pain 复发 | `principle_applications`、`gate_blocks`、`intervention_evidence_records`、`pain_events` | **分散未聚合**（归 Phase 5 派生读模型） |
+| 入口 → 诊断任务 | `sourcePainId`、`provenance`、`hostKind`、`sessionIdHint`、`evidence[]`、`correctionEvidence`、`painIngress`、`recovery` | `tasks.diagnostic_json`（`buildDiagnosticJson`） | **同步路径断线（D1）**：`PainToPrincipleService` 缺 `sourceMaterialAuthorization`，`pain-record --wait` 与 OpenClaw `commands/pain.ts` 缺 `trajectoryTurnReader` + `sourceMaterialAuthorization` |
+| 入口 → 诊断上下文 | `anchor` vs `deviationAnchor` | `tasks.diagnostic_json` → `SqliteContextAssembler` | **断线（D2）**：`pain-ingress` 的 `principle_deviation` 仅写 `deviationAnchor`，装配器仅读 `anchor` |
+| 诊断执行租约与心跳 | `stageTimeoutMs`、`leaseTtlMs`、`heartbeatIntervalMs` | `resolveExecutionTiming` → `BasePeerRunner` / `SplitDiagnosticianRunner` | **已接通**（默认 120s TTL / 40s 心跳均已生效；CLI 重复 Runner 构造归 Phase 2A 去重） |
+| 诊断 → 候选准入 | `recommendation_kind`、`confidence`、`trigger_pattern`、`action`、`admission_json` | `principle_candidates` | **已接通**（PRI-1267 已补齐写入与申领侧准入门） |
+| 候选 → 账本/抑制 → 播种 | `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression` | `ledger.json` + `admission_json` + `tasks.diagnostic_json` | **旁路缺口（D4）**：`handleCandidateInternalize` 未接权威身份与复用抑制门 |
+| 内化链跨跳血缘 | `correlationId`（= `candidateId`）跨 `PeerRunnerKind` 传递 | `tasks.diagnostic_json`（`PITaskMetadata`） | **待收紧（Phase 3）**：播种已写，需补有界父链一致性校验与历史在途链恢复（隔离 `DiagnosticianStageKind`） |
+| 内化 → 激活身份 | `pi_artifacts.source_principle_id` → `activations.target_ref` → `principle_applications.principle_id` | `scribe-runner.ts`（预检 + I2）+ `ledger-identity.ts`（I3） | **已接通** |
+| 激活 → 有效性反馈 | 注入回执、RuleHost 拦截、干预证据、同锚点 Pain 复发 | `principle_applications`、`gate_blocks`、`intervention_evidence_records`、`pain_events` | **分散未聚合**（归 Phase 5 只读派生读模型） |
 
 ---
 
 ## 6. 实施阶段
 
-各阶段按顺序推进；每个阶段可拆为小型 PR。**回退规则**：按逆序回退（后一阶段依赖前一阶段引入的辅助函数或测试时，不可跳过后一阶段单独回退中间阶段）。
+各阶段按顺序推进；每个阶段独立成小型 PR，按逆序回退。
 
-### Phase 0 — 生产快照漏斗基线（只读，0 代码改动）
+### Phase 0 — 生产工作区 WAL 安全快照漏斗基线（零生产运行时改动）
 
-- **做什么**：将当前工作区的 `state.db` 与 `trajectory.db` 复制到 `.tmp/` 隔离目录，只读统计全量与近 30 天漏斗：`pain_events`（分自动/手动/宿主）→ 诊断任务（分状态）→ 候选（分准入结论）→ 账本条目 → 内化各阶段任务 → 审批/注意队列 → 激活（分渠道）→ 注入/拦截回执。
-- **硬边界**：严禁直接打开或修改 `<workspace>/.pd/` 与 `~/.pd/runtime/` 下的活体文件（AGENTS §1.1）。
-- **产出**：一份简明漏斗表写入 `docs/reports/`，用于确认后续阶段优先级（若 90% 流失仍在入口或审批积压，Phase 4/5 按实际瓶颈重排）。
+- **做什么**：新增只读开发分析脚本 `scripts/dev/pipeline-funnel-snapshot.mjs`，直接复用 `pain-recall-read-model.ts` 的 `stageWalSnapshot`（对 `state.db` 与 `trajectory.db` 及其活跃 `-wal` 执行 T0/T1 双端 SHA-256 指纹校验暂存拷贝到系统临时隔离目录；若检测到并发写入/checkpoint 竞争则拒绝失真快照并安全重试），在暂存副本上统计全量与近 30 天各阶段数量、转化率与失败/拒绝 `reasonCode` 分布。
+- **硬边界**：严禁直接打开 `<workspace>/.pd/`、`~/.pd/runtime/` 原位数据库，严禁在源目录产生 `-shm` 副作用（AGENTS §1.1）。
+- **产出**：漏斗基线报告落盘至 `docs/reports/`，指导后续瓶颈排序。
 
-### Phase 1A — Canary Spine Test 落地（先红）
+### Phase 1A — 分层探针与入口测试落地（先红）
 
-- **做什么**：按 §4.5 实现端到端探针测试套件（含授权开启与撤回双断言）。对当前已知断线（D1、D2）保留精确的先红证据记录。
-- **改动面**：仅测试与测试夹具，不改生产代码。
+- **做什么**：按 §4.5 建立 `host-runtime`（`prompt` + `code_tool_hook`）、`pd-cli`、`openclaw-plugin` 三层测试，在未改生产代码前精确复现 D1、D2、D4 红灯并留存终端摘要证据。
 
-### Phase 1B — 修复现存 4 处断线（D1–D4 转绿）
-
-- **做什么**：
-  1. **修 D1**：`PainToPrincipleServiceOptions` 增加 `sourceMaterialAuthorization` 并透传；补齐 `pain-record.ts` 的 `trajectoryTurnReader` 与 `sourceMaterialAuthorization`。
-  2. **修 D2**：`SqliteContextAssembler` 兼容读取历史 `deviationAnchor`，`pain-ingress.ts` / `pain-record.ts` 同步写入规范 `anchor`。
-  3. **修 D4**：`handleCandidateInternalize` 增加账本已入库前置检查（无账本条目时结构化 `refused` + `nextAction`）。
-  4. **修 D3（或与 Phase 2 合并）**：补齐 `diagnose.ts` / `pain-retry.ts` 的租约心跳配置。
-- **验收**：Phase 1A 探针测试全绿，且针对 D1–D4 各有一条独立回归单测（修前红、修后绿）。
-
-### Phase 2 — 协作者打包与手搓 Runner 收编
+### Phase 1B — 修复现存 3 处断线（D1 / D2 / D4 转绿）
 
 - **做什么**：
-  1. 在 `host-runtime` 落地 `resolveWorkspacePipelineHostDeps`，逐个迁移：`diagnostician-auto-run`、`codex` worker、`workbuddy` worker、`openclaw hooks/pain.ts`、`pain-record.ts`、`diagnose.ts`、`pain-retry.ts`。
-  2. 收编 `diagnose.ts`、`pain-retry.ts` 到 core 诊断工厂；从 `internalization-consumer-cycle.ts` 抽出单任务执行器收编 `runtime-internalization-run-once.ts`。
-  3. 在 `architecture-regression.test.ts` 增加构造点白名单守卫，禁止在共享工厂/白名单之外新增 `new *Runner(`、`new SplitDiagnosticianRunner(`、`new PainSignalBridge(`。
-- **拆分建议**：按包拆 3 个小 PR（① `host-runtime` 函数 + 内部调用点；② `pd-cli` 收编；③ 宿主 worker / plugin 迁移 + CI 守卫），每批保持 Phase 1A 全绿。
+  1. **修 D1**：`PainToPrincipleServiceOptions` 补齐 `sourceMaterialAuthorization` 并按同步/异步模式收紧类型；补齐 `pain-record.ts`、`openclaw-plugin/src/hooks/pain.ts`、`openclaw-plugin/src/commands/pain.ts` 的授权与轨迹读取器接线。
+  2. **修 D2**：`context-payload.ts` 增加 `deviationAnchorToPainAnchor`；`pain-ingress.ts` / `pain-signal-bridge.ts` 同步产出规范 `anchor`；`SqliteContextAssembler` 兼容读取历史 `deviationAnchor`（损坏值写入 `ambiguityNotes`）。
+  3. **修 D4**：`handleCandidateInternalize` 在可内化路由判定后接入 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`，严格拒绝未入账本 `principle` 候选（正确提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`）与已复用/待裁决候选，保留未绑定 `rule` 候选的合法播种。
+- **验收**：Phase 1A 三层测试与 CLI 契约测试（`cli-1..cli-7`）全部由红转绿。
 
-### Phase 3 — 后继血缘不变量收紧
+### Phase 2 — 协作者打包、CLI 手搓 Runner 收编与构造点守卫
 
-- **做什么**：在 `InternalizationOrchestrator` 的后继任务生成与修订重开路径上，强制校验 `correlationId` 非空且与上游任务一致（`rc-6` fail-closed）；对历史无 `correlationId` 的存量在途任务保留从 `dreamer-<candidateId>-<channel>` 解析一次并前向写实的兼容出口。
-- **验收**：伪造缺失/不一致 `correlationId` 的负向测试必拒；`MVP_CORE_LOOP_CONTRACT` INV-02 / INV-07 / INV-08 既有测试全部保持通过。
+- **Phase 2A（协作者收口 + 诊断 CLI 收编）**：
+  - 落地 `resolveWorkspacePipelineHostDeps`，迁移全部同步 `PainToPrincipleService` 入口与 3 个宿主诊断 worker（共 8 处调用点）；
+  - 落地无缓存 `createDiagnosticianRunnerBundle`（严格校验外部 `stateManager` 不重复关闭、自建资源必释放），收编 `diagnose.ts` 与 `pain-retry.ts`。
+- **Phase 2B（内化单步执行收编 + 全仓构造点守卫）**：
+  - 抽出 `executeSelectedInternalizationTask` 收编 `runtime-internalization-run-once.ts`，补齐 6 种 Peer Runner（含 Artificer 预检与宿主工具语义）等价性测试；
+  - 在 `architecture-regression.test.ts` 落地 `new *Runner(`、`new PainSignalBridge(`、`new PainToPrincipleService(` 生产白名单守卫。
 
-### Phase 4 — 开关退役与阶段合并评估（须 Owner 逐项拍板）
+### Phase 3 — 内化链 `correlationId` 有界父链校验与历史恢复
 
-- **前置条件**：Phase 0–3 完成（`antipattern-prep-next-phase`）。
-- **4a 退役已无分支价值的开关**：盘点 55 个开关中“旧实现已从代码树删除”（例如 `pain-signal-runtime-factory.ts:776` 注释已写明单体 `DiagnosticianRunner` 已不存在的 `diagnostician_split_pipeline`）或生产恒开且无回退目标的开关，列清单由 Owner 确认后逐个清理死分支。
-- **4b 评估减少 LLM 跳数**：候选仅限“诊断 Stage B+C（distiller + router）”与“`prompt` 渠道 Dreamer + Philosopher”。必须按 `docs/process/PD-LAB-USAGE.md`（AGENTS §25A）跑离线基准对比，证明原则/规则质量与准入精确率不退化后才可合并；无数据不合并。
+- **做什么**：在 `InternalizationOrchestrator` 的 `PeerRunnerKind` 后继提议、提交、Evaluator 修复任务与 `reopenTaskForRevision` 路径接入 `resolveAuthoritativeCorrelationId(piTask, getTask)`，隔离 `DiagnosticianStageKind` 子任务，跑通全部 7 类正负向与历史兼容场景测试。
 
-### Phase 5 — 原则有效性派生读模型
+### Phase 4 — 开关退役与阶段合并评估（远期门控，须 Owner 逐项拍板）
 
-- **做什么**：按账本 `principleId` 聚合现有 `principle_applications`、`gate_blocks`、`intervention_evidence_records`、`pain_events` 与 adaptive linkage，输出派生视图：注入/评估次数、有证据的遵循/偏离计数、激活后同锚点 Pain 复发计数。
-- **硬约束**：严格遵守 [`docs/concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md`](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)——不新建写入表（P4），不把“任务成功”推断为“遵循原则”，证据不足一律标记 `insufficient_evidence`。
-- **前置门**：若将其暴露到 Console 主视图（MVP-Core 范围变更），开工前须经 Owner 确认并按私有文档情绪价值指南补齐设计（AGENTS §4、§5、§26）。
+- **前置条件**：Phase 0 漏斗基线与 Phase 1–3 全部完成（`antipattern-prep-next-phase`）。
+- **内容**：4a 清理经 Owner 确认的纯死开关分支；4b 若漏斗证明中段跳数是真实瓶颈，按 `docs/process/PD-LAB-USAGE.md`（AGENTS §25A）完成离线对照实验后方可合并阶段。
+
+### Phase 5 — 原则有效性只读派生读模型（远期门控，独立评审）
+
+- **内容**：聚合 `principle_applications`、`gate_blocks`、`intervention_evidence_records`、`pain_events` 输出只读有效性视图；严格遵守相对评价规范，证据不足一律标 `insufficient_evidence`；若进入 Console 主界面须先经 Owner 批准 MVP-Core 范围。
 
 ---
 
@@ -262,10 +255,10 @@ export function resolveWorkspacePipelineHostDeps(input: {
 
 | ID | 回答 |
 |---|---|
-| `mvp-q-1-what-if-skip` | D1–D4 继续在生产存在（同步诊断静默丢授权证据、CLI 锚点进不了模型、未入账本候选空跑 LLM）；每次加新字段或新入口继续靠人工审计抓漏 |
-| `mvp-q-2-how-observed` | Phase 0：漏斗报告；Phase 1A/1B：CI 探针测试由红转绿 + CLI 结构化拒绝原因；Phase 2：构造点数量净降与架构守卫；Phase 5：CLI/Console 按原则展示有效性证据 |
-| `mvp-q-3-how-disabled` | 零新增开关；所有改动不碰数据库表结构，按 PR 逆序可安全 revert |
-| `mvp-q-4-emotional-value` | Phase 0–4：`N/A — no direct Owner-facing behavior.` Phase 5：消除 Owner“激活了原则却不知道它到底有没有改变 Agent 行为”的盲飞焦虑（实现前按 `$PD_PRIVATE_DOCS_DIR/product/emotional-value.md` 核对） |
+| `mvp-q-1-what-if-skip` | D1、D2、D4 三处已核实断线继续在生产路径静默生效（3 个同步入口过滤授权证据、`principle_deviation` 锚点丢失、`candidate internalize` 允许无账本/已复用候选空跑 LLM）；新增协作者或入口时仍靠人工审计防漏 |
+| `mvp-q-2-how-observed` | Phase 0：WAL 一致性漏斗报告；Phase 1：三层探针测试由红转绿 + CLI 结构化拒绝输出；Phase 2：重复 Runner 代码净删除与架构回归守卫；Phase 5：按原则查询有效性证据 |
+| `mvp-q-3-how-disabled` | 零新增开关；不改数据库表结构，按 PR 逆序可安全 revert |
+| `mvp-q-4-emotional-value` | Phase 0–4：`N/A — no direct Owner-facing behavior.` Phase 5：立项前按 `$PD_PRIVATE_DOCS_DIR/product/emotional-value.md` 单独核对 |
 
 ---
 
@@ -273,51 +266,52 @@ export function resolveWorkspacePipelineHostDeps(input: {
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
-| 收编 `diagnose.ts` / `pain-retry.ts` 改变 CLI 输出细节或退出码 | 违反 §10 CLI 契约 | 保留 CLI 外层输出整形与重试循环，只替换内部 Runner 组装；跑全量 CLI 契约测试（`cli-1..cli-7`） |
-| 与在途分支冲突（Service Host Phase 5 cutover、Feedback Resilience PRI-1273/1275/1276） | 合并冲突 | 不修改 `pd-cli/src/services/service-host/**` 与 `pd-mcp-server/src/submit-assembly.ts`；开工前执行 `git worktree list` 与 `npm run error:context`（AGENTS §0） |
-| 探针测试耦合提示词措辞导致脆弱 | 改提示模板就误报 | 只断言**输入探针字面量**出现在请求体中，不断言提示词固定装饰文案 |
+| 收编 `diagnose.ts` / `pain-retry.ts` 误关外部传入的 `stateManager` 或改变 CLI 退出码 | 连接提前关闭 / 违反 §10 CLI 契约 | `createDiagnosticianRunnerBundle` 用 `ownsStateManager` 布尔位严格区分资源所有权；保留 CLI 外层输出整形，跑全量 CLI 契约测试 |
+| D4 门禁误伤 `rule` 候选或 `defer` 候选 | 阻断合法规则内化或改变 CLI 非内化返回码 | 先跑路由判定过滤非内化候选；对 `rule` 候选的 `reason === 'missing'` 显式放行至 `ScribeRunner` 预检，单测逐类锁死 |
+| Phase 3 门禁误伤 `diag_*` 子任务或历史在途链 | 诊断链中断或存量任务卡死 | 严格限定 `isPeerRunnerKind` 分支，并用有界父链回溯从根 `dreamer` 恢复历史链 |
+| 与在途分支冲突（`PRI-1278` Service Host、`PRI-1272` Feedback Resilience） | 合并冲突 | 不触碰 `pd-cli/src/services/service-host/**` 与 `pd-mcp-server/src/submit-assembly.ts` |
 
 ---
 
-## 9. 需要 Owner 拍板的事项
+## 9. Owner 决策记录与待确认项
 
-1. **是否批准按 v0.2 启动 Phase 0 + Phase 1A + Phase 1B**（测量漏斗 + 探针测试 + 修掉已确认的 D1–D4 断线）。
-2. **`pd candidate internalize` 对未入账本候选的策略（D4）**：倾向 **方案 A（严格拒绝，提示先执行 `pd candidate intake`）** 还是 **方案 B（在 `internalize` 内自动先完成账本 intake 再排 `dreamer`）**？推荐方案 A（职责单一，符合 `cli-5`）。
-3. **Phase 4 与 Phase 5 是否保留在本 SPEC 作远期路线**，还是只把 Phase 0–3 作为本 SPEC 的交付闭环、Phase 4/5 等漏斗数据出来后另立工单。
+1. **D4 处置策略（已采用严格拒绝）**：`pd candidate internalize` 对未完成账本入库的 `principle` 候选执行**严格拒绝**并提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`，绝不在 `internalize` 命令内隐式执行正式账本写入。
+2. **启动确认**：批准 v0.3 后，并行启动 **Phase 0（`PRI-1290`）** 与 **Phase 1A/1B（`PRI-1291`）**；Phase 4（`PRI-1294`）与 Phase 5（`PRI-1295`）保持 `Backlog` 条件门控，未经漏斗数据与 Owner 单独批准不启动。
 
 ---
 
-## 附录 A：可复跑实测命令
-
-以下命令在仓库根目录执行，均使用显式引号参数，不依赖未加引号的 Shell 变量展开：
+## 附录 A：可复跑实测命令（`origin/main@e9ace1ac5`）
 
 ```bash
-# 1. PainSignalBridge 生产构造点
+# 1. PainToPrincipleService 全仓 5 处生产构造点
+rg -n "new PainToPrincipleService\(" packages \
+  -g "*.ts" -g "!*.test.ts" -g "!**/dist/**" -g "!**/tests/**" -g "!**/__tests__/**"
+
+# 2. PainSignalBridge 生产构造点
 rg -n "new PainSignalBridge\(|await createPainSignalBridge\(" packages \
   -g "*.ts" -g "!*.test.ts" -g "!**/dist/**" -g "!**/tests/**" -g "!**/__tests__/**"
 
-# 2. 诊断阶段 Runner 生产构造点（可见共享工厂 1 处 + CLI 手搓 2 处 + lab 2 处）
+# 3. 诊断阶段 Runner 生产构造点（共享工厂 1 处 + CLI 手搓 2 处 + lab 2 处）
 rg -n "new (SplitDiagnostician|DiagRootCause|DiagDistiller|DiagRouter)Runner\(" packages \
   -g "*.ts" -g "!*.test.ts" -g "!**/dist/**" -g "!**/tests/**" -g "!**/__tests__/**"
 
-# 3. 内化阶段 Runner 生产构造点（可见 3 个文件）
+# 4. 内化阶段 Runner 生产构造点（3 个文件）
 rg -l "new (Dreamer|Philosopher|Scribe|Artificer|Evaluator|RolloutReviewer)Runner\(" packages \
   -g "*.ts" -g "!*.test.ts" -g "!**/dist/**" -g "!**/tests/**" -g "!**/__tests__/**"
 
-# 4. D1 核验：PainToPrincipleService 是否声明或透传 sourceMaterialAuthorization
+# 5. D1 核验：PainToPrincipleService 与 OpenClaw commands/pain.ts 缺失授权/轨迹注入
 rg -n "sourceMaterialAuthorization" packages/principles-core/src/runtime/pain-to-principle-service.ts || echo "MISSING"
+rg -n "trajectoryTurnReader|sourceMaterialAuthorization" packages/openclaw-plugin/src/commands/pain.ts || echo "MISSING"
 
-# 5. D2 核验：deviationAnchor 的非测试读写点（对比 sqlite-context-assembler.ts 无命中）
+# 6. D2 核验：deviationAnchor 的非测试读写点（对比 sqlite-context-assembler.ts 无命中）
 rg -n "deviationAnchor" packages \
   -g "*.ts" -g "!*.test.ts" -g "!**/dist/**" -g "!**/tests/**" -g "!**/__tests__/**"
 
-# 6. PITaskMetadata 字段总数与可选字段数（28 / 23）
+# 7. PITaskMetadata 字段总数与可选字段数（28 / 23）及特性开关注册数（55）
 sed -n '/^export interface PITaskMetadata/,/^}/p' \
   packages/principles-core/src/runtime/internalization/pitask-metadata.ts | rg -c "^  \w+\??:"
 sed -n '/^export interface PITaskMetadata/,/^}/p' \
   packages/principles-core/src/runtime/internalization/pitask-metadata.ts | rg -c "^  \w+\?:"
-
-# 7. 特性开关注册数（55）
 rg -c "^\s*id: '" packages/principles-core/src/runtime/feature-flags/feature-flag-contract.ts
 ```
 
@@ -327,7 +321,7 @@ rg -c "^\s*id: '" packages/principles-core/src/runtime/feature-flags/feature-fla
 |---|---|
 | 存储访问端口、空结果与错误的区分 | `docs/plans/2026-11-10-architecture-complexity-remediation-plan.md` |
 | 配置字段覆盖校验、Console `validators.ts` 生成化 | 同上 + `docs/reports/PD_MAINTENANCE_GOALS_20261110.md` |
-| 租约续期、阶段预算与父任务心跳 | `docs/specs/SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001-v1.0.md` |
+| 租约续期、阶段预算与父任务心跳默认契约 | `docs/specs/SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001-v1.0.md` |
 | 后台触发所有权与 OS Scheduler | `docs/specs/SPEC-PD-SERVICE-HOST-001.md` |
 | 提交身份预绑定、回执兜底与授权撤回清理 | `docs/specs/SPEC-PD-FEEDBACK-RESILIENCE-001.md` |
-| **协作者防漏装配、手搓入口收编、跨跳探针测试与现存 D1–D4 止血** | **本 SPEC（v0.2）** |
+| **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.3）** |
