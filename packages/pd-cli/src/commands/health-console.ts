@@ -13,6 +13,10 @@
  *  - not_installed          — no install manifest/runtime for this home (neutral)
  *  - installed_running      — a healthy console answered /api/health in the
  *                             default port window (neutral-healthy)
+ *  - stale_running          — a console process answers /api/health but its
+ *                             on-disk deployment is gone/broken (entry file
+ *                             removed or web bundle missing): it can only
+ *                             serve 404s. Defect — `pd console open` evicts it.
  *  - installed_not_running  — installed and intact, nobody started it (the
  *                             NORMAL on-demand state; neutral)
  *  - broken                 — entry/web bundle missing or a runtime-dependency
@@ -32,6 +36,7 @@ import {
 } from '@principles/install-layout';
 import {
   buildConsoleUrl,
+  classifyStaleConsoleInstance,
   DEFAULT_PORT,
   isPortInUse,
   PORT_FALLBACK_LIMIT,
@@ -40,7 +45,7 @@ import {
 import { checkConsoleRuntimeDependencies } from './console.js';
 
 export interface ConsoleHealthSection {
-  status: 'installed_running' | 'installed_not_running' | 'not_installed' | 'broken';
+  status: 'installed_running' | 'installed_not_running' | 'not_installed' | 'broken' | 'stale_running';
   dir: string | null;
   entry: string | null;
   webIndex: string | null;
@@ -139,6 +144,16 @@ export async function assessConsole(
     if (!(await isPortInUse(CONSOLE_SCAN_HOST, port))) continue;
     const health = await probeConsoleHealth({ host: CONSOLE_SCAN_HOST, port, timeoutMs: CONSOLE_PROBE_TIMEOUT_MS });
     if (health.healthy) {
+      const stale = classifyStaleConsoleInstance(health.instance);
+      if (stale !== null) {
+        return {
+          ...base,
+          status: 'stale_running',
+          running: { url: buildConsoleUrl(CONSOLE_SCAN_HOST, port), port },
+          reason: `stale console process pid ${stale.pid} (${stale.kind}) still holds the port but cannot serve the UI`,
+          nextAction: `Run \`pd console open --port ${port}\` — it terminates the stale process on that port and starts a healthy console.`,
+        };
+      }
       return { ...base, status: 'installed_running', running: { url: buildConsoleUrl(CONSOLE_SCAN_HOST, port), port } };
     }
     // Occupied by something that is not a healthy console — keep scanning.

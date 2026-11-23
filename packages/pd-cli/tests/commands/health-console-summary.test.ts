@@ -63,7 +63,11 @@ function withHome<T>(fn: (home: string) => Promise<T> | T): Promise<T> {
 
 const globalWithMocks = globalThis as typeof globalThis & {
   __mockIsPortInUse?: (host: string, port: number) => boolean;
-  __mockProbeConsoleHealth?: (opts: { host: string; port: number }) => { healthy: boolean; reason?: string };
+  __mockProbeConsoleHealth?: (opts: { host: string; port: number }) => {
+    healthy: boolean;
+    reason?: string;
+    instance?: { pid: number | null; serverEntry: string | null; webIndexExists: boolean | null };
+  };
 };
 
 afterEach(() => {
@@ -139,6 +143,43 @@ describe('assessConsole — install facts', () => {
       expect(section.running.port).toBe(3102);
     });
   });
+
+  it('reports stale_running when the answering console proves its deployment is gone', async () => {
+    await withHome(async (home) => {
+      makeInstalledConsoleHome(home);
+      globalWithMocks.__mockIsPortInUse = (host, port) => port === 3100;
+      globalWithMocks.__mockProbeConsoleHealth = () => ({
+        healthy: true,
+        instance: {
+          pid: 424242,
+          serverEntry: path.join(home, 'deleted-fixture', 'pd-console', 'dist', 'server.js'),
+          webIndexExists: null,
+        },
+      });
+      const section = await assessConsole(home);
+      expect(section.status).toBe('stale_running');
+      expect(section.running.port).toBe(3100);
+      expect(section.reason).toContain('424242');
+      expect(section.nextAction).toContain('pd console open --port 3100');
+    });
+  });
+
+  it('still reports installed_running for a healthy console whose deployment is intact', async () => {
+    await withHome(async (home) => {
+      const { consoleDir } = makeInstalledConsoleHome(home);
+      globalWithMocks.__mockIsPortInUse = (host, port) => port === 3100;
+      globalWithMocks.__mockProbeConsoleHealth = () => ({
+        healthy: true,
+        instance: {
+          pid: 424242,
+          serverEntry: path.join(consoleDir, 'dist', 'server.js'),
+          webIndexExists: true,
+        },
+      });
+      const section = await assessConsole(home);
+      expect(section.status).toBe('installed_running');
+    });
+  });
 });
 
 // ─── buildHealthSummary — pure derivation, DISAGREEING combinations ──────────
@@ -208,6 +249,21 @@ describe('buildHealthSummary — each clause from its own witness (ERR-182)', ()
     expect(summary.skills.status).toBe('ok');
     expect(summary.hostLoaded.status).toBe('ok');
     expect(summary.restart.status).toBe('ok');
+  });
+
+  it('DISAGREEING: mcp HEALTHY but console stale_running — only the console clause errors', () => {
+    const summary = buildHealthSummary(report({
+      console: consoleSection({
+        status: 'stale_running',
+        running: { url: 'http://127.0.0.1:3100', port: 3100 },
+        reason: 'stale console process pid 42',
+        nextAction: 'pd console open',
+      }),
+    }));
+    expect(summary.console.status).toBe('error');
+    expect(summary.console.detail).toContain('stale');
+    expect(summary.mcp.status).toBe('ok');
+    expect(summary.overall).toBe('error');
   });
 
   it('DISAGREEING: mcp HEALTHY but console broken — only the console clause errors', () => {

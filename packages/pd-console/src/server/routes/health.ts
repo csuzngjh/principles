@@ -131,7 +131,7 @@ export async function handleIngestionHealthRoute(
 export async function handleHealthRoute(
   req: IncomingMessage,
   res: ServerResponse,
-  options: { workspaceDir: string; authenticationMode: 'authenticated' | 'no_auth' },
+  options: { workspaceDir: string; authenticationMode: 'authenticated' | 'no_auth'; webIndexExists: boolean },
 ): Promise<void> {
   if (req.method !== 'GET') {
     sendError(res, 405, 'method_not_allowed', 'Only GET method is allowed');
@@ -179,6 +179,18 @@ export async function handleHealthRoute(
       // machine-local, never logged here, and absent entirely for consoles
       // launched without it (normal user launches), keeping the legacy shape.
       ...(VERIFY_NONCE !== null ? { verifyNonce: VERIFY_NONCE } : {}),
+      // Instance identity for launcher-side stale-process detection: a
+      // leftover console whose files were deleted underneath it (test
+      // fixture cleanup, interrupted update) still answers /api/health from
+      // memory but can only 404 the UI. Reporting pid + entry path + whether
+      // the web bundle still exists lets `pd console open` prove the
+      // responder is a PD console that can never serve, and replace it
+      // instead of reusing it forever.
+      instance: {
+        pid: process.pid,
+        serverEntry: typeof process.argv[1] === 'string' ? process.argv[1] : null,
+        webIndexExists: options.webIndexExists,
+      },
     });
   } catch (error) {
     // A SYSTEM-health failure (checkSystemHealth threw) is a different fact
