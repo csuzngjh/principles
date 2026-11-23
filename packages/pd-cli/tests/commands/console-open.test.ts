@@ -31,6 +31,7 @@ import {
   planConsoleLaunch,
   probeConsoleHealth,
   classifyStaleConsoleInstance,
+  commandLineMatchesServerEntry,
   openBrowser,
 } from '../../src/services/console-launcher.js';
 
@@ -1263,6 +1264,17 @@ describe('classifyStaleConsoleInstance', () => {
     }
   });
 
+  it('refuses a non-local entry path — a responder must not make us touch a UNC/network share (CWE-73)', () => {
+    for (const unc of [
+      '\\\\evil-host\\share\\pd-console\\dist\\server.js',
+      '//evil-host/share/pd-console/dist/server.js',
+      'file:///x/pd-console/dist/server.js',
+      'relative/pd-console/dist/server.js',
+    ]) {
+      expect(classifyStaleConsoleInstance({ pid: 424242, serverEntry: unc, webIndexExists: false })).toBeNull();
+    }
+  });
+
   it('does not trust an entry path that does not look like a pd-console server', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-stale-foreign-'));
     try {
@@ -1291,6 +1303,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
   afterEach(() => {
     delete (globalThis as any).__mockIsPortInUse;
     delete (globalThis as any).__mockGetProcessCommandLine;
+    delete (globalThis as any).__mockGetListenPortOwnerPids;
     vi.restoreAllMocks();
   });
 
@@ -1321,8 +1334,10 @@ describe('planConsoleLaunch — stale console eviction', () => {
     });
     let killed = false;
     (globalThis as any).__mockIsPortInUse = async () => !killed;
-    // Live cmdline proves pid 424242 runs the reported (deleted) entry.
+    // Live cmdline proves pid 424242 runs the reported (deleted) entry, and
+    // the OS confirms the same pid owns the listen socket on the port.
     (globalThis as any).__mockGetProcessCommandLine = async () => `node ${missingEntry} --port ${port}`;
+    (globalThis as any).__mockGetListenPortOwnerPids = async () => [424242];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { killed = true; return true; });
     try {
       const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
@@ -1348,6 +1363,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
     let killed = false;
     (globalThis as any).__mockIsPortInUse = async () => !killed;
     (globalThis as any).__mockGetProcessCommandLine = async () => `node "${entry}" --workspace /w`;
+    (globalThis as any).__mockGetListenPortOwnerPids = async () => [424243];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { killed = true; return true; });
     try {
       const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
@@ -1387,6 +1403,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
     });
     (globalThis as any).__mockIsPortInUse = async () => true;
     (globalThis as any).__mockGetProcessCommandLine = async () => `node ${missingEntry} --port ${port}`;
+    (globalThis as any).__mockGetListenPortOwnerPids = async () => [424242];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     try {
       const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
@@ -1413,6 +1430,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
     // The responder names pid 424242, but that pid actually runs an
     // unrelated binary — self-reported instance JSON is not proof.
     (globalThis as any).__mockGetProcessCommandLine = async () => 'C:\\Tools\\unrelated.exe --serve';
+    (globalThis as any).__mockGetListenPortOwnerPids = async () => [424242];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     try {
       const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
@@ -1431,6 +1449,27 @@ describe('planConsoleLaunch — stale console eviction', () => {
     });
     (globalThis as any).__mockIsPortInUse = async () => true;
     (globalThis as any).__mockGetProcessCommandLine = async () => null;
+    (globalThis as any).__mockGetListenPortOwnerPids = async () => [424242];
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
+      expect(result.status).toBe('failed');
+      expect(killSpy).not.toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('never signals a pid that does not own the listen socket — a responder cannot donate a victim pid', async () => {
+    const missingEntry = path.join(os.tmpdir(), 'pd-stale-e2e-nonexistent', 'console', 'dist', 'server.js');
+    const { server, port } = await serveStaleHealthyConsole({
+      pid: 424242, serverEntry: missingEntry, webIndexExists: null,
+    });
+    (globalThis as any).__mockIsPortInUse = async () => true;
+    // The crafted responder's cmdline claim even matches — but the OS says a
+    // different pid owns the socket, so pid 424242 is a victim, not the holder.
+    (globalThis as any).__mockGetProcessCommandLine = async () => `node ${missingEntry} --port ${port}`;
+    (globalThis as any).__mockGetListenPortOwnerPids = async () => [7777];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     try {
       const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
@@ -1461,5 +1500,34 @@ describe('probeConsoleHealth — instance block', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+// ─── commandLineMatchesServerEntry ───────────────────────────────────────────
+
+describe('commandLineMatchesServerEntry', () => {
+  const entry = '/checkout/packages/pd-console/dist/server.js';
+
+  it('matches an absolute entry argument verbatim', () => {
+    expect(commandLineMatchesServerEntry(`node ${entry} --port 3100`, entry)).toBe(true);
+  });
+
+  it('matches a quoted Windows path with backslashes', () => {
+    const winEntry = 'D:\\Users\\用户\\.pd\\runtime\\console\\dist\\server.js';
+    expect(commandLineMatchesServerEntry(`"D:\\Program Files\\node.exe" "${winEntry}" --port 3100`, winEntry)).toBe(true);
+  });
+
+  it('matches a relative dev entry reported absolutely (npm run dev keeps the relative argv)', () => {
+    const abs = '/checkout/packages/pd-console/src/server/index.ts';
+    expect(commandLineMatchesServerEntry('npm run dev -- node src/server/index.ts --port 3100', abs)).toBe(true);
+    expect(commandLineMatchesServerEntry('node ./src/server/index.ts', abs)).toBe(true);
+  });
+
+  it('refuses a bare basename token — filename alone is not proof', () => {
+    expect(commandLineMatchesServerEntry('node server.js --port 3100', entry)).toBe(false);
+  });
+
+  it('refuses a cmdline running an unrelated binary', () => {
+    expect(commandLineMatchesServerEntry('C:\\Tools\\unrelated.exe --serve', entry)).toBe(false);
   });
 });

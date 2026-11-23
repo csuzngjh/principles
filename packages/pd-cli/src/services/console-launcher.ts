@@ -399,7 +399,18 @@ export interface StaleConsoleVerdict {
  * layouts (…/console/dist/server.js) both match; a foreign local service
  * that happens to mimic the instance JSON shape does not.
  */
-const CONSOLE_SERVER_ENTRY_PATTERN = /pd-console[\\/]|[\\/]console[\\/]dist[\\/]server\.js$/i;
+const CONSOLE_SERVER_ENTRY_PATTERN = /(?:pd-console[\\/]|[\\/]console[\\/]dist[\\/]server\.js$)/i;
+
+/**
+ * The reported entry is a self-reported string from loopback JSON — before it
+ * is passed to fs calls it must be a local absolute path. A UNC or scheme
+ * path (`\\host\share`, `//host/share`, `file://…`) would let a local service
+ * trigger outbound SMB access and implicit network authentication on Windows
+ * (CWE-73); a relative path is unverifiable and equally refused.
+ */
+function isLocalAbsolutePath(p: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(p) || (p.startsWith('/') && !p.startsWith('//'));
+}
 
 export function classifyStaleConsoleInstance(
   instance: ConsoleInstanceInfo | undefined,
@@ -411,7 +422,7 @@ export function classifyStaleConsoleInstance(
   const entry = typeof instance.serverEntry === 'string' && instance.serverEntry.length > 0
     ? instance.serverEntry
     : null;
-  if (entry === null || !CONSOLE_SERVER_ENTRY_PATTERN.test(entry)) return null;
+  if (entry === null || !CONSOLE_SERVER_ENTRY_PATTERN.test(entry) || !isLocalAbsolutePath(entry)) return null;
   if (!fs.existsSync(entry)) {
     return { kind: 'orphaned_entry_removed', pid, serverEntry: entry };
   }
@@ -422,6 +433,26 @@ export function classifyStaleConsoleInstance(
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/**
+ * PowerShell 5.1 emits OEM-codepage output by default (cp936 on zh-CN hosts),
+ * which would mangle non-ASCII install paths before comparison. Follow the
+ * uninstaller's convention (create-principles-disciple/src/uninstaller.ts):
+ * pin the pipeline to UTF-8 and pass the script via -EncodedCommand
+ * (UTF-16LE base64) so embedded quotes survive argv handling.
+ */
+function runEncodedPowerShell(scriptBody: string): Promise<string | null> {
+  const script = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ${scriptBody}`;
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  return new Promise((resolve) => {
+    childProcess.execFile(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+      { timeout: 5000, encoding: 'utf8' },
+      (err, stdout) => resolve(err ? null : stdout),
+    );
+  });
+}
 
 /**
  * Read the live command line of a process we might evict. The `instance`
@@ -439,11 +470,22 @@ async function getProcessCommandLine(pid: number): Promise<string | null> {
     ) => Promise<string | null>;
     return mock(pid);
   }
-  const [cmd, args] = process.platform === 'win32'
-    ? ['powershell', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`]]
-    : ['ps', ['-p', String(pid), '-o', 'command=']];
+  if (process.platform === 'win32') {
+    const out = await runEncodedPowerShell(
+      `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+    );
+    if (out === null) return null;
+    const trimmed = out.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  // POSIX: `ps` replaces non-ASCII argv bytes with '?' under LC_ALL=C —
+  // pin a UTF-8 locale on Linux so non-ASCII install paths survive (macOS ps
+  // already passes argv bytes through).
+  const env = process.platform === 'linux'
+    ? { ...process.env, LC_ALL: 'C.UTF-8' }
+    : process.env;
   return new Promise((resolve) => {
-    childProcess.execFile(cmd, args, { timeout: 5000 }, (err, stdout) => {
+    childProcess.execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout: 5000, env }, (err, stdout) => {
       if (err) { resolve(null); return; }
       const out = stdout.trim();
       resolve(out.length > 0 ? out : null);
@@ -452,25 +494,85 @@ async function getProcessCommandLine(pid: number): Promise<string | null> {
 }
 
 /**
+ * Pids owning a LISTEN socket on `port`. Verification, not convenience: the
+ * reported pid must own the socket it answered on, otherwise a crafted
+ * responder could name any victim whose cmdline happens to match (CWE-863).
+ * null = the OS did not tell us (tool missing/failed) — refuse to kill.
+ */
+async function getListenPortOwnerPids(port: number): Promise<number[] | null> {
+  if (Object.hasOwn(globalThis, '__mockGetListenPortOwnerPids')) {
+    const mock = Reflect.get(globalThis, '__mockGetListenPortOwnerPids') as (
+      p: number
+    ) => Promise<number[] | null>;
+    return mock(port);
+  }
+  if (process.platform === 'win32') {
+    const out = await runEncodedPowerShell(
+      `(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue).OwningProcess`,
+    );
+    if (out === null) return null;
+    const pids = out.split(/\r?\n/).map((l) => Number(l.trim())).filter((n) => Number.isInteger(n) && n > 0);
+    return [...new Set(pids)];
+  }
+  const runQuery = (cmd: string, args: string[]): Promise<string | null> => new Promise((resolve) => {
+    childProcess.execFile(cmd, args, { timeout: 5000 }, (err, stdout) => resolve(err ? null : stdout));
+  });
+  const ssOut = await runQuery('ss', ['-ltnpH', `sport = :${port}`]);
+  if (ssOut !== null) {
+    const pids = [...ssOut.matchAll(/pid=(\d+)/g)].map((m) => Number(m[1]));
+    if (pids.length > 0) return [...new Set(pids)];
+    // ss ran but showed no owners — port free or owned by another user;
+    // fall through to lsof before deciding "unverifiable".
+  }
+  const lsofOut = await runQuery('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']);
+  if (lsofOut !== null) {
+    const pids = lsofOut.split(/\r?\n/).map((l) => Number(l.trim())).filter((n) => Number.isInteger(n) && n > 0);
+    return [...new Set(pids)];
+  }
+  return null;
+}
+
+/**
  * Does the live command line prove `pid` actually runs `serverEntry`?
  * Separators and case are normalized — a console may report a Windows path
- * while the OS stores either separator.
+ * while the OS stores either separator. `npm run dev`-style launches keep a
+ * RELATIVE script arg (`src/server/index.ts`) while health reports the
+ * absolute argv[1], so a path-bearing cmdline token also matches when it is a
+ * suffix path of the reported entry — never a bare basename.
  */
 export function commandLineMatchesServerEntry(commandLine: string, serverEntry: string): boolean {
   const norm = (s: string): string => s.replace(/\\/g, '/').toLowerCase();
-  return norm(commandLine).includes(norm(serverEntry));
+  const nse = norm(serverEntry);
+  const tokens: string[] = [];
+  for (const m of commandLine.matchAll(/"([^"]+)"|'([^']+)'/g)) tokens.push(m[1] ?? m[2] ?? '');
+  for (const t of commandLine.replace(/"[^"]*"|'[^']*'/g, ' ').split(/\s+/)) {
+    if (t.length > 0) tokens.push(t);
+  }
+  for (const raw of tokens) {
+    const tok = norm(raw).replace(/^\.\//, '');
+    if (!tok.includes('/')) continue;
+    if (nse === tok || nse.endsWith(`/${tok}`)) return true;
+  }
+  return false;
 }
 
 /**
  * Terminate a stale console process and wait for its port to free up.
- * Fails closed: no signal is sent unless the live command line proves the
- * pid runs the reported server entry — self-reported instance JSON alone is
- * never enough to kill on. Returns true only when the port accepts no
- * further connections.
+ * Fails closed: no signal is sent unless BOTH the live command line proves
+ * the pid runs the reported entry AND the pid owns the listen socket on the
+ * port it answered on — self-reported instance JSON alone is never enough to
+ * kill on. Returns true only when the port accepts no further connections.
  */
 async function evictStaleConsole(host: string, port: number, stale: StaleConsoleVerdict): Promise<boolean> {
-  const cmdline = await getProcessCommandLine(stale.pid);
+  if (!(await isPortInUse(host, port, 300))) return true;
+  const [cmdline, ownerPids] = await Promise.all([
+    getProcessCommandLine(stale.pid),
+    getListenPortOwnerPids(port),
+  ]);
   if (cmdline === null || !commandLineMatchesServerEntry(cmdline, stale.serverEntry)) {
+    return false;
+  }
+  if (ownerPids === null || !ownerPids.includes(stale.pid)) {
     return false;
   }
   const waitFree = async (budgetMs: number): Promise<boolean> => {

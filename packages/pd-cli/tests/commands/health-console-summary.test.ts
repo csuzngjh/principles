@@ -160,7 +160,7 @@ describe('assessConsole — install facts', () => {
       expect(section.status).toBe('stale_running');
       expect(section.running.port).toBe(3100);
       expect(section.reason).toContain('424242');
-      expect(section.nextAction).toContain('pd console open');
+      expect(section.nextAction).toContain('pd console open --port 3100');
     });
   });
 

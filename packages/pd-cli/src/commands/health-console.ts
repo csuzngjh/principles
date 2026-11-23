@@ -151,7 +151,7 @@ export async function assessConsole(
           status: 'stale_running',
           running: { url: buildConsoleUrl(CONSOLE_SCAN_HOST, port), port },
           reason: `stale console process pid ${stale.pid} (${stale.kind}) still holds the port but cannot serve the UI`,
-          nextAction: 'Run `pd console open` — it terminates the stale process and starts a healthy console.',
+          nextAction: `Run \`pd console open --port ${port}\` — it terminates the stale process on that port and starts a healthy console.`,
         };
       }
       return { ...base, status: 'installed_running', running: { url: buildConsoleUrl(CONSOLE_SCAN_HOST, port), port } };
