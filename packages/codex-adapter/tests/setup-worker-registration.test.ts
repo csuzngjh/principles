@@ -26,6 +26,12 @@ function fixture(extraEnv: Record<string, string> = {}) {
   fs.mkdirSync(layout, { recursive: true });
   fs.cpSync(path.join(repo, 'packages', 'install-layout', 'dist'), path.join(layout, 'dist'), { recursive: true });
   fs.copyFileSync(path.join(repo, 'packages', 'install-layout', 'package.json'), path.join(layout, 'package.json'));
+  // The canonical layout now imports better-sqlite3 (CAS arbitration, r5):
+  // the fabricated install must resolve its declared deps, exactly as the
+  // real `npm ci` install does, or the module import fails before any
+  // registration logic runs ('canonical_install_unavailable').
+  fs.mkdirSync(path.join(layout, 'node_modules'), { recursive: true });
+  fs.symlinkSync(path.join(repo, 'node_modules', 'better-sqlite3'), path.join(layout, 'node_modules', 'better-sqlite3'), 'junction');
   const manifest = path.join(home, '.pd', 'install.json');
   const previous = { layoutVersion: 1, mode: 'canonical', hosts: ['openclaw'], workspaces: [path.join(home, 'openclaw')], channel: 'stable', releaseMetadataUrl: 'https://example.test/releases' };
   fs.writeFileSync(manifest, JSON.stringify(previous));
