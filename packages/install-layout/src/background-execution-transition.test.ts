@@ -12,8 +12,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { fork } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 import {
   acquireBackgroundExecutionCasLock,
+  casGatePath,
   defaultCasFsOps,
   readWorkspaceBackgroundOwnership,
   transitionWorkspaceBackgroundExecution,
@@ -347,42 +351,27 @@ describe('cross-process lock', () => {
     expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
   });
 
-  it('stale reclaim RESTORES a lock that changed hands between read and rename (PRI-1282 P1-2)', () => {
-    const file = seedManifest('lock-reclaim-race');
+  it('a filesystem failure mid-reclaim is fail-closed, never a false acquire (PRI-1282 P1)', () => {
+    const file = seedManifest('lock-reclaim-io');
     const real = defaultCasFsOps();
     const holderA = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-A', workspaceDir: WS });
     expect(holderA.ok).toBe(true);
-    if (!holderA.ok) return;
-    const lockDir = `${file}.cas.lock`;
-    const ownerA = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8')) as Record<string, unknown>;
-    const ownerB = { ...ownerA, token: 'FOREIGN-B-TOKEN' };
-    let swapped = false;
     const fsOps = {
       ...real,
-      rename: (from: string, to: string) => {
-        const result = real.rename(from, to);
-        if (!swapped && result.ok && from === lockDir && to.includes('.stale-')) {
-          // Between the contender's owner read and the quarantine rename,
-          // the directory became a DIFFERENT lock — verification must catch
-          // the identity change and restore rather than delete it.
-          fs.writeFileSync(path.join(to, 'owner.json'), JSON.stringify(ownerB), 'utf8');
-          swapped = true;
-        }
-        return result;
-      },
+      removeDir: (dir: string) =>
+        dir === `${file}.cas.lock`
+          ? ({ ok: false as const, code: 'io' as const, error: new Error('EIO injected') })
+          : real.removeDir(dir),
     };
-    // First probe call answers 'dead' (for A's recorded PID); once B is
-    // restored the probe reports 'alive' — the restored lock must stay.
-    let probeCalls = 0;
     const contender = acquireBackgroundExecutionCasLock({
       manifestPath: file, operation: 'op-B', workspaceDir: WS, fsOps,
-      probes: { processAlive: () => (probeCalls += 1) === 1 ? 'dead' : 'alive' },
+      probes: { processAlive: () => 'dead' },
     });
-    expect(contender).toMatchObject({ ok: false, reason: 'lock_busy' });
-    // The foreign lock came back to the lock path untouched (fail-closed).
-    const restored = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8')) as { token: string };
-    expect(restored.token).toBe('FOREIGN-B-TOKEN');
-    fs.rmSync(lockDir, { recursive: true, force: true });
+    expect(contender).toMatchObject({ ok: false, reason: 'lock_io_error' });
+    // The dead holder's lock is intact — nothing claimed it.
+    const owner = JSON.parse(fs.readFileSync(path.join(`${file}.cas.lock`, 'owner.json'), 'utf8')) as { token: string; operation: string };
+    expect(owner.operation).toBe('op-A');
+    fs.rmSync(`${file}.cas.lock`, { recursive: true, force: true });
   });
 
   it('fails closed on a lock with malformed owner metadata', () => {
@@ -412,34 +401,197 @@ describe('cross-process lock', () => {
     expect(fs.existsSync(staleDir)).toBe(false);
   });
 
-  it('release that observes a REPLACED lock restores it instead of deleting (PRI-1282 P1-2)', () => {
-    const file = seedManifest('lock-release-race');
-    const real = defaultCasFsOps();
-    const fsOps = {
-      ...real,
-      rename: (from: string, to: string) => {
-        const result = real.rename(from, to);
-        if (result.ok && to.includes('.release-')) {
-          // Between the release's rename-aside and its owner verification,
-          // the lock changed hands — the move-then-verify release must put
-          // the foreign lock back, never delete it.
-          const ownerPath = path.join(to, 'owner.json');
-          const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) as Record<string, unknown>;
-          owner.token = 'FOREIGN-REPLACEMENT-TOKEN';
-          fs.writeFileSync(ownerPath, JSON.stringify(owner), 'utf8');
-        }
-        return result;
-      },
-    };
-    const first = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-a', workspaceDir: WS, fsOps });
+  it('release never deletes a lock carrying a foreign token (PRI-1282 P1)', () => {
+    const file = seedManifest('lock-release-foreign');
+    const first = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-a', workspaceDir: WS });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
+    // A replaced owner (foreign token written under the lock dir, e.g. by an
+    // out-of-protocol repair) must never be removed by our release.
+    const ownerPath = path.join(`${file}.cas.lock`, 'owner.json');
+    const foreign = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) as Record<string, unknown>;
+    foreign.token = 'FOREIGN-REPLACEMENT-TOKEN';
+    fs.writeFileSync(ownerPath, JSON.stringify(foreign), 'utf8');
     first.handle.release();
-    // The foreign lock was restored at the lock path — nothing was deleted.
-    const restoredPath = path.join(`${file}.cas.lock`, 'owner.json');
-    expect(fs.existsSync(restoredPath)).toBe(true);
-    const restored = JSON.parse(fs.readFileSync(restoredPath, 'utf8')) as { token: string };
+    expect(fs.existsSync(ownerPath)).toBe(true);
+    const restored = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) as { token: string };
     expect(restored.token).toBe('FOREIGN-REPLACEMENT-TOKEN');
     fs.rmSync(`${file}.cas.lock`, { recursive: true, force: true });
   });
+
+  it('an orphaned lock dir without owner metadata is lock_invalid, never auto-reclaimed', () => {
+    const file = seedManifest('lock-orphan');
+    fs.mkdirSync(`${file}.cas.lock`, { recursive: false });
+    const result = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-x', workspaceDir: WS });
+    expect(result).toMatchObject({ ok: false, reason: 'lock_invalid' });
+    fs.rmSync(`${file}.cas.lock`, { recursive: true, force: true });
+  });
+
+  it('an unavailable arbitration gate fails closed as lock_io_error (no decision outside arbitration)', () => {
+    const file = seedManifest('lock-gate-down');
+    const result = acquireBackgroundExecutionCasLock({
+      manifestPath: file, operation: 'op-x', workspaceDir: WS,
+      probes: { openGate: () => { throw new Error('gate db unopenable (injected)'); } },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'lock_io_error' });
+    expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
+  });
+
+  it('a lock decision while a contender holds the gate is lock_busy — acquire never runs beside arbitration', () => {
+    const file = seedManifest('lock-gate-held');
+    // Hold the arbitration gate ourselves: the contender's serialized
+    // section cannot even start.
+    const db = new DatabaseSync(casGatePath(file));
+    try {
+      db.exec('PRAGMA busy_timeout = 0');
+      db.exec('BEGIN IMMEDIATE');
+      const result = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-x', workspaceDir: WS });
+      expect(result).toMatchObject({ ok: false, reason: 'lock_busy' });
+      expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
+    } finally {
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // best effort
+      }
+      db.close();
+    }
+  });
+
+  it('acquire/reclaim/release phases all run INSIDE the gate transaction (gateSync seam)', () => {
+    const file = seedManifest('lock-phases');
+    const phases: string[] = [];
+    const gateStatements: string[] = [];
+    const res = acquireBackgroundExecutionCasLock({
+      manifestPath: file, operation: 'op-x', workspaceDir: WS,
+      probes: {
+        gateSync: (phase) => { phases.push(phase); },
+        openGate: (gatePath) => {
+          const db = new DatabaseSync(gatePath);
+          return {
+            exec: (sql: string) => { gateStatements.push(sql); db.exec(sql); },
+            close: () => { db.close(); },
+          };
+        },
+      },
+    });
+    expect(res.ok).toBe(true);
+    // gate-held fired after BEGIN IMMEDIATE, lock-created before ROLLBACK —
+    // the whole decision ran between the two transaction edges.
+    const begin = gateStatements.indexOf('BEGIN IMMEDIATE');
+    const rollback = gateStatements.lastIndexOf('ROLLBACK');
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(rollback).toBeGreaterThan(begin);
+    expect(phases).toEqual(['gate-held', 'lock-created']);
+    if (res.ok) res.handle.release();
+
+    // Reclaim path: dead holder → evaluate → remove → recreate, all inside
+    // the same serialized transaction.
+    const file2 = seedManifest('lock-phases-reclaim');
+    const deadPidDir = `${file2}.cas.lock`;
+    fs.mkdirSync(deadPidDir);
+    fs.writeFileSync(path.join(deadPidDir, 'owner.json'), JSON.stringify({
+      schema: 'pd.background-execution-cas-lock/1', token: 'dead-token', pid: 999_999_999,
+      host: os.hostname(), operation: 'crashed', workspaceDir: WS, createdAt: new Date().toISOString(),
+    }), 'utf8');
+    phases.length = 0;
+    const reclaim = acquireBackgroundExecutionCasLock({
+      manifestPath: file2, operation: 'op-y', workspaceDir: WS,
+      probes: { gateSync: (phase) => { phases.push(phase); }, processAlive: () => 'dead' },
+    });
+    expect(reclaim.ok).toBe(true);
+    expect(phases).toEqual(['gate-held', 'lock-evaluated', 'stale-removed', 'lock-created']);
+    if (reclaim.ok) reclaim.handle.release();
+  });
+});
+
+// ─── Real cross-process contention (PRI-1282 review round 4) ────────────────
+// Children run the BUILT dist (npm test builds before vitest) behind an IPC
+// barrier: the parent dictates the exact interleaving — no random sleeps.
+const distDir = path.resolve(import.meta.dirname, '..', 'dist');
+const distModuleUrl = pathToFileURL(path.join(distDir, 'background-execution-transition.js')).href;
+const distAvailable = fs.existsSync(path.join(distDir, 'background-execution-transition.js'));
+
+import type { ChildProcess } from 'node:child_process';
+
+interface ChildHandle { child: ChildProcess }
+
+function forkLockChild(manifestFile: string, root: string): Promise<ChildHandle> {
+  const helper = path.join(root, `cas-lock-child-${process.pid}-${Math.random().toString(36).slice(2, 8)}.mjs`);
+  fs.writeFileSync(
+    helper,
+    `import { acquireBackgroundExecutionCasLock } from ${JSON.stringify(distModuleUrl)};
+const manifestPath = process.argv[2];
+const res = acquireBackgroundExecutionCasLock({ manifestPath, operation: 'child-op', workspaceDir: 'ws' });
+if (!res.ok) { process.send?.({ failed: res.reason }); setTimeout(() => process.exit(4), 200); }
+else {
+  process.send?.({ acquired: true });
+  process.on('message', (m) => {
+    if (m === 'release') { res.handle.release(); process.send?.({ released: true }); process.exit(0); }
+    if (m === 'hold') { /* keep holding until killed */ }
+  });
+  setInterval(() => {}, 30_000);
+}
+`,
+    'utf8',
+  );
+  const child = fork(helper, [manifestFile], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  return new Promise<ChildHandle>((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('child acquire timed out')); }, 15_000);
+    child.on('message', (msg) => {
+      const m = msg as { acquired?: boolean; failed?: string };
+      clearTimeout(timer);
+      if (m.acquired === true) resolve({ child });
+      else reject(new Error(`child acquire failed: ${m.failed ?? 'unknown'}`));
+    });
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
+  });
+}
+
+function waitForExit(child: ChildProcess): Promise<void> {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
+    child.on('exit', () => resolve());
+  });
+}
+
+(distAvailable ? describe : describe.skip)('cross-process CAS lock (IPC-barrier interleaves)', () => {
+  it('two processes contending for the lock: exactly one holds it; release hands it over', async () => {
+    const file = seedManifest('mp-contend');
+    const holder = await forkLockChild(file, tmpRoot);
+    try {
+      // Child holds the lock — our acquire must be lock_busy, never a takeover.
+      const blocked = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-parent', workspaceDir: WS });
+      expect(blocked).toMatchObject({ ok: false, reason: 'lock_busy' });
+      holder.child.send('release');
+      await waitForExit(holder.child);
+      // After the child's release the lock is ours — the owner file carries
+      // OUR pid, so only one owner exists at any moment.
+      const acquired = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-parent', workspaceDir: WS });
+      expect(acquired.ok).toBe(true);
+      if (acquired.ok) acquired.handle.release();
+    } finally {
+      holder.child.kill('SIGKILL');
+      await waitForExit(holder.child);
+    }
+  }, 30_000);
+
+  it('a SIGKILLed holder is reclaimed by PID evidence — a second contender sees exactly one winner', async () => {
+    const file = seedManifest('mp-killed');
+    const holder = await forkLockChild(file, tmpRoot);
+    holder.child.kill('SIGKILL');
+    await waitForExit(holder.child);
+    // The recorded holder PID is provably dead → serialized reclaim wins.
+    const first = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-parent-1', workspaceDir: WS });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const owner = JSON.parse(fs.readFileSync(path.join(`${file}.cas.lock`, 'owner.json'), 'utf8')) as { pid: number; operation: string };
+    expect(owner.pid).toBe(process.pid);
+    expect(owner.operation).toBe('op-parent-1');
+    // A contender while WE hold it reports busy — at most one holder, always.
+    const blocked = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-parent-2', workspaceDir: WS });
+    expect(blocked).toMatchObject({ ok: false, reason: 'lock_busy' });
+    first.handle.release();
+    expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
+  }, 30_000);
 });

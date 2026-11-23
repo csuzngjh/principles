@@ -16,7 +16,15 @@
  * Concurrency model:
  *  - physical exclusion: one lock directory next to the manifest
  *    (`<manifest>.cas.lock/`, O_EXCL mkdir + owner metadata — the
- *    pd-worktree-mutation.lock pattern, at file scope);
+ *    pd-worktree-mutation.lock pattern, at file scope), with every
+ *    acquire / stale-reclaim / release DECISION serialized through a
+ *    dedicated SQLite arbitration gate (`<manifest>.cas.gate.db`,
+ *    `BEGIN IMMEDIATE` — the same proven mechanism as the service-run
+ *    lock's `service-run-gate.db`, here on the dependency-free
+ *    `node:sqlite` builtin). Under the gate, verify→remove→create is
+ *    one serialized section: no contender can interleave between a
+ *    reclaim's check and its recreate, and a release deletes only the
+ *    lock whose owner token it verified inside the same transaction;
  *  - logical fencing: inside the critical section the writer re-reads the
  *    current record; a stale observed `generation` or an unexpected state
  *    loses and nothing is written;
@@ -34,6 +42,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import {
   installManifestHostsForPersist,
   mergeInstallManifestWorkspaces,
@@ -47,7 +56,9 @@ import {
 // ─── Lock ───────────────────────────────────────────────────────────────────
 
 const CAS_LOCK_SCHEMA = 'pd.background-execution-cas-lock/1';
-/** Stale threshold: the critical section is a millisecond-scale file op. */
+/** @deprecated Retired (PRI-1282 review round 4): file age never proves
+ * abandonment — reclaim authority is holder-PID liveness only. Kept exported
+ * for source compatibility; no code path consults it. */
 export const DEFAULT_CAS_LOCK_STALE_MS = 30_000;
 
 export interface CasLockOwner {
@@ -64,20 +75,46 @@ export interface CasLockAcquireOptions {
   manifestPath: string;
   operation: string;
   workspaceDir: string;
+  /** @deprecated Retired (PRI-1282 review round 4): file age is never a
+   * reclaim authority — only a provably-dead holder PID is. Accepted and
+   * ignored for source compatibility. */
   staleMs?: number;
   now?: () => Date;
   /** Test seam: real fs by default. */
   fsOps?: CasFsOps;
   /**
-   * Holder-liveness probe for the PID recorded in a stale lock's owner
-   * metadata. Default: `process.kill(pid, 0)` semantics
-   * (alive / ESRCH→dead / EPERM→alive / anything else→unknown). Tests
-   * inject fakes; an inconclusive answer MUST be 'unknown' (fail-closed).
+   * Test seams — production passes nothing.
    */
   probes?: {
+    /**
+     * Holder-liveness probe for the PID recorded in a stale lock's owner
+     * metadata. Default: `process.kill(pid, 0)` semantics
+     * (alive / ESRCH→dead / EPERM→alive / anything else→unknown). Tests
+     * inject fakes; an inconclusive answer MUST be 'unknown' (fail-closed).
+     */
     readonly processAlive?: (pid: number) => 'alive' | 'dead' | 'unknown';
+    /**
+     * Arbitration-gate factory. Default opens the real `node:sqlite`
+     * gate database at `<manifest>.cas.gate.db`. Tests inject failures
+     * (gate unopenable → fail-closed `lock_io_error`) or wraps to prove
+     * a decision ran inside the transaction.
+     */
+    readonly openGate?: (gatePath: string) => CasGateLike;
+    /**
+     * Deterministic test hook invoked once per phase INSIDE the gate
+     * transaction — a contender parked here still holds the gate, which
+     * is what interleaving tests need to prove.
+     */
+    readonly gateSync?: (phase: CasGatePhase) => void;
   };
 }
+
+/** Deterministic injection points inside the arbitrated section. */
+export type CasGatePhase =
+  | 'gate-held'          // transaction open; about to evaluate the lock
+  | 'lock-evaluated'     // owner state decided; about to act on it
+  | 'stale-removed'      // dead holder's lock removed; about to create ours
+  | 'lock-created';      // our lock created; about to end the transaction
 
 export interface CasLockHandle {
   lockDir: string;
@@ -103,7 +140,7 @@ function defaultRealpath(target: string): string | undefined {
 /** Filesystem seam so tests can inject failures without monkey-patching node. */
 export interface CasFsOps {
   mkdirExclusive(dir: string): { ok: true } | { ok: false; code: 'exists' | 'io'; error?: Error };
-  readJson(file: string): { ok: true; value: unknown } | { ok: false; code: 'missing' | 'io'; error?: Error };
+  readJson(file: string): { ok: true; value: unknown } | { ok: false; code: 'missing' | 'malformed' | 'io'; error?: Error };
   writeJson(file: string, value: unknown): { ok: true } | { ok: false; code: 'io'; error?: Error };
   removeDir(dir: string): { ok: true } | { ok: false; code: 'io'; error?: Error };
   rename(from: string, to: string): { ok: true } | { ok: false; code: 'io'; error?: Error };
@@ -150,10 +187,128 @@ function defaultProcessAlive(pid: number): 'alive' | 'dead' | 'unknown' {
 
 function busyWaitMs(ms: number): void {
   // Sync context: a bounded spin over Date.now(). Callers only reach here on
-  // contention or mid-write windows, which are millisecond-scale events.
+  // contention windows, which are millisecond-scale events.
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     /* spin */
+  }
+}
+
+// ─── Arbitration gate (PRI-1282 review round 4) ─────────────────────────────
+//
+// Pure-POSIX file moves cannot express "verify identity THEN delete-or-create"
+// as one atomic step: any rename-aside + conditional restore leaves a window
+// where a fresh lock lands at the lock path and the restore clobbers or
+// strands it. The repository's proven answer to exactly this race class is
+// the service-run lock's arbitration gate (`service-run-gate.db`, SQLite
+// `BEGIN IMMEDIATE`): the OS/SQLite advisory lock serializes every decision,
+// so inside the transaction a contender cannot exist between our check and
+// our action. This module uses the same mechanism on the dependency-free
+// `node:sqlite` builtin (install-layout has no runtime dependencies).
+
+/** Minimal surface of `DatabaseSync` the gate needs (test-injectable). */
+export interface CasGateLike {
+  exec(sql: string): void;
+  close(): void;
+}
+
+/** The one arbitration database per manifest — stable, never per-attempt. */
+export function casGatePath(manifestPath: string): string {
+  return `${manifestPath}.cas.gate.db`;
+}
+
+/** A lock decision is millisecond-scale file work; a contender waits only
+ * this long for the gate before reporting `lock_busy`. */
+const CAS_GATE_BUSY_TIMEOUT_MS = 250;
+/** Release gets a bounded wait of its own (same posture as the run lock). */
+const CAS_GATE_RELEASE_BUSY_MS = 1500;
+
+function defaultOpenGate(gatePath: string): CasGateLike {
+  const db = new DatabaseSync(gatePath);
+  db.exec(`PRAGMA busy_timeout = ${CAS_GATE_BUSY_TIMEOUT_MS}`);
+  return db;
+}
+
+function isGateBusyError(error: unknown): boolean {
+  // node:sqlite surfaces SQLITE_BUSY as errcode 5 (SQLITE_LOCKED = 6).
+  const errcode = typeof error === 'object' && error !== null && Object.hasOwn(error, 'errcode')
+    ? Number(Reflect.get(error, 'errcode'))
+    : NaN;
+  return errcode === 5 || errcode === 6;
+}
+
+type CasGateOutcome<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: 'lock_busy' | 'lock_io_error'; message: string };
+
+/**
+ * Run `body` while holding the CAS arbitration gate: open the per-manifest
+ * gate database, `BEGIN IMMEDIATE`, run the serialized decision, end the
+ * transaction. The gate stores no state — the transaction ends with
+ * `ROLLBACK`, so a failed COMMIT can never orphan filesystem work done in
+ * `body`. A process dying mid-transaction releases the gate through the OS
+ * (POSIX fcntl / Windows LockFileEx), so recovery is deterministic.
+ * SQLITE_BUSY maps to `lock_busy`; every other gate failure is
+ * `lock_io_error` — decisions NEVER run outside arbitration.
+ */
+function withCasGate<T>(
+  manifestPath: string,
+  opts: {
+    busyTimeoutMs: number;
+    openGate?: (gatePath: string) => CasGateLike;
+    gateSync?: (phase: CasGatePhase) => void;
+  },
+  body: (gateSync: (phase: CasGatePhase) => void) => T,
+): CasGateOutcome<T> {
+  let db: CasGateLike | undefined;
+  try {
+    db = (opts.openGate ?? defaultOpenGate)(casGatePath(manifestPath));
+    db.exec(`PRAGMA busy_timeout = ${opts.busyTimeoutMs}`);
+  } catch (error) {
+    try {
+      db?.close();
+    } catch {
+      // already closing
+    }
+    return { ok: false, reason: 'lock_io_error', message: `arbitration gate unavailable: ${toError(error).message}` };
+  }
+  const gateSync = opts.gateSync ?? (() => undefined);
+  try {
+    db.exec('BEGIN IMMEDIATE');
+  } catch (error) {
+    try {
+      db.close();
+    } catch {
+      // already closing
+    }
+    return {
+      ok: false,
+      reason: isGateBusyError(error) ? 'lock_busy' : 'lock_io_error',
+      message: `arbitration gate begin failed: ${toError(error).message}`,
+    };
+  }
+  try {
+    const value = body(gateSync);
+    // No persistent gate data: ROLLBACK ends the transaction.
+    db.exec('ROLLBACK');
+    return { ok: true, value };
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // rollback best-effort; process death releases the gate anyway
+    }
+    return {
+      ok: false,
+      reason: isGateBusyError(error) ? 'lock_busy' : 'lock_io_error',
+      message: `arbitration gate transaction failed: ${toError(error).message}`,
+    };
+  } finally {
+    try {
+      db.close();
+    } catch {
+      // already closed
+    }
   }
 }
 
@@ -172,6 +327,7 @@ const realFsOps: CasFsOps = {
       return { ok: true, value: JSON.parse(fs.readFileSync(file, 'utf8')) as unknown };
     } catch (error) {
       if (errnoOf(error) === 'ENOENT') return { ok: false, code: 'missing' };
+      if (error instanceof SyntaxError) return { ok: false, code: 'malformed', error: toError(error) };
       return { ok: false, code: 'io', error: toError(error) };
     }
   },
@@ -246,139 +402,154 @@ function ownerFileName(): string {
   return 'owner.json';
 }
 
+type AcquiredOwner = { ok: true; owner: CasLockOwner } | { ok: false; reason: 'lock_busy' | 'lock_invalid' | 'lock_io_error'; message: string; holder?: CasLockOwner };
+
 /**
- * Acquire the per-manifest CAS critical section. Fails loud (never
- * auto-overwrites a live lock); a lock whose owner metadata is unreadable
- * after a bounded retry is `lock_invalid` — fail-closed for a human, because
- * an unattributable lock may be mid-write. A lock is reclaimed ONLY when its
- * recorded holder PID is provably dead on this host (PRI-1282 review: file
- * age alone never proves abandonment — a stalled-but-live holder would
- * resume and delete the replacement lock it believed it still held).
- * Reclaim is rename-quarantine + token re-verification + restore-on-mismatch
- * so a lock that changed hands mid-reclaim is put back, never destroyed.
+ * Acquire the per-manifest CAS critical section. Every decision — evaluate
+ * the existing lock, reclaim a provably-dead holder's lock, create ours —
+ * runs inside ONE `BEGIN IMMEDIATE` transaction on the per-manifest
+ * arbitration gate ({@link casGatePath}), so verify→remove→create is a
+ * serialized section by construction: no second contender can interleave
+ * between the check and the action (PRI-1282 review round 4 — the
+ * rename-quarantine/restore pattern it replaces could strand or overwrite
+ * a fresh lock in the check→act gap).
+ *
+ * Reclaim authority is the recorded holder's PID liveness, never file age:
+ * a lock is reclaimed ONLY when the recorded PID is provably dead on this
+ * host — a dead holder cannot be inside the critical section and cannot
+ * resume to delete the replacement lock. A live, foreign-host or
+ * unverifiable holder is `lock_busy`/`lock_invalid` — fail-closed.
  */
 export function acquireBackgroundExecutionCasLock(options: CasLockAcquireOptions): CasLockAcquireResult {
   const fsOps = options.fsOps ?? realFsOps;
   const now = options.now ?? (() => new Date());
-  const staleMs = options.staleMs ?? DEFAULT_CAS_LOCK_STALE_MS;
   const processAlive = options.probes?.processAlive ?? defaultProcessAlive;
   const lockDir = `${options.manifestPath}.cas.lock`;
+  const ownerFile = path.join(lockDir, ownerFileName());
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const created = fsOps.mkdirExclusive(lockDir);
-    if (created.ok) {
-      const owner: CasLockOwner = {
-        schema: CAS_LOCK_SCHEMA,
-        token: randomToken(),
-        pid: process.pid,
-        host: 'unknown-host',
-        operation: options.operation,
-        workspaceDir: options.workspaceDir,
-        createdAt: now().toISOString(),
+  const buildOwner = (): CasLockOwner => ({
+    schema: CAS_LOCK_SCHEMA,
+    token: randomToken(),
+    pid: process.pid,
+    // Diagnostics-only field; never a control input.
+    host: typeof os.hostname === 'function' ? os.hostname() : 'unavailable',
+    operation: options.operation,
+    workspaceDir: options.workspaceDir,
+    createdAt: now().toISOString(),
+  });
+
+  const gated = withCasGate(
+    options.manifestPath,
+    { busyTimeoutMs: CAS_GATE_BUSY_TIMEOUT_MS, openGate: options.probes?.openGate, gateSync: options.probes?.gateSync },
+    (gateSync): AcquiredOwner => {
+      gateSync('gate-held');
+      const createOwned = (): AcquiredOwner => {
+        const owner = buildOwner();
+        const created = fsOps.mkdirExclusive(lockDir);
+        if (!created.ok) {
+          return { ok: false, reason: 'lock_io_error', message: `failed to create CAS lock directory: ${created.error?.message ?? 'io error'}` };
+        }
+        const written = fsOps.writeJson(ownerFile, owner);
+        if (!written.ok) {
+          // We own the directory but cannot attribute it — remove it so the
+          // next acquirer is not stuck on an anonymous empty dir.
+          fsOps.removeDir(lockDir);
+          return { ok: false, reason: 'lock_io_error', message: `failed to write CAS lock owner metadata: ${written.error?.message ?? 'io error'}` };
+        }
+        gateSync('lock-created');
+        return { ok: true, owner };
       };
-      // Diagnostics-only field; never a control input.
-      owner.host = typeof os.hostname === 'function' ? os.hostname() : 'unavailable';
-      const written = fsOps.writeJson(path.join(lockDir, ownerFileName()), owner);
-      if (!written.ok) {
-        // We own the directory but cannot attribute it — remove and retry once;
-        // if removal fails the next acquirer sees lock_invalid (fail-closed).
-        fsOps.removeDir(lockDir);
-        return { ok: false, reason: 'lock_io_error', message: `failed to write CAS lock owner metadata: ${written.error?.message ?? 'io error'}` };
+
+      // Lock exists (or absent): attribute it.
+      const ownerRead = fsOps.readJson(ownerFile);
+      if (!ownerRead.ok && ownerRead.code === 'missing') {
+        // No owner metadata: either the whole lock dir is absent (we create)
+        // or it exists as an unattributable orphan (a crashed mid-create —
+        // never a live cooperator, whose owner.json is written inside the
+        // same gate transaction). The exclusive mkdir decides which.
+        const probe = fsOps.mkdirExclusive(lockDir);
+        if (probe.ok) {
+          const owner = buildOwner();
+          const written = fsOps.writeJson(ownerFile, owner);
+          if (!written.ok) {
+            fsOps.removeDir(lockDir);
+            return { ok: false, reason: 'lock_io_error', message: `failed to write CAS lock owner metadata: ${written.error?.message ?? 'io error'}` };
+          }
+          gateSync('lock-created');
+          return { ok: true, owner };
+        }
+        if (probe.code === 'exists') {
+          // Orphaned dir without owner.json — unattributable, fail-closed
+          // (same posture as malformed owner metadata).
+          return { ok: false, reason: 'lock_invalid', message: `CAS lock ${lockDir} exists without owner metadata; a human must inspect and remove it` };
+        }
+        return { ok: false, reason: 'lock_io_error', message: `failed to create CAS lock directory: ${probe.error?.message ?? 'io error'}` };
       }
-      return {
-        ok: true,
-        handle: {
-          lockDir,
-          owner,
-          release: () => {
-            // Move-then-verify release: the directory at lockDir is renamed
-            // aside atomically and only deleted when its owner.json still
-            // carries OUR token. A read-then-delete-by-path is NOT used —
-            // between the token check and the delete a stale reclaimer could
-            // have quarantined this lock and a fresh holder could have taken
-            // the path, letting us delete a lock we no longer own (PRI-1282
-            // review). A foreign lock moved aside is restored, never deleted.
-            const aside = `${lockDir}.release-${owner.token}`;
-            const moved = fsOps.rename(lockDir, aside);
-            if (!moved.ok) {
-              // Already gone — the stale-reclaimer quarantined it or a crash
-              // cleanup removed it; nothing to do.
-              return;
-            }
-            const current = fsOps.readJson(path.join(aside, ownerFileName()));
+      if (!ownerRead.ok) {
+        if (ownerRead.code === 'malformed') {
+          return { ok: false, reason: 'lock_invalid', message: `CAS lock ${lockDir} has malformed owner metadata; a human must inspect and remove it` };
+        }
+        return { ok: false, reason: 'lock_io_error', message: `failed to read CAS lock owner metadata: ${ownerRead.error?.message ?? 'io error'}` };
+      }
+      const holder = parseLockOwner(ownerRead.value);
+      if (holder === null) {
+        return { ok: false, reason: 'lock_invalid', message: `CAS lock ${lockDir} has missing or malformed owner metadata; a human must inspect and remove it` };
+      }
+      gateSync('lock-evaluated');
+      const ageMs = Date.parse(holder.createdAt);
+      const age = Number.isFinite(ageMs) ? now().getTime() - ageMs : Number.POSITIVE_INFINITY;
+      const liveness = holder.host === os.hostname() && holder.pid > 0
+        ? processAlive(holder.pid)
+        : ('unknown' as const);
+      if (liveness !== 'dead') {
+        return {
+          ok: false,
+          reason: 'lock_busy',
+          message: `CAS lock held by operation=${holder.operation} pid=${holder.pid} host=${holder.host} ageMs=${Math.max(0, Math.round(age))} target=${holder.workspaceDir} liveness=${liveness} (a lock is only reclaimed when its holder PID is provably dead)`,
+          holder,
+        };
+      }
+      // Provably-dead holder → serialized reclaim: remove + recreate inside
+      // the SAME gate transaction, so no new lock can land in between.
+      const removed = fsOps.removeDir(lockDir);
+      if (!removed.ok) {
+        return { ok: false, reason: 'lock_io_error', message: `failed to remove the dead holder's CAS lock: ${removed.error?.message ?? 'io error'}` };
+      }
+      gateSync('stale-removed');
+      return createOwned();
+    },
+  );
+
+  if (!gated.ok) return { ok: false, reason: gated.reason, message: gated.message };
+  const acquired = gated.value;
+  if (!acquired.ok) return acquired;
+  const { owner } = acquired;
+  return {
+    ok: true,
+    handle: {
+      lockDir,
+      owner,
+      release: () => {
+        // Compare-and-delete under the SAME arbitration gate: the owner
+        // metadata is re-read inside the transaction and the directory is
+        // removed only while it still carries OUR token — a foreign or
+        // replaced lock is never deleted, and no contender can interleave
+        // between the verify and the remove (PRI-1282 review round 4).
+        void withCasGate(
+          options.manifestPath,
+          { busyTimeoutMs: CAS_GATE_RELEASE_BUSY_MS, openGate: options.probes?.openGate },
+          () => {
+            const current = fsOps.readJson(ownerFile);
             const parsed = current.ok ? parseLockOwner(current.value) : null;
             if (parsed !== null && parsed.token === owner.token) {
-              fsOps.removeDir(aside);
-              return;
+              fsOps.removeDir(lockDir);
             }
-            // The directory we moved is NOT our lock — put it back exactly
-            // where contenders expect it. If a fresh holder already acquired
-            // lockDir in the gap, the restore fails and the aside directory
-            // stays for a human — a foreign lock is NEVER deleted either way.
-            fsOps.rename(aside, lockDir);
+            // Absent or foreign: nothing provably ours to remove — leave it.
           },
-        },
-      };
-    }
-    if (created.code === 'io') {
-      return { ok: false, reason: 'lock_io_error', message: `failed to create CAS lock directory: ${created.error?.message ?? 'io error'}` };
-    }
-    // Lock exists: attribute it.
-    const ownerFile = fsOps.readJson(path.join(lockDir, ownerFileName()));
-    if (!ownerFile.ok && ownerFile.code === 'missing' && attempt < 2) {
-      // Mid-write holder (mkdir landed, owner.json not yet): back off so the
-      // attribution write completes, then retry — declaring lock_invalid on a
-      // microseconds window would fail operations spuriously.
-      busyWaitMs(25);
-      continue;
-    }
-    const holder = ownerFile.ok ? parseLockOwner(ownerFile.value) : null;
-    if (holder === null) {
-      return { ok: false, reason: 'lock_invalid', message: `CAS lock ${lockDir} has missing or malformed owner metadata; a human must inspect and remove it` };
-    }
-    const ageMs = Date.parse(holder.createdAt);
-    const age = Number.isFinite(ageMs) ? now().getTime() - ageMs : Number.POSITIVE_INFINITY;
-    // Reclaim authority is PID liveness, never file age (PRI-1282 review):
-    // a lock whose recorded holder PID is PROVABLY dead is abandoned by
-    // construction — the dead holder cannot be inside the critical section
-    // and cannot resume to delete a replacement lock. A live holder past the
-    // stale TTL keeps its lock (the critical section is millisecond-scale,
-    // so >TTL liveness is a bug elsewhere — fail-closed busy, never evict a
-    // lock that may still be held). A holder on a different host or with an
-    // unverifiable PID is likewise never reclaimed.
-    const liveness = holder.host === os.hostname() && holder.pid > 0
-      ? processAlive(holder.pid)
-      : ('unknown' as const);
-    if (liveness === 'dead') {
-      // Quarantine-then-verify: rename the stale lock away (atomic), re-read
-      // the token inside the renamed directory, and only then delete. A
-      // directory that changed identity between our read and the rename is
-      // a DIFFERENT (possibly live) holder's lock — restore it exactly,
-      // never move or delete a lock we cannot prove is the dead one.
-      const quarantine = `${lockDir}.stale-${randomToken()}`;
-      const renamed = fsOps.rename(lockDir, quarantine);
-      if (!renamed.ok) continue;
-      const verify = fsOps.readJson(path.join(quarantine, ownerFileName()));
-      const verified = verify.ok ? parseLockOwner(verify.value) : null;
-      if (verified === null || verified.token !== holder.token) {
-        const restored = fsOps.rename(quarantine, lockDir);
-        if (!restored.ok) {
-          return { ok: false, reason: 'lock_invalid', message: `stale CAS lock reclaim at ${lockDir} observed an identity change and could not restore the moved lock; inspect ${quarantine}` };
-        }
-        continue; // re-evaluate the (restored or fresh) lock
-      }
-      fsOps.removeDir(quarantine);
-      continue; // retry acquisition with the dead lock gone
-    }
-    void staleMs;
-    return {
-      ok: false,
-      reason: 'lock_busy',
-      message: `CAS lock held by operation=${holder.operation} pid=${holder.pid} host=${holder.host} ageMs=${Math.max(0, Math.round(age))} target=${holder.workspaceDir} liveness=${liveness} (a lock is only reclaimed when its holder PID is provably dead)`,
-      holder,
-    };
-  }
-  return { ok: false, reason: 'lock_invalid', message: `could not acquire CAS lock ${lockDir} after bounded retries` };
+        );
+      },
+    },
+  };
 }
 
 // ─── Manifest write lock for non-transition writers (ERR-168) ───────────────
