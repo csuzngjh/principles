@@ -929,15 +929,18 @@ describe('legacy compatibility — old-format manifests stay readable under lega
 });
 
 // ---------------------------------------------------------------------------
-// PRI-1284 — budget flags forwarded through ab-grid to shard children
+// PRI-1284 — budget flags forwarded through ab-grid to shard children,
+// recorded in run manifests, and enforced on resume
 // ---------------------------------------------------------------------------
 
-describe('PRI-1284 — ab-grid forwards --reps to shard children (lab:run budget contract)', () => {
-  // Mark one CLI-reaching sample as a repeat pick; the stub world then proves
-  // the flag crossed the grid→child boundary: --reps 1 yields no rep1/rep2
-  // records, the same dataset WITHOUT the flag yields both (pre-fix the flag
-  // never reached the children, so the two runs were indistinguishable).
-  const REP_SAMPLE = 'S05'; // openclaw + session — reaches the stub CLI
+describe('PRI-1284 — budget flags forwarded + persisted through ab-grid (lab:run budget contract)', () => {
+  // Mark a CLI-reaching sample as a repeat pick; the stub world then proves
+  // the flag crossed the grid→child boundary TWICE: scheduling (rep-named
+  // record files) AND invocation (stub CLI call count). S01 is used because
+  // it carries host_kind=openclaw + a session — it actually reaches the stub
+  // CLI, unlike host-less samples refused before invocation.
+  const REP_SAMPLE = 'S01';
+  const REP_SESSION = 'sess-01';
   const repsDataset = { ...DATASET, repeatRunPicks: [REP_SAMPLE] };
 
   function writeRepsDataset() {
@@ -945,24 +948,76 @@ describe('PRI-1284 — ab-grid forwards --reps to shard children (lab:run budget
     return writeConfig(); // recompute the dataset digest over the new file
   }
   const recordNames = (runId) => fs.readdirSync(path.join(experimentRoot, 'runs', runId, 'records'));
+  const repCalls = () => readStubLog().filter((l) => l.cmd === 'pain record' && l.args.includes(REP_SESSION));
 
   afterAll(() => { fs.writeFileSync(datasetFile, JSON.stringify(DATASET, null, 2), 'utf8'); writeConfig(); });
 
-  it('grid run WITH --reps 1 produces only rep-0 records for a repeat pick', () => {
+  it('grid run WITH --reps=1 (equals form) produces only rep-0 records and ONE call per arm', () => {
     const cfg = writeRepsDataset();
-    const res = runRepoScript(ENTRY_AB_GRID, ['--config', cfg, '--run-id', 'r2-reps-fwd', '--parallel', '1', '--reps', '1']);
+    resetStubLog();
+    const res = runRepoScript(ENTRY_AB_GRID, ['--config', cfg, '--run-id', 'r2-reps-fwd', '--parallel', '1', '--reps=1']);
     expect(res.status, `stderr=${res.stderr.slice(0, 400)}`).toBe(0);
     const names = recordNames('r2-reps-fwd').filter((f) => f.startsWith(`${REP_SAMPLE}.`));
     expect(names.length).toBeGreaterThanOrEqual(1);
     expect(names.every((f) => !f.includes('.rep'))).toBe(true);
+    // Invocation-level proof: the repeat pick was invoked exactly once per
+    // arm — the equals form was accepted AND forwarded to the shard child.
+    expect(repCalls().length).toBe(2);
+    // The normalized budget is persisted on BOTH manifests.
+    const grid = JSON.parse(fs.readFileSync(path.join(experimentRoot, 'runs', 'r2-reps-fwd', 'grid-manifest.json'), 'utf8'));
+    expect(grid.budget).toEqual({ reps: 1, formationDepth: null });
+    const shardDir = path.join(experimentRoot, 'runs', 'r2-reps-fwd');
+    const shardManifest = JSON.parse(fs.readFileSync(path.join(shardDir, fs.readdirSync(shardDir).find((f) => f.startsWith('run-manifest.'))), 'utf8'));
+    expect(shardManifest.budget).toEqual({ reps: 1, formationDepth: null });
   });
 
-  it('grid run WITHOUT --reps runs the dataset repeats (rep1/rep2 records appear)', () => {
+  it('grid run WITHOUT --reps runs the dataset repeats (rep1/rep2 records + three calls per arm)', () => {
     const cfg = writeRepsDataset();
+    resetStubLog();
     const res = runRepoScript(ENTRY_AB_GRID, ['--config', cfg, '--run-id', 'r2-reps-default', '--parallel', '1']);
     expect(res.status, `stderr=${res.stderr.slice(0, 400)}`).toBe(0);
     const names = recordNames('r2-reps-default').filter((f) => f.startsWith(`${REP_SAMPLE}.`));
     expect(names.some((f) => f.endsWith('.rep1.json'))).toBe(true);
     expect(names.some((f) => f.endsWith('.rep2.json'))).toBe(true);
+    expect(repCalls().length).toBe(6);
+  });
+
+  it('resume with an OMITTED flag adopts the recorded budget — rep1/rep2 never scheduled', () => {
+    const cfg = writeRepsDataset();
+    resetStubLog();
+    const first = runRepoScript(ENTRY_AB_GRID, ['--config', cfg, '--run-id', 'r2-budget-adopt', '--parallel', '1', '--reps', '1']);
+    expect(first.status, `stderr=${first.stderr.slice(0, 400)}`).toBe(0);
+    expect(repCalls().length).toBe(2);
+    // Resume: drop --reps entirely. Without manifest-persisted budgets the
+    // shard would fall back to the dataset's 3 reps and schedule the pending
+    // rep1/rep2 units; with them the recorded budget stands and those units
+    // are never created.
+    resetStubLog();
+    const res = runRepoScript(ENTRY_AB_GRID, ['--config', cfg, '--run-id', 'r2-budget-adopt', '--parallel', '1']);
+    expect(res.status, `stderr=${res.stderr.slice(0, 400)}`).toBe(0);
+    const names = recordNames('r2-budget-adopt').filter((f) => f.startsWith(`${REP_SAMPLE}.`));
+    expect(names.every((f) => !f.includes('.rep'))).toBe(true);
+    // A resumed run whose rep-0 records are already terminal emits no CLI
+    // calls at all — the proof of adoption is that rep1/rep2 never ran.
+    expect(repCalls().length).toBe(0);
+    const grid = JSON.parse(fs.readFileSync(path.join(experimentRoot, 'runs', 'r2-budget-adopt', 'grid-manifest.json'), 'utf8'));
+    expect(grid.budget).toEqual({ reps: 1, formationDepth: null });
+  });
+
+  it('resume with an explicitly DIFFERENT budget is REFUSED — no shard launched, no records touched', () => {
+    const cfg = writeRepsDataset();
+    resetStubLog();
+    const first = runRepoScript(ENTRY_AB_GRID, ['--config', cfg, '--run-id', 'r2-budget-refuse', '--parallel', '1', '--reps', '1']);
+    expect(first.status, `stderr=${first.stderr.slice(0, 400)}`).toBe(0);
+    const callsAfterFirst = readStubLog().length;
+    const filesAfterFirst = fs.readdirSync(path.join(experimentRoot, 'runs', 'r2-budget-refuse')).sort();
+
+    const res = runRepoScript(ENTRY_AB_GRID, ['--config', cfg, '--run-id', 'r2-budget-refuse', '--parallel', '1', '--reps', '2']);
+    expect(res.status).not.toBe(0);
+    expect(res.stderr).toMatch(/budget mismatch on resume.*new --run-id/s);
+    // The refusal happens before any shard launches or record writes.
+    expect(readStubLog().length).toBe(callsAfterFirst);
+    expect(fs.readdirSync(path.join(experimentRoot, 'runs', 'r2-budget-refuse')).sort()).toEqual(filesAfterFirst);
+    expect(recordNames('r2-budget-refuse').filter((f) => f.startsWith(`${REP_SAMPLE}.`)).every((f) => !f.includes('.rep'))).toBe(true);
   });
 });

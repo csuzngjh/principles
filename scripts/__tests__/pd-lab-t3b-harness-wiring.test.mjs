@@ -1019,14 +1019,17 @@ describe('PRI-1284 — malformed budget flags are rejected at the real CLI bound
 
   const fx = buildFixture('budget');
 
-  for (const [flag, bad] of [['--reps', 'abc'], ['--reps', '0'], ['--reps', '2.5'], ['--formation-depth', 'abc'], ['--formation-depth', '0']]) {
-    it(`ab-run.mjs rejects ${flag} ${bad}`, () => {
-      const res = runRepoScript(ENTRY_AB_RUN, ['--config', fx.writeConfig(), '--run-id', `bud-${flag.replace(/--/g, '')}-${bad}`, '--shard-id', '0', flag, bad]);
-      expectBudgetRejected('ab-run.mjs', flag, res);
+  for (const [flag, bad] of [['--reps', 'abc'], ['--reps', '0'], ['--reps', '2.5'], ['--formation-depth', 'abc'], ['--formation-depth', '0'], ['--reps=abc', null], ['--formation-depth=0', null]]) {
+    const flagName = flag.split('=')[0];
+    const flagArgs = flag.includes('=') ? [flag] : [flag, bad];
+    const label = flag.includes('=') ? flag : `${flag} ${bad}`;
+    it(`ab-run.mjs rejects ${label}`, () => {
+      const res = runRepoScript(ENTRY_AB_RUN, ['--config', fx.writeConfig(), '--run-id', `bud-${label.replace(/[^a-z0-9]+/gi, '-')}`, '--shard-id', '0', ...flagArgs]);
+      expectBudgetRejected('ab-run.mjs', flagName, res);
     });
-    it(`ab-grid.mjs rejects ${flag} ${bad} (same contract, forwarded to shards)`, () => {
-      const res = runRepoScript(ENTRY_AB_GRID, ['--config', fx.writeConfig(), '--run-id', `budg-${flag.replace(/--/g, '')}-${bad}`, flag, bad]);
-      expectBudgetRejected('ab-grid.mjs', flag, res);
+    it(`ab-grid.mjs rejects ${label} (same contract, forwarded to shards)`, () => {
+      const res = runRepoScript(ENTRY_AB_GRID, ['--config', fx.writeConfig(), '--run-id', `budg-${label.replace(/[^a-z0-9]+/gi, '-')}`, ...flagArgs]);
+      expectBudgetRejected('ab-grid.mjs', flagName, res);
     });
   }
 });

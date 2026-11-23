@@ -26,7 +26,16 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..', '..');
 
-const argv = process.argv.slice(2);
+// PRI-1284 r2 (review): normalize `--flag=value` into `--flag value` — the
+// equals form used to return null from every lookup and fall back to the
+// default budget without a word (rc-9 no-silent-fallback).
+const argv = process.argv.slice(2).flatMap((a) => {
+  if (a.startsWith('--') && a.includes('=')) {
+    const eq = a.indexOf('=');
+    return [a.slice(0, eq), a.slice(eq + 1)];
+  }
+  return [a];
+});
 const USAGE = 'usage: node ab-grid.mjs --config <experiment-config.json> --run-id <id> [--parallel 1..8] [--arms <armA>,<armB>] [--simulate-failure <index>] [--reps N] [--formation-depth N]';
 // PRI-1254 r2 (review 0001 / P1-04): keep the config OBJECT (validated, for
 // this parent process) strictly apart from the config FILE PATH (the
@@ -54,8 +63,8 @@ const positiveIntOpt = (flag, raw) => {
   if (!Number.isInteger(n) || n < 1) throw new Error(`${flag} must be a positive integer — got ${JSON.stringify(raw)}`);
   return n;
 };
-const reps = repsOpt === null ? null : positiveIntOpt('--reps', repsOpt);
-const formationDepth = formationDepthOpt === null ? null : positiveIntOpt('--formation-depth', formationDepthOpt);
+let reps = repsOpt === null ? null : positiveIntOpt('--reps', repsOpt);
+let formationDepth = formationDepthOpt === null ? null : positiveIntOpt('--formation-depth', formationDepthOpt);
 
 // Arms: config pair by default; --arms must be exactly that pair (any order).
 const configuredArms = configArms();
@@ -97,7 +106,30 @@ const gridManifest = {
   shards: shards.map((s, i) => ({ index: i, samples: s, exitCode: null })),
   startedAt: new Date().toISOString(),
 };
-fs.writeFileSync(path.join(runDirPath, `grid-manifest.json`), JSON.stringify(gridManifest, null, 2) + '\n', 'utf8');
+// PRI-1284 r2 (review): the effective budget belongs to the RUN, not to this
+// invocation. On resume, read the budget recorded by the first writer — an
+// omitted flag adopts it and is forwarded to the shards; an explicitly
+// different value is refused BEFORE the manifest is rewritten and BEFORE
+// any shard launches, because completed records keep the old budget while
+// ab-metrics aggregates them all under one run id.
+const gridManifestPath = path.join(runDirPath, 'grid-manifest.json');
+if (fs.existsSync(gridManifestPath)) {
+  const priorBudget = JSON.parse(fs.readFileSync(gridManifestPath, 'utf8')).budget;
+  if (priorBudget) {
+    for (const key of ['reps', 'formationDepth']) {
+      const cur = key === 'reps' ? reps : formationDepth;
+      if (cur !== null && cur !== priorBudget[key]) {
+        console.error(`budget mismatch on resume: this run's grid manifest recorded ${key}=${priorBudget[key]}, invocation passed ${cur} — refusing to mix budgets under one run id; use a new --run-id for a different budget`);
+        process.exit(1);
+      }
+      if (cur === null && priorBudget[key] !== null && priorBudget[key] !== undefined) {
+        if (key === 'reps') reps = priorBudget[key]; else formationDepth = priorBudget[key];
+      }
+    }
+  }
+}
+gridManifest.budget = { reps, formationDepth };
+fs.writeFileSync(gridManifestPath, JSON.stringify(gridManifest, null, 2) + '\n', 'utf8');
 console.log(`run=${runId} parallel=${shards.length} shards=${JSON.stringify(shards.map((_, i) => i))}`);
 
 const children = shards.map((shard, i) => new Promise((resolve) => {

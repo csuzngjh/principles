@@ -71,8 +71,19 @@ function parseArgs(argv) {
   return out;
 }
 
-const config = bootstrapConfigContext(process.argv, USAGE);
-const args = parseArgs(process.argv);
+// PRI-1284 r2 (review): normalize `--flag=value` into `--flag value` — the
+// equals form used to fall through every lookup silently (rc-9), changing
+// real behavior without a word. Same normalization as ab-grid.
+const argv = [process.argv[0], process.argv[1], ...process.argv.slice(2).flatMap((a) => {
+  if (a.startsWith('--') && a.includes('=')) {
+    const eq = a.indexOf('=');
+    return [a.slice(0, eq), a.slice(eq + 1)];
+  }
+  return [a];
+})];
+
+const config = bootstrapConfigContext(argv, USAGE);
+const args = parseArgs(argv);
 
 // Arms come from the config; --arms (when given) must be exactly the
 // configured pair (any order) — never a default, never an unknown arm.
@@ -131,6 +142,26 @@ const manifest = {
   datasetSha256: cfg.dataset.sha256,
   snapshot: { dir: cfg.snapshot.dir, sha256: cfg.snapshot.sha256 },
 };
+// PRI-1284 r2 (review): the effective budget belongs to the RUN, not to this
+// invocation. On resume, read the budget the first writer recorded: an
+// omitted flag adopts it (the grid launcher forwards nothing and the shard
+// still runs the original budget); an explicitly different value is refused
+// BEFORE the manifest is rewritten or any workspace/record side effect —
+// ab-metrics aggregates every record under the run id, so a mixed budget
+// would silently corrupt the comparison.
+if (fs.existsSync(manifestPath)) {
+  const priorBudget = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).budget;
+  if (priorBudget) {
+    for (const key of ['reps', 'formationDepth']) {
+      if (args[key] !== null && args[key] !== priorBudget[key]) {
+        console.error(`budget mismatch on resume: this run's manifest recorded ${key}=${priorBudget[key]}, invocation passed ${args[key]} — refusing to mix budgets under one run id; use a new --run-id for a different budget`);
+        process.exit(1);
+      }
+      if (args[key] === null) args[key] = priorBudget[key] ?? null;
+    }
+  }
+}
+manifest.budget = { reps: args.reps, formationDepth: args.formationDepth };
 manifest.updatedAt = new Date().toISOString();
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 
