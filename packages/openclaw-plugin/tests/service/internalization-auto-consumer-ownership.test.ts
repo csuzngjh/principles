@@ -391,6 +391,51 @@ describe('consumer instance lifecycle (PRI-1282 r4 §3)', () => {
     expect(fs.existsSync(LEASE_FILE())).toBe(false);
   });
 
+  it('a second stop cancels a newly parked lifecycle while the previous lifecycle is still draining', async () => {
+    startService();
+    const oldIdentity = __autoConsumerTestSeams.identity(workspaceDir);
+    let settleOldCycle!: () => void;
+    const oldCycle = new Promise<void>((resolve) => { settleOldCycle = resolve; });
+    __autoConsumerTestSeams.injectInFlight(workspaceDir, oldCycle);
+    __autoConsumerTestSeams.setStopDrainWaitMs(5_000);
+    InternalizationAutoConsumerService.stop({ workspaceDir } as never);
+
+    // A host reload starts a new state while the old identity is still leased.
+    startService();
+    const newState = __autoConsumerTestSeams.workspaceStates.get(workspaceDir);
+    expect(newState).toBeDefined();
+    expect(newState?.identity.instanceId).not.toBe(oldIdentity.instanceId);
+    expect(newState?.timeoutId).not.toBeNull(); // parked on the old live lease
+
+    // The second stop must cancel this NEW watch state without touching A's lease.
+    InternalizationAutoConsumerService.stop({ workspaceDir } as never);
+    expect(newState?.stopped).toBe(true);
+    expect(newState?.timeoutId).toBeNull();
+    expect(__autoConsumerTestSeams.workspaceStates.has(workspaceDir)).toBe(false);
+    expect(readGatewayConsumerLease(workspaceDir)?.writers?.some((w) => w.instanceId === oldIdentity.instanceId)).toBe(true);
+
+    settleOldCycle();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(__autoConsumerTestSeams.workspaceStates.has(workspaceDir)).toBe(false);
+    expect(readGatewayConsumerLease(workspaceDir)).toBeNull();
+  });
+
+  it('a parked lifecycle releases its own lease before minting a new identity on resume', async () => {
+    startService();
+    const oldIdentity = __autoConsumerTestSeams.identity(workspaceDir);
+    const oldState = __autoConsumerTestSeams.workspaceStates.get(workspaceDir);
+    expect(oldState).toBeDefined();
+    expect(readGatewayConsumerLease(workspaceDir)).toMatchObject({ instanceId: oldIdentity.instanceId, state: 'consuming' });
+
+    await __autoConsumerTestSeams.watchOwnership(workspaceDir, oldState!, logger);
+
+    const resumedState = __autoConsumerTestSeams.workspaceStates.get(workspaceDir);
+    expect(resumedState).toBeDefined();
+    expect(resumedState?.identity.instanceId).not.toBe(oldIdentity.instanceId);
+    expect(readGatewayConsumerLease(workspaceDir)).toMatchObject({ instanceId: resumedState?.identity.instanceId, state: 'consuming' });
+  });
+
   it('stop() drain timeout keeps the protective lease and records an observable timeout — no silent exit', async () => {
     startService();
     __autoConsumerTestSeams.injectInFlight(workspaceDir, new Promise<void>(() => { /* never */ }));

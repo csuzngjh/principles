@@ -156,7 +156,7 @@ interface RetiredWorkspaceConsumerState {
 // A stopped state remains here until its in-flight cycle has settled AND its
 // exact instance lease has been released. Repeated stop() calls must never
 // infer process-wide release from the absence of an active timer state.
-const drainingWorkspaceStates = new Map<string, RetiredWorkspaceConsumerState>();
+const drainingWorkspaceStates = new Map<string, Map<string, RetiredWorkspaceConsumerState>>();
 
 function releaseRetiredWorkspaceLease(dir: string, retired: RetiredWorkspaceConsumerState): void {
   if (!retired.settled) return;
@@ -168,7 +168,11 @@ function releaseRetiredWorkspaceLease(dir: string, retired: RetiredWorkspaceCons
     }));
     return;
   }
-  if (drainingWorkspaceStates.get(dir) === retired) drainingWorkspaceStates.delete(dir);
+  const byInstance = drainingWorkspaceStates.get(dir);
+  if (byInstance?.get(retired.identity.instanceId) === retired) {
+    byInstance.delete(retired.identity.instanceId);
+    if (byInstance.size === 0) drainingWorkspaceStates.delete(dir);
+  }
 }
 
 /**
@@ -186,6 +190,9 @@ export const __autoConsumerTestSeams = {
   },
   setStopDrainWaitMs(ms: number): void {
     stopDrainWaitMs = ms;
+  },
+  watchOwnership(workspaceDir: string, state: WorkspaceConsumerState, logger: PluginLogger): Promise<void> {
+    return watchOwnership(workspaceDir, state, logger);
   },
 };
 
@@ -640,33 +647,38 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
   stop(ctx: OpenClawPluginServiceContext): void {
     const workspaceDir = ctx?.workspaceDir;
     const drainWorkspace = (dir: string, state: WorkspaceConsumerState): void => {
-      const existingDrain = drainingWorkspaceStates.get(dir);
+      const existingDrain = drainingWorkspaceStates.get(dir)?.get(state.identity.instanceId);
       if (existingDrain) {
-        // Idempotent stop: only retry release after the original cycle settled.
+        // Duplicate stop for the SAME lifecycle is idempotent. A different
+        // active lifecycle must still be stopped even while an older one drains.
         releaseRetiredWorkspaceLease(dir, existingDrain);
         return;
       }
-      // Forbid new cycles and remove the active timer state first. The retired
-      // identity remains tracked until the in-flight promise settles and its
-      // exact lease entry is successfully released.
+      // Always cancel the currently active lifecycle first. A workspace may
+      // simultaneously have an older in-flight drain and a newer parked state
+      // waiting for that old lease; stop must retire BOTH identities.
       state.stopped = true;
       if (state.timeoutId) clearTimeout(state.timeoutId);
       state.timeoutId = null;
-      workspaceStates.delete(dir);
+      if (workspaceStates.get(dir) === state) workspaceStates.delete(dir);
       const tracked = state.inFlight;
       const retired: RetiredWorkspaceConsumerState = {
         identity: state.identity,
         settled: tracked === null,
       };
-      drainingWorkspaceStates.set(dir, retired);
+      let byInstance = drainingWorkspaceStates.get(dir);
+      if (!byInstance) {
+        byInstance = new Map<string, RetiredWorkspaceConsumerState>();
+        drainingWorkspaceStates.set(dir, byInstance);
+      }
+      byInstance.set(state.identity.instanceId, retired);
       if (tracked === null) {
         releaseRetiredWorkspaceLease(dir, retired);
         return;
       }
 
       // Natural completion, not the bounded timeout, is the only proof that
-      // permits lease release. Keep the retired record after timeout so a
-      // repeated stop cannot clear it by PID while the old cycle is alive.
+      // permits lease release. Each lifecycle keeps its own drain record.
       const settled = tracked.then(
         () => { retired.settled = true; releaseRetiredWorkspaceLease(dir, retired); },
         () => { retired.settled = true; releaseRetiredWorkspaceLease(dir, retired); },
@@ -676,26 +688,24 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
           SystemLogger.log(dir, 'INTERNALIZATION_CONSUMER_STOP_DRAIN_TIMEOUT', JSON.stringify({
             reason: 'in_flight_cycle_still_running',
             waitMs: stopDrainWaitMs,
-            nextAction: 'The protective lease remains until the original in-flight cycle actually settles; repeated stop calls are safe.',
+            nextAction: 'The protective lease remains until this lifecycle\'s in-flight cycle actually settles; repeated stop calls are safe.',
           }));
         }
       });
     };
+    const retrySettledDrains = (dir: string): void => {
+      const byInstance = drainingWorkspaceStates.get(dir);
+      if (byInstance) {
+        for (const retired of [...byInstance.values()]) releaseRetiredWorkspaceLease(dir, retired);
+      }
+    };
     if (workspaceDir) {
       const state = workspaceStates.get(workspaceDir);
       if (state) drainWorkspace(workspaceDir, state);
-      else {
-        // No active state is not proof that a retired cycle exited. Preserve
-        // any pending lease; if its cycle settled but release previously
-        // failed, this stop retries the identity-gated release.
-        const retired = drainingWorkspaceStates.get(workspaceDir);
-        if (retired) releaseRetiredWorkspaceLease(workspaceDir, retired);
-      }
+      retrySettledDrains(workspaceDir);
     } else {
       for (const [dir, state] of [...workspaceStates.entries()]) drainWorkspace(dir, state);
-      for (const [dir, retired] of [...drainingWorkspaceStates.entries()]) {
-        releaseRetiredWorkspaceLease(dir, retired);
-      }
+      for (const dir of [...drainingWorkspaceStates.keys()]) retrySettledDrains(dir);
     }
   },
 };
@@ -825,8 +835,14 @@ async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerStat
   if (state.stopped) return;
   const ownership = evaluateOwnershipForConsumption(workspaceDir);
   if (!ownership.blocked) {
-    // PRI-1282 P1-3: before resuming, arbitrate against a foreign live
-    // consumer lease — a sibling Gateway instance must not double-resume.
+    // A parked lifecycle may still own an in-flight cycle. Never release its
+    // liveness record or mint a replacement identity until that work settles.
+    if (state.inFlight !== null) {
+      logger.warn(`[PD:AutoConsumer] Ownership returned to legacy_owned but the previous cycle is still in flight for ${workspaceDir}; waiting before resume.`);
+      armOwnershipWatch(workspaceDir, state, logger);
+      return;
+    }
+    // PRI-1282 P1-3: arbitrate against a foreign live consumer before resume.
     const foreign = foreignConsumerLeaseStatus(workspaceDir, {
       selfToken: state.identity.token,
       selfInstanceId: state.identity.instanceId,
@@ -836,21 +852,25 @@ async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerStat
       armOwnershipWatch(workspaceDir, state, logger);
       return;
     }
+    // start() mints a NEW instance identity. Release this parked instance's
+    // exact writer first; otherwise the new identity sees our old live lease
+    // as foreign and can never resume after a transient lease-gate failure.
+    const released = clearGatewayConsumerLease(workspaceDir, state.identity.token, state.identity.instanceId);
+    if (!released.ok) {
+      logger.error(`[PD:AutoConsumer] Cannot release the parked consumer lease before resume for ${workspaceDir}: ${released.reason}; retrying ownership watch.`);
+      armOwnershipWatch(workspaceDir, state, logger);
+      return;
+    }
     state.quiescing = false;
     state.ackedOperation = null;
     SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RESUMED', JSON.stringify({
       reason: 'background_execution_state_legacy_owned',
     }));
     logger.info(`[PD:AutoConsumer] Resuming consumption for workspace: ${workspaceDir} (ownership returned to legacy_owned).`);
-    // Clear the fired watch handle and drop the parked state FIRST — the
-    // service's own idempotency check ("Already started") keys on a live
-    // timeoutId, so re-entering start() without this would silently no-op.
     if (state.timeoutId) clearTimeout(state.timeoutId);
     state.timeoutId = null;
-    state.stopped = true; // retire the parked entry; start() builds a fresh one
-    workspaceStates.delete(workspaceDir);
-    // Restart the normal chain through the service's public entry so the
-    // adaptive counters and the initial-delay semantics reset cleanly.
+    state.stopped = true;
+    if (workspaceStates.get(workspaceDir) === state) workspaceStates.delete(workspaceDir);
     InternalizationAutoConsumerService.start({
       config: undefined,
       workspaceDir,

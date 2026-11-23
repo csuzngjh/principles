@@ -177,18 +177,6 @@ export function readGatewayConsumerLease(workspaceDir: string): GatewayConsumerL
  * record be clobbered back to 'consuming' (lost update) — afterwards the
  * revived 'consuming' record blinds every resume check forever.
  */
-function writeGatewayConsumerLeaseLocked(input: {
-  workspaceDir: string;
-  token: string;
-  instanceId: string;
-  state: 'consuming' | 'quiesced';
-  now?: () => Date;
-  openGate?: (path: string) => ConsumerLeaseGateLike;
-}): { ok: true } | { ok: false; reason: string } {
-  const gated = withConsumerLeaseGate(input.workspaceDir, () => writeGatewayConsumerLeaseUngated(input), input.openGate);
-  return gated.ok ? gated.value : { ok: false, reason: gated.reason };
-}
-
 function writeGatewayConsumerLeaseUngated(input: {
   workspaceDir: string;
   token: string;
@@ -393,7 +381,7 @@ export function writeGatewayConsumerLease(input: {
 }): { ok: true } | { ok: false; reason: string } {
   const gated = withConsumerLeaseGate(
     input.workspaceDir,
-    () => writeGatewayConsumerLeaseLocked(input),
+    () => writeGatewayConsumerLeaseUngated(input),
     input.openGate,
   );
   return gated.ok ? gated.value : gated;
@@ -428,7 +416,8 @@ export function registerGatewayConsumerLease(input: {
       if (foreign !== 'none') {
         return { refused: foreign } as const;
       }
-      return writeGatewayConsumerLeaseLocked({
+      // Registration already owns the gate; use the ungated file mutator.
+      return writeGatewayConsumerLeaseUngated({
         workspaceDir: input.workspaceDir,
         token: input.token,
         instanceId: input.instanceId,
