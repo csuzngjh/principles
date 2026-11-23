@@ -1024,11 +1024,11 @@ describe('PRI-1284 — malformed budget flags are rejected at the real CLI bound
     const flagArgs = flag.includes('=') ? [flag] : [flag, bad];
     const label = flag.includes('=') ? flag : `${flag} ${bad}`;
     it(`ab-run.mjs rejects ${label}`, () => {
-      const res = runRepoScript(ENTRY_AB_RUN, ['--config', fx.writeConfig(), '--run-id', `bud-${label.replace(/[^a-z0-9]+/gi, '-')}`, '--shard-id', '0', ...flagArgs]);
+      const res = runRepoScript(ENTRY_AB_RUN, ['--config', fx.writeConfig(), '--run-id', `bud-${flagName.slice(2)}-${flag.includes('=') ? 'eq' : bad}`, '--shard-id', '0', ...flagArgs]);
       expectBudgetRejected('ab-run.mjs', flagName, res);
     });
     it(`ab-grid.mjs rejects ${label} (same contract, forwarded to shards)`, () => {
-      const res = runRepoScript(ENTRY_AB_GRID, ['--config', fx.writeConfig(), '--run-id', `budg-${label.replace(/[^a-z0-9]+/gi, '-')}`, ...flagArgs]);
+      const res = runRepoScript(ENTRY_AB_GRID, ['--config', fx.writeConfig(), '--run-id', `budg-${flagName.slice(2)}-${flag.includes('=') ? 'eq' : bad}`, ...flagArgs]);
       expectBudgetRejected('ab-grid.mjs', flagName, res);
     });
   }

@@ -149,16 +149,22 @@ const manifest = {
 // BEFORE the manifest is rewritten or any workspace/record side effect —
 // ab-metrics aggregates every record under the run id, so a mixed budget
 // would silently corrupt the comparison.
-if (fs.existsSync(manifestPath)) {
-  const priorBudget = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).budget;
-  if (priorBudget) {
-    for (const key of ['reps', 'formationDepth']) {
-      if (args[key] !== null && args[key] !== priorBudget[key]) {
-        console.error(`budget mismatch on resume: this run's manifest recorded ${key}=${priorBudget[key]}, invocation passed ${args[key]} — refusing to mix budgets under one run id; use a new --run-id for a different budget`);
-        process.exit(1);
-      }
-      if (args[key] === null) args[key] = priorBudget[key] ?? null;
+// (readFileSync directly — an existsSync check ahead of the read would be a
+// file-system race and would also break when the manifest appears between
+// the two calls; ENOENT simply means first write for this run id.)
+let priorBudget = null;
+try {
+  priorBudget = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).budget ?? null;
+} catch (err) {
+  if (err && err.code !== 'ENOENT') throw err;
+}
+if (priorBudget) {
+  for (const key of ['reps', 'formationDepth']) {
+    if (args[key] !== null && args[key] !== priorBudget[key]) {
+      console.error(`budget mismatch on resume: this run's manifest recorded ${key}=${priorBudget[key]}, invocation passed ${args[key]} — refusing to mix budgets under one run id; use a new --run-id for a different budget`);
+      process.exit(1);
     }
+    if (args[key] === null) args[key] = priorBudget[key] ?? null;
   }
 }
 manifest.budget = { reps: args.reps, formationDepth: args.formationDepth };

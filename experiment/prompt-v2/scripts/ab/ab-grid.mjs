@@ -113,18 +113,23 @@ const gridManifest = {
 // any shard launches, because completed records keep the old budget while
 // ab-metrics aggregates them all under one run id.
 const gridManifestPath = path.join(runDirPath, 'grid-manifest.json');
-if (fs.existsSync(gridManifestPath)) {
-  const priorBudget = JSON.parse(fs.readFileSync(gridManifestPath, 'utf8')).budget;
-  if (priorBudget) {
-    for (const key of ['reps', 'formationDepth']) {
-      const cur = key === 'reps' ? reps : formationDepth;
-      if (cur !== null && cur !== priorBudget[key]) {
-        console.error(`budget mismatch on resume: this run's grid manifest recorded ${key}=${priorBudget[key]}, invocation passed ${cur} — refusing to mix budgets under one run id; use a new --run-id for a different budget`);
-        process.exit(1);
-      }
-      if (cur === null && priorBudget[key] !== null && priorBudget[key] !== undefined) {
-        if (key === 'reps') reps = priorBudget[key]; else formationDepth = priorBudget[key];
-      }
+// (readFileSync directly — existsSync-then-read would be a file-system race;
+// ENOENT simply means this run id's first launch.)
+let priorBudget = null;
+try {
+  priorBudget = JSON.parse(fs.readFileSync(gridManifestPath, 'utf8')).budget ?? null;
+} catch (err) {
+  if (err && err.code !== 'ENOENT') throw err;
+}
+if (priorBudget) {
+  for (const key of ['reps', 'formationDepth']) {
+    const cur = key === 'reps' ? reps : formationDepth;
+    if (cur !== null && cur !== priorBudget[key]) {
+      console.error(`budget mismatch on resume: this run's grid manifest recorded ${key}=${priorBudget[key]}, invocation passed ${cur} — refusing to mix budgets under one run id; use a new --run-id for a different budget`);
+      process.exit(1);
+    }
+    if (cur === null && priorBudget[key] !== null && priorBudget[key] !== undefined) {
+      if (key === 'reps') reps = priorBudget[key]; else formationDepth = priorBudget[key];
     }
   }
 }
