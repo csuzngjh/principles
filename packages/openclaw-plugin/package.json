@@ -92,7 +92,7 @@
     "@typescript-eslint/parser": "^8.72.2",
     "@vitest/coverage-v8": "^5.0.0",
     "esbuild": "^0.28.2",
-    "eslint": "^10.8.1",
+    "eslint": "^10.15.0",
     "jsdom": "^31.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.6",
