@@ -603,7 +603,18 @@ function resolvePackageDir(name: string, fromDir: string): string {
 function copyExecutorDependencyClosure(sourcePackageDir: string, stagingDir: string): void {
   const stagedModulesDir = path.join(stagingDir, 'node_modules');
   const manifest = JSON.parse(readFileSync(path.join(sourcePackageDir, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
-  const seen = new Set<string>();
+  // Two separate dedup keys, because they guard different things:
+  // - `copied` dedups the FLAT staged name (first resolution wins, mirroring
+  //   the npm hoisted winner at top level).
+  // - `expanded` dedups by RESOLVED package root, so every distinct version
+  //   still gets its dependency list walked. Name-only dedup here dropped
+  //   transitive deps of version-conflicted packages: minimatch resolved to
+  //   the hoisted copy first, so the tuf-js-nested minimatch's own deps
+  //   (@isaacs/nonrecursive-glob-match) were never staged, while the
+  //   wholesale cpSync still carried that nested copy into tuf-js — where
+  //   its require then failed (PR #2767 CI).
+  const copied = new Set<string>();
+  const expanded = new Set<string>();
   // Each queued dependency resolves from the package that DECLARES it —
   // nested/deduped layouts mean chownr resolves from tar, not from the
   // installer package root. The directory walk mirrors Node's own
@@ -611,13 +622,16 @@ function copyExecutorDependencyClosure(sourcePackageDir: string, stagingDir: str
   const queue: { name: string; fromDir: string }[] = Object.keys(manifest.dependencies ?? {}).map((name) => ({ name, fromDir: sourcePackageDir }));
   while (queue.length > 0) {
     const item = queue.shift() as { name: string; fromDir: string };
-    if (seen.has(item.name)) continue;
-    seen.add(item.name);
     const packageRoot = resolvePackageDir(item.name, item.fromDir);
-    cpSync(packageRoot, path.join(stagedModulesDir, item.name), { recursive: true, dereference: true });
+    if (expanded.has(packageRoot)) continue;
+    expanded.add(packageRoot);
+    if (!copied.has(item.name)) {
+      copied.add(item.name);
+      cpSync(packageRoot, path.join(stagedModulesDir, item.name), { recursive: true, dereference: true });
+    }
     const dependencyManifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
     for (const dependencyName of Object.keys(dependencyManifest.dependencies ?? {})) {
-      if (!seen.has(dependencyName)) queue.push({ name: dependencyName, fromDir: packageRoot });
+      queue.push({ name: dependencyName, fromDir: packageRoot });
     }
   }
 }

@@ -156,4 +156,41 @@ describe('deliverBootstrapExecutor convergence from the payload', () => {
     const executorManifest = JSON.parse(fs.readFileSync(executorManifestPath(), 'utf8')) as { version: string };
     expect(executorManifest.version).toBe('9.9.10');
   });
+
+  it('stages transitive deps of a version-conflicted package (minimatch-11 under tuf-js)', async () => {
+    // PR #2767 CI regression: tuf-js 6.0.3 nests minimatch 11 under
+    // tuf-js/node_modules while another consumer keeps a hoisted minimatch 9.
+    // Name-only dedup resolved 'minimatch' once and never walked the nested
+    // copy's own deps, so @isaacs/nonrecursive-glob-match was missing from
+    // the staged executor while the wholesale cpSync still carried the
+    // nested minimatch inside dep-tuf — its require failed there.
+    const src = fs.mkdtempSync(path.join(fixtureRoot, 'src-pkg-'));
+    writeInstallerPackage(src, '9.9.9');
+    const manifest = JSON.parse(fs.readFileSync(path.join(src, 'package.json'), 'utf8')) as { dependencies: Record<string, string> };
+    manifest.dependencies = { 'dep-a': '1.0.0', 'dep-tuf': '1.0.0' };
+    fs.writeFileSync(path.join(src, 'package.json'), JSON.stringify(manifest));
+
+    const writePkg = (rel: string, deps: Record<string, string>, version = '1.0.0'): void => {
+      const dir = path.join(src, 'node_modules', rel);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: rel.split('/').pop(), version, dependencies: deps }));
+    };
+    writePkg('dep-a', { minimatch: '^9.0.0' });
+    writePkg('minimatch', {}, '9.0.9');
+    writePkg('dep-tuf', { '@scope/models': '5.0.3' });
+    writePkg('dep-tuf/node_modules/@scope/models', { minimatch: '^11.0.0' }, '5.0.3');
+    writePkg('dep-tuf/node_modules/minimatch', { '@isaacs/nonrecursive-glob-match': '^1.1.0' }, '11.0.9');
+    writePkg('@isaacs/nonrecursive-glob-match', {}, '1.1.0');
+
+    const delivered = await deliverBootstrapExecutor({ pdHome, sourcePackageDir: src });
+
+    const stagedModules = path.join(delivered.executorDir, 'node_modules');
+    // The transitive dep of the SECOND minimatch version must still be staged.
+    expect(fs.existsSync(path.join(stagedModules, '@isaacs', 'nonrecursive-glob-match', 'package.json'))).toBe(true);
+    // The nested copy travels wholesale inside its parent, and the flat
+    // top-level slot keeps the first-resolved version.
+    expect(fs.existsSync(path.join(stagedModules, 'dep-tuf', 'node_modules', 'minimatch', 'package.json'))).toBe(true);
+    const flatMinimatch = JSON.parse(fs.readFileSync(path.join(stagedModules, 'minimatch', 'package.json'), 'utf8')) as { version: string };
+    expect(flatMinimatch.version).toBe('9.0.9');
+  });
 });
