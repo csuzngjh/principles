@@ -1398,18 +1398,54 @@ const INSTALL_STEPS: InstallStep[] = [
 
 const TOTAL_WEIGHT = INSTALL_STEPS.reduce((sum, step) => sum + step.weight, 0);
 
-function updateProgress(spinner: Ora | null, currentStep: number, message: string): void {
+/** The installer's weighted completion at a step; null outside the step table. */
+function installPercent(currentStep: number): number | null {
+  if (currentStep < 0 || currentStep >= INSTALL_STEPS.length) return null;
+  const completedWeight = INSTALL_STEPS.slice(0, currentStep + 1).reduce((sum, step) => sum + step.weight, 0);
+  return Math.round((completedWeight / TOTAL_WEIGHT) * 100);
+}
+
+/**
+ * What the installer needs from its status line: the current step, and the
+ * three ways a run can end. The interactive spinner satisfies it, and so does
+ * the relay that narrates a quiet run to another surface.
+ */
+interface ProgressSurface {
+  /** One step: its label, and the weighted completion (null when unknown). */
+  report(message: string, percent: number | null): void;
+  succeed(message?: string): void;
+  warn(message?: string): void;
+  fail(message?: string): void;
+}
+
+function terminalProgressSurface(spinner: Ora): ProgressSurface {
+  return {
+    report: (message, percent) => { spinner.text = percent === null ? message : `${message} (${percent}%)`; },
+    succeed: (message) => { spinner.succeed(message); },
+    warn: (message) => { spinner.warn(message); },
+    fail: (message) => { spinner.fail(message); },
+  };
+}
+
+/**
+ * Status line for a run nobody is watching in a terminal: every step is
+ * handed to the caller exactly as the spinner would have shown it. The three
+ * terminal markers print nothing — the result of the run travels in its
+ * return value.
+ */
+function narratedProgress(onStep: NonNullable<InstallRunMode['onProgress']>): ProgressSurface {
+  return {
+    report: (message, percent) => { onStep({ message, percent }); },
+    succeed: () => { /* narrated by the result, not by a terminal line */ },
+    warn: () => { /* same */ },
+    fail: () => { /* same */ },
+  };
+}
+
+function updateProgress(spinner: ProgressSurface | null, currentStep: number, message: string): void {
   if (!spinner) return;
 
-  if (currentStep < 0 || currentStep >= INSTALL_STEPS.length) {
-    spinner.text = message;
-    return;
-  }
-
-  const completedWeight = INSTALL_STEPS.slice(0, currentStep + 1).reduce((sum, s) => sum + s.weight, 0);
-  const percent = Math.round((completedWeight / TOTAL_WEIGHT) * 100);
-
-  spinner.text = `${message} (${percent}%)`;
+  spinner.report(message, installPercent(currentStep));
 }
 
 interface BackupResult {
@@ -5527,6 +5563,22 @@ export interface InstallRunMode {
   quiet?: boolean;
   /** No interactive prompts. True under --yes / --non-interactive / --json. */
   nonInteractive?: boolean;
+  /**
+   * Narration for a quiet run that someone is watching through another
+   * surface (the detached update executor feeds it to the Console's progress
+   * view): every installer step with the same weighted completion the spinner
+   * would print. Consulted only when `quiet` — a terminal shows its own line.
+   */
+  onProgress?: (progress: { readonly message: string; readonly percent: number | null }) => void;
+  /**
+   * Start the Console once the install has succeeded. The default keeps the
+   * first-install behavior (the console opens in the browser, on the welcome
+   * page). An update turns it off: the Owner is already looking at a console,
+   * which becomes the new release by handing itself over — a second console
+   * would only leave the first one serving the old version from the old tab.
+   * With no console running, the result says how to start one.
+   */
+  launchConsole?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -5958,7 +6010,12 @@ export async function install(
     }
   }
 
-  const spinner = quiet ? null : ora('Installing...').start();
+  // A terminal gets the spinner. A quiet run that asked to be narrated gets
+  // the relay instead of `null`, so every `if (spinner)` step report still
+  // flows somewhere; a quiet run that did not stays silent as before.
+  const spinner: ProgressSurface | null = quiet
+    ? (mode.onProgress === undefined ? null : narratedProgress(mode.onProgress))
+    : terminalProgressSurface(ora('Installing...').start());
   let backupDir: string | null = null;
   let runtimeBackupDir: string | null = null;
   // ADR-0024 D-2: non-null once the transaction is planned (first mutation is imminent).
@@ -6665,12 +6722,17 @@ export async function install(
     await killConsoleChild();
 
     // Task 8: auto-launch console via `pd console open` (reuses PRI-300
-    // handleConsoleOpen — no new launcher subsystem). Opens the browser to
-    // /welcome for onboarding. Detached so the console survives installer exit.
+    // handleConsoleOpen — no new launcher subsystem). A fresh install opens
+    // the browser on /welcome for onboarding. An update launches nothing: the
+    // console the update was started from hands itself over to the new
+    // release, and `pd console open` beside it would only add a second one.
+    // Detached so the console survives installer exit.
     // WorkBuddy remediation: the console manages the GOVERNANCE workspace for
     // this host — the directory hook/worker read — never the project dir.
     const consoleWorkspaceDir = resolveConsoleWorkspaceDir(activeHostTarget, options.workspaceDir, getHomeDir());
-    const launchResult = await autoLaunchConsole(consoleWorkspaceDir);
+    const launchResult = mode.launchConsole === false
+      ? { manualOpenCommand: `pd console open --workspace "${consoleWorkspaceDir}"`, consoleUrl: undefined, fallbackAction: undefined }
+      : await autoLaunchConsole(consoleWorkspaceDir);
 
     // PRI-645: report the ACTUAL effective channels (registry default +
     // sparse override). Never mask an explicit Owner disable with the
@@ -6704,7 +6766,8 @@ export async function install(
         // Console auto-launched — point user at the live URL.
         nextActions.push(`Console ready at ${launchResult.consoleUrl} (browser opened automatically)`);
       } else {
-        // EP-03: auto-launch did not succeed — keep manual start instruction.
+        // EP-03: auto-launch did not succeed (or, for an update, was not asked
+        // for) — keep the manual start instruction.
         nextActions.push(`${launchResult.manualOpenCommand} (listens on 127.0.0.1 only)`);
       }
     }

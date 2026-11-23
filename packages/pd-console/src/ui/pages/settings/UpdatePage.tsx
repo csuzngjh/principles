@@ -7,7 +7,7 @@
  *
  * Privacy boundary: version strings and timestamps only — no session/path data.
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -27,8 +27,9 @@ import type {
   UpdateHistoryEntry,
   ApplyUpdateResultData,
   UpdateRecoveryData,
+  UpdateTransactionProgress,
 } from "../../api.js";
-import { validateUpdateStatus, validateUpdateHistory, validateUpdateHistoryPruneResult, validateUpdateRecovery, validateUpdateTransaction } from "../../utils/validators.js";
+import { validateUpdateStatus, validateUpdateHistory, validateUpdateHistoryPruneResult, validateUpdateRecovery, validateUpdateTransaction, type UpdateHandoverOwner } from "../../utils/validators.js";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -39,8 +40,18 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "../../components/ui/alert-dialog.js";
-import { Loader2, CheckCircle2, XCircle, ArrowRight, AlertTriangle } from "lucide-react";
+import { TechnicalDetails, TechnicalRow } from "../../components/ui/technical-details.js";
+import { Loader2, CheckCircle2, XCircle, ArrowRight, AlertTriangle, Check } from "lucide-react";
 import { formatDate } from "../../utils/format-date.js";
+import { reloadPage } from "../../utils/page-reload.js";
+import {
+  UPDATE_STAGES,
+  describeUpdateProgress,
+  formatBytes,
+  formatElapsed,
+  type TransferSample,
+  type UpdateStage,
+} from "./update-progress.js";
 
 // ── Main page component ──────────────────────────────────────────────────────
 
@@ -51,6 +62,92 @@ type LoadingState = "loading" | "loaded";
 // next tick simply asks again).
 const TRANSACTION_POLL_INTERVAL_MS = 3_000;
 const TRANSACTION_POLL_TIMEOUT_MS = 15_000;
+
+// Consecutive polls that could not read the transaction before the page stops
+// asking on its own. Ten minutes without one answer means the console is gone
+// or the record was never written — it says nothing about how long a healthy
+// update may take, which is why this counts failures and not elapsed time.
+const TRANSACTION_UNREADABLE_POLL_CEILING = 200;
+
+// After a confirmed update the console process has to become the new release
+// before this page can show it. Who does that is the server's `handover`:
+// the console itself (it starts a successor and exits), the Companion (it
+// relaunches the console it owns), or nobody (a restart by hand). The page
+// looks for the process that replaces the one it started on and reloads into
+// it; if none comes within the owner's budget, the console still runs the
+// previous release and the Owner is told to restart it.
+const HANDOVER_POLL_INTERVAL_MS = 1_000;
+const HANDOVER_POLL_TIMEOUT_MS = 8_000;
+/** The console's own handover takes seconds; its wait for a successor that never answers is bounded well inside this. */
+const HANDOVER_POLL_LIMIT = 30;
+/** The Companion notices an update on its own 30-second beat, then relaunches the console. */
+const COMPANION_HANDOVER_POLL_LIMIT = 90;
+/** Nobody switches on their own: only a restart by hand can change the process, so look rarely, and not forever. */
+const MANUAL_HANDOVER_POLL_INTERVAL_MS = 3_000;
+const MANUAL_HANDOVER_POLL_LIMIT = 100;
+
+// The elapsed clock ticks locally — the transaction itself is asked for at
+// its own, slower cadence.
+const ELAPSED_TICK_MS = 1_000;
+
+const STAGE_LABEL_KEYS: Readonly<Record<UpdateStage, string>> = {
+  download: "pages.update.stage.download",
+  verify: "pages.update.stage.verify",
+  deploy: "pages.update.stage.deploy",
+  finalize: "pages.update.stage.finalize",
+};
+const STAGE_TITLE_KEYS: Readonly<Record<UpdateStage, string>> = {
+  download: "pages.update.stageTitle.download",
+  verify: "pages.update.stageTitle.verify",
+  deploy: "pages.update.stageTitle.deploy",
+  finalize: "pages.update.stageTitle.finalize",
+};
+const STAGE_HINT_KEYS: Readonly<Record<UpdateStage, string>> = {
+  download: "pages.update.stageHint.download",
+  verify: "pages.update.stageHint.verify",
+  deploy: "pages.update.stageHint.deploy",
+  finalize: "pages.update.stageHint.finalize",
+};
+const HANDOVER_TITLE_KEYS: Readonly<Record<Exclude<UpdateHandoverOwner, "manual">, string>> = {
+  console: "pages.update.switchingTitle",
+  companion: "pages.update.switchingCompanionTitle",
+};
+const HANDOVER_HINT_KEYS: Readonly<Record<Exclude<UpdateHandoverOwner, "manual">, string>> = {
+  console: "pages.update.switchingHint",
+  companion: "pages.update.switchingCompanionHint",
+};
+
+/** A running update as the page last read it. */
+interface InProgressUpdate {
+  readonly transactionId: string;
+  readonly lastState: string | null;
+  readonly startedAt: string | null;
+  readonly lastAt: string | null;
+  readonly progress: UpdateTransactionProgress | null;
+  /** The console process answering; undefined until a poll reports one. */
+  readonly serverPid: number | undefined;
+  /** Who will switch that process to the new release; undefined until a poll says. */
+  readonly handover: UpdateHandoverOwner | undefined;
+  /** Consecutive polls that could not read the transaction. */
+  readonly unreadablePolls: number;
+  /** The previous download sample; a transfer rate is measured from it. */
+  readonly transferFrom: TransferSample | null;
+}
+
+/**
+ * A confirmed update, waiting for the console process to become the new
+ * release. `owner` is `'manual'` when nobody will do it: the page has already
+ * asked for a restart and only keeps looking, so a tab follows the Owner's
+ * restart instead of staying on the old version.
+ */
+interface HandoverWait {
+  readonly transactionId: string;
+  readonly version: string;
+  readonly predecessorPid: number | undefined;
+  readonly owner: UpdateHandoverOwner;
+  readonly pollMs: number;
+  readonly limit: number;
+}
 
 // SPEC-PD-UIUX-002 §7: a wait that outlives a few seconds without explanation
 // reads as "broken". The first-paint skeleton says so through PageLoading; the
@@ -121,7 +218,15 @@ export function UpdatePage() {
   const [recoveryData, setRecoveryData] = useState<UpdateRecoveryData | null>(null);
   // PRI-853 (SPEC §12.1): a running detached update — the page tracks its
   // transaction instead of treating the accepted request as "success".
-  const [inProgress, setInProgress] = useState<{ transactionId: string; phase: string | null } | null>(null);
+  const [inProgress, setInProgress] = useState<InProgressUpdate | null>(null);
+  /** False once polling gave up on its own (nothing readable for too long); the Owner restarts it by hand. */
+  const [polling, setPolling] = useState(false);
+  /** A confirmed update, waiting for the console process to become the new release (see HandoverWait). */
+  const [handoverWait, setHandoverWait] = useState<HandoverWait | null>(null);
+  /** The page's clock while an update runs; the elapsed time must move even between polls. */
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  /** The previous download sample: a rate needs two points in time. */
+  const previousTransfer = useRef<TransferSample | null>(null);
 
   // History and recovery are read from local files. They gate only the first
   // paint of the page.
@@ -214,7 +319,14 @@ export function UpdatePage() {
     if (data.state === 'update_in_progress' && data.transactionId) {
       // PRI-853 (SPEC §12.1): an ACCEPTED request is not a completed update.
       // Track the detached transaction; only its terminal phase ends this flow.
-      setInProgress({ transactionId: data.transactionId, phase: null });
+      setHandoverWait(null);
+      previousTransfer.current = null;
+      setInProgress({
+        transactionId: data.transactionId,
+        lastState: null, startedAt: null, lastAt: null, progress: null,
+        serverPid: undefined, handover: undefined, unreadablePolls: 0, transferFrom: null,
+      });
+      setPolling(true);
       toast.info(t('pages.update.inProgressToast'));
       return;
     }
@@ -242,6 +354,18 @@ export function UpdatePage() {
     }
   }, [t, reloadAfterUpdate, statusData?.currentVersion]);
 
+  // The update is on disk, but the console answering this page is still the
+  // release it started as. Say so — and drop the status on screen, which
+  // described that older installation.
+  const showRestartRequired = useCallback(async (version: string): Promise<void> => {
+    setUpdateResult({
+      success: true,
+      message: t('pages.update.inProgressConfirmed', { version }),
+      requiresRestart: true,
+    });
+    if (!(await reloadAfterUpdate())) toast.error(t("pages.update.checkFailed"));
+  }, [t, reloadAfterUpdate]);
+
   // Owner history cleanup: keep the newest COLLAPSED_HISTORY_LIMIT entries,
   // delete the rest. The server reports the row accounting; the toast surfaces
   // the removed count so the destructive outcome is never silent (rc-9).
@@ -264,39 +388,93 @@ export function UpdatePage() {
     if (!(await loadData())) toast.error(t("pages.update.checkFailed"));
   }, [t, loadData]);
 
-  // PRI-853: poll the detached update's transaction until a terminal phase.
+  // The page's clock: while an update runs the elapsed time moves every
+  // second, which is what tells the Owner a quiet stage is still alive.
+  const updateRunning = inProgress !== null;
   useEffect(() => {
-    if (!inProgress) return;
+    if (!updateRunning) return;
+    const timer = setInterval(() => setNowMs(Date.now()), ELAPSED_TICK_MS);
+    return () => clearInterval(timer);
+  }, [updateRunning]);
+
+  // PRI-853: poll the detached update's transaction until a terminal phase.
+  // The loop is keyed to the transaction id alone: every poll replaces the
+  // `inProgress` object, and restarting on each of those would reset its
+  // bookkeeping — and poll again the instant an answer arrived.
+  const trackedTransactionId = inProgress?.transactionId ?? null;
+  useEffect(() => {
+    if (trackedTransactionId === null || !polling) return;
+    const transactionId = trackedTransactionId;
     let cancelled = false;
     let inFlight = false;
-    let attempts = 0;
+    let unreadablePolls = 0;
+    /** The console process this update was first seen served by — the one a handover replaces. */
+    let predecessorPid: number | undefined;
     const tick = async () => {
       // One poll at a time. A tick that finds its predecessor still waiting is
       // skipped, so a slow or stalled server can never stack requests behind
       // each other and starve everything else the page asks for.
       if (cancelled || inFlight) return;
       inFlight = true;
-      attempts += 1;
       try {
-        const result = await fetchUpdateTransaction(inProgress.transactionId, TRANSACTION_POLL_TIMEOUT_MS);
+        const result = await fetchUpdateTransaction(transactionId, TRANSACTION_POLL_TIMEOUT_MS);
         if (cancelled) return;
         const tx = result.success ? validateUpdateTransaction(result.data) : null;
         if (tx === null || !tx.exists) {
-          if (attempts >= 200) {
-            setInProgress(null);
-            setUpdateResult({ success: false, message: t('pages.update.inProgressTimeout'), reason: 'transaction_unresolved' });
+          // Unreadable. The usual cause is the console restarting (connection
+          // refused for a moment); a long run of these is a console that is
+          // gone. Neither is a verdict on the update, so the page keeps what
+          // it last knew and only says that it lost contact.
+          unreadablePolls += 1;
+          if (unreadablePolls >= TRANSACTION_UNREADABLE_POLL_CEILING) {
+            setPolling(false);
+            return;
           }
+          const lostContactPolls = unreadablePolls;
+          setInProgress((current) => (current === null || current.transactionId !== transactionId
+            ? current
+            : { ...current, unreadablePolls: lostContactPolls }));
           return;
         }
-        setInProgress({ transactionId: inProgress.transactionId, phase: tx.lastState });
+        unreadablePolls = 0;
+        predecessorPid ??= tx.serverPid;
+        // A rate needs two samples in time: this poll against the previous one.
+        const received = tx.progress?.bytesReceived;
+        const previousSample = previousTransfer.current;
+        const transferFrom = received !== undefined && previousSample !== null && previousSample.bytes !== received
+          ? previousSample
+          : null;
+        previousTransfer.current = received === undefined ? null : { atMs: Date.now(), bytes: received };
+        setInProgress({
+          transactionId,
+          lastState: tx.lastState,
+          startedAt: tx.startedAt ?? null,
+          lastAt: tx.lastAt ?? null,
+          progress: tx.progress ?? null,
+          serverPid: tx.serverPid,
+          handover: tx.handover,
+          unreadablePolls: 0,
+          transferFrom,
+        });
         if (!tx.terminal) return;
+        setPolling(false);
         setInProgress(null);
         if (tx.lastState === 'confirmed') {
-          setUpdateResult({ success: true, message: t('pages.update.inProgressConfirmed', { version: tx.productVersion ?? '' }), requiresRestart: true });
           toast.success(t('pages.update.fullUpdateSuccess'));
-        } else {
-          setUpdateResult({ success: false, message: t('pages.update.inProgressEnded', { state: tx.lastState ?? '' }) });
+          const version = tx.productVersion ?? '';
+          // A server that does not say (`handover` absent) is not waited for.
+          const owner = tx.handover ?? 'manual';
+          setHandoverWait(owner === 'manual'
+            ? { transactionId, version, predecessorPid, owner, pollMs: MANUAL_HANDOVER_POLL_INTERVAL_MS, limit: MANUAL_HANDOVER_POLL_LIMIT }
+            : {
+                transactionId, version, predecessorPid, owner,
+                pollMs: HANDOVER_POLL_INTERVAL_MS,
+                limit: owner === 'companion' ? COMPANION_HANDOVER_POLL_LIMIT : HANDOVER_POLL_LIMIT,
+              });
+          if (owner === 'manual') await showRestartRequired(version);
+          return;
         }
+        setUpdateResult({ success: false, message: t('pages.update.inProgressEnded', { state: tx.lastState ?? '' }) });
         if (!(await reloadAfterUpdate())) toast.error(t("pages.update.checkFailed"));
       } finally {
         inFlight = false;
@@ -305,7 +483,51 @@ export function UpdatePage() {
     const timer = setInterval(() => void tick(), TRANSACTION_POLL_INTERVAL_MS);
     void tick();
     return () => { cancelled = true; clearInterval(timer); };
-  }, [inProgress?.transactionId, t, reloadAfterUpdate]);
+  }, [trackedTransactionId, polling, t, reloadAfterUpdate, showRestartRequired]);
+
+  // Release handover: the confirmed update replaces the console process under
+  // this page with one on the new release. Reload the moment a different
+  // process answers for the same transaction — that is the new version, on
+  // the same URL. If none comes within the owner's budget (see HandoverWait),
+  // the console still runs the previous version and restarting it is the
+  // Owner's to do; the page says so instead of waiting forever.
+  const handoverTarget = handoverWait;
+  useEffect(() => {
+    if (!handoverTarget) return;
+    const { transactionId, version, predecessorPid, owner, pollMs, limit } = handoverTarget;
+    let cancelled = false;
+    let inFlight = false;
+    let polls = 0;
+    const tick = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        polls += 1;
+        if (polls > limit) {
+          cancelled = true;
+          clearInterval(timer);
+          setHandoverWait(null);
+          // When nobody was going to switch, the restart was asked for up front — nothing new to say.
+          if (owner !== 'manual') await showRestartRequired(version);
+          return;
+        }
+        // A failed request is expected here: the predecessor has stopped
+        // accepting and the successor is still booting. Just look again.
+        const result = await fetchUpdateTransaction(transactionId, HANDOVER_POLL_TIMEOUT_MS);
+        if (cancelled) return;
+        const tx = result.success ? validateUpdateTransaction(result.data) : null;
+        if (tx !== null && tx.exists && tx.serverPid !== undefined && tx.serverPid !== predecessorPid) {
+          cancelled = true;
+          reloadPage();
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    const timer = setInterval(() => void tick(), pollMs);
+    void tick();
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [handoverTarget, showRestartRequired]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   // First paint only: history and recovery are local reads. The version check
@@ -343,6 +565,44 @@ export function UpdatePage() {
   const sortedHistory = historyData ? sortHistoryDesc(historyData.updates) : [];
   const visibleHistory = showAllHistory ? sortedHistory : sortedHistory.slice(0, COLLAPSED_HISTORY_LIMIT);
   const hiddenHistoryCount = Math.max(0, sortedHistory.length - COLLAPSED_HISTORY_LIMIT);
+
+  // What the in-flight panel says. Everything the Owner reads here comes from
+  // the journal state, the installer's progress observation and the clock —
+  // never from the raw state names.
+  const running = inProgress;
+  const progressView = running
+    ? describeUpdateProgress({
+        lastState: running.lastState,
+        startedAt: running.startedAt,
+        lastAt: running.lastAt,
+        progress: running.progress,
+        nowMs,
+        transferFrom: running.transferFrom,
+      })
+    : null;
+  const progressDetail: string | null = (() => {
+    if (progressView === null || progressView.stage === null) return null;
+    // Contact lost on the last poll: that is the news, ahead of any figure.
+    if (running !== null && running.unreadablePolls > 0) return t("pages.update.reconnecting");
+    const { bytes } = progressView;
+    if (bytes === null) return t(STAGE_HINT_KEYS[progressView.stage]);
+    const parts = [t("pages.update.downloadReceived", {
+      received: formatBytes(bytes.received),
+      total: formatBytes(bytes.total),
+    })];
+    if (bytes.perSecond !== null) parts.push(t("pages.update.downloadRate", { rate: formatBytes(bytes.perSecond) }));
+    if (bytes.remainingMs !== null) parts.push(t("pages.update.downloadRemaining", { time: formatElapsed(bytes.remainingMs) }));
+    return parts.join(" · ");
+  })();
+  // The handover panel is shown only while someone is really switching the
+  // console; a restart by hand is already on screen as the result card.
+  const handoverPanel = handoverWait !== null && handoverWait.owner !== 'manual'
+    ? { ...handoverWait, owner: handoverWait.owner }
+    : null;
+  // "This page switches on its own" is a promise only the server's `handover` can keep.
+  const backgroundNote = running?.handover === 'manual'
+    ? t("pages.update.backgroundNoteRestart")
+    : t("pages.update.backgroundNote");
 
   return (
     <PageShell width="table">
@@ -494,18 +754,110 @@ export function UpdatePage() {
             </p>
           )}
 
-          {/* PRI-853: in-progress panel — the accepted detached transaction is
-              the live state; phases stream from the transaction endpoint. */}
-          {inProgress && (
-            <div className="mt-4 p-4 rounded-[6px] border border-gov/30 bg-surface text-body leading-relaxed" role="status">
+          {/* Update in flight: what is happening, how long it has taken, and
+              that nobody has to sit here for it. The journal's own state names
+              and the installer's step stay with the other technical facts,
+              collapsed — they never set the tone of the reading path. */}
+          {handoverPanel && (
+            <div className="mt-4 p-4 rounded-[6px] border border-gov/30 bg-surface text-body leading-relaxed" role="status" data-testid="update-switching" data-handover={handoverPanel.owner}>
               <div className="flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin text-gov" />
-                <span className="font-medium text-ink">{t("pages.update.inProgressPanel")}</span>
+                <span className="font-medium text-ink">{t(HANDOVER_TITLE_KEYS[handoverPanel.owner])}</span>
               </div>
-              <p className="mt-1 font-mono text-[12px] text-ink-3">
-                {t("pages.update.inProgressPhase", { phase: inProgress.phase ?? "…" })}
-              </p>
-              <p className="mt-1 font-mono text-[12px] text-ink-4">{inProgress.transactionId}</p>
+              <p className="mt-2 text-[12px] text-ink-3">{t(HANDOVER_HINT_KEYS[handoverPanel.owner])}</p>
+            </div>
+          )}
+
+          {inProgress && !handoverPanel && (
+            <div className="mt-4 p-4 rounded-[6px] border border-gov/30 bg-surface text-body leading-relaxed" data-testid="update-progress-panel">
+              {!polling ? (
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 mt-[3px] shrink-0 text-amber" />
+                    <p className="text-ink-2" aria-live="polite" data-testid="update-progress-unavailable">{t("pages.update.inProgressTimeout")}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPolling(true)}
+                    className="shrink-0 text-[12px] text-gov underline hover:text-gov/80 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                  >
+                    {t("pages.update.retryProgress")}
+                  </button>
+                </div>
+              ) : progressView === null || progressView.stage === null ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-gov" />
+                    <span className="font-medium text-ink">{t("pages.update.inProgressPanel")}</span>
+                  </div>
+                  <p className="mt-2 text-[12px] text-ink-3" aria-live="polite">{t("pages.update.progressPending")}</p>
+                  <p className="mt-3 text-[12px] text-ink-4">{backgroundNote}</p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2" aria-live="polite">
+                      <Loader2 className="h-4 w-4 animate-spin text-gov" />
+                      <span className="font-medium text-ink" data-testid="update-progress-stage">{t(STAGE_TITLE_KEYS[progressView.stage])}</span>
+                    </div>
+                    <span className="font-mono text-[12px] text-ink-4 tabular-nums whitespace-nowrap" data-testid="update-progress-elapsed">
+                      {t("pages.update.elapsed", { time: formatElapsed(progressView.elapsedMs) })}
+                    </span>
+                  </div>
+
+                  <ol className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]" data-testid="update-progress-stages">
+                    {UPDATE_STAGES.map((stage, index) => {
+                      const position = index < progressView.stageIndex ? 'done' : index === progressView.stageIndex ? 'current' : 'todo';
+                      return (
+                        <li key={stage} className="flex items-center gap-2" data-stage={stage} data-position={position}>
+                          <span className={`inline-flex h-4 w-4 items-center justify-center ${position === 'done' ? 'text-green' : position === 'current' ? 'text-gov' : 'text-ink-4/60'}`}>
+                            {position === 'done'
+                              ? <Check className="h-3.5 w-3.5" />
+                              : position === 'current'
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+                          </span>
+                          <span className={position === 'current' ? 'font-medium text-ink' : position === 'done' ? 'text-ink-3' : 'text-ink-4'}>
+                            {t(STAGE_LABEL_KEYS[stage])}
+                          </span>
+                          {index < UPDATE_STAGES.length - 1 && <span aria-hidden="true" className="h-px w-4 bg-line" />}
+                        </li>
+                      );
+                    })}
+                  </ol>
+
+                  {progressView.percent !== null ? (
+                    <div className="mt-3 flex items-center gap-3">
+                      <div
+                        className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={progressView.percent}
+                        aria-label={t(STAGE_TITLE_KEYS[progressView.stage])}
+                      >
+                        <div className="h-full rounded-full bg-gov transition-[width] duration-500" style={{ width: `${progressView.percent}%` }} />
+                      </div>
+                      <span className="font-mono text-[12px] text-ink-3 tabular-nums" data-testid="update-progress-percent">{progressView.percent}%</span>
+                    </div>
+                  ) : (
+                    <div className="mt-3 h-1.5 bg-muted rounded-full overflow-hidden" aria-hidden="true">
+                      <div className="h-full w-1/3 rounded-full bg-gov/60 animate-pulse" />
+                    </div>
+                  )}
+
+                  {progressDetail !== null && (
+                    <p className="mt-2 text-[12px] text-ink-3 tabular-nums" data-testid="update-progress-detail">{progressDetail}</p>
+                  )}
+
+                  <p className="mt-3 text-[12px] text-ink-4">{backgroundNote}</p>
+
+                  <TechnicalDetails>
+                    <TechnicalRow label={t("pages.update.stepLabel")} value={progressView.step ?? "—"} />
+                    <TechnicalRow label="transaction" value={inProgress.transactionId} />
+                  </TechnicalDetails>
+                </>
+              )}
             </div>
           )}
 
@@ -514,7 +866,7 @@ export function UpdatePage() {
             <button
               type="button"
               onClick={handleCheckForUpdates}
-              disabled={checking || fullUpdating || inProgress !== null}
+              disabled={checking || fullUpdating || inProgress !== null || handoverPanel !== null}
               className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {checking ? t("pages.update.checking") : t("pages.update.checkForUpdates")}
@@ -523,7 +875,7 @@ export function UpdatePage() {
               <button
                 type="button"
                 onClick={() => setShowFullUpdateDialog(true)}
-                disabled={checking || fullUpdating || inProgress !== null}
+                disabled={checking || fullUpdating || inProgress !== null || handoverPanel !== null}
                 className="bg-gov text-white rounded-[3px] px-[14px] py-[6px] text-caption hover:bg-gov/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {fullUpdating ? (

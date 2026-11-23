@@ -1826,6 +1826,7 @@ export type {
   UpdateHistoryPruneResultData,
   ApplyUpdateResultData,
   UpdateRecoveryData,
+  UpdateTransactionProgress,
   ApprovalRecordData,
   PrinciplesListData,
   CorePrinciplesData,

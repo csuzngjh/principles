@@ -140,6 +140,11 @@ export interface DownloadReleaseAssetOptions {
   readonly channel: ReleaseChannelName;
   /** Transaction the acquisition is journaled under; scopes the staging dir. */
   readonly transactionId: string;
+  /**
+   * Narration for the url branch: bytes received so far, and the total when the
+   * signed metadata declares one. The legacy TUF branch reports no byte counts.
+   */
+  readonly onProgress?: (receivedBytes: number, totalBytes: number | undefined) => void;
 }
 
 export interface DownloadedReleaseAsset {
@@ -196,6 +201,39 @@ function isRedirectStatus(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
+/**
+ * Reads a response body while counting it, so a download that takes minutes
+ * can be narrated instead of sitting on an unexplained wait. The bytes are
+ * still returned whole — verification below wants the complete asset — and a
+ * body the transport does not expose as a stream is read the plain way.
+ */
+async function readResponseBody(response: Response, onBytes: (receivedBytes: number) => void): Promise<Buffer> {
+  const { body } = response;
+  if (!body || typeof body.getReader !== 'function') {
+    const whole = Buffer.from(await response.arrayBuffer());
+    onBytes(whole.length);
+    return whole;
+  }
+  const reader = body.getReader();
+  const chunks: Buffer[] = [];
+  let received = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // Copy: the stream may reuse its buffer for the next chunk, and these
+      // bytes are hashed and written to disk afterwards.
+      const chunk = Buffer.from(value);
+      chunks.push(chunk);
+      received += chunk.length;
+      onBytes(received);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, received);
+}
+
 export async function downloadAndVerifyAssetFile(input: {
   url: string;
   destinationPath: string;
@@ -206,6 +244,8 @@ export async function downloadAndVerifyAssetFile(input: {
   fetcher?: AssetFetcher;
   /** Test seam: backoff between attempts (default 2000ms × attempt). */
   sleep?: (ms: number) => Promise<void>;
+  /** Byte count received so far. A new attempt starts from zero again. */
+  onProgress?: (receivedBytes: number) => void;
 }): Promise<void> {
   // PRI-927 (Owner decision): HTTPS-only, no warning mode and no insecure
   // override. The signed sha256+size below is the trust anchor, so a plaintext
@@ -265,7 +305,7 @@ export async function downloadAndVerifyAssetFile(input: {
             throw new ApplyPayloadError('metadata_refresh_failed', detail, 'Verify that the release pipeline published this release asset, then retry.');
           }
         } else {
-          bytes = Buffer.from(await response.arrayBuffer());
+          bytes = await readResponseBody(response, (receivedBytes) => input.onProgress?.(receivedBytes));
         }
         break;
       }
@@ -347,7 +387,7 @@ export async function downloadAndVerifyAssetFile(input: {
  * Zero deployment writes happen before every identity check has passed.
  */
 export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions): Promise<DownloadedReleaseAsset> {
-  const { paths, metadataBaseUrl, fetcher, assetFetcher, releaseMetadata, channel, transactionId } = options;
+  const { paths, metadataBaseUrl, fetcher, assetFetcher, releaseMetadata, channel, transactionId, onProgress } = options;
   const asset = selectReleaseAsset(releaseMetadata);
 
   // PRI-854 (option A): the signed metadata carries the asset's delivery URL —
@@ -363,6 +403,9 @@ export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions)
       expectedSizeBytes: asset.archiveSizeBytes,
       releaseId: releaseMetadata.releaseId,
       fetcher: assetFetcher,
+      onProgress: onProgress === undefined
+        ? undefined
+        : (receivedBytes) => onProgress(receivedBytes, asset.archiveSizeBytes),
     });
     const syntheticTarget: TrustedReleaseTarget = {
       artifactSha256: asset.archiveSha256,
@@ -450,6 +493,8 @@ export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions)
 export interface ExtractAndVerifyOptions {
   readonly transactionDir: string;
   readonly archivePath: string;
+  /** Narration: which of the two halves (extract, verify) is running. */
+  readonly onStep?: (message: string) => void;
 }
 
 /**
@@ -490,11 +535,13 @@ export async function extractAndVerifyReleaseAsset(options: ExtractAndVerifyOpti
   const payloadDir = path.join(transactionDir, 'payload');
   try {
     fs.mkdirSync(payloadDir, { recursive: true });
+    options.onStep?.('Extracting the release asset…');
     extractReleaseAssetArchive(transactionDir, payloadDir);
     // Dynamic import: keeps installer.js (and its CLI dependency graph) out
     // of the module graph until a real acquisition needs it — the governed
     // check path never pays for it.
     const { preflightSelfContainedReleaseAsset } = await import('../installer.js');
+    options.onStep?.('Verifying the release asset…');
     await preflightSelfContainedReleaseAsset(payloadDir);
   } catch (error) {
     if (error instanceof ApplyPayloadError) throw error;

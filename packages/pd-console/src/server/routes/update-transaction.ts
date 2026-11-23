@@ -11,10 +11,27 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { sendSuccess, sendMethodNotAllowed, sendNotFound, errorMessage } from '../utils/response.js';
 import { getPdHome } from '../utils/pd-home.js';
+import { releaseHandoverOwner, type ReleaseHandoverOwner } from '../release-handover.js';
 import type * as updateSurfaceModule from 'create-principles-disciple/update-console';
+import type { TransactionProgress } from 'create-principles-disciple/update-console';
 
 type JournalModule = typeof updateSurfaceModule;
 type LayoutModule = typeof updateSurfaceModule;
+
+/**
+ * ERR-207: the deployed release-manager is replaced one component at a time,
+ * so it may predate the progress sidecar. The Console must not assume the
+ * reader exists — "no progress known" is the correct reading of its absence.
+ */
+type ProgressSeam = Omit<JournalModule, 'readTransactionProgress'> & {
+  readTransactionProgress?: JournalModule['readTransactionProgress'];
+};
+
+/**
+ * A progress observation older than this describes a stage nobody is in any
+ * more (an executor that was killed never removed its sidecar).
+ */
+const PROGRESS_STALE_AFTER_MS = 120_000;
 
 /** Transaction ids are installer/console-generated (`<word>-<ts>-<hex>`); this
  * pattern doubles as the path-traversal guard for the journal file name (rc-1). */
@@ -76,21 +93,47 @@ function readJournalFact(journal: JournalModule, journalPath: string, transactio
   return factFromTransitions(journal, transactionId, journal.readTransactionJournalForRecovery(journalPath));
 }
 
+/**
+ * The Console process that answered. A page tracking an update compares its
+ * pid across polls to tell "the same console" from "its successor" — the
+ * release handover replaces the process underneath the page without changing
+ * the URL. `handover` says who will do that replacing, so the page knows
+ * whether to wait for it, and for how long.
+ */
+function serverIdentity(): { readonly serverPid: number; readonly handover: ReleaseHandoverOwner } {
+  return { serverPid: process.pid, handover: releaseHandoverOwner() };
+}
+
+function readProgressFact(seam: ProgressSeam, transactionsDir: string, transactionId: string): TransactionProgress | null {
+  // `hasOwn`, not property access: an older or mocked module may not carry
+  // the export at all, and reading a missing export is not "no progress".
+  const read = Object.hasOwn(seam, 'readTransactionProgress') ? seam.readTransactionProgress : undefined;
+  if (read === undefined) return null;
+  const progress = read(transactionsDir, transactionId);
+  if (progress === null) return null;
+  return Math.abs(Date.now() - Date.parse(progress.at)) <= PROGRESS_STALE_AFTER_MS ? progress : null;
+}
+
 async function transactionStatus(res: ServerResponse, transactionId: string): Promise<void> {
   if (!TRANSACTION_ID_PATTERN.test(transactionId)) {
-    sendSuccess(res, { transactionId, exists: false, reason: 'invalid_transaction_id' });
+    sendSuccess(res, { transactionId, exists: false, reason: 'invalid_transaction_id', ...serverIdentity() });
     return;
   }
   const journal: JournalModule = await import('create-principles-disciple/update-console');
+  const seam: ProgressSeam = journal;
   const layout: LayoutModule = journal;
   const paths = layout.resolvePdHomePaths(getPdHome().pdHome);
   const journalPath = path.join(paths.transactionsDir, `${transactionId}.jsonl`);
   if (!fs.existsSync(journalPath)) {
-    sendSuccess(res, { transactionId, exists: false });
+    sendSuccess(res, { transactionId, exists: false, ...serverIdentity() });
     return;
   }
   try {
-    sendSuccess(res, readJournalFact(journal, journalPath, transactionId));
+    sendSuccess(res, {
+      ...readJournalFact(journal, journalPath, transactionId),
+      ...serverIdentity(),
+      progress: readProgressFact(seam, paths.transactionsDir, transactionId),
+    });
   } catch (error) {
     // A broken journal is exactly the kind of fact recovery presentation needs —
     // report it, never swallow it (rc-9).
@@ -104,6 +147,8 @@ async function transactionStatus(res: ServerResponse, transactionId: string): Pr
       lastAt: null,
       productVersion: null,
       transitions: [],
+      ...serverIdentity(),
+      progress: null,
       reason: errorMessage(error),
     });
   }

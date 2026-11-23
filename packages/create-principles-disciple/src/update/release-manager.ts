@@ -40,6 +40,7 @@ import {
   type TransactionState,
 } from './transaction-journal.js';
 import { downloadReleaseAsset, extractAndVerifyReleaseAsset, ApplyPayloadError } from './apply-payload.js';
+import { createTransactionProgressReporter } from './transaction-progress.js';
 import { compareProductVersions, parseProductVersion, type ReleaseChannelName } from './product-identity.js';
 import { installManifestHostsForPersist, parseInstallManifest } from '@principles/install-layout';
 import type { InstallerJournal } from '../installer.js';
@@ -611,8 +612,12 @@ export class ReleaseManager {
       );
     }
 
+    // Observational only (see transaction-progress.ts): narrates the stages
+    // the journal cannot see inside of, and is removed once they are over.
+    const progress = createTransactionProgressReporter(this.paths.transactionsDir, transactionId);
     try {
       const { install } = await import('../installer.js');
+      progress.step('Downloading the release asset…');
       const downloaded = await downloadReleaseAsset({
         paths: this.paths,
         metadataBaseUrl: this.options.metadataBaseUrl,
@@ -620,12 +625,14 @@ export class ReleaseManager {
         releaseMetadata,
         channel: status.channel,
         transactionId,
+        onProgress: (receivedBytes, totalBytes) => progress.bytes(receivedBytes, totalBytes),
       });
       appendApplyTransition(journal, 'downloaded', `artifact sha256=${downloaded.trustedTarget.artifactSha256} target=${downloaded.trustedTarget.targetPath}`);
 
       const { payloadDir } = await extractAndVerifyReleaseAsset({
         transactionDir: downloaded.transactionDir,
         archivePath: downloaded.archivePath,
+        onStep: (message) => progress.step(message),
       });
       appendApplyTransition(journal, 'verified', 'release-asset preflight passed (identity + whole-payload digest)');
 
@@ -646,7 +653,16 @@ export class ReleaseManager {
           stopGateway: true,
         },
         payloadDir,
-        { quiet: true, nonInteractive: true },
+        {
+          quiet: true,
+          nonInteractive: true,
+          // An update starts no console. One is usually serving already — the
+          // one the update was asked from — and it becomes the new release by
+          // handing itself over; `pd console open` beside it only adds a second
+          // console, with the first still on the old version.
+          launchConsole: false,
+          onProgress: ({ message, percent }) => progress.step(message, percent),
+        },
         journal,
       );
       if (!installResult.success) {
@@ -699,6 +715,9 @@ export class ReleaseManager {
       throw mapped.transactionOpened
         ? mapped
         : new ReleaseManagerError(mapped.reason, mapped.message, mapped.nextAction, true);
+    } finally {
+      // The transaction is over either way; progress has no further meaning.
+      progress.close();
     }
   }
 

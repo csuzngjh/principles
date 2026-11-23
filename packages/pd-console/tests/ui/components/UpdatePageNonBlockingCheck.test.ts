@@ -43,9 +43,32 @@ const { tStub, i18nStub, api, toasts } = vi.hoisted(() => {
     'pages.update.applyUpdate': 'Update Now',
     'pages.update.applyFullUpdate': 'Full Update',
     'pages.update.confirmFullUpdateTitle': 'Confirm Update',
+    'common.technicalDetails': 'Technical details',
     'pages.update.inProgressPanel': 'Update in progress',
-    'pages.update.inProgressPhase': 'Current phase: {{phase}}',
+    'pages.update.progressPending': 'Getting the progress…',
+    'pages.update.elapsed': 'elapsed {{time}}',
+    'pages.update.backgroundNote': 'The update runs in the background.',
+    'pages.update.stage.download': 'Download',
+    'pages.update.stage.verify': 'Verify',
+    'pages.update.stage.deploy': 'Deploy',
+    'pages.update.stage.finalize': 'Finish',
+    'pages.update.stageTitle.download': 'Downloading the release',
+    'pages.update.stageTitle.verify': 'Verifying the release',
+    'pages.update.stageTitle.deploy': 'Deploying the new version',
+    'pages.update.stageTitle.finalize': 'Verifying and finishing',
+    'pages.update.stageHint.download': 'This depends on your network.',
+    'pages.update.stageHint.verify': 'Unpacking the release and checking its integrity.',
+    'pages.update.stageHint.deploy': 'Replacing the PD components.',
+    'pages.update.stageHint.finalize': 'Starting the new version for verification and updating host configuration.',
+    'pages.update.downloadReceived': '{{received}} / {{total}}',
+    'pages.update.downloadRate': '{{rate}}/s',
+    'pages.update.downloadRemaining': 'about {{time}} left',
+    'pages.update.stepLabel': 'Installer step',
+    'pages.update.switchingTitle': 'Update finished — switching to the new version',
+    'pages.update.switchingHint': 'The console is restarting on the new version.',
     'pages.update.inProgressConfirmed': 'Update finished ({{version}}). Restart the console to load the new version.',
+    'pages.update.fullUpdateRestartPrompt': 'The update finished, but the console is still running the previous version. Restart it.',
+    'pages.update.inProgressEnded': 'Update transaction ended: {{state}}',
   };
   const t = (key: string, args?: Record<string, unknown>): string => {
     let text = translations[key] ?? key;
@@ -77,6 +100,7 @@ vi.mock('../../../src/ui/api.js', () => ({
   applyFullUpdate: (...args: unknown[]) => api.applyFullUpdate(...args),
   pruneUpdateHistory: (...args: unknown[]) => api.pruneUpdateHistory(...args),
 }));
+vi.mock('../../../src/ui/utils/page-reload.js', () => ({ reloadPage: vi.fn() }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: tStub, i18n: i18nStub }),
@@ -89,19 +113,34 @@ vi.mock('sonner', () => ({
 
 const HISTORY_ROW = '2.2.0 → 2.3.0';
 const FINISHED_TEXT = 'Update finished (2.8.11). Restart the console to load the new version.';
+const SWITCHING_TEXT = 'Update finished — switching to the new version';
 /** The page's own poll budget (TRANSACTION_POLL_TIMEOUT_MS in UpdatePage). */
 const PRODUCTION_POLL_TIMEOUT_MS = 15_000;
 /** The page's own poll cadence (TRANSACTION_POLL_INTERVAL_MS in UpdatePage). */
 const PRODUCTION_POLL_INTERVAL_MS = 3_000;
 /** How long the page lets a check run before explaining it (CHECK_SLOW_AFTER_MS in UpdatePage). */
 const PRODUCTION_CHECK_SLOW_AFTER_MS = 2_000;
+/** How often and how long the page looks for the new console after an update (UpdatePage). */
+const PRODUCTION_HANDOVER_POLL_INTERVAL_MS = 1_000;
+const PRODUCTION_HANDOVER_POLL_LIMIT = 30;
 
-type PollAnswer = { success: true; data: { transactionId: string; exists: boolean; lastState: string; terminal: boolean; productVersion?: string } };
+type PollAnswer = {
+  success: true;
+  data: {
+    transactionId: string;
+    exists: boolean;
+    lastState: string;
+    terminal: boolean;
+    productVersion?: string;
+    serverPid?: number;
+    handover?: 'console' | 'companion' | 'manual';
+  };
+};
 
-function pollAnswer(lastState: string, terminal = false, productVersion?: string): PollAnswer {
+function pollAnswer(lastState: string, terminal = false, productVersion?: string, extra: Partial<PollAnswer['data']> = {}): PollAnswer {
   return {
     success: true,
-    data: { transactionId: 'update-1', exists: true, lastState, terminal, ...(productVersion !== undefined ? { productVersion } : {}) },
+    data: { transactionId: 'update-1', exists: true, lastState, terminal, ...(productVersion !== undefined ? { productVersion } : {}), ...extra },
   };
 }
 
@@ -126,6 +165,17 @@ function serveLocalData(): void {
     success: true,
     data: { needsRecovery: false, unfinished: [], superseded: [], broken: [], recoveryRequired: [] },
   });
+}
+
+/**
+ * Let the page look for the new console until it gives up: this console
+ * promised to hand itself over, but no successor ever answers.
+ */
+async function noSuccessorEverAnswers(): Promise<void> {
+  for (let looks = 0; looks < PRODUCTION_HANDOVER_POLL_LIMIT + 2; looks += 1) {
+    act(() => { vi.advanceTimersByTime(PRODUCTION_HANDOVER_POLL_INTERVAL_MS); });
+    await settle();
+  }
 }
 
 function renderPage(): void {
@@ -202,6 +252,7 @@ describe('UpdatePage — the version check never gates the page', () => {
   });
 
   it('keeps the finished-update result on screen while the page re-reads data', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     api.fetchUpdateStatus
       // Before the update: one is available.
       .mockResolvedValueOnce({
@@ -214,14 +265,17 @@ describe('UpdatePage — the version check never gates the page', () => {
       success: true,
       data: { state: 'update_in_progress', transactionId: 'update-1' },
     });
-    api.fetchUpdateTransaction.mockResolvedValue(pollAnswer('confirmed', true, '2.8.11'));
+    api.fetchUpdateTransaction.mockResolvedValue(pollAnswer('confirmed', true, '2.8.11', { serverPid: 111 }));
     serveLocalData();
     renderPage();
 
     fireEvent.click(await screen.findByText('Update Now'));
     fireEvent.click(await screen.findByText('Full Update'));
 
+    // Confirmed, and this console does not switch itself: the finished-update
+    // result is on screen at once…
     expect(await screen.findByText(FINISHED_TEXT)).toBeTruthy();
+    expect(screen.queryByText(SWITCHING_TEXT)).toBeNull();
     // The re-read was asked for and is still outstanding...
     expect(api.fetchUpdateStatus).toHaveBeenCalledTimes(2);
     // ...yet nothing on screen gave way to a loading state.
@@ -231,6 +285,7 @@ describe('UpdatePage — the version check never gates the page', () => {
   });
 
   it('after an update, a failed re-check drops the pre-update status instead of still offering the update', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     api.fetchUpdateStatus
       // Before the update: one is available.
       .mockResolvedValueOnce({
@@ -238,19 +293,24 @@ describe('UpdatePage — the version check never gates the page', () => {
         data: { currentVersion: '2.8.10', latestVersion: '2.8.11', hasUpdate: true, state: 'update_available' },
       })
       // The re-read after the update fails.
-      .mockResolvedValueOnce({ success: false, error: 'Request timeout', status: 504 });
+      .mockReturnValueOnce({ success: false, error: 'Request timeout', status: 504 });
     api.applyFullUpdate.mockResolvedValue({
       success: true,
       data: { state: 'update_in_progress', transactionId: 'update-1' },
     });
-    api.fetchUpdateTransaction.mockResolvedValue(pollAnswer('confirmed', true, '2.8.11'));
+    api.fetchUpdateTransaction.mockResolvedValue(pollAnswer('confirmed', true, '2.8.11', { serverPid: 111, handover: 'console' }));
     serveLocalData();
     renderPage();
 
     fireEvent.click(await screen.findByText('Update Now'));
     fireEvent.click(await screen.findByText('Full Update'));
 
-    expect(await screen.findByText(FINISHED_TEXT)).toBeTruthy();
+    // Confirmed: the page first waits for the console to hand itself over…
+    expect(await screen.findByText(SWITCHING_TEXT)).toBeTruthy();
+    // …and only once that never comes asks for the restart.
+    await noSuccessorEverAnswers();
+
+    expect(screen.getByText(FINISHED_TEXT)).toBeTruthy();
     // The status on screen described the installation that was just replaced:
     // it must not survive the update as a still-offered "update available".
     await waitFor(() => expect(screen.queryByText('Update Now')).toBeNull());
@@ -304,7 +364,7 @@ describe('UpdatePage — transaction polls never stack', () => {
     api.fetchUpdateTransaction.mockResolvedValue(pollAnswer('downloaded'));
     answerFirstPoll?.(pollAnswer('planned'));
     await settle();
-    expect(screen.getByText('Current phase: planned')).toBeTruthy();
+    expect(screen.getByTestId('update-progress-stage')?.textContent).toBe('Downloading the release');
     expect(api.fetchUpdateTransaction).toHaveBeenCalledTimes(1);
 
     // The next tick finds the slot free and asks again.
@@ -312,6 +372,6 @@ describe('UpdatePage — transaction polls never stack', () => {
     expect(api.fetchUpdateTransaction).toHaveBeenCalledTimes(2);
     expect(api.fetchUpdateTransaction).toHaveBeenNthCalledWith(2, 'update-1', PRODUCTION_POLL_TIMEOUT_MS);
     await settle();
-    expect(screen.getByText('Current phase: downloaded')).toBeTruthy();
+    expect(screen.getByTestId('update-progress-stage')?.textContent).toBe('Verifying the release');
   });
 });
