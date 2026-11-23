@@ -61,7 +61,7 @@ jobs:
       # time, zero findings). See .github/codeql/codeql-config-pr.yml.
       - name: Initialize CodeQL (PR fast path)
         if: github.event_name == 'pull_request'
-        uses: github/codeql-action/init@v4.38.2
+        uses: github/codeql-action/init@v4.39.4
         with:
           languages: ${{ matrix.language }}
           config-file: ./.github/codeql/codeql-config-pr.yml
@@ -70,15 +70,15 @@ jobs:
       # removed from these paths.
       - name: Initialize CodeQL (full suite)
         if: github.event_name != 'pull_request'
-        uses: github/codeql-action/init@v4.38.2
+        uses: github/codeql-action/init@v4.39.4
         with:
           languages: ${{ matrix.language }}
           queries: security-extended,security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v4.38.2
+        uses: github/codeql-action/autobuild@v4.39.4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4.38.2
+        uses: github/codeql-action/analyze@v4.39.4
         with:
           category: '/language:${{ matrix.language }}'
