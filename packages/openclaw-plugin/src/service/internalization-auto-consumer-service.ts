@@ -51,6 +51,8 @@ import {
   clearGatewayConsumerLease,
   clearGatewayConsumerLeaseByPid,
   foreignConsumerLeaseStatus,
+  leaseWriters,
+  registerGatewayConsumerLease,
 } from './gateway-consumer-lease.js';
 
 /**
@@ -390,11 +392,17 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     // still have in-flight work). A lease that cannot be written means the
     // liveness record cannot be published — never degrade into unprotected
     // consumption (fail-closed).
-    const foreignAtStart = foreignConsumerLeaseStatus(workspaceDir, {
-      selfToken: state.identity.token,
-      selfInstanceId: state.identity.instanceId,
+    // PRI-1282 r6: the foreign check AND our registration run inside one
+    // serialized lease-gate transaction — two Gateways can never both pass
+    // the check and land two 'consuming' records (the mutual-quiesce
+    // deadlock shape).
+    const registration = registerGatewayConsumerLease({
+      workspaceDir,
+      token: state.identity.token,
+      instanceId: state.identity.instanceId,
     });
-    if (foreignAtStart !== 'none') {
+    if (registration.ok && registration.status !== 'registered') {
+      const foreignAtStart = registration.status === 'refused_foreign_alive' ? 'alive' : 'unknown';
       state.stopped = false;
       state.quiescing = true;
       SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_START_REFUSED', JSON.stringify({
@@ -405,21 +413,15 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
       armOwnershipWatch(workspaceDir, state, logger);
       return;
     }
-    const leaseWrite = writeGatewayConsumerLease({
-      workspaceDir,
-      token: state.identity.token,
-      instanceId: state.identity.instanceId,
-      state: 'consuming',
-    });
-    if (!leaseWrite.ok) {
+    if (!registration.ok) {
       state.stopped = false;
       state.quiescing = true;
       SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_START_REFUSED', JSON.stringify({
         reason: 'consumer_lease_write_failed',
-        detail: leaseWrite.reason,
+        detail: registration.reason,
         nextAction: 'Fix the workspace .pd directory writability; consumption is refused until the lease can be published (fail-closed).',
       }));
-      logger.error(`[PD:AutoConsumer] Consumer lease write failed for ${workspaceDir}: ${leaseWrite.reason}; refusing to consume unprotected.`);
+      logger.error(`[PD:AutoConsumer] Consumer lease write failed for ${workspaceDir}: ${registration.reason}; refusing to consume unprotected.`);
       armOwnershipWatch(workspaceDir, state, logger);
       return;
     }
@@ -724,18 +726,14 @@ async function quiesceAndWatch(
     // workspace) makes that claim dishonest: do not ack; keep watching and
     // let the real holder's ack (or the handover's timeout) arbitrate.
     // Anything unverifiable fails closed the same way.
-    const foreign = foreignConsumerLeaseStatus(workspaceDir, {
-      selfToken: state.identity.token,
-      selfInstanceId: state.identity.instanceId,
-    });
-    const mayClaimQuiesced = outcome !== 'quiesced' || foreign === 'none';
-    if (outcome === 'quiesced' && foreign !== 'none') {
-      logger.warn(`[PD:AutoConsumer] Foreign consumer lease status=${foreign} for ${workspaceDir}; refusing to ack 'quiesced' — only the lease holder may claim the workspace quiesced.`);
-    }
-    // §3.3: before 'quiesced' may be claimed, OUR lease lifecycle must have
-    // ended correctly — the lease transitions to 'quiesced' first, and if
-    // that write fails we cannot prove lifecycle completion → no ack.
-    if (mayClaimQuiesced && outcome === 'quiesced') {
+    // §3.3 + PRI-1282 r6: mark OUR writer record 'quiesced' as soon as the
+    // local drain completes — decoupled from whether any OTHER writer is
+    // still active. The workspace-level 'quiesced' claim is a separate,
+    // later step: only when no foreign ACTIVE writer remains. Two Gateways
+    // must each publish their own drain without waiting on the other;
+    // otherwise both stall in a mutual wait (each sees the other's record
+    // as 'consuming' and never marks its own).
+    if (outcome === 'quiesced') {
       const leaseEnd = writeGatewayConsumerLease({
         workspaceDir,
         token: state.identity.token,
@@ -747,6 +745,14 @@ async function quiesceAndWatch(
         armOwnershipWatch(workspaceDir, state, logger);
         return;
       }
+    }
+    const foreign = foreignConsumerLeaseStatus(workspaceDir, {
+      selfToken: state.identity.token,
+      selfInstanceId: state.identity.instanceId,
+    });
+    const mayClaimQuiesced = outcome !== 'quiesced' || foreign === 'none';
+    if (outcome === 'quiesced' && foreign !== 'none') {
+      logger.warn(`[PD:AutoConsumer] Foreign consumer lease status=${foreign} for ${workspaceDir}; refusing to ack 'quiesced' — only the lease holder may claim the workspace quiesced.`);
     }
     if (mayClaimQuiesced) {
       const written = writeGatewayQuiesceAck({
@@ -831,6 +837,26 @@ async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerStat
       || state.ackedOperation.operationId !== ownership.operationId
       || state.ackedOperation.generation !== ownership.generation;
     if (changed) {
+      // PRI-1282 r6: publish OUR drain first when this state still carries
+      // a 'consuming' writer record — the workspace-level ack is judged
+      // separately, only after no foreign ACTIVE writer remains. Otherwise
+      // two recorded instances each wait for the other's mark forever.
+      const currentLease = readGatewayConsumerLease(workspaceDir);
+      const oursRecorded = currentLease !== null && leaseWriters(currentLease)
+        .some((w) => w.instanceId === state.identity.instanceId && w.state !== 'quiesced');
+      if (oursRecorded) {
+        const leaseEnd = writeGatewayConsumerLease({
+          workspaceDir,
+          token: state.identity.token,
+          instanceId: state.identity.instanceId,
+          state: 'quiesced',
+        });
+        if (!leaseEnd.ok) {
+          logger.error(`[PD:AutoConsumer] Cannot transition consumer lease to 'quiesced' for ${workspaceDir}: ${leaseEnd.reason}; refusing to ack 'quiesced' (lease lifecycle unproven).`);
+          armOwnershipWatch(workspaceDir, state, logger);
+          return;
+        }
+      }
       // Same foreign-lease honesty gate as quiesceAndWatch (PRI-1282 P1-3).
       const foreign = foreignConsumerLeaseStatus(workspaceDir, {
         selfToken: state.identity.token,

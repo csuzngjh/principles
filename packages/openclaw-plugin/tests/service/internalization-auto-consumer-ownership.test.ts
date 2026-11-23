@@ -585,3 +585,106 @@ describe('cross-process lease visibility (PRI-1282 r5 F7)', () => {
     vi.useFakeTimers();
   }, 20_000);
 });
+
+// ─── PRI-1282 r6: split drain-mark vs workspace-ack + serialized registration ─
+describe('dual-Gateway quiesce progress (PRI-1282 r6)', () => {
+  it('a live foreign consumer does not prevent OUR lease record from being marked quiesced (ack still withheld)', async () => {
+    ownership(preparingRecord('op-split-drain', 3));
+    // A parseable foreign record (r5 schema, different instance) held by
+    // THIS test process's PID → 'alive' per pid-liveness.
+    writeGatewayConsumerLease({
+      workspaceDir, token: 'foreign-tok', instanceId: 'foreign-inst', state: 'consuming',
+    });
+    startService();
+    await vi.advanceTimersByTimeAsync(0);
+    // No workspace-level ack while the foreign writer is active...
+    expect(readGatewayQuiesceAck(workspaceDir)).toBeNull();
+    // ...but OUR writer record was still transitioned to 'quiesced' —
+    // the drain mark is decoupled from the global claim so a second
+    // Gateway is never blocked waiting on it.
+    const lease = readGatewayConsumerLease(workspaceDir);
+    const ours = lease?.writers?.find((w) => w.instanceId === __autoConsumerTestSeams.identity(workspaceDir).instanceId);
+    expect(ours?.state).toBe('quiesced');
+    expect(lease?.writers?.find((w) => w.instanceId === 'foreign-inst')?.state).toBe('consuming');
+  });
+});
+
+describe('cross-process lease registration (PRI-1282 r6)', () => {
+  it('two real processes serialize check+register: the second is refused while the first consumes, and takes over after the first drains', async () => {
+    vi.useRealTimers();
+    const { spawn, execFileSync } = await import('node:child_process');
+    const bundlePath = path.join(process.cwd(), 'tests', '.tmp-lease-bundle-r6.cjs');
+    execFileSync('npx', ['esbuild', 'src/service/gateway-consumer-lease.ts',
+      '--bundle', '--format=cjs', '--platform=node', '--external:better-sqlite3',
+      `--outfile=${bundlePath}`], { stdio: 'pipe' });
+    const marker = (name: string) => path.join(workspaceDir, '.pd', `child-${name}`);
+    const childScript = `
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const lease = require(${JSON.stringify(bundlePath)});
+      const ws = ${JSON.stringify(workspaceDir)};
+      const id = process.env.ROLE;
+      const reg = lease.registerGatewayConsumerLease({ workspaceDir: ws, token: 'tok-' + id, instanceId: 'inst-' + id });
+      fs.writeFileSync(path.join(ws, '.pd', 'child-reg-' + id + '.json'), JSON.stringify(reg));
+      // Then idle until the parent signals drain: mark our record 'quiesced'.
+      const timer = setInterval(() => {
+        if (fs.existsSync(path.join(ws, '.pd', 'drain-' + id))) {
+          lease.writeGatewayConsumerLease({ workspaceDir: ws, token: 'tok-' + id, instanceId: 'inst-' + id, state: 'quiesced' });
+          fs.writeFileSync(path.join(ws, '.pd', 'child-drained-' + id), 'done');
+          clearInterval(timer);
+          process.exit(0);
+        }
+      }, 25);
+      timer.unref();
+      setInterval(() => {}, 1000); // keep alive for liveness evidence
+    `;
+    const spawnChild = (role: string) => spawn(process.execPath, ['-e', childScript], {
+      stdio: 'ignore', env: { ...process.env, ROLE: role },
+    });
+    const waitFile = async (p: string, tries = 200): Promise<boolean> => {
+      for (let i = 0; i < tries && !fs.existsSync(p); i += 1) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return fs.existsSync(p);
+    };
+    const a = spawnChild('a');
+    try {
+      expect(await waitFile(marker('reg-a.json'))).toBe(true);
+      const b = spawnChild('b');
+      try {
+        expect(await waitFile(marker('reg-b.json'))).toBe(true);
+        const regA = JSON.parse(fs.readFileSync(marker('reg-a.json'), 'utf8'));
+        const regB = JSON.parse(fs.readFileSync(marker('reg-b.json'), 'utf8'));
+        // Exactly one may hold the consuming role.
+        expect(regA).toMatchObject({ ok: true, status: 'registered' });
+        expect(regB).toMatchObject({ ok: true, status: 'refused_foreign_alive' });
+        expect(foreignConsumerLeaseStatus(workspaceDir, { selfInstanceId: 'inst-b' })).toBe('alive');
+
+        // A drains: marks its OWN record quiesced, then exits.
+        fs.writeFileSync(path.join(workspaceDir, '.pd', 'drain-a'), 'go');
+        expect(await waitFile(path.join(workspaceDir, '.pd', 'child-drained-a'))).toBe(true);
+
+        // The lease keeps BOTH records: a quiesced + nothing active.
+        const lease = readGatewayConsumerLease(workspaceDir);
+        expect(lease?.writers?.find((w) => w.instanceId === 'inst-a')?.state).toBe('quiesced');
+        expect(foreignConsumerLeaseStatus(workspaceDir, { selfInstanceId: 'inst-b' })).toBe('none');
+
+        // A third Gateway lifecycle now registers — take-over after A's drain.
+        const b2 = spawnChild('b2');
+        try {
+          expect(await waitFile(marker('reg-b2.json'))).toBe(true);
+          const reg = JSON.parse(fs.readFileSync(marker('reg-b2.json'), 'utf8'));
+          expect(reg).toMatchObject({ ok: true, status: 'registered' });
+        } finally {
+          b2.kill('SIGKILL');
+        }
+      } finally {
+        b.kill('SIGKILL');
+      }
+    } finally {
+      a.kill('SIGKILL');
+      try { fs.unlinkSync(bundlePath); } catch { /* best effort */ }
+    }
+    vi.useFakeTimers();
+  }, 40_000);
+});

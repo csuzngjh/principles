@@ -20,6 +20,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import Database from 'better-sqlite3';
 
 export const GATEWAY_CONSUMER_LEASE_SCHEMA_VERSION = 'pd.gateway-consumer-lease.v1';
 export const GATEWAY_CONSUMER_LEASE_FILE = 'gateway-consumer-lease.json';
@@ -145,8 +146,11 @@ function parseWriter(raw: unknown): GatewayConsumerLeaseWriter | null {
   return { token: w.token, instanceId: w.instanceId, pid: w.pid, host: w.host, state: w.state, startedAt: w.startedAt, updatedAt: w.updatedAt };
 }
 
-/** Every writer recorded on the lease (falls back to the top-level record). */
-function leaseWriters(lease: GatewayConsumerLease): GatewayConsumerLeaseWriter[] {
+/**
+ * Every writer recorded on the lease — the writers[] entries, or the
+ * top-level record for pre-r5 single-writer leases.
+ */
+export function leaseWriters(lease: GatewayConsumerLease): GatewayConsumerLeaseWriter[] {
   if (Array.isArray(lease.writers) && lease.writers.length > 0) return lease.writers;
   return [{
     token: lease.token, instanceId: lease.instanceId, pid: lease.pid, host: lease.host,
@@ -176,7 +180,26 @@ export function writeGatewayConsumerLease(input: {
   now?: () => Date;
 }): { ok: true } | { ok: false; reason: string } {
   const now = input.now ?? (() => new Date());
-  const existing = readGatewayConsumerLease(input.workspaceDir);
+  // A lease file that exists but does not parse is an UNVERIFIABLE foreign
+  // record (e.g. an older schema without instanceId) — overwriting it would
+  // delete a live consumer's liveness evidence. Fail closed instead (r6).
+  let rawExisting: string | null = null;
+  try {
+    rawExisting = fs.readFileSync(leasePath(input.workspaceDir), 'utf8');
+  } catch (error) {
+    if (errnoOf(error) !== 'ENOENT') {
+      return { ok: false, reason: `cannot read the existing consumer lease: ${errnoOf(error) || 'io error'}` };
+    }
+  }
+  let existing: GatewayConsumerLease | null = null;
+  if (rawExisting !== null) {
+    try {
+      existing = parseGatewayConsumerLease(JSON.parse(rawExisting));
+    } catch { /* malformed JSON → treated as unparseable */ }
+    if (existing === null) {
+      return { ok: false, reason: 'consumer lease exists but is unparseable; refusing to overwrite an unverifiable foreign liveness record (fail-closed)' };
+    }
+  }
   const ours: GatewayConsumerLeaseWriter = {
     token: input.token,
     instanceId: input.instanceId,
@@ -268,6 +291,112 @@ export function clearGatewayConsumerLease(workspaceDir: string, token: string, i
   } catch {
     try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
   }
+}
+
+/**
+ * Cross-process arbitration gate for lease mutations: a SQLite
+ * `BEGIN IMMEDIATE` transaction on `<lease>.gate.db` (better-sqlite3 —
+ * same mechanism as the install-manifest CAS lock, dependency already
+ * shipped with the plugin). Every check-and-register / mark-and-observe
+ * decision runs inside the serialized section, so two Gateways can never
+ * interleave "I checked no other consumer" with "I registered myself".
+ */
+export interface ConsumerLeaseGateLike {
+  exec(sql: string): void;
+  close(): void;
+}
+
+const LEASE_GATE_BUSY_TIMEOUT_MS = 250;
+
+function defaultOpenLeaseGate(gatePath: string): ConsumerLeaseGateLike {
+  const db = new Database(gatePath);
+  db.exec(`PRAGMA busy_timeout = ${LEASE_GATE_BUSY_TIMEOUT_MS}`);
+  return db;
+}
+
+export function withConsumerLeaseGate<T>(
+  workspaceDir: string,
+  fn: () => T,
+  openGate?: (path: string) => ConsumerLeaseGateLike,
+): { ok: true; value: T } | { ok: false; reason: string } {
+  const dir = path.join(workspaceDir, '.pd');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (error) {
+    return { ok: false, reason: `cannot create .pd directory for the consumer lease gate: ${errnoOf(error) || 'io error'}` };
+  }
+  let db: ConsumerLeaseGateLike;
+  try {
+    db = (openGate ?? defaultOpenLeaseGate)(`${leasePath(workspaceDir)}.gate.db`);
+  } catch (error) {
+    return { ok: false, reason: `consumer lease gate unavailable: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    let value: T | undefined;
+    let completed = false;
+    try {
+      value = fn();
+      completed = true;
+    } finally {
+      try {
+        db.exec(completed ? 'COMMIT' : 'ROLLBACK');
+      } catch {
+        // best effort — a failed COMMIT surfaces below as a gate error path
+      }
+    }
+    return { ok: true, value: value as T };
+  } catch (error) {
+    return { ok: false, reason: `consumer lease gate transaction failed: ${error instanceof Error ? error.message : String(error)}` };
+  } finally {
+    try { db.close(); } catch { /* already closed */ }
+  }
+}
+
+export type ConsumerLeaseRegistration =
+  | { ok: true; status: 'registered' }
+  | { ok: true; status: 'refused_foreign_alive' | 'refused_foreign_unknown' }
+  | { ok: false; reason: string };
+
+/**
+ * Serialized "check foreign consumer → register ourselves" for consumer
+ * start (PRI-1282 review r6): without the gate, two Gateways can each pass
+ * the foreign check before either writes, land two 'consuming' records,
+ * and then wait on each other at quiesce forever.
+ */
+export function registerGatewayConsumerLease(input: {
+  workspaceDir: string;
+  token: string;
+  instanceId: string;
+  processAlive?: (pid: number) => 'alive' | 'dead' | 'unknown';
+  openGate?: (path: string) => ConsumerLeaseGateLike;
+}): ConsumerLeaseRegistration {
+  const gated = withConsumerLeaseGate(
+    input.workspaceDir,
+    () => {
+      const foreign = foreignConsumerLeaseStatus(input.workspaceDir, {
+        selfToken: input.token,
+        selfInstanceId: input.instanceId,
+        processAlive: input.processAlive,
+      });
+      if (foreign !== 'none') {
+        return { refused: foreign } as const;
+      }
+      return writeGatewayConsumerLease({
+        workspaceDir: input.workspaceDir,
+        token: input.token,
+        instanceId: input.instanceId,
+        state: 'consuming',
+      });
+    },
+    input.openGate,
+  );
+  if (!gated.ok) return { ok: false, reason: gated.reason };
+  const result = gated.value;
+  if ('refused' in result) {
+    return { ok: true, status: result.refused === 'alive' ? 'refused_foreign_alive' : 'refused_foreign_unknown' };
+  }
+  return result.ok ? { ok: true, status: 'registered' } : { ok: false, reason: result.reason };
 }
 
 /**
