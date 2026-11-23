@@ -133,3 +133,66 @@ PR #2749 共 14 条 Devin Review 线程全部 ✅ resolved（本轮新增关闭 
 1. CAS SQLite 门依赖 `node:sqlite`（Node≥22.5 内置）；旧运行时尚未移除，如宿主 Node 过旧锁获取将 fail-closed 报错而非静默放行——按设计。
 2. Gateway 真实进程下的 lease/ack 联调未验（上表 NOT_VERIFIED）——属 Phase 5 cutover 前置项。
 3. `no_resumable_operation` 对"操作已完成但操作者误用 --resume"返回结构化的不可续跑而非静默成功——行为语义变化，已在证据字段披露。
+
+---
+
+## 12. 第五轮整改（2026-11-23，评审：每工作区租约身份 / Node 22.0 兼容 / 锁删除原子性 / readiness 等 8 项）
+
+**HEAD：`ed2b96fd4`**（含 `0696d9922`、`b4ad12cf2`）。
+
+### 12.1 修复摘要
+
+| 评审项 | 修复 |
+|---|---|
+| F1 同 Gateway 多工作区共享租约身份 → 第一工作区永久停摆 | 每个 `WorkspaceConsumerState` 持不可变 `freshConsumerIdentity()`（token+instanceId）；lease 升级为 multi-writer `writers[]`；启动/续租/静默/监视/停止全部按状态身份操作 |
+| F2 `node:sqlite` 在 Node 22.0 不可用 | CAS 门换 `better-sqlite3`（预编译二进制随 tarball 分发，`npm ci --ignore-scripts` 安全） |
+| F3 锁清理中断留下无主目录卡死后续写入 | 仲裁事务内验证归属后原子 rename 移出规范路径再删除 |
+| F4 待处理阶段任务（默认禁用）误拒交接 | readiness 对阶段任务改用与消费周期相同的 `ignoreAgentEnabled` 解析，诊断 Agent 保留原门禁 |
+| F5 `--resume` 缺真实 CLI 接线测试 | 新增从 Commander 真实解析到恢复逻辑断言操作 ID 的用例 |
+| F6 `--resume` 对已完结操作返回未验证 | 已完结操作显式拒绝续跑（结构化 `no_resumable_operation`） |
+| F7 quiesce 确认只见最后写入者 | 随 F1 multi-writer：每条写者记录独立 liveness 判定，不互相遮蔽 |
+| F8 readiness 证据表测试假 schema | 改真实生产 schema（`session_id`、`canonical_pain_id` 等列）+ 缺列旧 schema 降级验证 |
+
+### 12.2 CI 修复
+
+| SHA | 内容 |
+|---|---|
+| b4ad12cf2 | install-layout release-lock 重生成（better-sqlite3 入锁文件），消除 quick-check EUSAGE |
+| ed2b96fd4 | workbuddy manifest 合并/裁剪对注册表 install-layout 0.9.1 无锁导出走 cohort-window fail-soft；gateway-notice 测试 `.cas.lock` 读取委托真实 fs |
+
+---
+
+## 13. 第六轮整改（2026-11-23，评审：双 Gateway 互等死锁）
+
+**最终 HEAD：`02e027bc1`**（PR #2749，未合并）。
+
+### 13.1 问题与修复
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| 两个 Gateway 均通过启动检查后登记 → 租约并存两条 consuming；交接时互等对方先静默 → 死锁；超时回退后仍互相拒绝恢复 | ① foreign 检查与登记写入未串行化（check→read→write 非原子）；② `quiesceAndWatch` 把"标记自己已排空"与"确认整个工作区已静默"绑在一起，受 `foreign==='none'` 门控 → 互等 | `registerGatewayConsumerLease`：检查+登记在 SQLite `BEGIN IMMEDIATE` 门内原子完成；排空标记与工作区 ACK 解耦——本地排空完成即刻在受保护更新中将自己写者记录置 `quiesced`，仅当无其他活跃写者时才发工作区 ACK；`watchOwnership` 阻塞 ACK 路径同样先落自己的 drain 标记（`oursRecorded` 防未登记进程造记录） |
+| （修复中发现）unparseable 旧 schema 租约被静默覆盖 → 外国活跃证据丢失 | `writeGatewayConsumerLease` 对存在但不可解析的租约按空处理并覆写 | 存在但不可解析 → `ok:false` fail-closed 拒绝覆写 |
+
+### 13.2 测试
+
+| 层 | 用例 | 结果 |
+|---|---|---|
+| 服务级 | foreign 活跃时本进程排空仍把自身记录置 `quiesced`（ACK 仍扣留） | PASS |
+| 真实双进程 | esbuild CJS bundle + spawn 三个子进程：A 登记成功、B `refused_foreign_alive`、A 排空后 B2 接管 `registered` | PASS |
+| 套件 | openclaw-plugin 217 文件 2450 测试全绿；pd-cli/install-layout 相关套件绿 | PASS |
+
+### 13.3 CI 修复
+
+| SHA | 内容 |
+|---|---|
+| 4c098c006 | pd-cli Windows lane：真实-fs ENOTDIR 断言收窄到 POSIX（Windows Node 对"文件当父目录"子路径返回 ENOENT；注入错误码用例继续跨平台覆盖分类器） |
+| 02e027bc1 | codex-adapter 测试 fixture 的伪造 canonical layout 补 better-sqlite3 解析（symlink），消除 `canonical_install_unavailable` 误报 |
+
+### 13.4 CI（最终 HEAD 02e027bc1）
+
+26 checks 全绿；CodeRabbit skip；PR mergeable。
+
+### 13.5 剩余风险
+
+1. §11.6-1 已过时：CAS 门已迁 `better-sqlite3`，Node ≥22.0 兼容，无 node:sqlite 依赖。
+2. 双 Gateway 互等死锁在真实宿主进程联调中仍属 NOT_VERIFIED（由双进程确定性测试覆盖，无随机 sleep）；Phase 5 cutover 前置项不变。
