@@ -1,9 +1,13 @@
 # SPEC-PD-PIPELINE-SPINE-001 — PD 核心管道主干收敛规范
 
-- **版本**：v0.8
+- **版本**：v0.9
 - **日期**：2026-11-23
 - **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
 - **修订记录**：
+  - **v0.9（PR #2763 第七轮独立复核修订）**：
+    1. **修正 §2.3 消费者描述**：v0.8 已将桶消费者收紧为仅 `pd-cli`，§2.3 残留 "pd-cli/host-runtime" 旧表述，统一为 `pd-cli`（`diagnose.ts`/`candidate.ts`）。
+    2. **闭环 `diagnose` 拒绝结果终端可观察性**：核实 `diagnose.ts` TTY 输出循环（`:1049-1079`）无 `status:'refused'` 分支，且全候选被拒时 `internalizeNextAction` 落到 `'No candidates were generated from this diagnosis.'` 误报——要求 TTY 输出 `DREAMER SEED REFUSED` + 结构化 `reason`，全部被拒时 `nextAction` 明确报告拒绝原因（不误报"未生成候选"），补 TTY 回归测试。
+    3. **跨文档 Complexity Delta 同步**：跨包导出 3→4（第 4 个是既有 `validateRecommendationKind` 入桶非新抽象）须同步至 Linear `PRI-1289` 与 PR 描述 §5；修正 PR Review Convergence 中第五轮误标 `v0.8` 为 `v0.7`。
   - **v0.8（PR #2763 第六轮独立复核修订）**：
     1. **闭环 `diagnose` 拒绝结果与 `nextAction`**：核实 `diagnose.ts:975-976` 的 `internalizableCandidateIds` 仅排除 `reviewRequired`/`seedSuppressed`/`admissionRefused` 三类，seed 闸新增的 `status:'refused'` 记录不在排除集内——被拒候选仍会在 `nextAction`/控制台（`:1107` `parkedResults` 仅过滤 `review_required`）收到 `pd candidate internalize` 指令。Phase 1B 必须新增 `seedRefusedIds` 排除集（两条输出路径同步）、`intakeResults` 类型扩展结构化 `reason` 字段、JSON 回归测试断言 `consumed`+`refused` 共存且被拒候选不出现于 `nextAction`。
     2. **收紧 Validator 消费者范围**：`@principles/core/runtime` 桶导出的实际消费者仅为 `pd-cli`（`diagnose.ts`、`candidate.ts`）；`PainSignalBridge` 在 core 内模块内部导入不计桶消费者；`host-runtime` 无 `validateRecommendationKind` 调用点（`internalization-consumer-cycle.ts` 已直接传 `rawRecommendationKind`），不得为凑名单列入 `export-admissions.json`。
@@ -35,7 +39,7 @@
   - **v0.2（对抗式自审修订）**：修正 `runtimeKind` / `hostKind` 混淆；按 P2.1 删除 `createPipelineRuntime` 大门面；用探针值端到端测试替代静态字段清单；删除 `PITaskMetadata` 三分组重排。
 - **范围**：Pain → 诊断 → 候选准入与账本入库 → 内化 → 激活 → 注入/拦截 → 行为证据 这条核心链路的协作者装配、跨跳数据连通性与有效性闭环
 - **事实基线**：`origin/main@679dcc93f`。§3 的全部数字与代码锚点均在该基线上实测，复跑命令见附录 A。
-- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.8）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
+- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.9）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
 - **不改变**：Pain 语义、诊断/内化业务规则、Owner 审批权、任务状态机（`MVP_CORE_LOOP_CONTRACT` INV-01..08）、物理数据库布局、Workspace 数据归属
 - **关联**：
   - `docs/architecture/MVP_CORE_LOOP_CONTRACT.md`（语义基线，本 SPEC 不修改）
@@ -99,7 +103,7 @@ New public abstraction/interface: YES (4 internal cross-package exports:
   2. `@principles/host-runtime`: `executeSelectedInternalizationTask`
   3. `@principles/core/runtime`: `createDiagnosticianRunnerBundle`
   4. `@principles/core/runtime`: `validateRecommendationKind`（既有纯函数公开导出，
-     非新抽象——供 pd-cli/host-runtime 的 D4/seed 闸经正式包接口调用）
+     非新抽象——供 pd-cli（`diagnose.ts`/`candidate.ts`）的 D4/seed 闸经正式包接口调用）
   plus reusing existing WAL snapshot logic via exported read-only helper for Phase 0;
   net removes 3 hand-rolled Runner assembly switches and 8 ad-hoc collaborator wiring blocks)
 New runtime feature flag: NO
@@ -213,7 +217,7 @@ New external/network capability: NO
    - `pipeline-spine-prompt-canary.e2e.test.ts`（轻量常驻主干）：真实临时工作区 SQLite + `resolveWorkspacePipelineHostDeps` + 满足各阶段业务校验器与准入规则的录制型 Fake Runtime Adapter。注入非默认探针包（`CANARY_REASON_9f3a`、`CANARY_OWNER_CORRECTION_7b2c`、`evaluatePainIngress` 产出的 `principle_deviation` 锚点 `P_CANARY_ANCHOR_4d1e@1`、已授权 `codex` 会话原文 `CANARY_TURN_TEXT_8e5f`、`INTENT.md` 的 `CANARY_INTENT_2a6d`），跑穿 `PainToPrincipleService.recordPain`（同步）→ Stage A/B/C → 准入与账本 Intake → `runInternalizationConsumerCycle`（`prompt` 短链）→ 自动激活 → `prompt-injection-projection`；并含**撤回 `codex` 授权负向用例**（断言 `CANARY_TURN_TEXT_8e5f` 消失且 `ambiguityNotes` 含 `consent_revoked`）。
    - `pipeline-spine-rulecode-canary.e2e.test.ts`（高风险渠道集成探针）：覆盖 `code_tool_hook` 全链（Owner 规则绑定 → Scribe → Artificer → Evaluator 沙箱重放 → RolloutReviewer → 审批 → Shadow/Live → `production-rulehost-gate` 拦截回执），断言 `pi_artifacts.source_principle_id`、`activations.target_ref`、`principle_applications.principle_id` 与账本原则 UUID 完全一致。
 2. **Layer B — `packages/pd-cli/tests/commands/` CLI 组合根与 D4 门禁测试**：
-   - 覆盖真实 CLI 处理器：`pain-record --wait`（证明接入 `trajectoryTurnReader` + `sourceMaterialAuthorization`）、`diagnose`（**v0.7**：含 `rawRecommendationKind` 非法/缺失候选零 Dreamer 红灯用例，先红后绿；拒绝结果以新增 `intakeResults` 记录表达、不覆盖既有 `'consumed'` 记录；**v0.8**：JSON 回归断言 `consumed`+`refused` 共存且被拒候选不出现于 `nextAction`/`internalizableCandidateIds` 与控制台 `internalize` 指令中）、`pain-retry`、`candidate internalize`（证明未入账本 `principle` 候选被严格拒绝、已复用候选被抑制、未绑定 `rule` 候选不被误杀、`defer` 候选维持 `no_task_created`）。
+   - 覆盖真实 CLI 处理器：`pain-record --wait`（证明接入 `trajectoryTurnReader` + `sourceMaterialAuthorization`）、`diagnose`（**v0.7**：含 `rawRecommendationKind` 非法/缺失候选零 Dreamer 红灯用例，先红后绿；拒绝结果以新增 `intakeResults` 记录表达、不覆盖既有 `'consumed'` 记录；**v0.8**：JSON 回归断言 `consumed`+`refused` 共存且被拒候选不出现于 `nextAction`/`internalizableCandidateIds` 与控制台 `internalize` 指令中；**v0.9**：TTY 回归断言 `DREAMER SEED REFUSED` 分支与全拒 `nextAction` 不误报"未生成候选"）、`pain-retry`、`candidate internalize`（证明未入账本 `principle` 候选被严格拒绝、已复用候选被抑制、未绑定 `rule` 候选不被误杀、`defer` 候选维持 `no_task_created`）。
 3. **Layer C — `packages/openclaw-plugin/tests/` 插件双入口协作者测试**：
    - 同时覆盖 `src/hooks/pain.ts` 与 `src/commands/pain.ts` 两条入口，验证二者均注入同一工作区 `sourceMaterialAuthorization` 与 `WorkspaceContext.trajectory` 读取器。
 4. **Core 侧自动入口红灯单测（v0.7）**：`packages/principles-core` 内为 `PainSignalBridge` 播种路径补 `rawRecommendationKind` 非法/缺失候选**零 Dreamer** 红灯用例与合法 `rule`/`prompt` 路由不变用例（与 `diagnose` 侧 Layer B 用例同属 Phase 1A 先红清单；既有 `candidate-seed-suppression.test.ts` 夹具将 raw 与 normalized 设为同值，不覆盖本缺陷，须用异值夹具）。
@@ -256,7 +260,7 @@ New external/network capability: NO
 - **做什么**：
   1. **修 D1**：`PainToPrincipleServiceOptions` 补齐 `sourceMaterialAuthorization` 并按同步/异步模式收紧类型；补齐 `pain-record.ts`、`openclaw-plugin/src/hooks/pain.ts`、`openclaw-plugin/src/commands/pain.ts` 的授权与轨迹读取器接线。
   2. **修 D2**：`context-payload.ts` 增加 `deviationAnchorToPainAnchor`；`pain-ingress.ts` / `pain-signal-bridge.ts` 同步产出规范 `anchor`；`SqliteContextAssembler` 兼容读取历史 `deviationAnchor`（损坏值写入 `ambiguityNotes`）。
-  3. **修 D4（含两自动入口，v0.6 强制）**：`handleCandidateInternalize` 在可内化路由判定与**既有任务去重**之后接入 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`，严格拒绝未入账本 `principle` 候选（正确提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`）与已复用/待裁决候选，保留未绑定 `rule` 候选的合法播种；Admission 文档 `ok:false` 一律 fail-closed。**同步修复两条自动入口的归一化 kind 缺口**：`diagnose.ts` Dreamer seed 循环与 `pain-signal-bridge.ts` 播种路径必须改用 `validateRecommendationKind(candidate.rawRecommendationKind)`——非法原始 kind 一律零播种（fail-closed：`diagnose` 以**新增** `intakeResults` 记录表达结构化 `refused`、`reason: 'candidate_kind_invalid'`，**不覆盖**既有 `'consumed'` + `ledgerWriteRefused` 记录；bridge 发 telemetry），身份解析与放行判定均传原始字段；合法 `rule`/`prompt` 候选路由行为不变；**不得**把所有 Intake 拒绝粗暴改为停止处理（`consumed` + `ledgerWriteRefused` 的账本语义保持，仅在 seed 闸前增加原始 kind 校验）。**跨包接口前置（v0.7）**：`validateRecommendationKind` 须先从 `@principles/core/runtime` 公开桶正式导出（同步 `runtime-barrel-surface.json`/`export-surface-baseline.json`/`export-admissions.json`）——禁止在 pd-cli 复制白名单或深导入 core 内部路径。**消费者范围（v0.8 收紧）**：桶消费者仅 `pd-cli`（`diagnose.ts`、`candidate.ts`）；`PainSignalBridge` 用 core 内模块导入不计桶消费者；`host-runtime` 无调用点不得列入 `export-admissions.json`。**`nextAction` 闭环（v0.8）**：`diagnose.ts` 须新增 `seedRefusedIds` 排除集——`status:'refused'` 候选从 `internalizableCandidateIds`（`diagnose.ts:975-976`）与控制台输出路径（`:1107` `parkedResults`）同步剔除，不得再向其打印 `pd candidate internalize` 指令；`intakeResults` 类型扩展结构化 `reason` 字段。
+  3. **修 D4（含两自动入口，v0.6 强制）**：`handleCandidateInternalize` 在可内化路由判定与**既有任务去重**之后接入 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`，严格拒绝未入账本 `principle` 候选（正确提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`）与已复用/待裁决候选，保留未绑定 `rule` 候选的合法播种；Admission 文档 `ok:false` 一律 fail-closed。**同步修复两条自动入口的归一化 kind 缺口**：`diagnose.ts` Dreamer seed 循环与 `pain-signal-bridge.ts` 播种路径必须改用 `validateRecommendationKind(candidate.rawRecommendationKind)`——非法原始 kind 一律零播种（fail-closed：`diagnose` 以**新增** `intakeResults` 记录表达结构化 `refused`、`reason: 'candidate_kind_invalid'`，**不覆盖**既有 `'consumed'` + `ledgerWriteRefused` 记录；bridge 发 telemetry），身份解析与放行判定均传原始字段；合法 `rule`/`prompt` 候选路由行为不变；**不得**把所有 Intake 拒绝粗暴改为停止处理（`consumed` + `ledgerWriteRefused` 的账本语义保持，仅在 seed 闸前增加原始 kind 校验）。**跨包接口前置（v0.7）**：`validateRecommendationKind` 须先从 `@principles/core/runtime` 公开桶正式导出（同步 `runtime-barrel-surface.json`/`export-surface-baseline.json`/`export-admissions.json`）——禁止在 pd-cli 复制白名单或深导入 core 内部路径。**消费者范围（v0.8 收紧）**：桶消费者仅 `pd-cli`（`diagnose.ts`、`candidate.ts`）；`PainSignalBridge` 用 core 内模块导入不计桶消费者；`host-runtime` 无调用点不得列入 `export-admissions.json`。**`nextAction` 闭环（v0.8）**：`diagnose.ts` 须新增 `seedRefusedIds` 排除集——`status:'refused'` 候选从 `internalizableCandidateIds`（`diagnose.ts:975-976`）与控制台输出路径（`:1107` `parkedResults`）同步剔除，不得再向其打印 `pd candidate internalize` 指令；`intakeResults` 类型扩展结构化 `reason` 字段。**拒绝可观察性（v0.9）**：TTY 输出循环须新增 `status:'refused'` 分支打印 `DREAMER SEED REFUSED` + 结构化 `reason`；全部候选被拒时 `nextAction` 明确报告拒绝原因与修复指引，**不得**落到 `'No candidates were generated from this diagnosis.'` 误报（`diagnose.ts:987` 尾部分支现状如此）；补 TTY 回归测试。
 - **验收**：Phase 1A 三层测试与 CLI 契约测试（`cli-1..cli-7`）全部由红转绿；`diagnose` 与 `PainSignalBridge` 两条自动入口各自增加**非法原始 kind 零播种测试**（`rawRecommendationKind` 为非法值/缺失时不得创建 `dreamer` 任务，合法 `rule`/`prompt` 候选路由不受影响）。
 
 ### Phase 2 — 协作者打包、CLI 手搓 Runner 收编与构造点守卫
@@ -308,7 +312,7 @@ New external/network capability: NO
 ## 9. Owner 决策记录与待确认项
 
 1. **D4 处置策略（已采用严格拒绝）**：`pd candidate internalize` 对未完成账本入库的 `principle` 候选执行**严格拒绝**并提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`，绝不在 `internalize` 命令内隐式执行正式账本写入。
-2. **启动确认**：批准 v0.8 后，并行启动 **Phase 0（`PRI-1290`）** 与 **Phase 1A/1B（`PRI-1291`）**；Phase 4（`PRI-1294`）与 Phase 5（`PRI-1295`）保持 `Backlog` 条件门控，未经漏斗数据与 Owner 单独批准不启动。
+2. **启动确认**：批准 v0.9 后，并行启动 **Phase 0（`PRI-1290`）** 与 **Phase 1A/1B（`PRI-1291`）**；Phase 4（`PRI-1294`）与 Phase 5（`PRI-1295`）保持 `Backlog` 条件门控，未经漏斗数据与 Owner 单独批准不启动。
 
 ---
 
@@ -356,4 +360,4 @@ rg -c "^\s*id: '" packages/principles-core/src/runtime/feature-flags/feature-fla
 | 租约续期、阶段预算与父任务心跳默认契约 | `docs/specs/SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001-v1.0.md` |
 | 后台触发所有权与 OS Scheduler | `docs/specs/SPEC-PD-SERVICE-HOST-001.md` |
 | 提交身份预绑定、回执兜底与授权撤回清理 | `docs/specs/SPEC-PD-FEEDBACK-RESILIENCE-001.md` |
-| **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.8）** |
+| **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.9）** |
