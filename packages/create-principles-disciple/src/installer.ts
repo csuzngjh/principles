@@ -6707,7 +6707,7 @@ export async function install(
       const detail = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
       logger.warn(`Service Host reconciliation threw (${detail}) — the install itself is unaffected; run pd service status manually.`);
       serviceHostOutcome = {
-        freshInstall: false,
+        freshInstall: freshInstallRun,
         scheduler: {
           state: 'failed',
           registered: null,
