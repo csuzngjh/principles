@@ -231,6 +231,13 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     // planted pd-cli entry — delegate to the real fs instead of the
     // auto-mocked undefined.
     vi.mocked(fs.statSync).mockImplementation((value) => realFs.statSync(String(value)));
+    // atomicReplaceTextFile stages install.json through mkdtempSync — the
+    // auto-mock returns undefined, so delegate to the real fs inside the
+    // throwaway HOME (the fake .pd parent is created for real first).
+    vi.mocked(fs.mkdtempSync).mockImplementation((prefix) => {
+      realFs.mkdirSync(path.dirname(String(prefix)), { recursive: true });
+      return realFs.mkdtempSync(String(prefix));
+    });
     vi.mocked(appendJournalTransition).mockImplementation(() => undefined);
     const httpModule = await import('http') as unknown as { get: ReturnType<typeof vi.fn> };
     answerHealthy(httpModule);
