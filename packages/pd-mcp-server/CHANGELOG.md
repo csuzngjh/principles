@@ -1,5 +1,96 @@
 # @principles/pd-mcp-server
 
+## 0.5.0
+
+### Minor Changes
+
+- d2799f4: PRI-1274 (B1): host identity prebind and structured-receipt fallback for `pd_submit_pain`
+  
+  - New unified `HostSubmissionContext` (Core): normalizes host-injected MCP `tools/call` `_meta` (Codex native `threadId`/`sessionId` + optional `x-codex-turn-metadata.turn_id`; namespaced `pd.host-context.v1` for other hosts) with sentinel/shape validation and a fail-closed conflict rule against model-supplied `hostSession` claims. Review round 2: a present-but-invalid `threadId` (sentinel/oversized) is its own `invalid` verdict — never a silent fallback to `sessionId` — and a claim with ANY foreign identifier conflicts even when a second identifier agrees.
+  - `pd_submit_pain` main path: a trusted `_meta` context pre-binds the submission session at the ORIGINAL Pain/Task write. Session binding no longer requires the target turn text (`codex_target_evidence_unavailable` coupling removed); a missing `submissionTurnId` never negates the session. Target-evidence reads use the assembly's own validated host kind (never a fixed `codex`) and an unreadable optional store degrades to no enrichment instead of aborting the submission.
+  - New quiet flag `host_identity_minimal_metadata` (default off): the one-time Workspace-level minimal identity-metadata authorization, separate from `codex_conversation_ingestion` and `automatic_pain_submission`. Flag off keeps submissions legally unbound with `blocked_by_consent` and persists ZERO identity metadata from the fallback (no `receiptRef`/`toolCallId`).
+  - Codex PostToolUse fallback (B1): the gate now parses the REAL namespaced Codex tool name (`mcp__pd_recall__pd_submit_pain`; server `pd-recall` and its identifier-sanitized spelling — verified against the installed codex-cli 0.171.0 binary and the Gate 2 runtime capture) — bare names and same-named tools on other MCP servers never enter. The envelope decode rejects multi-block content as ambiguous, normalizes workspace spellings before validation, and applies the unified format/sentinel check to event identity fields. Recovery restores the SAME original task via the existing expected-value CAS — now with full status/lease preconditions closing the read→write race against a concurrent worker (P1-4), plus original-task hostKind/workspace verification (P1-2). The receipt's `sessionAssociation` is the security boundary: ONLY `codex_host_metadata_missing` is recoverable; `host_context_conflict`, `host_context_invalid:*`, `blocked_by_consent` and `codex_target_turn_invalid` refusals can never be overturned by the fallback. `submit_unconfirmed` requires an exact-ID read-back; same-call replay is idempotent; different `toolCallId` is ambiguous; terminal/leased/foreign/conflicting tasks are never mutated; no transcript reads, no free-text recovery. No automatic retry of receipt recovery exists (P1-5 option B): the hook's stderr states per-outcome truth instead of a false next-cycle promise.
+  - Target turns now participate in diagnosis admission (P1-3): `submissionTurnId` and `targetTurnId` are distinct fields end-to-end. A session-bound submission that names a target turn whose text is not yet collectable is created `waiting_for_target_evidence` (same versioned `recovery` block, no new TaskStatus) unless it carries an explicit Owner statement; the candidate picker excludes waiting tasks inside the store query (SQL WHERE before ORDER BY/LIMIT, memory-store parity); a bounded worker-cycle reconcile flips them once the exact (host, session, turn) text exists; the context assembler reads EXACTLY the named turn — the session's other turns never substitute it — and never infers a target when none was named.
+  - `painIngress.verifiedHostSession` now validates `submissionTurnId` and `targetTurnId` independently (historical both-or-neither rows parse unchanged).
+- 652409b: PRI-1283 R2/R3 (SPEC-PD-FEEDBACK-RESILIENCE-001 TECH §2.2): sourceRef
+  revocation safety gate and persisted excerpt cleanup.
+  
+  R2 — unified latest-consent read gate over the conversation-ingestion consent
+  ledger v3 (the single authority): a new `SourceMaterialAuthorizationPort`
+  (core) with the ledger-backed implementation
+  `createConsentLedgerSourceMaterialAuthorization` (host-runtime), consulted
+  PER CALL (no cache) at every consumption entry point — diagnosis context
+  assembly (evidence entries, correction evidence, promoted evidence window,
+  governance turn reader, payload sourceRefs), all three split-pipeline model
+  invocation boundaries (`source_authorization_revoked` blocks the run), the
+  shared admission re-verification (`evaluateAndPersistAdmissionForWrite` /
+  internalization orchestrator / consumer cycle), `pd pain recall`, the Console
+  evidence-chain read model, and the MCP submit assembly (target-turn evidence
+  and session-verification probes refuse on blocked consent). Unwired ports
+  fail CLOSED for governance-sourced material; `owner_reported:` / `candidate:`
+  / openclaw inline evidence is not consent-governed and unaffected.
+  `ensureGovernanceContinuation` / `reconcileGovernanceContinuation` now AND the
+  caller flag with a live ledger read instead of trusting the flag alone.
+  
+  R3 — `runSourceRevocationSweep` (host-runtime): idempotent, visible,
+  retryable purge of persisted excerpts for every host whose recorded consent
+  decision is not granted — governance_observations text/tool facts NULLed and
+  retention-class expired (the store's no-regain guard makes re-granting NOT
+  resurrect old excerpts), admission marker payloads redacted (including the
+  independent `reason` column and pending-review termination), pain_events
+  text/reason NULLed for automatic pains (the Pain row and its identity
+  survive), task diagnostic_json evidence entries removed with a truthful
+  `painIngress.evidenceClass` (`source_revoked` added to the v1 reason enum)
+  and a non-sensitive `sourceRevocation` audit block, pain_diagnoses,
+  diagnostician artifacts, runs.output_payload and pi_artifacts evidence
+  filtered via row CAS. Wired into `pd codex setup --decline` / `pd workbuddy
+  setup --decline` (immediate sweep) and exposed as `pd consent sweep-revoked
+  [--apply] [--json]` (default dry run — truly read-only connections, no schema
+  init, no WAL/journal writes); audit trail at
+  `.state/source-revocation-sweep.jsonl` carries metadata only. Ledger-missing
+  workspaces are not swept (not a revocation) while R2 gates keep blocking; an
+  unreadable ledger fails the sweep loudly.
+  
+  Review round 2 hardening (directives A–F): pending Stage-2 reviews of a
+  revoked host are terminated `abandoned('source_revoked')` by both the sweep
+  and the claim path (claim-time consent re-validation; pre-classifier claim
+  verification blocks new model requests after a revocation; in-flight results
+  are fenced by the decision+claimToken CAS); explicit Owner statements
+  (`PD记录痛苦：` / `pd pain explicit` / WorkBuddy explicit intake) are
+  classified by their own provenance and survive the revocation on every read
+  path (sweep / recall / context assembler / console) and in the intake
+  re-verification (a historical `admitted` verdict is re-verified against the
+  latest source authorization before internalization may reuse it); dry runs
+  are read-only per table with counted-from-write purges and reported audit
+  failures; the core barrel surface carries only cross-package production
+  consumers (9 admitted symbols).
+  
+  Review round 3 (owner_manual classification ruling): an explicit Owner
+  statement is owner_manual only when its text is credibly Owner-authored —
+  a direct Owner channel (`codex_explicit_prefix` / `workbuddy_explicit_prefix`
+  / `cli_owner_statement` / `openclaw_manual_pain`), or an agent-assisted
+  `codex_explicit_agent` submission carrying a bound Owner confirmation record
+  (`ownerConfirmation.kind = owner_verbatim_turn_match` written by the
+  registration path after verifying the statement VERBATIM against the current
+  turn's host transcript, fingerprint-bound to the persisted text). A
+  self-declared `owner_statement` classification or a forged/mismatched
+  confirmation never exempts: unverified agent submissions persist as
+  Agent-derived and are governed by the consent ledger on every entry point
+  (sweep / recall / context assembler / console / admission), consistent under
+  one shared `isOwnerManualCorrectionEvidence` judgment.
+  
+  Round 4 hardening (review threads #14/#19/#20/#21): the console evidence-chain redaction now judges STRUCTURED correction evidence via `isOwnerManualCorrectionEvidence` instead of the spoofable summary reason marker; verbatim confirmation additionally requires an authorized source-material ledger for that host; the admission validator accepts legacy unconfirmed `codex_explicit_agent` payloads (empty evidence array tolerated) as Agent-derived so task reconciliation cannot starve on them; and the sweep task probe also matches rows carrying `correctionEvidence` so statement-only governed tasks are evaluated, with the evidenceClass rewrite made rerun-idempotent.
+  Diagnostician PHASE 1.5 now labels an unverified `codex_explicit_agent` correction as agent-relayed/unverified instead of claiming verbatim Owner words (review thread on the prompt builder).
+
+### Patch Changes
+
+- Updated dependencies [00ec958]
+- Updated dependencies [d2799f4]
+- Updated dependencies [652409b]
+- Updated dependencies [3a3b142]
+  - @principles/core@8.1.0
+  - @principles/host-runtime@4.6.0
+
 ## 0.4.4
 
 ### Patch Changes
