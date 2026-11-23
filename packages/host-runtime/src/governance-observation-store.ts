@@ -1278,14 +1278,17 @@ export function listGovernanceConversationTextsForHostTurn(
       "AND retention_class IN ('operational','promoted')",
       "AND visible_text IS NOT NULL AND TRIM(visible_text) <> ''",
       'ORDER BY id DESC LIMIT ?',
-    ].join(' ')).all(input.hostKind, input.rolloutIdentity, input.hostTurnId, limit) as Record<string, unknown>[];
-    const mapped = rows.map((row) => ({
-      id: Number(rowField(row, 'id')),
-      kind: rowField(row, 'kind') === 'assistant_turn' ? 'assistant_turn' as const : 'user_turn' as const,
-      logicalKey: String(rowField(row, 'logical_key')),
-      visibleText: String(rowField(row, 'visible_text')),
-      observedAt: String(rowField(row, 'observed_at')),
-    }));
+    ].join(' ')).all(input.hostKind, input.rolloutIdentity, input.hostTurnId, limit);
+    const mapped = rows.map((row) => {
+      const kind = rowField(row, 'kind');
+      return {
+        id: Number(rowField(row, 'id')),
+        kind: kind === 'assistant_turn' ? 'assistant_turn' as const : 'user_turn' as const,
+        logicalKey: String(rowField(row, 'logical_key')),
+        visibleText: String(rowField(row, 'visible_text')),
+        observedAt: String(rowField(row, 'observed_at')),
+      };
+    });
     mapped.reverse();
     return { ok: true, rows: mapped };
   } finally {
