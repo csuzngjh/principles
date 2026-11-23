@@ -36,6 +36,7 @@ describe('console dist freshness gate (PD_BUNDLE_SKIP_CONSOLE_BUILD)', () => {
     write('src/ui/main.tsx', 'export const u = 1;\n', T_SRC);
     write('dist/server.js', "export { main } from './server/index.js';\n", T_DIST);
     write('dist/server/index.js', 'export function main() {}\n', T_DIST);
+    write('dist/server/successor.js', 'export function run() {}\n', T_DIST);
     write('dist/web/index.html', '<!doctype html><script src="./assets/app.js"></script>\n', T_DIST);
     write('dist/web/assets/app.js', '(()=>{console.log(1)})();\n', T_DIST);
     return root;
@@ -63,6 +64,9 @@ describe('console dist freshness gate (PD_BUNDLE_SKIP_CONSOLE_BUILD)', () => {
   it.each([
     ['dist/server.js'],
     ['dist/server/index.js'],
+    // The release handover starts this one by path: a dist without it installs
+    // and serves, and silently loses the handover.
+    ['dist/server/successor.js'],
     ['dist/web/index.html'],
   ])('fails when the required artifact %s is missing (incomplete dist)', (rel) => {
     const root = createConsole();
