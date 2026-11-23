@@ -196,3 +196,14 @@ PR #2749 共 14 条 Devin Review 线程全部 ✅ resolved（本轮新增关闭 
 
 1. §11.6-1 已过时：CAS 门已迁 `better-sqlite3`，Node ≥22.0 兼容，无 node:sqlite 依赖。
 2. 双 Gateway 互等死锁在真实宿主进程联调中仍属 NOT_VERIFIED（由双进程确定性测试覆盖，无随机 sleep）；Phase 5 cutover 前置项不变。
+
+---
+
+## 14. 第七轮整改（2026-11-23，评审：租约变更丢失更新 + workbuddy 窗口覆盖）
+
+**最终 HEAD：`c5d26973f`**（PR #2749，未合并；CI 26 checks 全绿）。
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| 并发静默写入丢失更新：A 在锁外读整份租约再整体替换，可覆盖 B 刚写入的 `quiesced` 使其回到 `consuming`，双方恢复检查被永久致盲 | write/clear/clearByPid 三处的 read→merge→replace 均在仲裁门外 | 三处全部收进与注册相同的 SQLite `BEGIN IMMEDIATE` 门；新增 parked-gate 确定性测试（门被持有时写/清被拒、释放后通过） |
+| WorkBuddy 安装/卸载在 cohort 窗口内可覆盖 OpenClaw 后台所有权 | 以"npm 依赖版本旧"推断"无 §8.4 写者"不成立——随包 pd 解析自己的 `~/.pd/runtime/install-layout` 副本，可为 cohort 版 | 解锁写前探测已安装运行时能力：cohort-capable 或不可验证 → fail-closed 拒绝；仅确认 pre-cohort（不可能存在 ownership 写者）才走解锁写 |
