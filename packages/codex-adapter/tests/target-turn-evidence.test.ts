@@ -137,6 +137,19 @@ describe('readCodexTargetTurnEvidence — the EXACT turn only', () => {
     expect(readCodexTargetTurnEvidence(ws, SESSION, TARGET_TURN)).toEqual({ status: 'not_found' });
   });
 
+  it('the read is bound to ONE workspace: the same session/turn text living in ANOTHER workspace never satisfies it (错误 Workspace 拒绝)', () => {
+    const owner = workspace(true); // holds the target turn's rows
+    const stranger = workspace(true); // own (empty) store, consent granted too
+    seed(owner, [observation({ visibleText: 'target body that belongs to the owning workspace only' })]);
+    // The workspace that owns the rows reads them…
+    expect(readCodexTargetTurnEvidence(owner, SESSION, TARGET_TURN)).toMatchObject({ status: 'available' });
+    // …a different workspace directory never reaches across — not with the
+    // identical session + turn ids, and not with a granted consent ledger of
+    // its own. The reader has no workspace parameter coming from task input;
+    // this pins that the binding really is the worker's own workspace.
+    expect(readCodexTargetTurnEvidence(stranger, SESSION, TARGET_TURN)).toEqual({ status: 'not_found' });
+  });
+
   it('rows the retention policy expired are not readable text (来源过期)', () => {
     const ws = workspace(true);
     // The store's own ingest transaction expires rows older than the 7-day

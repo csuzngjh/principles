@@ -1056,4 +1056,32 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
       }
     });
   });
+
+  it('two concurrent reconciles over the same waiting task backfill EXACTLY once (the CAS arbitrates; no double evidence, no double flip)', async () => {
+    const painId = 'mcp_1700000001273_a0000017';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const read = (): TargetTurnEvidenceRead => ({ status: 'available', entries: TURN10_ENTRIES });
+    const nowIso = new Date().toISOString();
+    // Two executors race on the same persisted state (e.g. a companion-driven
+    // cycle and a Service Host run-once overlapping). Both may list the task;
+    // only ONE expected-value CAS can win — the loser sees either an empty
+    // waiting set or a lost CAS, never a second write.
+    const [first, second] = await Promise.all([
+      reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: read, nowIso, limit: 25 }),
+      reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: read, nowIso, limit: 25 }),
+    ]);
+    expect(first.flipped + second.flipped).toBe(1);
+    expect(first.backfilled + second.backfilled).toBe(1);
+    expect(first.blocked + second.blocked).toBe(0);
+    expect([...first.errors, ...second.errors]).toEqual([]);
+    const diagnostic = await readDiagnostic(taskId);
+    // One write's worth of evidence: the two target rows, not four.
+    expect(diagnostic.evidence).toEqual(TURN10_ENTRIES);
+    expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'available', entryCount: 2 });
+    expect((diagnostic.recovery as Record<string, unknown>).attemptCount).toBe(2);
+    // And a third, later pass finds nothing left to do.
+    const again = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: read, nowIso, limit: 25 });
+    expect(again).toMatchObject({ checked: 0, flipped: 0, backfilled: 0 });
+  });
 });

@@ -682,5 +682,71 @@ describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backf
       expect((diagnostic.evidence as Array<{ sourceRef: string }>).every((entry) =>
         entry.sourceRef.startsWith(`governance_observation:codex|${ROOT_SESSION}|${turnId(10)}|`))).toBe(true);
     });
+
+    it('a MALFORMED line ahead of the target turn is a stable fail-closed stop: the task waits honestly (no diagnosis, no evidence) and the lag is observable', { timeout: 120_000 }, async () => {
+      // Phase A: turns 1–9 ingested by the real hook.
+      const stop = await runHookExecutable(ws.codexHome, JSON.stringify({
+        session_id: ROOT_SESSION, turn_id: turnId(9), transcript_path: ws.transcriptPath,
+        cwd: ws.root, hook_event_name: 'Stop', model: 'gpt-5.6-sol', permission_mode: 'bypassPermissions',
+        stop_hook_active: false, last_assistant_message: assistantMarker(9),
+      }), { timeoutMs: 20_000 });
+      expect(stop.status, stop.stderr).toBe(0);
+
+      // Phase B: the real MCP entry submits targeting turn 10 → waiting.
+      const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-1273-e2e-logs-'));
+      dirs.push(logDir);
+      const transport = new StdioClientTransport({
+        command: process.execPath, args: [MCP_DIST_ENTRY],
+        env: { PD_MCP_WORKSPACE_DIR: ws.root, PD_MCP_HOST: 'codex', PD_MCP_LOG_DIR: logDir },
+        stderr: 'pipe',
+      });
+      const client = new Client({ name: 'pd-1273-e2e-malformed', version: '0.0.0' });
+      await client.connect(transport);
+      let taskId = '';
+      try {
+        const result = await client.callTool({
+          name: 'pd_submit_pain',
+          arguments: {
+            reason: 'Anchor: agent instruction. Observed: behavior. Deviation: mismatch.',
+            anchorType: 'agent_instruction', anchorRef: 'AGENTS.md#safety',
+            painType: 'user_frustration', targetTurnId: turnId(10),
+          },
+          _meta: { threadId: ROOT_SESSION, 'x-codex-turn-metadata': { turn_id: turnId(12) } },
+        });
+        const [block] = result.content;
+        if (block === undefined || block.type !== 'text') throw new Error('expected text content');
+        const receipt = JSON.parse(block.text) as { taskId: string | null };
+        if (receipt.taskId === null) throw new Error('receipt identity missing');
+        taskId = receipt.taskId;
+      } finally {
+        try { await client.close(); } catch { /* already gone */ }
+      }
+
+      // Phase C: a newline-terminated line that does not parse precedes the
+      // late turns 10–12. SPEC §14.2: a malformed record is STABLE — the
+      // decoder stops at it and never advances past it (the operator remedy
+      // is the quarantine command), so turn 10 is not collectable yet.
+      fs.appendFileSync(ws.transcriptPath, [
+        '{"timestamp":"2026-11-23T08:01:30.000Z","ordinal":500,"type":"event_msg","payload":{"type":"item_co',
+        ...rolloutLines(12).slice(rolloutLineCount(9)).map((l) => JSON.stringify(l)),
+      ].join('\n') + '\n');
+
+      const model = deterministicModelBoundary(ws.root);
+      const cycle = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      // Observable, never a silent skip: catch-up reports the rollout as still
+      // lagging (rc-9).
+      expect(cycle.report?.catchUp).toMatchObject({ remainingLagRollouts: expect.arrayContaining([ROOT_SESSION]) });
+      // The task keeps its honest waiting state — nothing is fabricated from
+      // another turn, nothing is diagnosed.
+      expect(cycle.report?.targetEvidenceReconcile).toMatchObject({ checked: 1, flipped: 0, backfilled: 0, blocked: 0, stillWaiting: 1 });
+      expect(cycle.report?.diagnostician).toBeNull();
+      expect(model.rootCausePrompts).toEqual([]);
+      const row = diagnosticRow(ws.root, taskId);
+      expect(row?.status).toBe('pending');
+      const diagnostic = JSON.parse(row?.diagnostic_json ?? '{}') as Record<string, unknown>;
+      expect((diagnostic.recovery as Record<string, unknown>).state).toBe('waiting_for_target_evidence');
+      expect(diagnostic.evidence).toEqual([]);
+      expect(diagnostic.sessionIdHint).toBe(ROOT_SESSION);
+    });
   });
 });
