@@ -279,6 +279,15 @@ export async function handleUpdateRoute(
         pdHome: getPdHome().pdHome,
         metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
       });
+      // The transport does not cancel what it times out: `asyncHandler` answers
+      // 504 at its budget while this route is still awaiting the gate above.
+      // Carrying on from there would START an update the page was told had
+      // failed — detached, and tracked by nobody. A request that was already
+      // answered, or whose caller is gone, is over: nothing below runs for it.
+      if (res.writableEnded || res.destroyed) {
+        console.error(`[update] ${subPath} abandoned: the request was already answered while the readiness gate ran`);
+        return;
+      }
       const readiness = authority.kinds[subPath === '/check' ? 'check' : 'apply-full'];
       if (!readiness.ready || authority.installStatus === null) {
         failure = { ...failure, reason: readiness.reasons.join(',') || 'install_state_corrupt', message: 'The installation is not ready for a signed release update.' };
