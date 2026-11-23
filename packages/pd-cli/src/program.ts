@@ -1027,9 +1027,10 @@ internalizationCmd
   .option('--allow-test-double', 'Acknowledge that test-double runtime will mutate real queue state')
   .option('--no-enqueue-next', 'Skip successor enqueue after successful runner (default: auto-enqueue)')
   .option('--timeout-ms <ms>', 'Runner timeout in milliseconds (default: 300000, overrides workflows.yaml)', parseInt)
+  .option('--only-candidates <ids>', 'Comma-separated candidate ids: only lease tasks belonging to these candidate chains (experiment shard isolation)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext, timeoutMs: opts.timeoutMs });
+    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext, timeoutMs: opts.timeoutMs, onlyCandidates: opts.onlyCandidates });
   });
 
 registerRunRuleHostCommand(internalizationCmd);

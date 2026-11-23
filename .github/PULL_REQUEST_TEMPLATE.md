@@ -195,6 +195,12 @@ Owner / operator 如何观察它确实生效？
 | ___ | PASS / FAIL | ___ |
 | ___ | PASS / FAIL | ___ |
 
+### PD-Lab Impact（条件性，AGENTS.md §25A）
+
+* [ ] NOT_REQUIRED — 不触及 Agent 行为面，一句话原因: ___
+* [ ] REQUIRED — 已按 `docs/process/PD-LAB-USAGE.md` §4 执行/交付：实验目标 / 使用的 lab 能力 / 结果（`PASS` / `PASS_WITH_LIMITATIONS` / `BLOCKED` / `NOT_RUN`）/ 证据位置 / 已知限制: ___
+* [ ] BLOCKED — 需要实验但授权（D2–D6）或环境条件不满足，缺失项: ___（不得把 BLOCKED 描述为 PASS）
+
 ### Failure-path test obligation (advisory, EP-09)
 
 新增每一条失败分支测试，必须同时给出：

@@ -354,61 +354,91 @@ describe('T3b §5.11 — full-dataset redaction probe covers EVERY sample', () =
 describe('T3b §5.10 + PRI-1256 r3/r4 — terminal classification: legitimate outcomes vs persistence anomalies', () => {
   const chainTrue = { diagnoseOk: true, routerTaskSucceeded: true, routerRunSucceeded: true, stageArtifactsSchemaValid: true };
 
-  // The classifier requires candidates for EVERY legitimate terminal —
-  // `done-no-candidate` is retired as a producible state (historical
-  // persisted records still resume; covered by the runtime-safety suite).
-  it('current: router succeeded + candidates → done (ok)', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false });
+  // The classifier requires candidates AND a completed formation loop for
+  // EVERY legitimate terminal — `done-no-candidate` is retired as a
+  // producible state (historical persisted records still resume; covered
+  // by the runtime-safety suite), and a budget-exhausted formation loop
+  // falls to `incomplete` (PRI-1284 P1-3), never a done-* certificate.
+  it('current: router succeeded + candidates + formation complete → done (ok)', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false, formationComplete: true });
     expect(t.status).toBe('done');
     expect(t.ok).toBe(true);
     expect(t.legitimateTerminal).toBeNull();
   });
   it('current: router succeeded + NO candidates → incomplete, never done-no-candidate', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesComplete: false, admissionRefused: false, deferOnly: false });
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: false, admissionRefused: false, deferOnly: false, formationComplete: true });
     expect(t.status).toBe('incomplete');
     expect(t.ok).toBe(false);
     expect(t.legitimateTerminal).toBeNull();
   });
   it('current: router succeeded + all-defer + NO candidates → incomplete (defer cannot rescue missing candidates)', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesComplete: false, admissionRefused: false, deferOnly: true });
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: false, admissionRefused: false, deferOnly: true, formationComplete: true });
     expect(t.status).toBe('incomplete');
     expect(t.ok).toBe(false);
     expect(t.legitimateTerminal).toBeNull();
   });
-  it('current: router succeeded + all-defer + candidates → done-deferred', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: true });
+  it('current: router succeeded + all-defer + candidates + formation complete → done-deferred', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: true, formationComplete: true });
     expect(t.status).toBe('done-deferred');
     expect(t.ok).toBe(true);
     expect(t.legitimateTerminal).toBe('deferred');
   });
-  it('current: router succeeded + admission refused + candidates → done-admission-refused (PRI-1222)', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: true, deferOnly: false });
+  it('current: router succeeded + admission refused + candidates + formation complete → done-admission-refused (PRI-1222)', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: true, deferOnly: false, formationComplete: true });
     expect(t.status).toBe('done-admission-refused');
     expect(t.ok).toBe(true);
     expect(t.legitimateTerminal).toBe('admission-refused');
   });
   it('current: router succeeded + admission refused + NO candidates → incomplete (refusal never bypasses the persistence check)', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesComplete: false, admissionRefused: true, deferOnly: false });
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: false, admissionRefused: true, deferOnly: false, formationComplete: true });
     expect(t.status).toBe('incomplete');
     expect(t.ok).toBe(false);
     expect(t.legitimateTerminal).toBeNull();
+  });
+  // PRI-1284 P1-3: a budget-exhausted formation loop is NOT a completed
+  // unit — it must classify `incomplete` (resumable) even when the chain
+  // and the candidate linkage are otherwise perfect.
+  it('PRI-1284: budget-exhausted formation loop → incomplete, never a done-* certificate', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false, formationComplete: false });
+    expect(t.status).toBe('incomplete');
+    expect(t.ok).toBe(false);
+    expect(t.legitimateTerminal).toBeNull();
+  });
+  it('PRI-1284: formationComplete=false cannot be rescued by defer or admission-refused either', () => {
+    for (const admissionRefused of [true, false]) {
+      for (const deferOnly of [true, false]) {
+        const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused, deferOnly, formationComplete: false });
+        expect(t.status).toBe('incomplete');
+        expect(t.ok).toBe(false);
+        expect(t.legitimateTerminal).toBeNull();
+      }
+    }
   });
   it('task/run success alone never certifies completion: no check combination yields done-no-candidate', () => {
     for (const candidatesComplete of [true, false]) {
       for (const admissionRefused of [true, false]) {
         for (const deferOnly of [true, false]) {
           for (const stageArtifactsSchemaValid of [true, false]) {
-            const t = classifyTerminal({ ...chainTrue, stageArtifactsSchemaValid, candidatesComplete, admissionRefused, deferOnly });
-            expect(t.status).not.toBe('done-no-candidate');
-            if (!candidatesComplete) expect(t.ok).toBe(false);
+            for (const formationComplete of [true, false]) {
+              const t = classifyTerminal({ ...chainTrue, stageArtifactsSchemaValid, candidatesComplete, admissionRefused, deferOnly, formationComplete });
+              expect(t.status).not.toBe('done-no-candidate');
+              if (!candidatesComplete || !formationComplete) expect(t.ok).toBe(false);
+            }
           }
         }
       }
     }
   });
+  it('the full success matrix certifies exactly the three legitimate terminals', () => {
+    for (const [admissionRefused, deferOnly, expected] of [[false, false, 'done'], [false, true, 'done-deferred'], [true, false, 'done-admission-refused']]) {
+      const t = classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused, deferOnly, formationComplete: true });
+      expect(t.status).toBe(expected);
+      expect(t.ok).toBe(true);
+    }
+  });
   it('classic outcomes keep their meaning: incomplete / failed', () => {
-    expect(classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false, stageArtifactsSchemaValid: false }).status).toBe('incomplete');
-    expect(classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false, routerTaskSucceeded: false }).status).toBe('failed');
+    expect(classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false, formationComplete: true, stageArtifactsSchemaValid: false }).status).toBe('incomplete');
+    expect(classifyTerminal({ ...chainTrue, candidatesComplete: true, admissionRefused: false, deferOnly: false, formationComplete: true, routerTaskSucceeded: false }).status).toBe('failed');
   });
   it('detectDeferOnly never guesses defer: unparseable/empty/mixed recommendations are false', () => {
     const mk = (content) => [{ source_task_id: 'diag_router-t1', content_json: typeof content === 'string' ? content : JSON.stringify(content) }];
@@ -971,4 +1001,35 @@ describe('ab-metrics role propagation (subprocess over a synthetic run)', () => 
     expect(report.pairs.fullChain.arms).toEqual({ baseline: 'wtbase', candidate: 'wtcand' });
     expect(report.pairs.fullChain.missing.every((m) => ['wtbase', 'wtcand', 'both'].includes(m.missingArm))).toBe(true);
   });
+});
+
+// ---------------------------------------------------------------------------
+// PRI-1284 — budget flags must fail loudly, never silently degrade
+// ---------------------------------------------------------------------------
+
+describe('PRI-1284 — malformed budget flags are rejected at the real CLI boundary', () => {
+  // Before this change, `--reps abc` produced NaN and silently filtered out
+  // every repeat while still printing "run complete", and a non-numeric
+  // `--formation-depth` made the depth comparison dead. Both entries must
+  // refuse non-positive-integers BEFORE any record write.
+  const expectBudgetRejected = (entry, flag, res) => {
+    expect(res.status, `${entry} ${flag} must exit non-zero (got ${res.status})\nstdout=${res.stdout.slice(0, 200)}`).not.toBe(0);
+    expect(res.stderr).toContain(`${flag} must be a positive integer`);
+  };
+
+  const fx = buildFixture('budget');
+
+  for (const [flag, bad] of [['--reps', 'abc'], ['--reps', '0'], ['--reps', '2.5'], ['--formation-depth', 'abc'], ['--formation-depth', '0'], ['--reps=abc', null], ['--formation-depth=0', null]]) {
+    const flagName = flag.split('=')[0];
+    const flagArgs = flag.includes('=') ? [flag] : [flag, bad];
+    const label = flag.includes('=') ? flag : `${flag} ${bad}`;
+    it(`ab-run.mjs rejects ${label}`, () => {
+      const res = runRepoScript(ENTRY_AB_RUN, ['--config', fx.writeConfig(), '--run-id', `bud-${flagName.slice(2)}-${flag.includes('=') ? 'eq' : bad}`, '--shard-id', '0', ...flagArgs]);
+      expectBudgetRejected('ab-run.mjs', flagName, res);
+    });
+    it(`ab-grid.mjs rejects ${label} (same contract, forwarded to shards)`, () => {
+      const res = runRepoScript(ENTRY_AB_GRID, ['--config', fx.writeConfig(), '--run-id', `budg-${flagName.slice(2)}-${flag.includes('=') ? 'eq' : bad}`, ...flagArgs]);
+      expectBudgetRejected('ab-grid.mjs', flagName, res);
+    });
+  }
 });
