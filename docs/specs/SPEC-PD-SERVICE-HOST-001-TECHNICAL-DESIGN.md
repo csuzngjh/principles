@@ -1,8 +1,9 @@
 # SPEC-PD-SERVICE-HOST-001 — 配套技术设计与实施方案
 
-- **版本**：v0.3
-- **日期**：2026-11-20
-- **状态**：Architecture Approved（ADR-0020 §11.6）/ Implementation not started；本文件不授权超出 §11.6 范围的运行时行为
+- **版本**：v0.4
+- **日期**：2026-11-23
+- **状态**：Architecture Approved（ADR-0020 §11.6）/ Phase 1–5 implemented；Phase 5 交付新安装默认与首次所有权初始化，待 Owner review
+- **v0.4 Phase 5 修订**：新增 §9.1 首次安装 provisioning（`provision_fresh_install`）、宿主选择与后台生命周期解耦、升级隔离与安装证据；更新 §11 文件映射的实施状态。
 - **v0.3 整改修订**：补齐 Workspace Binding 契约（§5.1）、Worker Adapter 最小合同与能力矩阵（§2.3）、环境隔离分层契约（§5.2）、所有权交接协议与最小实现要求（§9）；删除已过时的“实现前须先过 §11.1 Owner Gate”表述。
 - **v0.2 源码审计修订**：本节按 2026-11-19 源码事实审计修正；标注〔新增能力〕的字段/接口当前并不存在，不得以现有能力名义引用。
 - **上位规范**：[PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md)
@@ -326,6 +327,32 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 
 进程存在性、PID、启动顺序或固定延迟**不是**所有权证明。
 
+### 9.1 首次安装 provisioning（Phase 5）
+
+全新安装没有历史消费者，但“没有旧消费者”不能被推断为“可以直接写 Owner”——它必须被**结构性证明**。因此新增一个最小状态机迁移：
+
+- **迁移**：`provision_fresh_install`，`legacy_owned`（无 record）→ `service_host_owned`，单次 CAS 原子写，generation 0→1；
+- **授权证明**（写路径内强制，不信任调用方）：
+  - `freshInstall=true` 必须显式传入；
+  - manifest 中该 Workspace **没有任何** `backgroundExecutions` record（连 `legacy_owned` record 都算历史，必须走 `begin_handover`）；
+  - 一个已 `service_host_owned` 的 Workspace 重放是 `changed:false` 的 no-op；
+- **不可用它做升级**：任何已有 record（含 legacy）都 `unexpected_state` 拒绝，nextAction 指向 `pd service handover`；
+- **等价能力复用**：同一把跨进程 CAS 锁、同一 generation fencing、同一 operationId 幂等键、同一原子 rename、同一 unknown-field 保留；不新增第二套状态机或持久化字段。
+
+安装器编排（`create-principles-disciple`，提交后执行，失败只告警）：
+
+| 步骤 | 实现 | 失败语义 |
+|---|---|---|
+| 1. 调度器注册+启用 | 既有 `pd service install` / `enable`，随后 `pd service status --json` 复核 | `consent_required` / `registered_disabled` / `failed` → **不翻转 Owner** |
+| 2. no-consume readiness | active-release CLI：OpenClaw `worker --readiness`；Codex/WorkBuddy `worker --status` | readiness 失败 → `not_provisioned` + nextAction |
+| 3. 所有权 CAS | `transitionWorkspaceBackgroundExecution({kind:'provision_fresh_install', freshInstall:true, registerWorkspace:true})` | 写入失败/投影不符 → `failed`，不重试猜测 |
+| 4. 首次真实周期 | `pd service run-once --trigger installer --json`（有界超时） | 未完成 → 保留所有权，下一 OS 触发从持久化 task/lease 恢复 |
+| 5. 安装证据 | `<pdHome>/service/install-provisioning.json`（原子写） | 证据写失败 → 告警，不影响既定所有权 |
+
+**升级隔离**：同一 installer 只有在 manifest 于本次运行前**不存在**时才走上述路径。升级只做 refresh-if-registered，并输出 `pd service handover` 迁移入口；`--enable-service-host` 是升级时唯一允许启用调度器的来源。
+
+**Service-Host-only**（`--host none`）：manifest `hosts: []` + `workspaces:[…]` 是合法形态；readiness 记为 `waiting_for_host_binding`，首次周期会记录 `no_adapter_supports_workspace`；状态契约新增 `hostBindingState`，绝不伪造宿主 Worker。
+
 ## 10. 测试矩阵
 
 | 类别 | 必测场景 |
@@ -340,6 +367,8 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 | Host isolation | OpenClaw Gateway 退出后，已持久化且证据足够的任务继续 |
 | Governance | Owner pause、feature flag off、Diagnostician capability disabled、consent revoked |
 | Security | 无凭据出现在参数/日志；Workspace pointer 不串线；不扫描未授权宿主目录 |
+| Fresh install | 无 manifest → 默认注册+启用；`provision_fresh_install` 原子所有权；readiness → 首次周期 → 证据；`--yes` / `--json` / `--non-interactive` / `--no-service-host` 同意语义 |
+| Upgrade isolation | 既有 record / 注册 / enabled 状态不变；只 refresh-if-registered；`legacy_owned` 不被静默翻转 |
 
 ## 11. 实施顺序与文件映射
 
@@ -347,9 +376,9 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 |---|---|---|
 | 1 | ~~新 packages/pd-service-host~~ → **已修正：packages/pd-cli/src/services/service-host/** | 实现 run-once coordinator、scheduler adapter（Phase 3：`scheduler/` 子目录）、lock、status。**不抽独立包**（ERR-196 发布资产风险类；Phase 1 决策，Phase 3 沿用） |
 | 2 | packages/pd-cli | 增加 pd service 命令；复用既有 --once Worker CLI（Phase 3：install/enable/disable/status/uninstall + managed run-once + 共享派发核心 workspace-dispatch.ts） |
-| 3 | packages/create-principles-disciple | 注册/撤销用户级 scheduler（Phase 3：经桥接调用已安装 CLI —— 显式同意注册 / 升级 refresh-if-registered / 卸载撤销） |
-| 4 | packages/openclaw-plugin + 新 OpenClaw Adapter seam | 将 Gateway timer 与可独立执行能力分开（Phase 4，未实施） |
-| 5 | packages/pd-companion | 移除 Worker supervision 接线，保留 status / notification（Phase 5，未实施） |
+| 3 | packages/create-principles-disciple | 注册/撤销用户级 scheduler（Phase 3：经桥接调用已安装 CLI —— 显式同意注册 / 升级 refresh-if-registered / 卸载撤销）。**Phase 5：宿主选择与后台生命周期解耦（`--host` 无默认、`none` 合法）；全新安装默认注册+启用；首次 Workspace 所有权 provisioning（readiness → CAS → 首次周期 → 证据）** |
+| 4 | packages/openclaw-plugin + 新 OpenClaw Adapter seam | 将 Gateway timer 与可独立执行能力分开（Phase 4，已实施；Phase 5 复用同一 marker 门禁） |
+| 5 | packages/pd-companion | 移除 Worker supervision 接线，保留 status / notification（Phase 5：过渡态/Service Host 所有权阻塞与崩溃重启抑制已实施并有回归测试；旧 Workspace 保留显式 legacy fallback） |
 | 6 | packages/pd-console | 增加服务状态查询与显式操作；不拥有生命周期（Phase 3：只读 `GET /api/service-host/status` 已落地） |
 | 7 | docs / architecture tests | 同步架构边界、依赖规则、生命周期与回滚测试（Phase 3：`docs/runbooks/PD_SERVICE_HOST_SCHEDULER.md`） |
 

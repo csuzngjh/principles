@@ -71,3 +71,28 @@ describe('--stop-gateway flag registration (cli-7, real program)', () => {
     expect(opt?.flags).toBe('--stop-gateway');
   });
 });
+
+// PRI-1278 Phase 5: host integration and the background life cycle are two
+// independent dimensions. `--host` must NOT silently default to OpenClaw, and
+// the scheduler must expose an explicit opt-out plus the consent flags.
+describe('PRI-1278 Phase 5 install flag registration (cli-7, real program)', () => {
+  const installCmd = program.commands.find((c) => c.name() === 'install');
+
+  it('--host has NO default (omitting it must never install OpenClaw)', () => {
+    const opt = installCmd!.options.find((o) => o.long === '--host');
+    expect(opt).toBeDefined();
+    expect(opt?.defaultValue).toBeUndefined();
+  });
+
+  it('exposes the explicit scheduler opt-out', () => {
+    const opt = installCmd!.options.find((o) => o.long === '--no-service-host');
+    expect(opt).toBeDefined();
+  });
+
+  it('keeps the explicit register/enable consent flags', () => {
+    const register = installCmd!.options.find((o) => o.long === '--register-service-host');
+    const enable = installCmd!.options.find((o) => o.long === '--enable-service-host');
+    expect(register?.defaultValue).toBe(false);
+    expect(enable?.defaultValue).toBe(false);
+  });
+});

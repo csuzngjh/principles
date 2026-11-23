@@ -122,7 +122,7 @@ export function checkEnvironment(): EnvCheckResult {
   return result;
 }
 
-export type WorkspaceHost = 'openclaw' | 'codex' | 'workbuddy' | 'all';
+export type WorkspaceHost = 'openclaw' | 'codex' | 'workbuddy' | 'all' | 'none';
 
 export interface DetectWorkspaceOptions {
   /**
@@ -240,6 +240,14 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
     ));
   } else if (host === 'workbuddy') {
     candidates.push(hostRoots.workbuddyWorkspaceDir);
+  } else if (host === 'none') {
+    // Service-Host-only (PRI-1278 Phase 5): no host owns a default workspace,
+    // so the neutral PD-owned location is the only honest default. Never
+    // inherit OpenClaw's ~/clawd — that would imply a host that isn't installed.
+    if (typeof env.PD_WORKSPACE_DIR === 'string' && env.PD_WORKSPACE_DIR.trim().length > 0) {
+      candidates.push(env.PD_WORKSPACE_DIR);
+    }
+    candidates.push(path.join(homePaths.homeDir, 'pd-workspace'));
   } else {
     // OpenClaw owns its default workspace under the active OpenClaw state dir.
     if (typeof env.OPENCLAW_WORKSPACE === 'string' && env.OPENCLAW_WORKSPACE.trim().length > 0) {
@@ -294,7 +302,9 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
     ? hostRoots.codexWorkspaceDir
     : host === 'workbuddy'
       ? hostRoots.workbuddyWorkspaceDir
-      : path.join(hostRoots.homeDir, 'clawd');
+      : host === 'none'
+        ? path.join(homePaths.homeDir, 'pd-workspace')
+        : path.join(hostRoots.homeDir, 'clawd');
   return {
     detectedPath: defaultPath,
     exists: false,

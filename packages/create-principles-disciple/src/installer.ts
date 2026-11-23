@@ -37,7 +37,7 @@ import {
   type VerificationResult,
   type RuntimeProfileInput,
 } from './mvp-config.js';
-import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostTarget } from './installers/index.js';
+import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostSelection, type HostTarget } from './installers/index.js';
 import { atomicReplaceTextFile, errnoCode } from './utils/config-file-io.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
@@ -50,7 +50,8 @@ import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir
 import * as installLayoutModule from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
-import { reconcileServiceHostScheduler } from './service-host-bridge.js';
+import { reconcileServiceHostScheduler, type ServiceHostSchedulerOutcome } from './service-host-bridge.js';
+import { provisionFreshInstallWorkspace, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -226,12 +227,12 @@ const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
 // Shared components use ~/.pd/runtime. The plugin package is host-neutral for
 // Codex-only installs; OpenClaw/all still receive their adapter copy under
 // ~/.openclaw/extensions for host discovery.
-let activeHostTarget: HostTarget = 'openclaw';
-function installsOpenClaw(host: HostTarget): boolean {
+let activeHostTarget: HostSelection = 'none';
+function installsOpenClaw(host: HostSelection): boolean {
   return host === 'openclaw' || host === 'all';
 }
 
-function installsWorkbuddy(host: HostTarget): boolean {
+function installsWorkbuddy(host: HostSelection): boolean {
   return host === 'workbuddy' || host === 'all';
 }
 
@@ -241,7 +242,7 @@ function installsWorkbuddy(host: HostTarget): boolean {
  * materialized ONLY then (review 2026-11-18): an OpenClaw-only run must not
  * be rolled back by an unwritable CODEX_HOME it never asked to touch.
  */
-export function installRunServesCodex(host: HostTarget, refreshTargets: readonly HostTarget[]): boolean {
+export function installRunServesCodex(host: HostSelection, refreshTargets: readonly HostTarget[]): boolean {
   return host === 'codex' || host === 'all' || refreshTargets.includes('codex');
 }
 
@@ -251,7 +252,7 @@ function pluginInstallDirs(): string[] {
     : [getInstalledPluginDir()];
 }
 
-export function mergeInstallManifestHosts(current: unknown, host: HostTarget): string[] {
+export function mergeInstallManifestHosts(current: unknown, host: HostSelection): string[] {
   const hosts = new Set<string>();
   const parsed = parseInstallManifest(current);
   if (current !== undefined && !parsed.manifest) {
@@ -269,7 +270,7 @@ export function mergeInstallManifestHosts(current: unknown, host: HostTarget): s
   return [...hosts];
 }
 
-function resolveInstallManifestHosts(host: HostTarget): string[] {
+function resolveInstallManifestHosts(host: HostSelection): string[] {
   let current: unknown;
   try {
     current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
@@ -306,8 +307,8 @@ function readPersistedInstallHosts(): string[] {
  * WorkBuddy stays opt-in (OD-03): 'all' never attaches it here, but a manifest
  * that ALREADY records it must be refreshed like any other served host.
  */
-export function resolveHostRefreshTargets(persistedHosts: readonly string[], host: HostTarget): HostTarget[] {
-  const covered = new Set<string>(host === 'all' ? ['openclaw', 'codex'] : [host]);
+export function resolveHostRefreshTargets(persistedHosts: readonly string[], host: HostSelection): HostTarget[] {
+  const covered = new Set<string>(host === 'all' ? ['openclaw', 'codex'] : host === 'none' ? [] : [host]);
   const targets: HostTarget[] = [];
   for (const persisted of persistedHosts) {
     if (persisted !== 'openclaw' && persisted !== 'codex' && persisted !== 'workbuddy') continue;
@@ -338,7 +339,7 @@ export interface UpgradeHostPlan {
  * Pure so the coverage rule is testable without running a whole install.
  */
 export function planUpgradeHosts(
-  requested: HostTarget,
+  requested: HostSelection,
   persistedHosts: readonly string[],
   detected: readonly DetectedHost[],
 ): UpgradeHostPlan {
@@ -371,7 +372,7 @@ export function planUpgradeHosts(
 function mergeInstallManifestWorkspacesFor(
   current: ReturnType<typeof parseInstallManifest>['manifest'],
   workspaceDir: string,
-  host?: HostTarget,
+  host?: HostSelection,
 ): string[] {
   let workspaces = mergeInstallManifestWorkspaces(current, path.resolve(workspaceDir));
   if (host === 'workbuddy') {
@@ -1694,7 +1695,7 @@ function verifyCopiedTree(source: string, copy: string): number {
 /**
  * Exported for real-filesystem tests (tests/backup-location.test.ts).
  */
-export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResult {
+export function backupExistingInstall(host: HostSelection = 'none'): BackupResult {
   const extDir = getPluginExtDir();
   const runtimeDir = getPdRuntimeDir();
   const hasExt = installsOpenClaw(host) && existsSync(extDir);
@@ -4539,7 +4540,7 @@ async function probeAutolaunchHealth(
  * the task project path. Other hosts keep the project workspace.
  */
 export function resolveConsoleWorkspaceDir(
-  host: HostTarget | undefined,
+  host: HostSelection | undefined,
   projectWorkspaceDir: string,
   homeDir: string,
 ): string {
@@ -5289,6 +5290,23 @@ export interface InstallResult {
    * non-empty; `success` is NOT affected (migration is best-effort by design).
    */
   legacyBackupMigrationFailures?: LegacyBackupMigrationFailure[];
+  /**
+   * PRI-1278 Phase 5: the background-execution outcome of this install —
+   * scheduler registration/enablement and (fresh installs only) the workspace
+   * ownership handover with its first managed cycle. Present on committed
+   * installs; `--json` consumers rely on it because `logger.info` is silenced.
+   */
+  serviceHost?: ServiceHostInstallOutcome;
+  /** PRI-1278 Phase 5: the host ADAPTER this run installed ('none' = Service-Host-only). */
+  hostAdapter?: HostSelection;
+}
+
+/** PRI-1278 Phase 5: everything the installer knows about the background owner. */
+export interface ServiceHostInstallOutcome {
+  readonly freshInstall: boolean;
+  readonly scheduler: ServiceHostSchedulerOutcome;
+  readonly provisioning: ServiceHostProvisioningOutcome | null;
+  readonly nextAction: string;
 }
 
 /** One structured legacy-backup migration failure (§8.5 / InstallResult). */
@@ -5467,10 +5485,13 @@ export async function materializeCodexWorkspace(
 }
 
 export async function runHostInstallers(
-  host: HostTarget,
+  host: HostSelection,
   ctx: HostInstallContext,
   overrides: { readonly codexWorkspaceDir?: string; readonly codexWorkspaceError?: string } = {},
 ): Promise<HostInstallResult[]> {
+  // Service-Host-only install: no host adapter exists, so no host installer
+  // runs. This is a first-class mode, not an error — never fabricate one.
+  if (host === 'none') return [];
   const installers = getHostInstallers(host);
   const results: HostInstallResult[] = [];
   for (const installer of installers) {
@@ -5781,6 +5802,12 @@ export async function install(
   // files. Validated here, the failure costs nothing.
   assertUsableWorkspaceDir(options.workspaceDir);
 
+  // PRI-1278 Phase 5: a FIRST install is proven by the absence of the PD
+  // install manifest BEFORE this run mutates anything. Only a first install
+  // may adopt the new background default (scheduler enable + ownership
+  // provisioning); every existing installation keeps its recorded lifecycle.
+  const freshInstallRun = !existsSync(getInstallManifestPath());
+
   // Decide the payload shape once: self-contained (release asset) or
   // npm-distributed (registry-resolved dependencies). A present `_release`
   // asset keeps the hard preflight; the npm-distributed shape must pass
@@ -6088,8 +6115,18 @@ export async function install(
     // carries PD and include it in BOTH the manifest record and the refresh
     // set, so one upgrade brings all hosts forward without uninstall/reinstall.
     const detectedHostsBeforeRun = detectInstalledHosts();
-    const hostPlan = planUpgradeHosts(options.host, persistedHostsBeforeRun, detectedHostsBeforeRun);
-    installManifestHosts = withDetectedHosts(resolveInstallManifestHosts(options.host), detectedHostsBeforeRun);
+    // PRI-1278 Phase 5: a FIRST install never inherits a host from machine
+    // leftovers or a sibling detection — the operator chose the host adapter
+    // (or chose none). Only an EXISTING install widens its coverage.
+    const hostPlan = planUpgradeHosts(
+      options.host,
+      freshInstallRun ? [] : persistedHostsBeforeRun,
+      freshInstallRun ? [] : detectedHostsBeforeRun,
+    );
+    installManifestHosts = withDetectedHosts(
+      resolveInstallManifestHosts(options.host),
+      freshInstallRun ? [] : detectedHostsBeforeRun,
+    );
     for (const detectedHost of hostPlan.newlyCovered) {
       logger.info(`Detected installed host "${detectedHost.hostId}" (${detectedHost.evidence}) — included in this upgrade.`);
     }
@@ -6609,22 +6646,79 @@ export async function install(
       }
     }
 
-    // PRI-1281 Phase 3 (task §6): user-level OS scheduler reconciliation.
+    // PRI-1281 Phase 3 / PRI-1278 Phase 5: user-level OS scheduler
+    // reconciliation + fresh-install ownership provisioning.
     // POST-COMMIT by design — the runtime transaction is already confirmed,
     // so every bridge failure is a WARNING, never a reported install failure
-    // (ERR-197). Consent-gated registration; upgrades only refresh an
-    // EXISTING registration (enabled state preserved) and never create one
-    // silently. Identity comes from the installer's own authoritative pdHome.
+    // (ERR-197). The consent intent is resolved by the caller; the installer
+    // enforces the two hard rules itself:
+    //  1. an upgrade NEVER enables implicitly (only an explicit flag may);
+    //  2. ownership is handed over ONLY on a fresh install whose scheduler is
+    //     verified enabled.
+    let serviceHostOutcome: ServiceHostInstallOutcome;
     try {
-      await reconcileServiceHostScheduler({
+      const freshInstall = freshInstallRun;
+      const requestedConsent = options.serviceHost ?? {
+        // Defensive default for callers that predate the consent contract:
+        // explicit flags only, never an implicit fresh-install enable.
+        intent: options.enableServiceHost === true
+          ? 'enable'
+          : options.registerServiceHost === true
+            ? 'register_only'
+            : 'refresh_if_registered',
+        source: 'explicit_flag' as const,
+      };
+      const consent = requestedConsent.intent === 'enable'
+        && requestedConsent.source !== 'explicit_flag'
+        && !freshInstall
+        ? {
+            intent: 'refresh_if_registered' as const,
+            source: 'policy' as const,
+          }
+        : requestedConsent;
+      if (consent !== requestedConsent) {
+        logger.warn('Service Host scheduler enable was requested implicitly on an EXISTING installation — downgraded to refresh-if-registered. Run `pd service enable` explicitly to arm automatic runs.');
+      }
+      const scheduler = await reconcileServiceHostScheduler({
         pdHome: getPdDir(),
-        registerServiceHost: options.enableServiceHost === true || options.registerServiceHost === true,
-        enableServiceHost: options.enableServiceHost === true,
+        intent: consent.intent,
+        source: consent.source,
+        freshInstall,
         warn: (message) => logger.warn(message),
         info: (message) => logger.info(message),
       });
+      const provisioning = freshInstall && scheduler.state === 'enabled'
+        ? await provisionFreshInstallWorkspace({
+            pdHome: getPdDir(),
+            workspaceDir: options.workspaceDir,
+            host: options.host,
+            scheduler,
+            warn: (message) => logger.warn(message),
+            info: (message) => logger.info(message),
+          })
+        : null;
+      serviceHostOutcome = {
+        freshInstall,
+        scheduler,
+        provisioning,
+        nextAction: provisioning?.nextAction ?? scheduler.nextAction,
+      };
     } catch (bridgeError) {
-      logger.warn(`Service Host scheduler reconciliation threw (${bridgeError instanceof Error ? bridgeError.message : String(bridgeError)}) — the install itself is unaffected; run pd service status manually.`);
+      const detail = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
+      logger.warn(`Service Host reconciliation threw (${detail}) — the install itself is unaffected; run pd service status manually.`);
+      serviceHostOutcome = {
+        freshInstall: false,
+        scheduler: {
+          state: 'failed',
+          registered: null,
+          enabled: null,
+          detail: `reconciliation_threw:${detail}`,
+          nextAction: 'Run `pd service status --json` and repair the Service Host manually; no ownership change was attempted.',
+          warnings: [detail],
+        },
+        provisioning: null,
+        nextAction: 'Run `pd service status --json` and repair the Service Host manually; no ownership change was attempted.',
+      };
     }
     if (spinner) {
       // rc-9: the runtime transaction IS committed here, but a pending host
@@ -6717,6 +6811,8 @@ export async function install(
       ...(legacyBackupMigrationFailures !== undefined ? { legacyBackupMigrationFailures } : {}),
       ...(manualActionReason !== undefined ? { reason: manualActionReason, manualActions: hostManualActions } : {}),
       journal: installerJournalRecord(journal),
+      serviceHost: serviceHostOutcome,
+      hostAdapter: options.host,
     };
     return pendingResult;
   } catch (error) {

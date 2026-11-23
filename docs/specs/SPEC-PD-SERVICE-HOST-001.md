@@ -1,8 +1,9 @@
 # SPEC-PD-SERVICE-HOST-001 — PD 独立服务宿主架构规范
 
-- **版本**：v0.3
-- **日期**：2026-11-20
-- **状态**：Architecture Approved（ADR-0020 §11.6 dated amendment，Owner 2026-11-19）/ Implementation not started
+- **版本**：v0.4
+- **日期**：2026-11-23
+- **状态**：Architecture Approved（ADR-0020 §11.6 dated amendment，Owner 2026-11-19）/ Phase 1–4 implemented；Phase 5（新安装默认 Service Host）implemented，awaiting Owner review
+- **v0.4 Phase 5 修订**：新安装默认启用 Service Host 并原子初始化 Workspace 所有权；宿主 Adapter 选择与后台生命周期彻底解耦（`--host` 无默认）；升级路径严格保留 refresh-if-registered 与既有 Owner；新增 §11 Phase 5 实施边界与 AC-14。
 - **v0.3 整改修订**：统一授权状态（§11.6 已批准架构，§11 治理 Gate 改写）、补齐 Workspace 发现与 Host Binding 契约（§7 FR-05、§9）、新增 Workspace 级所有权状态机（§8.4）、实施阶段改为 Phase 1–5 契约化描述（§11）。
 - **v0.2 源码审计修订**：按 2026-11-19 最新源码事实审计修正；§3 表格维持「当前事实」，§3.1 记录两个 Adapter 的真实差异与被推翻的隐式假设。
 - **范围**：PD 后台任务的生命周期所有权、触发、执行、恢复与可观测性
@@ -36,7 +37,7 @@
 |---|---|---|
 | Architecture Approved | 架构方案经 Owner 批准 | **已达成**：ADR-0020 §11.6（2026-11-19），范围限 PD-owned 用户级 OS scheduler + 有界 `pd service run-once` + 复用现有 Worker Cycle |
 | Implementation | 在批准范围内正常开发、评审、测试 | 允许按本 SPEC 推进；架构批准不等于代码已实现，也不免除正常实现评审 |
-| Production Cutover | 生产环境生命周期所有权交接 | **未达成**：须逐 Workspace 完成 §8.4 原子交接并通过 §11 Phase 5 验收 Gate |
+| Production Cutover | 生产环境生命周期所有权交接 | **新安装已达成（Phase 5）**：全新安装默认注册并启用 Service Host，且新 Workspace 原子初始化为 `service_host_owned`。**既有安装未达成**：历史 Workspace 必须逐 Workspace 完成 §8.4 原子交接并通过 §11 Phase 5 验收 Gate，不得静默迁移 |
 
 其他文档引用 Service Host 状态时只能引用本表，不得另造一套授权表述。ADR-0020 §11.1 未被 §11.6 收窄的部分（系统级服务、通用常驻 Daemon、第二套任务系统等 Hold）**仍然有效**，本 SPEC 不删除这些限制。
 
@@ -195,6 +196,8 @@ OpenClaw / Codex / WorkBuddy 负责 Hook、MCP、上下文和授权证据接入�
 - OpenClaw 自动消费迁移到 PD-owned Worker Cycle；OpenClaw Plugin 保留宿主接入，不再拥有该消费 timer。
 - 单实例触发锁、Workspace 隔离、失败记录、下次周期恢复。
 - Companion 与 Console 的状态读取和显式运维入口。
+- **新安装默认（Phase 5）**：全新安装默认注册并启用用户级 OS 调度器，并把本次安装创建的 Workspace 原子初始化为 `service_host_owned`；宿主 Adapter 选择独立于后台生命周期（`--host` 无默认，`none` = Service-Host-only）。
+- **升级隔离（Phase 5）**：既有安装保持既有 owner marker、注册与 enabled 状态；只做 refresh-if-registered，绝不静默创建/启用调度器或翻转 legacy_owned。
 
 ### 6.2 非目标
 
@@ -267,7 +270,7 @@ installed_* ── pd service uninstall ───────► uninstalled
 
 ### 8.3 Workspace 状态
 
-至少区分：ready、running、paused、waiting_for_evidence、degraded、unavailable、completed。不能把“安装清单有登记”或“进程已启动”映射成 healthy。
+至少区分：ready、running、paused、waiting_for_evidence、waiting_for_host_binding、degraded、unavailable、completed。不能把“安装清单有登记”或“进程已启动”映射成 healthy。`waiting_for_host_binding` 表示 Service Host 已拥有该 Workspace 的后台生命周期，但没有任何宿主 Adapter 能服务它（Service-Host-only 安装）——这是正常等待态，不是失败周期。
 
 ### 8.4 Workspace 级后台生命周期所有权状态机
 
@@ -426,14 +429,45 @@ ADR-0020 §11.6 dated amendment（2026-11-19）已记录 Owner 对本 SPEC 窄�
 
 ### Phase 5 — 生产生命周期交接与旧所有权退役
 
-- **目标**：Production Cutover（§2.0）：旧所有者退役，Service Host 成为唯一生产所有者。
-- **修改模块**：Companion（停止 Worker supervision）、OpenClaw Plugin（停用 AutoConsumer timer）、installer/文档。
+- **目标**：Production Cutover（§2.0）：旧所有者退役，Service Host 成为唯一生产所有者；**新安装默认即为 Service Host**。
+- **修改模块**：Companion（停止 Worker supervision）、OpenClaw Plugin（停用 AutoConsumer timer）、installer（宿主选择解耦、全新安装默认启用与所有权初始化）、文档。
 - **复用模块**：§8.4 owner marker 与交接协议。
-- **新增模块**：owner marker 字段与原子读写路径（若 Phase 1–4 未提前落地）。
+- **新增模块**：`provision_fresh_install` 最小首次初始化迁移（`@principles/install-layout`，同一 generation fencing / operationId 幂等 / 原子 rename）；安装器 provisioning 编排（readiness → CAS → 首次真实周期 → 证据）。
 - **依赖条件**：Phase 1–4 全部退出条件；真实安装验收覆盖 UI 关闭、Companion/Gateway 退出、机器重启、Worker 崩溃、升级、禁用、卸载。
-- **风险**：迁移中断双执行；旧所有者未完全退役。
-- **验收条件**：AC-01～AC-13 全数通过；每个 Workspace marker 历史可审计。
+- **风险**：迁移中断双执行；旧所有者未完全退役；把新安装默认错误应用到升级用户。
+- **验收条件**：AC-01～AC-14 全数通过；每个 Workspace marker 历史可审计。
 - **退出条件**：旧生命周期代码路径移除或显式降级为 manual fallback（FR-15），且回滚路径验证通过。
+
+#### Phase 5 实施边界（硬约束）
+
+**Phase 5 可以做**：
+
+1. 全新安装（run 前不存在 install manifest）默认：`--yes` 接受推荐默认值（注册+启用），交互安装显式询问（默认 Yes）；
+2. 全新 Workspace 通过 `provision_fresh_install` 一次性原子写入 `service_host_owned`（仅当该 Workspace **没有任何** ownership record 时允许）；
+3. 安装后以 active-release 入口执行 no-consume readiness 与一次真实 managed cycle，写入 `<pdHome>/service/install-provisioning.json` 证据；
+4. 宿主 Adapter 与后台生命周期解耦：`--host` 无默认，`none` 为合法安装形态（manifest `hosts: []` + workspaces）；
+5. 升级路径保留既有 owner / 注册 / enabled 状态，输出待迁移 Workspace 列表。
+
+**Phase 5 不可以做**：
+
+1. 升级时把 `legacy_owned` 静默翻转为 `service_host_owned`；
+2. 升级时静默创建或启用 OS 调度器；
+3. 用 `provision_fresh_install` 覆盖任何已有 ownership record（包括 `legacy_owned` record）；
+4. 在 Scheduler 未验证 enabled 时翻转 Owner；
+5. 无宿主 Adapter 时伪造 Worker 能力或声称已有宿主业务处理能力；
+6. 在安装器里重新实现 Scheduler / 任务存储 / 队列 / Lease。
+
+#### Phase 5 首次初始化顺序（不可颠倒）
+
+1. 写 manifest 登记 Workspace（宿主安装器之前/之后均可，但必须在 ownership 写入之前）；
+2. 注册并启用调度器，通过 `pd service status --json` 复核 `registered=true / enabled=true`；
+3. active-release no-consume readiness（OpenClaw `--readiness`；Codex/WorkBuddy `--status`）；
+4. `provision_fresh_install` CAS 写入 `service_host_owned`（generation 1）；
+5. 复核持久化投影（`owner=service_host`，generation ≥ 1）；
+6. 执行一次真实 managed cycle（`--trigger installer`）；
+7. 写 provisioning 证据；最后才允许 Gateway restart（OpenClaw 侧 marker 门禁先于 AutoConsumer 激活）。
+
+任一前置失败：不翻转 Owner，报告 `not_provisioned` + nextAction。
 
 ## 12. 验收标准
 
@@ -452,6 +486,7 @@ ADR-0020 §11.6 dated amendment（2026-11-19）已记录 Owner 对本 SPEC 窄�
 | AC-11 | 凭据与路径 | 命令参数无秘密；每个子进程显式绑定目标 Workspace；继承环境不能重定向 Workspace |
 | AC-12 | 真实健康 | PID、注册记录或心跳不能单独证明健康；必须能观察到实际周期完成和业务进展 |
 | AC-13 | 所有权交接 | 每个 Workspace 的 LEGACY_OWNED→SERVICE_HOST_OWNED 切换经 owner marker 原子完成；迁移中途崩溃不产生双消费者；回滚可恢复到唯一旧所有者 |
+| AC-14 | 全新安装默认（Phase 5） | 一个从未安装过 PD、且未安装 OpenClaw 的机器，可完成安装并获得已注册且已启用的 Service Host；新 Workspace 的 manifest marker 为 `service_host_owned` / `effectiveOwner=service_host` / `generation≥1`；首次真实 managed cycle 可从持久化状态恢复；升级安装不改变既有 owner / 注册 / enabled 状态 |
 
 ## 13. 文档权威与关联
 

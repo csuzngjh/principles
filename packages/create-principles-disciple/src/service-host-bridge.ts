@@ -29,6 +29,38 @@ export interface ServiceHostBridgeOutcome {
   readonly registered?: boolean | null;
   /** From `pd service status`: the registered trigger interval (null = unreadable). */
   readonly triggerIntervalMs?: number | null;
+  /** From `pd service status`: whether the OS reports the trigger enabled. */
+  readonly enabled?: boolean | null;
+}
+
+/**
+ * PRI-1278 Phase 5: the background-execution consent resolved by the caller.
+ * The installer never creates a persistent OS trigger without one of these.
+ */
+export type ServiceHostSchedulerIntent =
+  | 'enable'
+  | 'register_only'
+  | 'refresh_if_registered'
+  | 'opt_out'
+  | 'consent_required';
+
+export type ServiceHostSchedulerState =
+  | 'enabled'
+  | 'registered_disabled'
+  | 'refreshed'
+  | 'not_registered'
+  | 'consent_required'
+  | 'opted_out'
+  | 'failed';
+
+export interface ServiceHostSchedulerOutcome {
+  readonly state: ServiceHostSchedulerState;
+  readonly registered: boolean | null;
+  readonly enabled: boolean | null;
+  readonly triggerIntervalMs?: number | null;
+  readonly detail?: string;
+  readonly nextAction: string;
+  readonly warnings: readonly string[];
 }
 
 /** Env vars that must never steer the spawned CLI's install identity. */
@@ -54,7 +86,14 @@ interface SpawnOutcome {
   readonly timedOut?: boolean;
 }
 
-function spawnCli(entry: string, args: readonly string[], spawnFn: typeof spawn = spawn): Promise<SpawnOutcome> {
+interface SpawnCliOptions {
+  readonly spawnFn?: typeof spawn;
+  readonly timeoutMs?: number;
+}
+
+function spawnCli(entry: string, args: readonly string[], options: SpawnCliOptions = {}): Promise<SpawnOutcome> {
+  const spawnFn = options.spawnFn ?? spawn;
+  const timeoutMs = options.timeoutMs ?? BRIDGE_TIMEOUT_MS;
   return new Promise<SpawnOutcome>((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -70,7 +109,7 @@ function spawnCli(entry: string, args: readonly string[], spawnFn: typeof spawn 
       } catch {
         // exit handler settles
       }
-    }, BRIDGE_TIMEOUT_MS);
+    }, timeoutMs);
     const settle = (outcome: SpawnOutcome): void => {
       if (settled) return;
       settled = true;
@@ -114,6 +153,69 @@ export interface ServiceHostBridgeProbes {
   readonly spawnFn?: typeof spawn;
 }
 
+export interface InstalledCliJsonResult {
+  readonly ok: boolean;
+  readonly code: number | null;
+  readonly detail: string;
+  readonly doc?: Record<string, unknown>;
+  readonly stderr?: string;
+}
+
+/**
+ * Run one bounded call against the JUST-INSTALLED pd CLI and return its single
+ * JSON document. Used by the provisioning probes (worker readiness, first
+ * managed cycle). Parsing rules are the same cli-1 contract as
+ * `runServiceHostCli`: exactly one JSON object, never "log-mixed output =
+ * absent state".
+ */
+export interface InstalledCliCallOptions {
+  /** Test injection for the spawn boundary. */
+  readonly probes?: ServiceHostBridgeProbes;
+  /** Bounded call budget (the first managed cycle needs more than 120s). */
+  readonly timeoutMs?: number;
+}
+
+export async function runInstalledCliJson(
+  pdHome: string,
+  args: readonly string[],
+  options: InstalledCliCallOptions = {},
+): Promise<InstalledCliJsonResult> {
+  const entry = path.join(pdHome, 'runtime', 'pd-cli', 'dist', 'index.js');
+  if (!fs.existsSync(entry)) {
+    return { ok: false, code: null, detail: `service_host_cli_entry_missing:${entry}` };
+  }
+  const outcome = await spawnCli(entry, [...args, '--pd-home', path.dirname(pdHome)], {
+    ...(options.probes?.spawnFn !== undefined ? { spawnFn: options.probes.spawnFn } : {}),
+    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+  });
+  if (outcome.timedOut === true) {
+    return { ok: false, code: outcome.code, detail: `service_host_cli_timeout:${args.join(' ')}` };
+  }
+  if (outcome.spawnError !== undefined) {
+    return { ok: false, code: outcome.code, detail: `service_host_cli_spawn_failed:${outcome.spawnError}` };
+  }
+  const stdoutDoc = outcome.stdout.trim();
+  if (stdoutDoc === '') {
+    return { ok: false, code: outcome.code, detail: `service_host_cli_no_json:exit_${outcome.code ?? 'null'}`, stderr: outcome.stderr };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdoutDoc);
+  } catch {
+    return { ok: false, code: outcome.code, detail: `service_host_cli_unparsable_json:exit_${outcome.code ?? 'null'}`, stderr: outcome.stderr };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, code: outcome.code, detail: 'service_host_cli_schema_violation:top_level', stderr: outcome.stderr };
+  }
+  return {
+    ok: outcome.code === 0,
+    code: outcome.code,
+    detail: outcome.code === 0 ? 'ok' : `exit_${outcome.code ?? 'null'}`,
+    doc: parsed as Record<string, unknown>,
+    stderr: outcome.stderr,
+  };
+}
+
 /** Run one `pd service <subcommand>` lifecycle call against the installed CLI. */
 export async function runServiceHostCli(pdHome: string, args: readonly string[], probes: ServiceHostBridgeProbes = {}): Promise<ServiceHostBridgeOutcome> {
   // args = ['service', '<op>', ...] — the operation is the second token.
@@ -129,7 +231,7 @@ export async function runServiceHostCli(pdHome: string, args: readonly string[],
   // `--pd-home` carries the HOME ROOT — the CLI derives <home>/.pd itself,
   // so passing pdHome would resolve to <home>/.pd/.pd. For the canonical
   // layout getPdDir() IS <home>/.pd, hence dirname.
-  const outcome = await spawnCli(entry, [...args, '--json', '--pd-home', path.dirname(pdHome)], probes.spawnFn);
+  const outcome = await spawnCli(entry, [...args, '--json', '--pd-home', path.dirname(pdHome)], { spawnFn: probes.spawnFn });
   if (outcome.timedOut === true) {
     return {
       ok: false,
@@ -189,8 +291,13 @@ export async function runServiceHostCli(pdHome: string, args: readonly string[],
       (scheduler as { triggerConfiguration: unknown }).triggerConfiguration !== null
         ? ((scheduler as { triggerConfiguration: { intervalMs?: unknown } }).triggerConfiguration.intervalMs ?? null) as number | null
         : null;
+    const enabled =
+      typeof scheduler === 'object' && scheduler !== null && Object.hasOwn(scheduler, 'enabled') &&
+      (typeof (scheduler as { enabled?: unknown }).enabled === 'boolean' || (scheduler as { enabled?: unknown }).enabled === null)
+        ? (scheduler as { enabled: boolean | null }).enabled
+        : null;
     if (outcome.code === 0 && doc.schemaVersion === 'pd.service-status.v1') {
-      return { ok: true, detail: 'ok', registered, triggerIntervalMs: typeof intervalMs === 'number' ? intervalMs : null };
+      return { ok: true, detail: 'ok', registered, enabled, triggerIntervalMs: typeof intervalMs === 'number' ? intervalMs : null };
     }
     const reason = typeof doc.reason === 'string' ? doc.reason : `exit_${outcome.code ?? 'null'}`;
     if (outcome.code === 0 && doc.schemaVersion !== 'pd.service-status.v1') {
@@ -261,69 +368,200 @@ export function maybeSchedulerRegistrationExists(homeDir: string): boolean {
 
 export interface SchedulerReconcileInput {
   readonly pdHome: string;
-  /** Explicit operator consent (--register-service-host / --enable-service-host). */
-  readonly registerServiceHost: boolean;
-  /** --enable-service-host (implies registerServiceHost). */
-  readonly enableServiceHost: boolean;
+  /** PRI-1278 Phase 5: the resolved consent (what to do, and why). */
+  readonly intent: ServiceHostSchedulerIntent;
+  /** Provenance of the intent (used to refuse implicit upgrades). */
+  readonly source?: 'explicit_flag' | 'interactive_consent' | 'recommended_default' | 'policy';
+  /** The installer observed NO manifest before this run. */
+  readonly freshInstall: boolean;
   readonly warn: (message: string) => void;
   readonly info?: (message: string) => void;
   /** Test injection for the spawn boundary. */
   readonly probes?: ServiceHostBridgeProbes;
 }
 
+async function readSchedulerStatus(input: SchedulerReconcileInput): Promise<ServiceHostBridgeOutcome> {
+  return await runServiceHostCli(input.pdHome, ['service', 'status'], input.probes ?? {});
+}
+
 /**
- * Post-install scheduler reconciliation (task §6). Runs AFTER the install
- * transaction committed, so every failure is a WARNING — a bridge failure
- * must never turn a committed install into a reported failure (ERR-197).
+ * Post-install scheduler reconciliation (task §6 / PRI-1278 Phase 5). Runs
+ * AFTER the install transaction committed, so every failure is a WARNING — a
+ * bridge failure must never turn a committed install into a reported failure
+ * (ERR-197).
  *
- *  - consent given: register (default disabled), then optionally enable;
- *  - no consent: REFRESH-IF-REGISTERED only — an existing registration is
- *    re-installed idempotently (entry refresh, enabled state PRESERVED), and
- *    a machine with no registration gets NOTHING silently created.
+ *  - 'enable': register then enable, then VERIFY through `pd service status`
+ *    that the OS reports both facts (an unreadable verdict is degraded, never
+ *    silently reported as success);
+ *  - 'register_only': register installed_disabled;
+ *  - 'refresh_if_registered': an existing registration is re-installed
+ *    idempotently (entry refresh, enabled state PRESERVED); a machine with no
+ *    registration gets NOTHING created;
+ *  - 'opt_out' / 'consent_required': no OS mutation at all, with a structured
+ *    reason — never silent.
  */
-export async function reconcileServiceHostScheduler(input: SchedulerReconcileInput): Promise<void> {
-  if (input.registerServiceHost) {
-    const install = await runServiceHostCli(input.pdHome, ['service', 'install'], input.probes ?? {});
-    if (!install.ok) {
-      input.warn(`Service Host scheduler registration failed (${install.detail}). ${install.nextAction ?? ''}`.trim());
-      return;
+export async function reconcileServiceHostScheduler(input: SchedulerReconcileInput): Promise<ServiceHostSchedulerOutcome> {
+  const warnings: string[] = [];
+  const warn = (message: string): void => {
+    warnings.push(message);
+    input.warn(message);
+  };
+
+  if (input.intent === 'opt_out') {
+    return {
+      state: 'opted_out',
+      registered: null,
+      enabled: null,
+      nextAction: 'Service Host scheduler was explicitly disabled for this install. Arm it later with `pd service install` then `pd service enable`; workspace data and pending tasks are kept.',
+      warnings,
+    };
+  }
+  if (input.intent === 'consent_required') {
+    return {
+      state: 'consent_required',
+      registered: null,
+      enabled: null,
+      nextAction: 'No OS scheduler trigger was registered: this non-interactive run did not include consent. Re-run with --enable-service-host (or --yes to accept the recommended defaults), or run `pd service install` then `pd service enable` afterwards.',
+      warnings,
+    };
+  }
+  if (input.intent === 'refresh_if_registered') {
+    // Upgrade / preservation path: refresh only when a registration
+    // plausibly exists. The file probe avoids a full CLI boot per install
+    // on machines where nothing was ever registered.
+    if (!maybeSchedulerRegistrationExists(path.dirname(input.pdHome))) {
+      return {
+        state: 'not_registered',
+        registered: false,
+        enabled: null,
+        nextAction: 'No Service Host scheduler registration existed before this install and none was created (upgrade preserves the existing lifecycle). Enable it explicitly with `pd service enable` after `pd service install` if this installation should move to the PD-owned background lifecycle.',
+        warnings,
+      };
     }
-    input.info?.('Service Host scheduler registered (disabled by default — enable with `pd service enable`).');
-    if (input.enableServiceHost) {
-      const enable = await runServiceHostCli(input.pdHome, ['service', 'enable'], input.probes ?? {});
-      if (!enable.ok) {
-        input.warn(`Service Host scheduler ENABLE failed (${enable.detail}) — the registration exists but stays DISABLED. ${enable.nextAction ?? ''}`.trim());
-        return;
-      }
-      input.info?.('Service Host scheduler enabled — automatic managed runs are armed.');
+    const status = await readSchedulerStatus(input);
+    if (!status.ok) {
+      warn(`Service Host scheduler state could not be verified after install (${status.detail}) — nothing was changed. ${status.nextAction ?? ''}`.trim());
+      return {
+        state: 'failed',
+        registered: status.registered ?? null,
+        enabled: status.enabled ?? null,
+        detail: status.detail,
+        nextAction: 'Inspect `pd service status --json` and repair the registration; the existing scheduler state was kept unchanged.',
+        warnings,
+      };
     }
-    return;
-  }
-  // Upgrade path: refresh only when a registration plausibly exists. The
-  // file probe avoids a full CLI boot per install on machines where nothing
-  // was ever registered (CI/fresh installs); an unreadable dir falls back to
-  // asking the CLI.
-  if (!maybeSchedulerRegistrationExists(path.dirname(input.pdHome))) {
-    return;
-  }
-  const status = await runServiceHostCli(input.pdHome, ['service', 'status'], input.probes ?? {});
-  if (!status.ok) {
-    input.warn(`Service Host scheduler state could not be verified after install (${status.detail}) — nothing was changed. ${status.nextAction ?? ''}`.trim());
-    return;
-  }
-  if (status.registered === true) {
-    // Refresh preserves the existing registration config (task §15): the
-    // interval comes from the live status document — an UNREADABLE interval
-    // fails closed (a silent default would quietly reset a custom cadence).
+    if (status.registered !== true) {
+      return {
+        state: 'not_registered',
+        registered: status.registered ?? null,
+        enabled: status.enabled ?? null,
+        nextAction: 'No Service Host registration is present; nothing was created during this upgrade. Use `pd service install` + `pd service enable` to adopt the PD-owned background lifecycle.',
+        warnings,
+      };
+    }
     if (status.triggerIntervalMs === undefined || status.triggerIntervalMs === null) {
-      input.warn('Service Host scheduler refresh refused: the registered trigger interval could not be read from pd service status — the existing registration was KEPT unchanged. Re-run pd service status and repair the registration first.');
-      return;
+      warn('Service Host scheduler refresh refused: the registered trigger interval could not be read from pd service status — the existing registration was KEPT unchanged. Re-run pd service status and repair the registration first.');
+      return {
+        state: 'failed',
+        registered: status.registered,
+        enabled: status.enabled ?? null,
+        detail: 'trigger_interval_unreadable',
+        nextAction: 'Repair the registration (`pd service status --json`) and re-run the installer, or re-register explicitly with `pd service install --interval-ms <ms>`.',
+        warnings,
+      };
     }
     const refresh = await runServiceHostCli(input.pdHome, ['service', 'install', '--interval-ms', String(status.triggerIntervalMs)], input.probes ?? {});
     if (!refresh.ok) {
-      input.warn(`Service Host scheduler refresh failed (${refresh.detail}) — the last valid registration was KEPT. ${refresh.nextAction ?? ''}`.trim());
-      return;
+      warn(`Service Host scheduler refresh failed (${refresh.detail}) — the last valid registration was KEPT. ${refresh.nextAction ?? ''}`.trim());
+      return {
+        state: 'failed',
+        registered: true,
+        enabled: status.enabled ?? null,
+        triggerIntervalMs: status.triggerIntervalMs,
+        detail: refresh.detail,
+        nextAction: 'Re-run `pd service install` manually; the previous registration still exists and was not removed.',
+        warnings,
+      };
     }
     input.info?.(`Service Host scheduler registration refreshed to the active release (interval ${status.triggerIntervalMs}ms and enabled state preserved).`);
+    return {
+      state: 'refreshed',
+      registered: true,
+      enabled: status.enabled ?? null,
+      triggerIntervalMs: status.triggerIntervalMs,
+      nextAction: 'Registration refreshed to the active release; its enabled/disabled state was preserved.',
+      warnings,
+    };
   }
+
+  // 'enable' or an explicit register on a fresh install.
+  const install = await runServiceHostCli(input.pdHome, ['service', 'install'], input.probes ?? {});
+  if (!install.ok) {
+    warn(`Service Host scheduler registration failed (${install.detail}). ${install.nextAction ?? ''}`.trim());
+    return {
+      state: 'failed',
+      registered: install.registered ?? null,
+      enabled: null,
+      detail: install.detail,
+      nextAction: 'The Service Host scheduler was NOT registered, so workspace ownership will not be handed over. Fix the OS scheduler registration (`pd service install --json`) and re-run the installer.',
+      warnings,
+    };
+  }
+  if (input.intent === 'register_only') {
+    input.info?.('Service Host scheduler registered (disabled by default — enable with `pd service enable`).');
+    return {
+      state: 'registered_disabled',
+      registered: true,
+      enabled: false,
+      nextAction: 'The scheduler is registered but DISABLED. Run `pd service enable` to arm automatic managed runs.',
+      warnings,
+    };
+  }
+  const enable = await runServiceHostCli(input.pdHome, ['service', 'enable'], input.probes ?? {});
+  if (!enable.ok) {
+    warn(`Service Host scheduler ENABLE failed (${enable.detail}) — the registration exists but stays DISABLED. ${enable.nextAction ?? ''}`.trim());
+    return {
+      state: 'registered_disabled',
+      registered: true,
+      enabled: false,
+      detail: enable.detail,
+      nextAction: 'The scheduler registration exists but could not be enabled, so workspace ownership will not be handed over. Fix the OS trigger (`pd service enable --json`) and re-run the installer.',
+      warnings,
+    };
+  }
+  // Verify through the OS-backed status document: "enable returned 0" is not
+  // proof that the trigger is armed (cli-6 / AC-12 truthful health).
+  const verified = await readSchedulerStatus(input);
+  if (!verified.ok || verified.registered !== true) {
+    warn(`Service Host scheduler enabled but the OS state could not be verified (${verified.detail}) — treat the trigger as UNCONFIRMED. ${verified.nextAction ?? ''}`.trim());
+    return {
+      state: 'failed',
+      registered: verified.registered ?? null,
+      enabled: verified.enabled ?? null,
+      detail: verified.detail,
+      nextAction: 'Run `pd service status --json` and confirm registered=true / enabled=true before relying on automatic runs; workspace ownership was NOT handed over.',
+      warnings,
+    };
+  }
+  if (verified.enabled !== true) {
+    warn('Service Host scheduler enabled but `pd service status` does not report the trigger as enabled — workspace ownership was NOT handed over.');
+    return {
+      state: 'registered_disabled',
+      registered: true,
+      enabled: verified.enabled ?? null,
+      triggerIntervalMs: verified.triggerIntervalMs ?? null,
+      detail: 'enabled_unconfirmed',
+      nextAction: 'Inspect `pd service status --json`; run `pd service enable` again if the OS reports the trigger disabled.',
+      warnings,
+    };
+  }
+  input.info?.('Service Host scheduler enabled — automatic managed runs are armed.');
+  return {
+    state: 'enabled',
+    registered: true,
+    enabled: true,
+    triggerIntervalMs: verified.triggerIntervalMs ?? null,
+    nextAction: 'Service Host scheduler is enabled and verified. One bounded cycle runs every configured interval while the user is logged in; disable any time with `pd service disable`.',
+    warnings,
+  };
 }

@@ -50,8 +50,8 @@ export interface InstallManifest {
    * Host: only the state machine defined in the SPEC may advance an entry,
    * every transition is a monotonic-generation compare-and-set, and PID /
    * delays / startup order are NEVER ownership proof — this record is.
-   * The schema stores the record; the CAS write itself is NOT implemented
-   * yet (Phase 5 acceptance).
+   * The CAS write path and the state machine live in
+   * `background-execution-transition.ts` (Phase 4/5).
    */
   backgroundExecutions?: Readonly<Record<string, BackgroundExecutionRecord>>;
 }
@@ -420,9 +420,6 @@ export function parseInstallManifest(
     }
     carriedUnknownHosts = value.unknownHosts.filter((host) => !isHost(host));
   }
-  if (value.hosts.length === 0 && carriedUnknownHosts.length === 0) {
-    return { error: 'install_manifest_malformed: hosts must contain at least one host' };
-  }
   const hosts: InstallHost[] = [];
   const unknownHosts: string[] = [];
   const warnings: InstallManifestWarning[] = [];
@@ -441,6 +438,15 @@ export function parseInstallManifest(
   }
   const workspaces = parseWorkspaceList(value.workspaces, platform);
   if (workspaces.error) return { error: workspaces.error };
+  // A Service-Host-only install has NO host adapter (PRI-1278 Phase 5): the
+  // manifest legitimately carries `hosts: []` while declaring the workspaces
+  // the Service Host owns. An empty manifest with neither hosts nor
+  // workspaces is still structural damage — "no host AND no workspace" is
+  // indistinguishable from a truncated file, and every consumer would read
+  // it as a healthy empty install.
+  if (hosts.length === 0 && unknownHosts.length === 0 && (workspaces.workspaces ?? []).length === 0) {
+    return { error: 'install_manifest_malformed: hosts must contain at least one host or the manifest must declare at least one workspace' };
+  }
   const backgroundExecutions = parseBackgroundExecutions(
     { backgroundExecution: value.backgroundExecution, backgroundExecutions: value.backgroundExecutions },
     workspaces.workspaces ?? [],

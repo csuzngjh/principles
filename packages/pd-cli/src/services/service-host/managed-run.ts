@@ -256,6 +256,10 @@ function managedNextAction(executions: readonly ManagedExecutionRecord[], empty:
   if (empty) {
     return 'No workspace is currently owned by the Service Host (effectiveOwner=service_host). This is a legal empty managed run — no Worker started and nothing was consumed. Ownership handover happens per-workspace in Phase 4/5 (SPEC §8.4); legacy consumers remain the unique automatic lifecycle owners.';
   }
+  const waiting = executions.filter((e) => e.workspaceState === 'waiting_for_host_binding');
+  if (waiting.length > 0) {
+    return `Managed run completed: ${waiting.length} workspace(s) are waiting for a host binding (Service-Host-only install). The Service Host owns their background lifecycle; no adapter exists yet, so nothing was consumed. Install a host adapter and bind the workspace — no ownership change is needed again.`;
+  }
   const forbidden = executions.filter((e) => e.skipReason === 'handover_preparing_forbidden' || e.skipReason === 'rollback_pending_forbidden');
   const notAuthorized = executions.filter((e) => e.skipReason !== undefined && e.skipReason.startsWith('workspace_not_authorized'));
   const unhealthy = executions.filter((e) => e.admission === 'executed' && (e.workspaceState === 'failed' || e.workspaceState === 'degraded' || e.workspaceState === 'unavailable'));
@@ -485,13 +489,20 @@ async function completeManagedRun(identity: InstallIdentity, context: {
       if (!supportedAny) {
         if (isAborted()) break;
         executedAny = true; // the workspace WAS admitted; the adapter binding is the problem
+        // PRI-1278 Phase 5: a Service-Host-only workspace has NO host binding
+        // at all — that is a truthful WAITING state, not a failure. A
+        // workspace that HAS claims but no adapter still supports it is a
+        // real misconfiguration (`unavailable`).
+        const waitingForBinding = entry.hosts.length === 0;
         executions.push({
           canonicalDir: entry.canonicalDir,
           hostKind: null,
           admission: 'executed',
           skipReason: `no_adapter_supports_workspace:${MANAGED_WORKER_HOST_KINDS.join('|')}`,
-          skipNextAction: 'This service_host_owned workspace has no validated host binding (claim or host-tool declaration) for any adapter. Register the host binding; the scheduler cannot execute it.',
-          workspaceState: 'unavailable',
+          skipNextAction: waitingForBinding
+            ? 'This service_host_owned workspace has no host binding yet (Service-Host-only install). Install a host adapter and bind the workspace; the scheduler will dispatch it once a binding exists.'
+            : 'This service_host_owned workspace has no validated host binding (claim or host-tool declaration) for any adapter. Register the host binding; the scheduler cannot execute it.',
+          workspaceState: waitingForBinding ? 'waiting_for_host_binding' : 'unavailable',
           lastProgressAt: previousAt ?? null,
           lastProgressSource: hadPrevious ? 'previous_run' : null,
         });
