@@ -52,14 +52,13 @@ const ignoreDispatcherError = (_error: unknown): void => {
  * Keep that reconciliation in the single I/O seam that owns the undici import
  * rather than scattering casts. pi-ai never reads `textStream`; the response
  * is returned untouched (no wrapper, no re-fetch, same dispatcher behaviour).
- * The downcast is deliberately narrow: `undici.Response` is the structural
- * supertype (it only lacks the new getter), so this is an ordinary TypeScript
- * downcast between declarations of one runtime class, not an `any` escape.
+ * undici 8 declares the same members pi-ai's response type expects, so the
+ * hand-off is a plain return — no cast survives type-checking here.
  */
 type PiAiResponse = Awaited<ReturnType<FetchFunction>>;
 
 function asPiAiResponse(response: undici.Response): PiAiResponse {
-  return response as PiAiResponse;
+  return response;
 }
 
 /**
