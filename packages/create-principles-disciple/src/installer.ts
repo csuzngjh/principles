@@ -1035,6 +1035,7 @@ function execNpm(args: string[], cwd?: string, timeoutOverride?: number): string
         encoding: 'utf-8',
         stdio: 'pipe',
         env: process.env,
+        windowsHide: true,
         timeout: timeoutOverride ?? INSTALL_TIMEOUT_MS,
       })
   ).trim();
@@ -1076,7 +1077,7 @@ export function verifyNativeModules(cwd: string, componentName: string): void {
     if (!existsSync(nativeModPath)) continue;
 
     try {
-      execFileSync(process.execPath, ['-e', `require('${nativeMod}')`], { cwd, stdio: 'pipe' });
+      execFileSync(process.execPath, ['-e', `require('${nativeMod}')`], { cwd, stdio: 'pipe', windowsHide: true });
     } catch {
       throw new Error(`${componentName} native module ${nativeMod} failed its require probe: the prebuilt binary for this Node.js ABI is missing or incompatible (no rebuild step exists by design). Install the platform release asset matching this OS, architecture, and ABI.`);
     }
@@ -2463,7 +2464,7 @@ async function defaultLegacyRulePreflightRunner(pdCliEntry: string, workspaceDir
     const result = await execFileAsync(
       process.execPath,
       [pdCliEntry, 'runtime', 'compatibility-scan', '--json', '--workspace', workspaceDir],
-      { timeout: 60_000, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } },
+      { timeout: 60_000, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' }, windowsHide: true },
     );
     return parseCompatibilityScanStdout(result.stdout);
   } catch (err) {
@@ -3109,12 +3110,14 @@ export function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
           encoding: 'utf-8',
           timeout: 30_000,
           stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
         });
       } else {
         execFileSync('npm', packArgs, {
           encoding: 'utf-8',
           timeout: 30_000,
           stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
         });
       }
 
@@ -3131,6 +3134,7 @@ export function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
         encoding: 'utf-8',
         timeout: 15_000,
         stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
       });
 
       const packageDir = path.join(extractDir, 'package');
@@ -3237,7 +3241,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   let localError: string | undefined;
   try {
     const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
-    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
+    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, windowsHide: true, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
     localOk = true;
   } catch (e: unknown) {
     let detail = 'unknown error';
@@ -3275,7 +3279,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
         // constant argv array (no shell string, no interpolation).
         execFileSync('cmd.exe', ['/c', 'pd', '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, windowsHide: true, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
       } else {
-        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
+        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, windowsHide: true, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
       }
       return true;
     } catch {
@@ -4391,6 +4395,10 @@ export async function verifyConsole(
       stdio: 'pipe',
       env: { ...process.env },
       detached: false,
+      // The installer may run with no console at all (the detached update
+      // executor, the Companion); an unhidden probe console would pop a
+      // visible terminal window on every attempt.
+      windowsHide: true,
     });
 
     let childExited = false;
@@ -4584,6 +4592,7 @@ async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: s
       detached: true,
       stdio: 'ignore',
       shell: false,
+      windowsHide: true,
       env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
     },
   );
@@ -6354,6 +6363,7 @@ export async function install(
       const pdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
       execFileSync(process.execPath, [pdCliEntry, 'runtime', 'init', '--confirm', '--workspace', options.workspaceDir], {
         stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: true,
         timeout: 30000,
         env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
       });
@@ -6387,6 +6397,7 @@ export async function install(
       const { promisify } = await import('node:util');
       const execFileAsync = promisify(execFile);
       await execFileAsync(process.execPath, [pdCliEntry, 'demo', 'story-a', '--json'], {
+        windowsHide: true,
         timeout: STORY_A_VERIFICATION_TIMEOUT_MS,
         env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
       });

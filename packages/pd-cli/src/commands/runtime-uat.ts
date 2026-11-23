@@ -142,6 +142,7 @@ function pd(args: string[], workspace: string, timeoutMs = 300_000): string {
       timeout: timeoutMs,
       env: { ...process.env },
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
   } catch (err: unknown) {
     if (err instanceof Error && // eslint-disable-next-line no-restricted-syntax -- 'in' required for Error subtype narrowing (err.code access)

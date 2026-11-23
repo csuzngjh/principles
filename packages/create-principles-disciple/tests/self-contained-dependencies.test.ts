@@ -47,10 +47,12 @@ describe('self-contained bundled component dependency contract', () => {
     await prepareBundledComponentDependencies(componentDir, 'Core');
 
     expect(childProcess.execSync).not.toHaveBeenCalled();
+    // windowsHide: the installer runs without a console (detached update
+    // executor), so the require probe must not open a terminal window.
     expect(childProcess.execFileSync).toHaveBeenCalledWith(
       process.execPath,
       ['-e', "require('better-sqlite3')"],
-      { cwd: componentDir, stdio: 'pipe' },
+      { cwd: componentDir, stdio: 'pipe', windowsHide: true },
     );
   });
 

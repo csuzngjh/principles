@@ -71,8 +71,8 @@ export function checkEnvironment(): EnvCheckResult {
   // nvm-windows 等场景），CreateProcess 直连会跳过它命中真 node.exe，
   // 让版本门形同虚设。
   const nodeVersion = IS_WIN32
-    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'node', '-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
-    : probeVersion(() => execFileSync('node', ['-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'node', '-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }))
+    : probeVersion(() => execFileSync('node', ['-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   if (nodeVersion !== null && nodeVersion.length > 0) {
     result.nodeVersion = nodeVersion;
     // 注：此处刻意用 String.match 并禁用 prefer-regexp-exec——写门确定性
@@ -86,16 +86,16 @@ export function checkEnvironment(): EnvCheckResult {
 
   // 检测 OpenClaw（win32 上 openclaw 是 .cmd shim，无 .exe，须经 cmd.exe /c）
   const openclawVersion = IS_WIN32
-    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'openclaw', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
-    : probeVersion(() => execFileSync('openclaw', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'openclaw', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }))
+    : probeVersion(() => execFileSync('openclaw', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   if (openclawVersion !== null) {
     result.openclawVersion = openclawVersion;
     result.hasOpenClaw = true;
   } else {
     // 尝试 clawd 命令
     const clawdVersion = IS_WIN32
-      ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'clawd', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
-      : probeVersion(() => execFileSync('clawd', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+      ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'clawd', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }))
+      : probeVersion(() => execFileSync('clawd', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
     if (clawdVersion !== null) {
       result.openclawVersion = clawdVersion;
       result.hasOpenClaw = true;
@@ -103,9 +103,9 @@ export function checkEnvironment(): EnvCheckResult {
   }
 
   // 检测 Python（win32 上 python.org 安装通常只提供 python.exe，python3 可能不在 PATH）
-  let pythonVersion: string | null = probeVersion(() => execFileSync('python3', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  let pythonVersion: string | null = probeVersion(() => execFileSync('python3', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   if (pythonVersion === null && IS_WIN32) {
-    pythonVersion = probeVersion(() => execFileSync('python', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+    pythonVersion = probeVersion(() => execFileSync('python', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   }
   if (pythonVersion !== null) {
     const [, version] = pythonVersion.split(' ');
@@ -114,7 +114,7 @@ export function checkEnvironment(): EnvCheckResult {
   }
 
   // 检测 Git
-  const gitVersion = probeVersion(() => execFileSync('git', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  const gitVersion = probeVersion(() => execFileSync('git', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   if (gitVersion !== null) {
     result.hasGit = true;
   }
@@ -411,8 +411,8 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
     // element or a JS-side output match — it never enters a shell string.
     if (Number.isInteger(port) && port > 0 && port < 65536) {
       const output = IS_WIN32
-        ? execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf-8', timeout: 5000 })
-        : execFileSync('lsof', ['-i', `:${port}`, '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000 });
+        ? execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf-8', timeout: 5000, windowsHide: true })
+        : execFileSync('lsof', ['-i', `:${port}`, '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000, windowsHide: true });
       const text = output.trim();
       if (text) {
         let listeningLine: string | undefined;
@@ -480,13 +480,13 @@ function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlR
       if (IS_WIN32) {
         execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', 'stop', '--force'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
       } else {
-        execFileSync('openclaw', ['gateway', 'stop', '--force'], { encoding: 'utf-8', timeout: 15000 });
+        execFileSync('openclaw', ['gateway', 'stop', '--force'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
       }
     } else {
       if (IS_WIN32) {
         execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', 'start'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
       } else {
-        execFileSync('openclaw', ['gateway', 'start'], { encoding: 'utf-8', timeout: 15000 });
+        execFileSync('openclaw', ['gateway', 'start'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
       }
     }
     return { ok: true };
