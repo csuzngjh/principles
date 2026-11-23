@@ -1,9 +1,13 @@
 # SPEC-PD-PIPELINE-SPINE-001 — PD 核心管道主干收敛规范
 
-- **版本**：v0.6
+- **版本**：v0.7
 - **日期**：2026-11-23
 - **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
 - **修订记录**：
+  - **v0.7（PR #2763 第五轮独立复核修订）**：
+    1. **补跨包 Validator 导出契约（实施阻塞）**：`validateRecommendationKind` 已存在于 `recommendation-kind-resolver.ts` 但 `runtime/index.ts:268` 仅导出 `isPrincipleLedgerEligibleKind`，`pd-cli`/`host-runtime` 经 `@principles/core/runtime` 桶无法调用——Phase 1B 须先从桶正式导出该既有纯函数（同步 `runtime-barrel-surface.json`/`export-surface-baseline.json`/`export-admissions.json`，Complexity Delta 跨包导出 3→4）；**禁止** pd-cli 复制 `VALID_RECOMMENDATION_KINDS` 白名单或深导入 core 内部路径；`isPrincipleLedgerEligibleKind` 不可替代（只判 `principle`）。
+    2. **Phase 1A 红灯清单补两入口零播种测试**：`PainSignalBridge` 与 `diagnose` 各补非法/缺失 `rawRecommendationKind` 零 Dreamer 用例与合法 `rule`/`prompt` 路由不变用例，必须先红后绿（既有 `candidate-seed-suppression.test.ts` 夹具将 raw 与 normalized 设同值，不覆盖本缺陷）。
+    3. **明确 `diagnose` 结构化拒绝表达**：seed 闸拒绝以**新增** `intakeResults` 记录（参照 `dreamer_seed_suppressed` 模式，`status: 'refused'`+`reason:'candidate_kind_invalid'`）表达，**不覆盖**既有 `'consumed'` + `ledgerWriteRefused` 记录，保住既有 CLI/批处理语义。
   - **v0.6（PR #2763 第四轮独立复核修订）**：
     1. **两自动入口归一化 kind 隐患升级为 Phase 1B 强制项**：核实 `diagnose.ts` 存在真实执行窗口——Intake 拒绝（非异常）路径仍记录 `status: 'consumed'`（附 `ledgerWriteRefused`），而 Dreamer seed 循环仅以 `status === 'consumed'` 为闸且用归一化 `candidate.recommendationKind` 做身份解析与路由，被 Intake 拒绝的非法原始 kind 可经 `'principle'` 折叠完成播种；`pain-signal-bridge.ts:1766/1792` 同类。两入口修正（`rawRecommendationKind` + `validateRecommendationKind`、非法零播种、保留合法 `rule`/`prompt` 路由、双入口零播种测试）由"实施期可选"升为 `PRI-1291` 强制验收；`admissionDoc.ok` 折叠写法维持可选项。
     2. **Phase 0 阈值校准条款**：≤5s / ≤60s 为建议值未经实证校准；校准完成前超窗缺失报告为 `skew_window_candidate`（标注阈值未校准），不判定确定流失。
@@ -28,7 +32,7 @@
   - **v0.2（对抗式自审修订）**：修正 `runtimeKind` / `hostKind` 混淆；按 P2.1 删除 `createPipelineRuntime` 大门面；用探针值端到端测试替代静态字段清单；删除 `PITaskMetadata` 三分组重排。
 - **范围**：Pain → 诊断 → 候选准入与账本入库 → 内化 → 激活 → 注入/拦截 → 行为证据 这条核心链路的协作者装配、跨跳数据连通性与有效性闭环
 - **事实基线**：`origin/main@679dcc93f`。§3 的全部数字与代码锚点均在该基线上实测，复跑命令见附录 A。
-- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.6）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
+- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.7）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
 - **不改变**：Pain 语义、诊断/内化业务规则、Owner 审批权、任务状态机（`MVP_CORE_LOOP_CONTRACT` INV-01..08）、物理数据库布局、Workspace 数据归属
 - **关联**：
   - `docs/architecture/MVP_CORE_LOOP_CONTRACT.md`（语义基线，本 SPEC 不修改）
@@ -87,10 +91,12 @@ Complexity Delta (Target Architecture across Phase 0–3)
 New durable source of truth: NO
 New persisted schema/state: NO
 New subsystem/service/background process: NO
-New public abstraction/interface: YES (3 internal cross-package factory/executor exports:
+New public abstraction/interface: YES (4 internal cross-package exports:
   1. `@principles/host-runtime`: `resolveWorkspacePipelineHostDeps`
   2. `@principles/host-runtime`: `executeSelectedInternalizationTask`
   3. `@principles/core/runtime`: `createDiagnosticianRunnerBundle`
+  4. `@principles/core/runtime`: `validateRecommendationKind`（既有纯函数公开导出，
+     非新抽象——供 pd-cli/host-runtime 的 D4/seed 闸经正式包接口调用）
   plus reusing existing WAL snapshot logic via exported read-only helper for Phase 0;
   net removes 3 hand-rolled Runner assembly switches and 8 ad-hoc collaborator wiring blocks)
 New runtime feature flag: NO
@@ -204,9 +210,10 @@ New external/network capability: NO
    - `pipeline-spine-prompt-canary.e2e.test.ts`（轻量常驻主干）：真实临时工作区 SQLite + `resolveWorkspacePipelineHostDeps` + 满足各阶段业务校验器与准入规则的录制型 Fake Runtime Adapter。注入非默认探针包（`CANARY_REASON_9f3a`、`CANARY_OWNER_CORRECTION_7b2c`、`evaluatePainIngress` 产出的 `principle_deviation` 锚点 `P_CANARY_ANCHOR_4d1e@1`、已授权 `codex` 会话原文 `CANARY_TURN_TEXT_8e5f`、`INTENT.md` 的 `CANARY_INTENT_2a6d`），跑穿 `PainToPrincipleService.recordPain`（同步）→ Stage A/B/C → 准入与账本 Intake → `runInternalizationConsumerCycle`（`prompt` 短链）→ 自动激活 → `prompt-injection-projection`；并含**撤回 `codex` 授权负向用例**（断言 `CANARY_TURN_TEXT_8e5f` 消失且 `ambiguityNotes` 含 `consent_revoked`）。
    - `pipeline-spine-rulecode-canary.e2e.test.ts`（高风险渠道集成探针）：覆盖 `code_tool_hook` 全链（Owner 规则绑定 → Scribe → Artificer → Evaluator 沙箱重放 → RolloutReviewer → 审批 → Shadow/Live → `production-rulehost-gate` 拦截回执），断言 `pi_artifacts.source_principle_id`、`activations.target_ref`、`principle_applications.principle_id` 与账本原则 UUID 完全一致。
 2. **Layer B — `packages/pd-cli/tests/commands/` CLI 组合根与 D4 门禁测试**：
-   - 覆盖真实 CLI 处理器：`pain-record --wait`（证明接入 `trajectoryTurnReader` + `sourceMaterialAuthorization`）、`diagnose`、`pain-retry`、`candidate internalize`（证明未入账本 `principle` 候选被严格拒绝、已复用候选被抑制、未绑定 `rule` 候选不被误杀、`defer` 候选维持 `no_task_created`）。
+   - 覆盖真实 CLI 处理器：`pain-record --wait`（证明接入 `trajectoryTurnReader` + `sourceMaterialAuthorization`）、`diagnose`（**v0.7**：含 `rawRecommendationKind` 非法/缺失候选零 Dreamer 红灯用例，先红后绿；拒绝结果以新增 `intakeResults` 记录表达、不覆盖既有 `'consumed'` 记录）、`pain-retry`、`candidate internalize`（证明未入账本 `principle` 候选被严格拒绝、已复用候选被抑制、未绑定 `rule` 候选不被误杀、`defer` 候选维持 `no_task_created`）。
 3. **Layer C — `packages/openclaw-plugin/tests/` 插件双入口协作者测试**：
    - 同时覆盖 `src/hooks/pain.ts` 与 `src/commands/pain.ts` 两条入口，验证二者均注入同一工作区 `sourceMaterialAuthorization` 与 `WorkspaceContext.trajectory` 读取器。
+4. **Core 侧自动入口红灯单测（v0.7）**：`packages/principles-core` 内为 `PainSignalBridge` 播种路径补 `rawRecommendationKind` 非法/缺失候选**零 Dreamer** 红灯用例与合法 `rule`/`prompt` 路由不变用例（与 `diagnose` 侧 Layer B 用例同属 Phase 1A 先红清单；既有 `candidate-seed-suppression.test.ts` 夹具将 raw 与 normalized 设为同值，不覆盖本缺陷，须用异值夹具）。
 
 ---
 
@@ -246,7 +253,7 @@ New external/network capability: NO
 - **做什么**：
   1. **修 D1**：`PainToPrincipleServiceOptions` 补齐 `sourceMaterialAuthorization` 并按同步/异步模式收紧类型；补齐 `pain-record.ts`、`openclaw-plugin/src/hooks/pain.ts`、`openclaw-plugin/src/commands/pain.ts` 的授权与轨迹读取器接线。
   2. **修 D2**：`context-payload.ts` 增加 `deviationAnchorToPainAnchor`；`pain-ingress.ts` / `pain-signal-bridge.ts` 同步产出规范 `anchor`；`SqliteContextAssembler` 兼容读取历史 `deviationAnchor`（损坏值写入 `ambiguityNotes`）。
-  3. **修 D4（含两自动入口，v0.6 强制）**：`handleCandidateInternalize` 在可内化路由判定与**既有任务去重**之后接入 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`，严格拒绝未入账本 `principle` 候选（正确提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`）与已复用/待裁决候选，保留未绑定 `rule` 候选的合法播种；Admission 文档 `ok:false` 一律 fail-closed。**同步修复两条自动入口的归一化 kind 缺口**：`diagnose.ts` Dreamer seed 循环与 `pain-signal-bridge.ts` 播种路径必须改用 `validateRecommendationKind(candidate.rawRecommendationKind)`——非法原始 kind 一律零播种（fail-closed，结构化 `refused`/telemetry），身份解析与放行判定均传原始字段；合法 `rule`/`prompt` 候选路由行为不变；**不得**把所有 Intake 拒绝粗暴改为停止处理（`consumed` + `ledgerWriteRefused` 的账本语义保持，仅在 seed 闸前增加原始 kind 校验）。
+  3. **修 D4（含两自动入口，v0.6 强制）**：`handleCandidateInternalize` 在可内化路由判定与**既有任务去重**之后接入 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`，严格拒绝未入账本 `principle` 候选（正确提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`）与已复用/待裁决候选，保留未绑定 `rule` 候选的合法播种；Admission 文档 `ok:false` 一律 fail-closed。**同步修复两条自动入口的归一化 kind 缺口**：`diagnose.ts` Dreamer seed 循环与 `pain-signal-bridge.ts` 播种路径必须改用 `validateRecommendationKind(candidate.rawRecommendationKind)`——非法原始 kind 一律零播种（fail-closed：`diagnose` 以**新增** `intakeResults` 记录表达结构化 `refused`、`reason: 'candidate_kind_invalid'`，**不覆盖**既有 `'consumed'` + `ledgerWriteRefused` 记录；bridge 发 telemetry），身份解析与放行判定均传原始字段；合法 `rule`/`prompt` 候选路由行为不变；**不得**把所有 Intake 拒绝粗暴改为停止处理（`consumed` + `ledgerWriteRefused` 的账本语义保持，仅在 seed 闸前增加原始 kind 校验）。**跨包接口前置（v0.7）**：`validateRecommendationKind` 须先从 `@principles/core/runtime` 公开桶正式导出（同步 `runtime-barrel-surface.json`/`export-surface-baseline.json`/`export-admissions.json`），pd-cli/host-runtime 经正式包接口调用——禁止在 pd-cli 复制白名单或深导入 core 内部路径。
 - **验收**：Phase 1A 三层测试与 CLI 契约测试（`cli-1..cli-7`）全部由红转绿；`diagnose` 与 `PainSignalBridge` 两条自动入口各自增加**非法原始 kind 零播种测试**（`rawRecommendationKind` 为非法值/缺失时不得创建 `dreamer` 任务，合法 `rule`/`prompt` 候选路由不受影响）。
 
 ### Phase 2 — 协作者打包、CLI 手搓 Runner 收编与构造点守卫
@@ -298,7 +305,7 @@ New external/network capability: NO
 ## 9. Owner 决策记录与待确认项
 
 1. **D4 处置策略（已采用严格拒绝）**：`pd candidate internalize` 对未完成账本入库的 `principle` 候选执行**严格拒绝**并提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`，绝不在 `internalize` 命令内隐式执行正式账本写入。
-2. **启动确认**：批准 v0.6 后，并行启动 **Phase 0（`PRI-1290`）** 与 **Phase 1A/1B（`PRI-1291`）**；Phase 4（`PRI-1294`）与 Phase 5（`PRI-1295`）保持 `Backlog` 条件门控，未经漏斗数据与 Owner 单独批准不启动。
+2. **启动确认**：批准 v0.7 后，并行启动 **Phase 0（`PRI-1290`）** 与 **Phase 1A/1B（`PRI-1291`）**；Phase 4（`PRI-1294`）与 Phase 5（`PRI-1295`）保持 `Backlog` 条件门控，未经漏斗数据与 Owner 单独批准不启动。
 
 ---
 
@@ -346,4 +353,4 @@ rg -c "^\s*id: '" packages/principles-core/src/runtime/feature-flags/feature-fla
 | 租约续期、阶段预算与父任务心跳默认契约 | `docs/specs/SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001-v1.0.md` |
 | 后台触发所有权与 OS Scheduler | `docs/specs/SPEC-PD-SERVICE-HOST-001.md` |
 | 提交身份预绑定、回执兜底与授权撤回清理 | `docs/specs/SPEC-PD-FEEDBACK-RESILIENCE-001.md` |
-| **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.6）** |
+| **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.7）** |

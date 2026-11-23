@@ -1,12 +1,16 @@
 # SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案
 
-- **版本**：v0.6
+- **版本**：v0.7
 - **日期**：2026-11-23
 - **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
-- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.6）](./SPEC-PD-PIPELINE-SPINE-001.md)
+- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.7）](./SPEC-PD-PIPELINE-SPINE-001.md)
 - **源码事实基线**：`origin/main@679dcc93f`
 - **规范性数据契约**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)、[MVP Core Loop Contract](../architecture/MVP_CORE_LOOP_CONTRACT.md)
 - **标注约定**：文中标注 `〔现有能力〕` 的符号已在当前源码中存在；标注 `〔新增能力〕` 的符号当前不存在，实施前不得以现有能力名义引用；标注 `〔收编删除〕` 的代码块为重复组装，迁移后删除。
+- **v0.7 关键技术修订摘要**：
+  1. §2.1/§3.4.2 补**跨包 Validator 导出契约**（实施阻塞）：`validateRecommendationKind` 存在于 `recommendation-kind-resolver.ts` 但 `runtime/index.ts:268` 仅导出 `isPrincipleLedgerEligibleKind`，`pd-cli`/`host-runtime` 经 `@principles/core/runtime` 桶无法调用——Phase 1B 须先从桶正式导出该既有纯函数并同步 `runtime-barrel-surface.json`/`export-surface-baseline.json`/`export-admissions.json`（跨包公开符号增量 3→4）；禁止 pd-cli 复制 `VALID_RECOMMENDATION_KINDS` 白名单或深导入 core 内部路径；`isPrincipleLedgerEligibleKind` 不可替代（只判 `principle`）。
+  2. §3.7 补 Phase 1A 红灯清单：`PainSignalBridge`（core 侧）与 `diagnose`（Layer B）各增非法/缺失 `rawRecommendationKind` 零 Dreamer 用例与合法 `rule`/`prompt` 路由不变用例，先红后绿；既有 `candidate-seed-suppression.test.ts` 夹具 raw==normalized 不覆盖本缺陷，须用异值夹具。
+  3. §3.4.2 明确 `diagnose` 结构化拒绝表达：seed 闸拒绝以**新增** `intakeResults` 记录（参照 `dreamer_seed_suppressed` 模式，`status: 'refused'`、`reason: 'candidate_kind_invalid'`）表达，不覆盖既有 `'consumed'` + `ledgerWriteRefused` 记录。
 - **v0.6 关键技术修订摘要**：
   1. §3.4.2 注 3 升级：`pain-signal-bridge.ts`（`:1766` 身份解析 + `:1792` 路由）与 `diagnose.ts`（`:859` kind 取值、`:877` 抑制输入、seed 循环 `status === 'consumed'` 闸）两条自动入口的归一化 kind 缺口由"实施期可选"升为 **Phase 1B 强制修复**——已核实 `diagnose.ts` 中 Intake 拒绝（非异常）仍记录 `status: 'consumed'`（附 `ledgerWriteRefused`），seed 循环会以 `'consumed'` 放行并用折叠后的 `'principle'` 完成播种，被 Intake 拒绝的非法原始 kind 可进入 Dreamer 链。修法：seed 闸前 `validateRecommendationKind(candidate.rawRecommendationKind)`，非法一律零播种，身份解析传原始字段，合法 `rule`/`prompt` 路由不变，不把所有 Intake 拒绝改为停止处理；双入口各增非法 kind 零播种测试。
   2. §3.8 补 Phase 0 阈值校准条款：≤5s / ≤60s 为未校准建议值，校准前超窗缺失按 `skew_window_candidate` 输出并标注"阈值未校准"，不判确定流失。
@@ -75,7 +79,7 @@ pd-cli                   openclaw-plugin                codex-adapter          w
 ```
 
 硬约束核对：
-- **跨包公开符号增量共 3 个**（`createDiagnosticianRunnerBundle`、`resolveWorkspacePipelineHostDeps`、`executeSelectedInternalizationTask`）+ 1 个既有内部只读快照函数 `stageWalSnapshot` 暴露给仓库内脚本；更新 `@principles/core/runtime` 公开桶时必须同步更新 `runtime-barrel-surface.json`、`export-surface-baseline.json` 与 `export-admissions.json`。
+- **跨包公开符号增量共 4 个**（`createDiagnosticianRunnerBundle`、`resolveWorkspacePipelineHostDeps`、`executeSelectedInternalizationTask`，以及 **v0.7** 既有纯函数 `validateRecommendationKind` 从 `@principles/core/runtime` 桶公开导出——`runtime/index.ts` 当前仅导出 `isPrincipleLedgerEligibleKind`，D4 门禁与两自动入口的 seed 闸须经正式包接口调用同一 Validator；`isPrincipleLedgerEligibleKind` 只判 `principle`，无法区分合法 `rule`/`prompt` 与非法值，不可替代）+ 1 个既有内部只读快照函数 `stageWalSnapshot` 暴露给仓库内脚本；更新 `@principles/core/runtime` 公开桶时必须同步更新 `runtime-barrel-surface.json`、`export-surface-baseline.json` 与 `export-admissions.json`。
 - `packages/principles-core/io-seam-registry.json` **无需新增条目**（`stageWalSnapshot` 已在 `pain-recall-read-model.ts` 注册边界内，其余改动无新 I/O）。
 
 ---
@@ -332,7 +336,7 @@ if (identity.status !== 'resolved') {
 >
 > 注 2：现有 `diagnose.ts:877` 与 `candidate.ts:1231` 的抑制输入采用 `admissionDoc.ok ? ... : undefined` 折叠写法（历史惯例）。本门禁是新增的 fail-closed 判定点，**不得**复制该惯例；上述两个既有调用点是否同步收紧列为实施期可选项，不属本 PR 范围。
 >
-> 注 3（v0.6 升级为 Phase 1B 强制项）：同类缺口亦存在于两条自动入口——`pain-signal-bridge.ts:1766` 向 `resolveCandidatePrincipleIdentity` 传入归一化的 `candidate.recommendationKind ?? 'principle'`、`:1792` 路由 `CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? '']`；`diagnose.ts:859` 取 `const kind = candidate.recommendationKind` 供 `:879` 身份解析与路由使用。且 `diagnose.ts` 存在已核实的执行窗口：Intake 拒绝（非异常）路径仍记录 `status: 'consumed'`（附 `ledgerWriteRefused`），而 Dreamer seed 循环仅以 `intakeResult.status !== 'consumed'` 为闸——非法原始 kind 被折叠为 `'principle'` 后 `candidate_kind_invalid` 不触发、`'principle'` 路由命中，被 Intake 拒绝的候选仍可完成播种。**修复契约**：两条入口在 seed 判定前执行 `const rawKind = validateRecommendationKind(candidate.rawRecommendationKind)`，`rawKind === null` 一律零播种（`diagnose` 记录结构化 `refused`，bridge 发 telemetry），身份解析与 `rule` 放行判定一律传 `candidate.rawRecommendationKind`；合法 `rule`/`prompt` 候选路由行为不变；**不得**把所有 Intake 拒绝改为停止处理（`consumed` + `ledgerWriteRefused` 语义保留，仅在 seed 闸前加原始 kind 校验）。两入口各补一个非法原始 kind 零播种测试。注 2 的 `ok:false` 折叠写法维持实施期可选项。
+> 注 3（v0.6 升级为 Phase 1B 强制项）：同类缺口亦存在于两条自动入口——`pain-signal-bridge.ts:1766` 向 `resolveCandidatePrincipleIdentity` 传入归一化的 `candidate.recommendationKind ?? 'principle'`、`:1792` 路由 `CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? '']`；`diagnose.ts:859` 取 `const kind = candidate.recommendationKind` 供 `:879` 身份解析与路由使用。且 `diagnose.ts` 存在已核实的执行窗口：Intake 拒绝（非异常）路径仍记录 `status: 'consumed'`（附 `ledgerWriteRefused`），而 Dreamer seed 循环仅以 `intakeResult.status !== 'consumed'` 为闸——非法原始 kind 被折叠为 `'principle'` 后 `candidate_kind_invalid` 不触发、`'principle'` 路由命中，被 Intake 拒绝的候选仍可完成播种。**修复契约**：两条入口在 seed 判定前执行 `const rawKind = validateRecommendationKind(candidate.rawRecommendationKind)`，`rawKind === null` 一律零播种，身份解析与 `rule` 放行判定一律传 `candidate.rawRecommendationKind`；合法 `rule`/`prompt` 候选路由行为不变；**不得**把所有 Intake 拒绝改为停止处理（`consumed` + `ledgerWriteRefused` 语义保留，仅在 seed 闸前加原始 kind 校验）。**拒绝表达（v0.7）**：`diagnose` 以**新增** `intakeResults` 记录表达（参照 `dreamer_seed_suppressed` 模式，`status: 'refused'`、`reason: 'candidate_kind_invalid'`），**不覆盖**同候选既有 `'consumed'` + `ledgerWriteRefused` 记录——保住既有 CLI/批处理语义；bridge 侧发 telemetry。**跨包接口前置（v0.7）**：`validateRecommendationKind` 须先从 `@principles/core/runtime` 桶正式导出并同步三个导出基线 JSON，pd-cli/host-runtime 经正式包接口调用同一 Validator；**禁止**在 pd-cli 复制 `VALID_RECOMMENDATION_KINDS` 白名单或深导入 core 内部路径。两入口各补一个非法原始 kind 零播种测试（见 §3.7，纳入 Phase 1A 红灯清单先红后绿）。注 2 的 `ok:false` 折叠写法维持实施期可选项。
 
 ---
 
@@ -447,11 +451,16 @@ export async function resolveAuthoritativeCorrelationId(
 
 - 验证 `pain-record --wait` 真实注入授权与轨迹读取器（修 D1 前红、修后绿）；
 - 验证 `handleCandidateInternalize` 的 D4 完整矩阵：① 未入账本 `principle` 候选返回 `refused / candidate_not_in_ledger` 且 `nextAction` 为 `pd candidate intake --candidate-id <id> --workspace "<path>"`；② `principle_reuse` 已复用候选返回抑制拒绝；③ 未绑定 `rule` 候选正常创建 `dreamer` 任务；④ `defer` 候选维持 `no_task_created`；⑤ 账本多原则歧义或损坏时 fail-closed 拒绝。
+- **`diagnose` 自动入口零播种红灯用例（v0.7）**：`rawRecommendationKind` 非法值与缺失值两类候选均**不得**创建 `dreamer` 任务（修前红、修后绿；夹具必须让 raw 与 normalized 取值不同，既有 `candidate-seed-suppression.test.ts` 夹具两者同值不覆盖本缺陷）；拒绝结果以新增 `intakeResults` 记录断言、既有 `'consumed'` 记录不被覆盖；合法 `rule`/`prompt` 候选路由不变。
 - Phase 2A/2B 时验证 `diagnose`、`pain-retry`（含外部 `stateManager` 不被提前关闭、死信重放分支不变）与 `runtime-internalization-run-once`。
 
 #### Layer C：`packages/openclaw-plugin/tests/`（插件双入口测试）
 
 - 同时测试 `src/hooks/pain.ts` 与 `src/commands/pain.ts`（修 D1 前红、修后绿），证明两条入口均传入 `WorkspaceContext.trajectory` 读取器与同一工作区的 `sourceMaterialAuthorization`。
+
+#### Core 侧：`packages/principles-core` `PainSignalBridge` 零播种红灯用例（v0.7）
+
+- `rawRecommendationKind` 非法值与缺失值两类候选经 bridge 播种路径**不得**创建 `dreamer` 任务（修前红、修后绿，异值夹具）；合法 `rule`/`prompt` 路由不变；非法 kind 触发 seed-suppression 相关 telemetry 而非静默放行。
 
 ---
 
@@ -474,7 +483,7 @@ export async function resolveAuthoritativeCorrelationId(
 
 ---
 
-## 5. Linear 工单拆分映射（同步至 v0.6 口径）
+## 5. Linear 工单拆分映射（同步至 v0.7 口径）
 
 | 工单号 | 层级 | 对应阶段 | 标题 | 归属 Project | 状态 | 前置阻塞 |
 |---|---|---|---|---|---|---|
