@@ -11,17 +11,44 @@
  * `ready_for_diagnosis` on the SAME task via the existing expected-value CAS
  * with full status/lease preconditions.
  *
+ * PRI-1273 (A2): the flip and the evidence backfill are ONE CAS write. When
+ * the caller-injected reader returns the target turn's entries, the SAME
+ * original task's top-level `evidence` array and its versioned
+ * `painIngress.evidenceClass` (available/entryCount) are persisted together
+ * with the disposition flip — real array and count stay consistent, exactly
+ * like a submission whose target text existed up front (SPEC-PD-FEEDBACK-
+ * RESILIENCE-001 TD §3 step 6). A source-material consent denial is NOT a
+ * wait: it reclassifies the task to `blocked_by_source_material_consent`
+ * (the picker already excludes that state; only a newly authorized target
+ * turn may unblock it).
+ *
  * Bounded by design: at most `limit` (default 5) waiting tasks per cycle, no
  * new Task, no queue, no scheduler, no transcript scanning — the only input
- * beyond the task rows is the caller-injected `targetTurnTextAvailable`
+ * beyond the task rows is the caller-injected `readTargetTurnEvidence`
  * probe (the host adapter reads its own authorized governance store).
  */
 import type { RuntimeStateManager } from './store/runtime-state-manager.js';
 import type { TaskRecord } from './task-status.js';
 import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, type PainRecoveryDisposition } from './pain-admission-disposition.js';
+import type { SourceMaterialDenialReason } from './source-material-authorization.js';
+import type { PainEvidenceEntry } from './pain-signal-bridge.js';
 
 /** Bounded per-cycle work: waiting tasks examined per reconcile run. */
 export const TARGET_EVIDENCE_RECONCILE_LIMIT = 5;
+
+/**
+ * PRI-1273 (A2): the structured target-turn evidence read the reconcile (and
+ * any host adapter probing on its behalf) consumes. The SAME vocabulary the
+ * submit path's opportunistic enrichment uses (`pd-mcp-server`
+ * submit-assembly imports this type): only `available` carries entries; a
+ * consent denial is distinct from "text not yet there"; a store failure is
+ * distinct from both.
+ */
+export type TargetTurnEvidenceRead =
+  | { readonly status: 'available'; readonly entries: PainEvidenceEntry[] }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'blocked_by_consent'; readonly reason: SourceMaterialDenialReason }
+  | { readonly status: 'read_failed'; readonly reason: string };
 
 /**
  * r2b (devin finding 0002): rotation cursor scope. A fixed oldest-first
@@ -39,6 +66,10 @@ export interface TargetEvidenceReconcileReport {
   readonly checked: number;
   /** Dispositions flipped to `ready_for_diagnosis`. */
   readonly flipped: number;
+  /** Flips whose CAS also backfilled the target-turn evidence entries. */
+  readonly backfilled: number;
+  /** Dispositions reclassified to `blocked_by_source_material_consent`. */
+  readonly blocked: number;
   /** Still waiting (text not yet available) or CAS-lost to a concurrent writer. */
   readonly stillWaiting: number;
   /** Per-task structured failures (malformed payload, store error) — rc-9. */
@@ -47,9 +78,13 @@ export interface TargetEvidenceReconcileReport {
 
 export interface ReconcileWaitingTargetEvidenceInput {
   readonly stateManager: Pick<RuntimeStateManager, 'listTasks' | 'updateTaskIfDiagnosticJsonUnchanged' | 'getDiagnosticianServiceCursor' | 'setDiagnosticianServiceCursor'>;
-  /** Host-adapter probe: does the authorized store hold readable text for
-   * the exact (session, target turn)? Owns host/workspace semantics. */
-  readonly targetTurnTextAvailable: (sessionId: string, targetTurnId: string) => boolean;
+  /**
+   * PRI-1273: host-adapter probe — read the authorized store for the EXACT
+   * (session, target turn). Owns host/workspace semantics AND the
+   * source-material consent gate: a denied read returns `blocked_by_consent`,
+   * never a fake not-found. The backfill persists exactly what this returns.
+   */
+  readonly readTargetTurnEvidence: (sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead;
   readonly nowIso: string;
   readonly limit?: number;
 }
@@ -64,6 +99,27 @@ interface WaitingTaskFacts {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * rc-4: the entries array from the host adapter is validated element-by-
+ * element before anything is persisted — an entry is exactly
+ * `{sourceRef, note}` with non-empty bounded strings, the same shape the
+ * submit path's enrichment writes. Invalid input is a read failure, never a
+ * partially-persisted evidence array.
+ */
+function validateEvidenceEntries(entries: readonly unknown[]): PainEvidenceEntry[] | null {
+  const validated: PainEvidenceEntry[] = [];
+  for (const entry of entries) {
+    if (!isRecord(entry)) return null;
+    const keys = Object.keys(entry);
+    if (keys.length !== 2 || !keys.includes('sourceRef') || !keys.includes('note')) return null;
+    const {sourceRef, note} = entry;
+    if (typeof sourceRef !== 'string' || sourceRef.length === 0 || sourceRef.length > 500) return null;
+    if (typeof note !== 'string' || note.length === 0) return null;
+    validated.push({ sourceRef, note });
+  }
+  return validated;
 }
 
 /** Parse a waiting task's persisted facts; null when the payload does not
@@ -123,6 +179,51 @@ function parseWaitingTaskFacts(task: TaskRecord): WaitingTaskFacts | null {
 }
 
 /**
+ * PRI-1273 (A2): build the ONE CAS payload for a task whose target-turn
+ * evidence has arrived. The disposition flip, the top-level `evidence`
+ * array and `painIngress.evidenceClass` ride the SAME conditional UPDATE —
+ * a concurrent writer cannot observe the flip without the evidence, or the
+ * evidence without the count (SPEC TD §3 steps 6–7). An already non-empty
+ * evidence array (not expected on a waiting task, but never assumed away)
+ * is preserved untouched and only the disposition flips.
+ */
+function buildBackfillPatch(input: {
+  readonly diagnostic: Record<string, unknown>;
+  readonly facts: WaitingTaskFacts;
+  readonly entries: PainEvidenceEntry[];
+  readonly nowIso: string;
+}): { readonly newRecord: Record<string, unknown>; readonly backfilled: boolean } {
+  const {diagnostic, facts, entries, nowIso} = input;
+  const disposition: PainRecoveryDisposition = {
+    ...facts.existingDisposition,
+    state: 'ready_for_diagnosis',
+    reasonCode: 'target_evidence_arrived',
+    attemptCount: facts.existingDisposition.attemptCount + 1,
+    lastCheckedAt: nowIso,
+    resolvedAt: nowIso,
+  };
+  const existingEvidence = Array.isArray(diagnostic.evidence) ? diagnostic.evidence : [];
+  const painIngress = isRecord(diagnostic.painIngress) ? diagnostic.painIngress : {};
+  if (existingEvidence.length === 0) {
+    return {
+      newRecord: {
+        ...diagnostic,
+        evidence: entries,
+        painIngress: { ...painIngress, evidenceClass: { status: 'available' as const, entryCount: entries.length } },
+        recovery: disposition,
+      },
+      backfilled: true,
+    };
+  }
+  // Evidence already present (e.g. an owner statement arrived through another
+  // path): preserve it and the class that already agrees with its count.
+  return {
+    newRecord: { ...diagnostic, recovery: disposition },
+    backfilled: false,
+  };
+}
+
+/**
  * One bounded reconcile pass. Never throws: every failure lands in the
  * report's `errors` (bounded, ids + codes only).
  */
@@ -132,6 +233,8 @@ export async function reconcileWaitingTargetEvidenceTasks(
   const limit = Math.max(1, Math.min(input.limit ?? TARGET_EVIDENCE_RECONCILE_LIMIT, 25));
   let checked = 0;
   let flipped = 0;
+  let backfilled = 0;
+  let blocked = 0;
   let stillWaiting = 0;
   const errors: string[] = [];
 
@@ -170,38 +273,84 @@ export async function reconcileWaitingTargetEvidenceTasks(
       errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
       continue;
     }
-    if (!input.targetTurnTextAvailable(facts.sessionId, facts.targetTurnId)) {
+    const read = input.readTargetTurnEvidence(facts.sessionId, facts.targetTurnId);
+    if (read.status === 'not_found') {
       stillWaiting += 1;
       continue;
     }
-    const disposition: PainRecoveryDisposition = {
-      ...facts.existingDisposition,
-      state: 'ready_for_diagnosis',
-      reasonCode: 'target_evidence_arrived',
-      attemptCount: facts.existingDisposition.attemptCount + 1,
-      lastCheckedAt: input.nowIso,
-      resolvedAt: input.nowIso,
-    };
+    if (read.status === 'read_failed') {
+      // Observable degradation, bounded code + reason (rc-9): the task keeps
+      // waiting and is re-examined on a later cycle.
+      errors.push(`target_evidence_read_failed:taskId=${task.taskId}:${read.reason.slice(0, 80)}`);
+      stillWaiting += 1;
+      continue;
+    }
+    let parsedRecord: Record<string, unknown>;
     try {
-      let parsedRecord: Record<string, unknown>;
-      try {
-        const parsed: unknown = JSON.parse(facts.diagnosticText);
-        parsedRecord = isRecord(parsed) ? parsed : {};
-      } catch {
-        errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
-        continue;
+      const parsed: unknown = JSON.parse(facts.diagnosticText);
+      parsedRecord = isRecord(parsed) ? parsed : {};
+    } catch {
+      errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
+      continue;
+    }
+    if (read.status === 'blocked_by_consent') {
+      // PRI-1273 / PRI-1283: a source-material denial is a DIFFERENT state
+      // from waiting — persist the block with its reason code so the read
+      // model shows why, and never mix it back into the waiting set.
+      const disposition: PainRecoveryDisposition = {
+        ...facts.existingDisposition,
+        state: 'blocked_by_source_material_consent',
+        reasonCode: `target_turn_source_material_${read.reason}`,
+        attemptCount: facts.existingDisposition.attemptCount + 1,
+        lastCheckedAt: input.nowIso,
+      };
+      const updated = await input.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+        task.taskId,
+        facts.diagnosticText,
+        { diagnosticJson: JSON.stringify({ ...parsedRecord, recovery: disposition }) },
+        {
+          expectedStatus: task.status,
+          expectedLeaseOwner: task.leaseOwner ?? null,
+          expectedLeaseExpiresAt: task.leaseExpiresAt ?? null,
+          expectedLeaseGeneration: task.leaseGeneration ?? 0,
+          expectedAttemptCount: task.attemptCount,
+        },
+      );
+      if (updated !== null) {
+        blocked += 1;
+      } else {
+        // Lost a race — the concurrent writer's state wins; re-checked next cycle.
+        stillWaiting += 1;
       }
+      continue;
+    }
+    // read.status === 'available'
+    const entries = validateEvidenceEntries(read.entries);
+    if (entries === null || entries.length === 0) {
+      errors.push(`target_evidence_read_invalid_entries:taskId=${task.taskId}`);
+      stillWaiting += 1;
+      continue;
+    }
+    try {
+      const patch = buildBackfillPatch({ diagnostic: parsedRecord, facts, entries, nowIso: input.nowIso });
       // Status/lease preconditions (P1-4 parity): a worker that leased or
       // finished the task in the read→write window defeats the flip in the
       // same statement as the diagnostic_json comparison.
       const updated = await input.stateManager.updateTaskIfDiagnosticJsonUnchanged(
         task.taskId,
         facts.diagnosticText,
-        { diagnosticJson: JSON.stringify({ ...parsedRecord, recovery: disposition }) },
-        { expectedStatus: task.status, expectedLeaseOwner: task.leaseOwner ?? null, expectedLeaseExpiresAt: task.leaseExpiresAt ?? null },
+        { diagnosticJson: JSON.stringify(patch.newRecord) },
+        {
+          expectedStatus: task.status,
+          expectedLeaseOwner: task.leaseOwner ?? null,
+          expectedLeaseExpiresAt: task.leaseExpiresAt ?? null,
+          expectedLeaseGeneration: task.leaseGeneration ?? 0,
+          expectedAttemptCount: task.attemptCount,
+        },
       );
       if (updated !== null) {
         flipped += 1;
+        if (patch.backfilled) backfilled += 1;
       } else {
         // Lost a race — the concurrent writer's state wins; re-checked next cycle.
         stillWaiting += 1;
@@ -211,5 +360,5 @@ export async function reconcileWaitingTargetEvidenceTasks(
     }
   }
 
-  return { checked, flipped, stillWaiting, errors };
+  return { checked, flipped, backfilled, blocked, stillWaiting, errors };
 }

@@ -28,8 +28,9 @@
  * `tool_call` rows, or look-alike strings (SPEC TD §1.3).
  */
 import * as path from 'node:path';
-import { listGovernanceObservations } from '@principles/host-runtime';
+import { listGovernanceObservations, readSourceMaterialAuthorization } from '@principles/host-runtime';
 import { isSentinelSessionId } from '@principles/core/runtime';
+import type { TargetTurnEvidenceRead } from '@principles/core/runtime';
 import {
   recoverTaskIdentityFromReceipt,
   validatePainSubmitReceipt,
@@ -107,30 +108,71 @@ export interface PainReceiptFallbackInput {
 }
 
 /**
- * P1-3: does the authorized governance store already hold readable text for
- * the EXACT (session, turn)? Shared by the receipt fallback (disposition
- * choice) and the workspace worker's waiting-task reconcile (the flip) —
- * the diagnosis itself re-reads the turn through the same store.
- * Unreadable ⇒ missing.
+ * PRI-1273 (A2): the structured target-turn evidence read the worker's
+ * waiting-task reconcile consumes. This is the EXACT-turn authority for the
+ * Codex host boundary:
+ *
+ *  1. the source-material consent ledger is consulted FIRST (PRI-1283 R2
+ *     parity with the submit path): a missing / revoked / not-granted /
+ *     unreadable decision returns `blocked_by_consent` BEFORE any store
+ *     query — a denial is never mixed into the waiting set;
+ *  2. the governance store is queried for the EXACT (rollout identity, host
+ *     turn id) — never a session scan, never the submission turn, never a
+ *     recent-turn fallback;
+ *  3. rows keep the same retention/excerpt contract the submit path's
+ *     enrichment uses (user/assistant turns, operational|promoted retention,
+ *     `governance_observation:<logicalKey>` sourceRef, bounded note) so the
+ *     backfilled entries are indistinguishable from submit-time evidence.
+ *
+ * Expired/purged rows (retention outside operational|promoted, empty text)
+ * simply do not qualify — an honest not_found until retention re-promotes
+ * or the turn is re-collected.
  */
-export function codexTargetTurnTextAvailable(workspaceDir: string, sessionId: string, turnId: string): boolean {
+export function readCodexTargetTurnEvidence(workspaceDir: string, sessionId: string, turnId: string): TargetTurnEvidenceRead {
+  const authorization = readSourceMaterialAuthorization({ workspaceDir, hostKind: 'codex' });
+  if (authorization.status === 'blocked') {
+    return { status: 'blocked_by_consent', reason: authorization.reason };
+  }
   try {
     const result = listGovernanceObservations({
       workspaceDir,
       hostKind: 'codex',
       rolloutIdentity: sessionId,
       hostTurnId: turnId,
-      limit: 8,
+      limit: 64,
     });
-    if (!result.ok) return false;
-    return result.observations.some((row) =>
+    if (!result.ok) {
+      return { status: 'read_failed', reason: result.reason };
+    }
+    const entries = result.observations.flatMap((row) =>
       (row.kind === 'user_turn' || row.kind === 'assistant_turn')
-      && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
-      && typeof row.visibleText === 'string'
-      && row.visibleText.trim() !== '');
-  } catch {
-    return false;
+        && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
+        && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
+        ? [{ sourceRef: 'governance_observation:' + row.logicalKey, note: row.visibleText.slice(0, 2000) }]
+        : [],
+      // Rows are capture-ordered; retain the final turns on long conversations.
+    ).slice(-12);
+    return entries.length > 0
+      ? { status: 'available', entries }
+      : { status: 'not_found' };
+  } catch (error) {
+    return { status: 'read_failed', reason: error instanceof Error ? error.message.slice(0, 120) : 'store_exception' };
   }
+}
+
+/**
+ * P1-3: does the authorized governance store already hold readable text for
+ * the EXACT (session, turn)? Shared by the receipt fallback (disposition
+ * choice) and the workspace worker's waiting-task reconcile (the flip) —
+ * the diagnosis itself re-reads the turn through the same store.
+ * Unreadable ⇒ missing. Since PRI-1273 this boolean is the `available`
+ * projection of the consent-gated structured read above: a consent denial
+ * reads as "not available", so the receipt fallback's waiting disposition
+ * is reclassified to `blocked_by_source_material_consent` by the worker
+ * reconcile on its next bounded pass.
+ */
+export function codexTargetTurnTextAvailable(workspaceDir: string, sessionId: string, turnId: string): boolean {
+  return readCodexTargetTurnEvidence(workspaceDir, sessionId, turnId).status === 'available';
 }
 
 /**

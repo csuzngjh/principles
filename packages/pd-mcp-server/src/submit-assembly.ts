@@ -42,8 +42,7 @@ import {
   hostSessionClaimConflictsWithContext,
   isSentinelSessionId,
   resolveHostSubmissionContext,
-  type PainEvidenceEntry,
-  type SourceMaterialDenialReason,
+  type TargetTurnEvidenceRead,
 } from '@principles/core/runtime';
 import { submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
@@ -81,12 +80,11 @@ function readHostId(value: unknown): string | undefined {
  *                preserve minimal identity, but block diagnosis;
  *   - read_failed: the store read itself failed (structured stderr note);
  *                submission remains legal; enrichment is optional.
+ *
+ * PRI-1273: the type moved to Core (`pain-target-evidence-reconcile.ts`) so
+ * the submit-time enrichment and the worker reconcile's backfill share ONE
+ * vocabulary — the entries shape both paths persist must never drift.
 */
-type TargetTurnEvidenceRead =
-  | { readonly status: 'available'; readonly entries: PainEvidenceEntry[] }
-  | { readonly status: 'not_found' }
-  | { readonly status: 'blocked_by_consent'; readonly reason: SourceMaterialDenialReason }
-  | { readonly status: 'read_failed'; readonly reason: string };
 
 /**
  * PRI-1274: opportunistic target-turn evidence. Bounded read of this

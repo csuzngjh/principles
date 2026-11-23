@@ -24,7 +24,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { pickDiagnosticianCandidate } from '../diagnostician-candidate.js';
-import { reconcileWaitingTargetEvidenceTasks } from '../pain-target-evidence-reconcile.js';
+import { reconcileWaitingTargetEvidenceTasks, type TargetTurnEvidenceRead } from '../pain-target-evidence-reconcile.js';
 import { submitPainCapability } from '../pain-submit-capability.js';
 import { createDiagnosticianTaskId } from '../pain-signal-bridge.js';
 import { PainSignalBridge } from '../pain-signal-bridge.js';
@@ -36,7 +36,7 @@ import { SqliteHistoryQuery } from '../store/history/sqlite-history-query.js';
 import { SqliteContextAssembler } from '../store/context/sqlite-context-assembler.js';
 import type { TrajectoryTurnReader, TrajectoryUserTurn } from '../store/context/trajectory-turn-reader.js';
 import { validatePainSubmitReceipt, recoverTaskIdentityFromReceipt } from '../pain-receipt-recovery.js';
-import { parsePainIngressV1Payload } from '../pain-ingress-payload.js';
+import { parsePainIngressV1Payload, checkIngressTopLevelConsistency } from '../pain-ingress-payload.js';
 
 let tmpDir: string;
 let stateManager: RuntimeStateManager;
@@ -286,7 +286,7 @@ describe('P1-3 — the worker reconcile is the only exit from waiting', () => {
     // Text not yet collected: the reconcile reports still-waiting, no write.
     const before = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
-      targetTurnTextAvailable: () => false,
+      readTargetTurnEvidence: () => ({ status: 'not_found' }),
       nowIso: new Date().toISOString(),
     });
     expect(before.checked).toBe(1);
@@ -295,19 +295,33 @@ describe('P1-3 — the worker reconcile is the only exit from waiting', () => {
     expect((await readDiagnostic(taskId)).sessionIdHint === undefined).toBe(false);
 
     // Text arrived (e.g. catch-up ingested the turn): the disposition flips
-    // on the SAME task via CAS.
+    // on the SAME task via CAS — and PRI-1273 backfills the evidence +
+    // evidenceClass in the SAME write.
     const after = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
-      targetTurnTextAvailable: () => true,
+      readTargetTurnEvidence: () => ({
+        status: 'available',
+        entries: [{ sourceRef: 'governance_observation:codex|rollout-target|turn-10|user_turn', note: 'turn ten body' }],
+      }),
       nowIso: new Date().toISOString(),
     });
     expect(after.flipped).toBe(1);
+    expect(after.backfilled).toBe(1);
     const diagnostic = await readDiagnostic(taskId);
     const recovery = diagnostic.recovery as Record<string, unknown>;
     expect(recovery.state).toBe('ready_for_diagnosis');
     expect(recovery.reasonCode).toBe('target_evidence_arrived');
     expect(recovery.attemptCount).toBe(2);
     expect(recovery.resolvedAt).toBeDefined();
+    // PRI-1273 (A2): the real evidence array and its evidenceClass land on
+    // the SAME original task, consistent for the read-back validator.
+    expect(diagnostic.evidence).toEqual([
+      { sourceRef: 'governance_observation:codex|rollout-target|turn-10|user_turn', note: 'turn ten body' },
+    ]);
+    const painIngress = diagnostic.painIngress as Record<string, unknown>;
+    expect(painIngress.evidenceClass).toEqual({ status: 'available', entryCount: 1 });
+    const reparsed = parsePainIngressV1Payload(painIngress);
+    expect(reparsed.ok).toBe(true);
 
     // Now the picker serves it.
     const picked = await pickDiagnosticianCandidate(stateManager, 1, new Date().toISOString());
@@ -324,7 +338,7 @@ describe('P1-3 — the worker reconcile is the only exit from waiting', () => {
     });
     const malformed = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
-      targetTurnTextAvailable: () => true,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: [{ sourceRef: 'x', note: 'y' }] }),
       nowIso: new Date().toISOString(),
     });
     expect(malformed.errors.some((line) => line.includes('diagnosis_malformed_waiting'))).toBe(true);
@@ -556,16 +570,19 @@ describe('r2b (0002) — the waiting reconcile rotates; the oldest five cannot s
       );
       expect(receipt.status).toBe('submitted');
     }
-    const probe = (_sessionId: string, turnId: string): boolean => turnId === 'turn-06';
+    const probe = (_sessionId: string, turnId: string): TargetTurnEvidenceRead =>
+      turnId === 'turn-06'
+        ? { status: 'available', entries: [{ sourceRef: 'governance_observation:codex|x|turn-06|user_turn', note: 'turn six body' }] }
+        : { status: 'not_found' };
 
     // Default limit 5: the first pass sees the five OLDEST (no text).
-    const first = await reconcileWaitingTargetEvidenceTasks({ stateManager, targetTurnTextAvailable: probe, nowIso: new Date().toISOString() });
+    const first = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
     expect(first.checked).toBe(5);
     expect(first.flipped).toBe(0);
     expect(first.stillWaiting).toBe(5);
 
     // Second pass rotates past them and reaches the sixth — which flips.
-    const second = await reconcileWaitingTargetEvidenceTasks({ stateManager, targetTurnTextAvailable: probe, nowIso: new Date().toISOString() });
+    const second = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
     expect(second.checked).toBe(1);
     expect(second.flipped).toBe(1);
   });
@@ -650,5 +667,227 @@ describe('r2b (0003) — the split pipeline (manual pd diagnose run) refuses wai
     expect(task?.status).toBe('pending');
     expect(task?.leaseOwner ?? null).toBeNull();
     expect(await stateManager.runStore.listRunsByTask(taskId)).toEqual([]);
+  });
+});
+
+describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto the SAME task', () => {
+  const TURN10_ENTRIES = [
+    { sourceRef: 'governance_observation:codex|rollout-1273|turn-10|user_turn', note: 'turn ten user body' },
+    { sourceRef: 'governance_observation:codex|rollout-1273|turn-10|assistant_turn', note: 'turn ten assistant body' },
+  ];
+
+  it('the reader receives the EXACT (session, target turn) — turn 12\'s submission reads turn 10 only', async () => {
+    const painId = 'mcp_1700000001273_a0000001';
+    await submitTargetingTurn10(painId);
+    const seen: Array<[string, string]> = [];
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: (sessionId, turnId) => {
+        seen.push([sessionId, turnId]);
+        return { status: 'available', entries: TURN10_ENTRIES };
+      },
+      nowIso: new Date().toISOString(),
+    });
+    expect(seen).toEqual([['rollout-target', 'turn-10']]);
+    expect(report.backfilled).toBe(1);
+    // The backfill carries ONLY the target turn's rows — count and content
+    // agree, and the full read-back consistency contract accepts the payload.
+    const diagnostic = await readDiagnostic(createDiagnosticianTaskId(painId));
+    expect(diagnostic.evidence).toEqual(TURN10_ENTRIES);
+    const painIngress = diagnostic.painIngress as Record<string, unknown>;
+    expect(painIngress.evidenceClass).toEqual({ status: 'available', entryCount: 2 });
+    const parsedIngress = parsePainIngressV1Payload(painIngress);
+    expect(parsedIngress.ok).toBe(true);
+    if (!parsedIngress.ok) return;
+    expect(checkIngressTopLevelConsistency({
+      payload: parsedIngress.payload,
+      topLevelProvenance: diagnostic.provenance,
+      topLevelSessionIdHint: diagnostic.sessionIdHint,
+      topLevelEvidenceCount: TURN10_ENTRIES.length,
+    })).toBeNull();
+  });
+
+  it('a source-material consent denial is NOT a wait — the task is reclassified blocked with the reason', async () => {
+    const painId = 'mcp_1700000001273_a0000002';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'blocked_by_consent', reason: 'consent_revoked' }),
+      nowIso: new Date().toISOString(),
+    });
+    expect(report.blocked).toBe(1);
+    expect(report.flipped).toBe(0);
+    const diagnostic = await readDiagnostic(taskId);
+    const recovery = diagnostic.recovery as Record<string, unknown>;
+    expect(recovery.state).toBe('blocked_by_source_material_consent');
+    expect(recovery.reasonCode).toBe('target_turn_source_material_consent_revoked');
+    // No evidence was persisted from a denied source, and the class never
+    // claims availability.
+    expect(diagnostic.evidence).toEqual([]);
+    const painIngress = diagnostic.painIngress as Record<string, unknown>;
+    expect((painIngress.evidenceClass as Record<string, unknown>).status).toBe('unavailable');
+    // The blocked task leaves the waiting set: a second reconcile does not
+    // touch it again, and the picker excludes it.
+    const second = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'blocked_by_consent', reason: 'consent_revoked' }),
+      nowIso: new Date().toISOString(),
+    });
+    expect(second.checked).toBe(0);
+    expect(await pickDiagnosticianCandidate(stateManager, 5, new Date().toISOString())).toBeNull();
+  });
+
+  it('consent_missing and consent_not_granted denials carry their own reason codes', async () => {
+    for (const [suffix, reason] of [['3', 'consent_missing'], ['4', 'consent_not_granted']] as const) {
+      const painId = `mcp_1700000001273_a00000${suffix}`;
+      await submitTargetingTurn10(painId);
+      const report = await reconcileWaitingTargetEvidenceTasks({
+        stateManager,
+        readTargetTurnEvidence: () => ({ status: 'blocked_by_consent', reason }),
+        nowIso: new Date().toISOString(),
+      });
+      expect(report.blocked).toBe(1);
+      const diagnostic = await readDiagnostic(createDiagnosticianTaskId(painId));
+      expect((diagnostic.recovery as Record<string, unknown>).reasonCode).toBe(`target_turn_source_material_${reason}`);
+    }
+  });
+
+  it('a store read failure is an observable error, never a flip and never a block', async () => {
+    const painId = 'mcp_1700000001273_a0000005';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'read_failed', reason: 'sqlite_locked' }),
+      nowIso: new Date().toISOString(),
+    });
+    expect(report.flipped).toBe(0);
+    expect(report.blocked).toBe(0);
+    expect(report.errors.some((line) => line.includes('target_evidence_read_failed') && line.includes(taskId))).toBe(true);
+    // The task keeps waiting untouched — a transient store failure must not
+    // burn the one recovery classification.
+    const diagnostic = await readDiagnostic(taskId);
+    expect((diagnostic.recovery as Record<string, unknown>).state).toBe('waiting_for_target_evidence');
+  });
+
+  it('invalid entries from the reader are rejected element-wise (rc-4), never partially persisted', async () => {
+    const painId = 'mcp_1700000001273_a0000006';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const badEntriesCases: unknown[][] = [
+      [{ sourceRef: 'x', note: 'ok' }, { sourceRef: '', note: 'empty ref' }],
+      [{ sourceRef: 'x', note: 'ok' }, { sourceRef: 'y', note: 42 }],
+      [{ sourceRef: 'x', note: 'ok' }, 'not-an-object'],
+      [{ sourceRef: 'x', note: 'ok', extra: 'field' }],
+      [],
+    ];
+    for (const entries of badEntriesCases) {
+      const report = await reconcileWaitingTargetEvidenceTasks({
+        stateManager,
+        readTargetTurnEvidence: () => ({ status: 'available', entries: entries as never }),
+        nowIso: new Date().toISOString(),
+      });
+      expect(report.flipped).toBe(0);
+      expect(report.errors.some((line) => line.includes('target_evidence_read_invalid_entries'))).toBe(true);
+    }
+    const diagnostic = await readDiagnostic(taskId);
+    expect((diagnostic.recovery as Record<string, unknown>).state).toBe('waiting_for_target_evidence');
+    expect(diagnostic.evidence).toEqual([]);
+  });
+
+  it('idempotent: a repeated catch-up after the flip writes nothing new (the task left the waiting set)', async () => {
+    const painId = 'mcp_1700000001273_a0000007';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const first = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      nowIso: new Date().toISOString(),
+    });
+    expect(first.backfilled).toBe(1);
+    const second = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      nowIso: new Date().toISOString(),
+    });
+    expect(second.checked).toBe(0);
+    expect(second.flipped).toBe(0);
+    expect(second.backfilled).toBe(0);
+    const diagnostic = await readDiagnostic(taskId);
+    expect((diagnostic.evidence as unknown[]).length).toBe(2);
+    expect((diagnostic.recovery as Record<string, unknown>).attemptCount).toBe(2);
+  });
+
+  it('an actively leased waiting task is never mutated by the reconcile (P1-4 parity)', async () => {
+    const painId = 'mcp_1700000001273_a0000008';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const acquisition = await stateManager.acquireLeaseDetailed({
+      taskId,
+      owner: 'external-worker',
+      runtimeKind: 'pi-ai',
+      durationMs: 60_000,
+    });
+    const before = await readDiagnostic(taskId);
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      nowIso: new Date().toISOString(),
+    });
+    // The CAS preconditions (expected lease owner/expiry) defeat the write:
+    // the task stays byte-identical under the active lease.
+    expect(report.flipped + report.blocked).toBe(0);
+    const after = await readDiagnostic(taskId);
+    expect(after).toEqual(before);
+    expect(acquisition.task.leaseOwner).toBe('external-worker');
+  });
+
+  it('a terminal waiting-shaped task is never reopened', async () => {
+    const painId = 'mcp_1700000001273_a0000009';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    await stateManager.updateTask(taskId, { status: 'failed' });
+    const before = await readDiagnostic(taskId);
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      nowIso: new Date().toISOString(),
+    });
+    // The store query filters status=pending, so the failed task is not even
+    // examined — no write, no reopen.
+    expect(report.checked).toBe(0);
+    const task = await stateManager.getTask(taskId);
+    expect(task?.status).toBe('failed');
+    expect(JSON.parse(task?.diagnosticJson ?? '{}')).toEqual(before);
+  });
+
+  it('a waiting task that already carries evidence flips without touching the existing array', async () => {
+    const painId = 'mcp_1700000001273_a0000010';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    // Another path (e.g. PRI-1283's sweep shape) already wrote one entry
+    // with a matching evidenceClass.
+    const diagnostic = await readDiagnostic(taskId);
+    const existing = [{ sourceRef: 'codex:correction', note: 'owner correction' }];
+    await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      JSON.stringify(diagnostic),
+      { diagnosticJson: JSON.stringify({
+        ...diagnostic,
+        evidence: existing,
+        painIngress: { ...(diagnostic.painIngress as Record<string, unknown>), evidenceClass: { status: 'available', entryCount: 1 } },
+      }) },
+    );
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      nowIso: new Date().toISOString(),
+    });
+    expect(report.flipped).toBe(1);
+    expect(report.backfilled).toBe(0);
+    const after = await readDiagnostic(taskId);
+    expect(after.evidence).toEqual(existing);
+    expect(((after.painIngress as Record<string, unknown>).evidenceClass as Record<string, unknown>).entryCount).toBe(1);
   });
 });
