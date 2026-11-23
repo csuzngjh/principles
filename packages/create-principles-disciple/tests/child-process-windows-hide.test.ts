@@ -242,6 +242,39 @@ describe('the scanner is sensitive (self-check on snippets)', () => {
         "spawn(node, [entry], { stdio: 'ignore' });",
       ].join('\n'));
       expect(scanTree(fixture, { exceptions: [exception] }).findings.map((finding) => finding.verdict)).toEqual(['missing']);
+
+      // one exception covers ONE call site: a second, identical call is still a finding
+      fs.rmSync(path.join(fixture, 'a.ts'));
+      const first = { file: 'b.ts', fn: 'spawn', snippet: "spawn('explorer.exe'", reason: 'opens the system browser' };
+      const second = { ...first, reason: 'opens the system browser, from the other menu' };
+      fs.writeFileSync(path.join(fixture, 'b.ts'), [
+        "import { spawn } from 'node:child_process';",
+        "spawn('explorer.exe', [firstUrl]);",
+        "spawn('explorer.exe', [secondUrl]);",
+      ].join('\n'));
+      expect(scanTree(fixture, { exceptions: [first] }).findings.map((finding) => finding.verdict)).toEqual(['no-options-literal']);
+      expect(scanTree(fixture, { exceptions: [first] }).staleExceptions).toEqual([]);
+      expect(scanTree(fixture, { exceptions: [first, second] }).staleExceptions).toEqual([]);
+      // ...and once the second call is gone, its justification must go with it.
+      fs.writeFileSync(path.join(fixture, 'b.ts'), [
+        "import { spawn } from 'node:child_process';",
+        "spawn('explorer.exe', [firstUrl]);",
+      ].join('\n'));
+      expect(scanTree(fixture, { exceptions: [first, second] }).staleExceptions).toEqual([second]);
+
+      fs.rmSync(path.join(fixture, 'b.ts'));
+      // a function handed to a wrapper is reported against the wrapper call,
+      // which is what an exception for it has to name
+      fs.writeFileSync(path.join(fixture, 'c.ts'), [
+        "import { execFile } from 'node:child_process';",
+        'runWith(execFile, opts);',
+      ].join('\n'));
+      const escaped = scanTree(fixture).findings.find((finding) => finding.file === 'c.ts');
+      expect(escaped?.verdict).toBe('function-escape');
+      expect(escaped?.call).toBe('runWith(execFile, opts)');
+      expect(scanTree(fixture, { exceptions: [
+        { file: 'c.ts', fn: 'execFile', snippet: 'runWith(execFile,', reason: 'the wrapper passes windowsHide: true' },
+      ] }).findings.filter((finding) => finding.file === 'c.ts')).toEqual([]);
     } finally {
       fs.rmSync(fixture, { recursive: true, force: true });
     }

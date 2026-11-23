@@ -516,9 +516,10 @@ const GATEWAY_STOP_POLL_INTERVAL_MS = 1_000;
  * Deliberately NOT a copy of the two sibling liveness probes
  * (`openclaw-plugin/src/utils/file-lock.ts` and
  * `principles-core/src/principle-tree-ledger.ts`), which read ANY
- * `process.kill` failure as "dead". The sibling stop leg in
- * `pd-console/src/server/utils/gateway.ts` decides by exit code alone and has
- * no liveness probe to reuse. The OpenClaw gateway is a high-integrity
+ * `process.kill` failure as "dead". The Console's former stop leg
+ * (`pd-console/src/server/utils/gateway.ts`) decided by exit code alone and had
+ * no liveness probe to reuse; it was unreferenced and has been removed, so
+ * this stays the only stop-side liveness probe. The OpenClaw gateway is a high-integrity
  * scheduled task on Windows, and a medium-IL installer that signals it gets
  * EPERM — which means ALIVE. A false "dead" here would confirm a stop that
  * never happened, so win32 asks the SCM read-only via tasklist and POSIX

@@ -122,14 +122,16 @@ export function scanSource(relativeFile, text) {
   const findings = [];
   let callSites = 0;
 
-  const report = (node, fn, verdict) => {
+  const report = (node, fn, verdict, context = node) => {
     findings.push({
       file: relativeFile,
       line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
       fn,
       verdict,
       detail: DETAIL[verdict],
-      call: node.getText(source).replace(/\s+/g, ' ').slice(0, 160),
+      // The offending expression, or — for a function escaping as a value —
+      // the expression it escapes into, which is what an exception must name.
+      call: context.getText(source).replace(/\s+/g, ' ').slice(0, 160),
     });
   };
 
@@ -273,12 +275,12 @@ export function scanSource(relativeFile, text) {
         // The alias leaves this file; its callers cannot be scanned from here.
         report(node, functionNames.get(node.text), 'function-escape');
       } else if (!isCallee && !isPropertyName && !isDeclarationName && !isTypePosition && !insideAliasValue(node)) {
-        report(node, functionNames.get(node.text), 'function-escape');
+        report(node, functionNames.get(node.text), 'function-escape', node.parent);
       }
     } else if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)
       && namespaceNames.has(node.expression.text) && CHILD_PROCESS_FUNCTIONS.has(node.name.text)) {
       const isCallee = ts.isCallExpression(node.parent) && node.parent.expression === node;
-      if (!isCallee) report(node, node.name.text, 'function-escape');
+      if (!isCallee) report(node, node.name.text, 'function-escape', node.parent);
     }
     ts.forEachChild(node, visit);
   };
@@ -306,7 +308,9 @@ function listSourceFiles(dir, out = []) {
  *
  * `exceptions` are per call site — `{ file, fn, snippet, reason }`; a finding
  * is covered when file and function match and the call text contains `snippet`.
- * An exception that covers nothing any more is returned in `staleExceptions`:
+ * One exception covers one call site, so a justification is written for each
+ * place it excuses and cannot be stretched over a second one by accident. An
+ * exception that covers nothing any more is returned in `staleExceptions`:
  * the caller must fail on it, so a justification cannot outlive its call site.
  *
  * @param {string} root
@@ -325,7 +329,8 @@ export function scanTree(root, options = {}) {
     callSites += scanned.callSites;
     if (scanned.callSites > 0 || scanned.findings.length > 0) files.push(relative);
     for (const finding of scanned.findings) {
-      const index = exceptions.findIndex((exception) => exception.file === finding.file
+      const index = exceptions.findIndex((exception, position) => !covered.has(position)
+        && exception.file === finding.file
         && exception.fn === finding.fn && finding.call.includes(exception.snippet));
       if (index === -1) {
         findings.push(finding);

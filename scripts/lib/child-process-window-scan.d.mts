@@ -21,11 +21,11 @@ export interface Finding {
   readonly fn: string;
   readonly verdict: Verdict;
   readonly detail: string;
-  /** The call as written, whitespace-normalised and truncated. */
+  /** The call as written, whitespace-normalised and truncated; for a function escaping as a value, the expression it escapes into. */
   readonly call: string;
 }
 
-/** A call site a package justifies. Must name a call that still exists. */
+/** A call site a package justifies. Must name a call that still exists; one entry covers one call site. */
 export interface Exception {
   readonly file: string;
   readonly fn: string;
