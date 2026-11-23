@@ -551,6 +551,18 @@
       ],
       "whyNotInternal": "The console opens trajectory.db directly for read-only counts and pain lookups; it cannot reach the core-internal storage-paths module by relative import.",
       "alternativeConsidered": "Importing it from ./trajectory-store, rejected because that entry is the trajectory API surface, not the workspace path contract."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "piTaskBelongsToCandidates",
+      "kind": "value",
+      "addedIn": "PRI-1284",
+      "expiresAt": "2027-05-23",
+      "consumers": [
+        "packages/pd-cli/src/commands/runtime-internalization-run-once.ts"
+      ],
+      "whyNotInternal": "run-once in pd-cli builds its --only-candidates skipCandidate on this membership predicate; a private copy in pd-cli would drift from the correlationId/taskId matching rules the orchestrator tests pin.",
+      "alternativeConsidered": "Duplicating the match inside pd-cli was rejected: the membership rule (correlationId OR embedded taskId) is defined where the seeding semantics live; a copy silently diverges."
     }
   ],
   "removals": [

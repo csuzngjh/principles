@@ -27,7 +27,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..', '..');
 
 const argv = process.argv.slice(2);
-const USAGE = 'usage: node ab-grid.mjs --config <experiment-config.json> --run-id <id> [--parallel 1..8] [--arms <armA>,<armB>] [--simulate-failure <index>]';
+const USAGE = 'usage: node ab-grid.mjs --config <experiment-config.json> --run-id <id> [--parallel 1..8] [--arms <armA>,<armB>] [--simulate-failure <index>] [--reps N] [--formation-depth N]';
 // PRI-1254 r2 (review 0001 / P1-04): keep the config OBJECT (validated, for
 // this parent process) strictly apart from the config FILE PATH (the
 // normalized string every shard child receives via --config). The previous
@@ -41,8 +41,21 @@ const runId = getOpt('--run-id', null);
 const parallel = Number(getOpt('--parallel', 6));
 const armsOpt = getOpt('--arms', null);
 const simulateFailureIndex = getOpt('--simulate-failure', null);
+const repsOpt = getOpt('--reps', null);
+const formationDepthOpt = getOpt('--formation-depth', null);
 if (!runId) throw new Error('--run-id required');
 if (!Number.isInteger(parallel) || parallel < 1 || parallel > 8) throw new Error('--parallel must be 1..8');
+// Budget flags are forwarded verbatim to every shard child (PRI-1284 —
+// the shard launcher used to drop them, so lab:run silently reverted to
+// dataset reps and unbounded formation depth). Validate them HERE, before
+// any side effect, with the same positive-integer contract ab-run enforces.
+const positiveIntOpt = (flag, raw) => {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${flag} must be a positive integer — got ${JSON.stringify(raw)}`);
+  return n;
+};
+const reps = repsOpt === null ? null : positiveIntOpt('--reps', repsOpt);
+const formationDepth = formationDepthOpt === null ? null : positiveIntOpt('--formation-depth', formationDepthOpt);
 
 // Arms: config pair by default; --arms must be exactly that pair (any order).
 const configuredArms = configArms();
@@ -98,6 +111,10 @@ const children = shards.map((shard, i) => new Promise((resolve) => {
     '--shard-id', String(i),
     '--arms', arms.join(','),
   ];
+  // Forward the budget flags verbatim: without this the shard silently ran
+  // with dataset repeatRunPicks and unbounded formation depth (PRI-1284).
+  if (reps !== null) childArgs.push('--reps', String(reps));
+  if (formationDepth !== null) childArgs.push('--formation-depth', String(formationDepth));
   if (simulateFailureIndex !== null && Number(simulateFailureIndex) === i) {
     // Deliberate failure hook (Gate 0): exit non-zero without side effects.
     resolve({ index: i, code: 42, simulated: true });

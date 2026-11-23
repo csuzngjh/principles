@@ -21,7 +21,7 @@
  *   legacy compat      — legacy batches keep reading old-format manifests
  *                        under the legacy rules (NOT_APPLICABLE_LEGACY).
  */
-import { describe, expect, it, beforeAll } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -925,5 +925,44 @@ describe('legacy compatibility — old-format manifests stay readable under lega
       expect(res.stderr.split('\n').filter((l) => l.trim().startsWith('- [')).length).toBeGreaterThanOrEqual(3);
       expect(res.stderr).not.toMatch(/at Object\.|at process\./);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRI-1284 — budget flags forwarded through ab-grid to shard children
+// ---------------------------------------------------------------------------
+
+describe('PRI-1284 — ab-grid forwards --reps to shard children (lab:run budget contract)', () => {
+  // Mark one CLI-reaching sample as a repeat pick; the stub world then proves
+  // the flag crossed the grid→child boundary: --reps 1 yields no rep1/rep2
+  // records, the same dataset WITHOUT the flag yields both (pre-fix the flag
+  // never reached the children, so the two runs were indistinguishable).
+  const REP_SAMPLE = 'S05'; // openclaw + session — reaches the stub CLI
+  const repsDataset = { ...DATASET, repeatRunPicks: [REP_SAMPLE] };
+
+  function writeRepsDataset() {
+    fs.writeFileSync(datasetFile, JSON.stringify(repsDataset, null, 2), 'utf8');
+    return writeConfig(); // recompute the dataset digest over the new file
+  }
+  const recordNames = (runId) => fs.readdirSync(path.join(experimentRoot, 'runs', runId, 'records'));
+
+  afterAll(() => { fs.writeFileSync(datasetFile, JSON.stringify(DATASET, null, 2), 'utf8'); writeConfig(); });
+
+  it('grid run WITH --reps 1 produces only rep-0 records for a repeat pick', () => {
+    const cfg = writeRepsDataset();
+    const res = runRepoScript(ENTRY_AB_GRID, ['--config', cfg, '--run-id', 'r2-reps-fwd', '--parallel', '1', '--reps', '1']);
+    expect(res.status, `stderr=${res.stderr.slice(0, 400)}`).toBe(0);
+    const names = recordNames('r2-reps-fwd').filter((f) => f.startsWith(`${REP_SAMPLE}.`));
+    expect(names.length).toBeGreaterThanOrEqual(1);
+    expect(names.every((f) => !f.includes('.rep'))).toBe(true);
+  });
+
+  it('grid run WITHOUT --reps runs the dataset repeats (rep1/rep2 records appear)', () => {
+    const cfg = writeRepsDataset();
+    const res = runRepoScript(ENTRY_AB_GRID, ['--config', cfg, '--run-id', 'r2-reps-default', '--parallel', '1']);
+    expect(res.status, `stderr=${res.stderr.slice(0, 400)}`).toBe(0);
+    const names = recordNames('r2-reps-default').filter((f) => f.startsWith(`${REP_SAMPLE}.`));
+    expect(names.some((f) => f.endsWith('.rep1.json'))).toBe(true);
+    expect(names.some((f) => f.endsWith('.rep2.json'))).toBe(true);
   });
 });

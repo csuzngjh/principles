@@ -46,6 +46,14 @@ const Database = require('better-sqlite3');
 
 const USAGE = 'usage: node ab-run.mjs --config <experiment-config.json> --run-id <id> [--samples S1,S2] [--arms <armA>,<armB>] [--shard-id <id>] [--max-formation-loops N] [--reps N] [--formation-depth N]';
 
+function parsePositiveIntFlag(flag, raw) {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`${flag} must be a positive integer — got ${JSON.stringify(raw)} (a non-numeric value would silently produce NaN budgets, e.g. zero reps or a dead depth comparison)`);
+  }
+  return n;
+}
+
 function parseArgs(argv) {
   const out = { samples: null, arms: null, shardId: 'solo', maxFormationLoops: 24, reps: null, formationDepth: null };
   for (let i = 2; i < argv.length; i++) {
@@ -54,9 +62,9 @@ function parseArgs(argv) {
     else if (a === '--samples') out.samples = argv[++i].split(',');
     else if (a === '--arms') out.arms = argv[++i].split(',');
     else if (a === '--shard-id') out.shardId = argv[++i];
-    else if (a === '--max-formation-loops') out.maxFormationLoops = Number(argv[++i]);
-    else if (a === '--reps') out.reps = Number(argv[++i]);
-    else if (a === '--formation-depth') out.formationDepth = Number(argv[++i]);
+    else if (a === '--max-formation-loops') out.maxFormationLoops = parsePositiveIntFlag('--max-formation-loops', argv[++i]);
+    else if (a === '--reps') out.reps = parsePositiveIntFlag('--reps', argv[++i]);
+    else if (a === '--formation-depth') out.formationDepth = parsePositiveIntFlag('--formation-depth', argv[++i]);
     else if (a !== '--config' && !(i > 0 && argv[i - 1] === '--config')) throw new Error(`unknown arg: ${a}`);
   }
   if (!out.runId) throw new Error('--run-id is required');
