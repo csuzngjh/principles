@@ -4,6 +4,19 @@
   "admissions": [
     {
       "entry": "./runtime",
+      "symbol": "validateRecommendationKind",
+      "kind": "value",
+      "addedIn": "PRI-1291",
+      "expiresAt": "2027-11-24",
+      "consumers": [
+        "packages/pd-cli/src/commands/diagnose.ts",
+        "packages/pd-cli/src/commands/candidate.ts"
+      ],
+      "whyNotInternal": "The D4 seed gates in pd-cli must validate the RAW persisted recommendation_kind through the same fail-closed authority the intake write boundary uses; isPrincipleLedgerEligibleKind only answers the principle question and cannot distinguish legal rule/prompt kinds from invalid values.",
+      "alternativeConsidered": "Copying VALID_RECOMMENDATION_KINDS into pd-cli was rejected (two lists drift); deep-importing core internals was rejected (bypasses the package contract the surface gate freezes)."
+    },
+    {
+      "entry": "./runtime",
       "symbol": "DreamerSeedSuppression",
       "kind": "type",
       "addedIn": "PRI-1243",

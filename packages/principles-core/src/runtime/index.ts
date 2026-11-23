@@ -266,6 +266,11 @@ export type {
   ReuseEvaluationValidation,
 } from './principle-reuse/reuse-evaluation-output.js';
 export { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
+// SPEC-PD-PIPELINE-SPINE-001 D4 (v0.7): the strict fail-closed validator the
+// pd-cli seed gates need at the write boundary — `isPrincipleLedgerEligibleKind`
+// only answers the 'principle' question and cannot distinguish legal
+// rule/prompt kinds from invalid values.
+export { validateRecommendationKind } from './store/candidate/recommendation-kind-resolver.js';
 
 // Store
 export { SqliteTaskStore } from './store/task/sqlite-task-store.js';

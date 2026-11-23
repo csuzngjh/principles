@@ -209,6 +209,30 @@ export function parsePainAnchor(value: unknown): PainAnchor | undefined {
   return { type: type as PainAnchorType, ref };
 }
 
+/**
+ * SPEC-PD-PIPELINE-SPINE-001 D2: derive the canonical
+ * `established_principle` anchor from a verified `deviationAnchor` pair
+ * (`{principleId, principleVersion}`), the pre-structure legacy shape still
+ * written by the `principle_deviation` ingress path and present on
+ * historical diagnostic_json rows. The `<principleId>@<principleVersion>`
+ * composition rule mirrors pain-submit-capability's ANCHOR_ID_PATTERN (the
+ * MCP submit authority). Anything malformed yields undefined — never a
+ * fabricated anchor (rc-1/rc-2).
+ */
+export function deviationAnchorToPainAnchor(da: unknown): PainAnchor | undefined {
+  if (typeof da !== 'object' || da === null || Array.isArray(da)) return undefined;
+  const record = da as Record<string, unknown>;
+  const { principleId, principleVersion } = record;
+  if (typeof principleId !== 'string' || typeof principleVersion !== 'string') return undefined;
+  const id = principleId.trim();
+  const version = principleVersion.trim();
+  if (id.length === 0 || version.length === 0) return undefined;
+  const ref = `${id}@${version}`;
+  // same rule the MCP submit authority enforces for established_principle
+  if (!/^[^@\s]+@\d+$/u.test(ref)) return undefined;
+  return parsePainAnchor({ type: 'established_principle', ref });
+}
+
 export const DiagnosisTargetSchema = Type.Object({
   reasonSummary: Type.Optional(Type.String()),
   source: Type.Optional(Type.String()),

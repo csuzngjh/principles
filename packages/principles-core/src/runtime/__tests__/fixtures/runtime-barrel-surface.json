@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2065,
+  "count": 2066,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -2051,6 +2051,7 @@
     "validateProposedParams",
     "validateProposedPathBounds",
     "validateRecommendation",
+    "validateRecommendationKind",
     "validateRecoveryCapabilityCoverage",
     "validateRecoveryControlSurfaces",
     "validateReuseEvaluationOutput",

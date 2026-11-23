@@ -20,6 +20,7 @@ import type { EffectivePdConfig } from './config/pd-config-types.js';
 import { resolveDiagnosticianCapability } from './diagnostician-capability.js';
 import type { IntentDocReader } from './intent/intent-doc-reader-port.js';
 import type { TrajectoryTurnReader } from './store/context/trajectory-turn-reader.js';
+import type { SourceMaterialAuthorizationPort } from './source-material-authorization.js';
 import type { TelemetryEvent } from '../telemetry-event.js';
 
 export type FailureCategory =
@@ -39,7 +40,18 @@ export type FailureCategory =
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export interface PainToPrincipleServiceOptions {
+/**
+ * SPEC-PD-PIPELINE-SPINE-001 D1: the options are a discriminated union on
+ * `asyncMode`. Async mode only persists the pending task and may omit the
+ * sync-only collaborators; a synchronous (or possibly-synchronous) entry MUST
+ * inject both `trajectoryTurnReader` and `sourceMaterialAuthorization` at the
+ * type level — before D1 the sync bridge call silently fell back to
+ * `denyAllSourceMaterialAuthorization` and filtered already-authorized
+ * governance material as unauthorized. Unit-test helpers may explicitly pass
+ * `denyAllSourceMaterialAuthorization` or an empty reader; production code
+ * must never let `undefined` slip through the compile-time check.
+ */
+export interface PainToPrincipleServiceBaseOptions {
   workspaceDir: string;
   stateDir: string;
   ledgerAdapter: LedgerAdapter;
@@ -51,15 +63,11 @@ export interface PainToPrincipleServiceOptions {
   effectiveConfig?: EffectivePdConfig;
   /** PRI-306: Env var accessor for readiness checks. Defaults to process.env. */
   getEnvVar?: (name: string) => string | undefined;
-  /** PRI-369: When true, recordPain returns immediately after task creation (status='submitted').
-   *  The diagnosis runs in background via orchestrator wakeOnce/recovery-sweep. */
-  asyncMode?: boolean;
   /**
    * PRI-468: Optional INTENT.md reader for Stage A intent tension check.
    * Plugin layer supplies the concrete I/O adapter; core only consumes the port.
    */
   intentDocReader?: IntentDocReader;
-  trajectoryTurnReader?: TrajectoryTurnReader;
   /**
    * PRI-939 Option A: optional workspace-scoped telemetry sink forwarded to
    * createPainSignalBridge so short-lived CLI processes persist the allowlisted
@@ -76,6 +84,22 @@ export interface PainToPrincipleServiceOptions {
    */
   isAutoPainSubmissionAuthorized?: () => boolean;
 }
+
+export type PainToPrincipleServiceOptions =
+  | (PainToPrincipleServiceBaseOptions & {
+      /** PRI-369: recordPain returns immediately after task creation
+       * (status='submitted'); the diagnosis runs in background via
+       * orchestrator wakeOnce/recovery-sweep. */
+      readonly asyncMode: true;
+      readonly trajectoryTurnReader?: TrajectoryTurnReader;
+      readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+    })
+  | (PainToPrincipleServiceBaseOptions & {
+      /** Synchronous diagnosis: the two collaborators below are REQUIRED. */
+      readonly asyncMode?: false;
+      readonly trajectoryTurnReader: TrajectoryTurnReader;
+      readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
+    });
 
 export interface PainToPrincipleInput {
   painId: string;
@@ -283,6 +307,11 @@ export class PainToPrincipleService {
         getEnvVar: this.opts.getEnvVar,
         intentDocReader: this.opts.intentDocReader,
         trajectoryTurnReader: this.opts.trajectoryTurnReader,
+        // SPEC-PD-PIPELINE-SPINE-001 D1: forward the sync entry's
+        // authorization so authorized governance material survives the
+        // bridge's latest-consent gate instead of silently falling back to
+        // deny-all.
+        sourceMaterialAuthorization: this.opts.sourceMaterialAuthorization,
         // PRI-939 Option A: workspace-scoped persistence for allowlisted events.
         ...(this.opts.telemetrySink ? { telemetrySink: this.opts.telemetrySink } : {}),
         isAutoPainSubmissionAuthorized: this.opts.isAutoPainSubmissionAuthorized,

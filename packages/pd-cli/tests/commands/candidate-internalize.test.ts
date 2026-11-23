@@ -11,6 +11,10 @@ const { mockStateManager, MockRuntimeStateManager } = vi.hoisted(() => {
     connection: {
       getDb: vi.fn(),
     },
+    // SPEC-PD-PIPELINE-SPINE-001 D4: the authority gate reads the admission
+    // document (fail-closed on ok:false). Default = a readable document with
+    // no processing history, matching a normally-intaked candidate.
+    getAdmissionDocument: vi.fn().mockResolvedValue({ ok: true, document: null }),
   };
 
   function MockRuntimeStateManager(this: any) {
@@ -28,6 +32,20 @@ vi.mock('@principles/core/runtime', async (importOriginal) => {
     RuntimeStateManager: MockRuntimeStateManager,
     decideInternalizationRoute: vi.fn(),
     resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
+    // SPEC-PD-PIPELINE-SPINE-001 D4: these wiring tests exercise the handler,
+    // not the ledger — the gate sees a resolved derived identity, the state a
+    // normally-intaked candidate has in production.
+    PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function () {
+      return {
+        resolveCandidatePrincipleIdentity: () => ({
+          status: 'resolved',
+          candidateId: 'c1',
+          principleId: '11111111-1111-4111-8111-111111111111',
+          basis: 'derived_candidate',
+          checkedAt: '2026-11-23T00:00:00.000Z',
+        }),
+      };
+    }),
   };
 });
 

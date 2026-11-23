@@ -38,6 +38,7 @@ import {
   isFeatureEnabled,
   evaluateDreamerSeedSuppression,
   pendingOwnerDecision,
+  validateRecommendationKind,
   type DreamerSeedSuppression,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
@@ -691,7 +692,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     }
 
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string; reuseRecommendation?: { status: 'recommended' } | { status: 'unavailable'; reason: string }; admissionRefused?: boolean }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string; reuseRecommendation?: { status: 'recommended' } | { status: 'unavailable'; reason: string }; admissionRefused?: boolean; reason?: string }[] = [];
     let intakeFailed = false;
 
     if (opts.intake === false) {
@@ -856,7 +857,24 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // nextAction/exit-code signaling below (partial failure still exits non-zero).
     if (opts.intake !== false) {
       for (const candidate of candidates) {
-        const kind = candidate.recommendationKind;
+        // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.6): validate the RAW persisted
+        // kind BEFORE anything else. `recommendationKind` is the fail-open
+        // read view (invalid values fold to 'principle'), which is how a
+        // candidate Intake already refused for `candidate_kind_invalid`
+        // could still be seeded here. Invalid/missing raw kind → an
+        // ADDITIONAL structured refusal record; the existing 'consumed' +
+        // ledgerWriteRefused record is preserved untouched.
+        const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
+        if (rawKind === null) {
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'refused',
+            reason: 'candidate_kind_invalid',
+            nextAction: 'No task was created. The persisted recommendation_kind is not a valid kind; re-run the diagnosis or repair the candidate row before internalizing.',
+          });
+          continue;
+        }
+        const kind = rawKind;
         if (kind === 'defer' || kind === 'implementation') continue;
         const intakeResult = intakeResults.find((r) => r.candidateId === candidate.candidateId);
         if (!intakeResult || intakeResult.status !== 'consumed') continue;
@@ -876,7 +894,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           const admissionDoc = await stateManager.getAdmissionDocument(candidate.candidateId);
           const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
           suppression = evaluateDreamerSeedSuppression({
-            identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidate.candidateId, kind ?? 'principle'),
+            identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidate.candidateId, candidate.rawRecommendationKind),
             processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
             ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
           });
@@ -963,6 +981,15 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       // manual review) recorded on the intake result instead.
       const admissionRefusedResults = intakeResults.filter((r) => r.admissionRefused === true);
       const admissionRefusedIds = admissionRefusedResults.map((r) => r.candidateId);
+      // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.8): seed-REFUSED candidates (invalid
+      // raw kind) must not appear in internalizableCandidateIds or receive a
+      // `pd candidate internalize` instruction on any output path.
+      const seedRefusedIds = intakeResults
+        .filter((r) => r.status === 'refused')
+        .map((r) => r.candidateId);
+      const seedRefusedNote = seedRefusedIds.length > 0
+        ? ` ${seedRefusedIds.length} candidate(s) were REFUSED at Dreamer seeding (candidate_kind_invalid — the persisted recommendation_kind is not a valid kind; no task was created).`
+        : '';
       const reviewRequiredNote = reviewRequiredIds.length > 0
         ? ` ${reviewRequiredIds.length} candidate(s) parked for reuse review (suspected duplicates) — decide before internalizing: pd candidate review --candidate-id <id> --decide reuse|create`
         : '';
@@ -973,17 +1000,19 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         ? ` ${admissionRefusedResults.length} candidate(s) were REFUSED by the admission gate (e.g. confidence below threshold or insufficient evidence) — do NOT internalize them; supplement evidence or use manual review: ${[...new Set(admissionRefusedResults.map((r) => r.nextAction ?? 'provide additional evidence or request manual review'))].join(' / ')}`
         : '';
       const internalizableCandidateIds = candidateIds
-        .filter((id) => !reviewRequiredIds.includes(id) && !seedSuppressedIds.includes(id) && !admissionRefusedIds.includes(id));
+        .filter((id) => !reviewRequiredIds.includes(id) && !seedSuppressedIds.includes(id) && !admissionRefusedIds.includes(id) && !seedRefusedIds.includes(id));
       const internalizeNextAction = dreamerSeededCount > 0
-        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}${reviewRequiredNote}${suppressedNote}${admissionRefusedNote}`
+        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}${reviewRequiredNote}${suppressedNote}${admissionRefusedNote}${seedRefusedNote}`
         : internalizableCandidateIds.length > 0
-          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}${suppressedNote}${admissionRefusedNote}`
+          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}${suppressedNote}${admissionRefusedNote}${seedRefusedNote}`
           : reviewRequiredIds.length > 0
             ? `All candidates are parked for reuse review (suspected duplicates). To decide each, run:\n  ${reviewRequiredIds.map((id) => `pd candidate review --candidate-id ${id} --decide reuse|create`).join('\n  ')}`
             : admissionRefusedIds.length > 0 && admissionRefusedIds.length === candidateIds.length
               ? `All candidates were refused by the admission gate — internalization is correctly blocked. Per candidate: ${[...new Set(admissionRefusedResults.map((r) => r.nextAction ?? 'provide additional evidence or request manual review'))].join(' / ')}`
               : seedSuppressedIds.length > 0
                 ? `All candidates are durably resolved (Dreamer seeds suppressed by design — no independent chain).${suppressedNote}`
+              : seedRefusedIds.length > 0 && seedRefusedIds.length === candidateIds.length
+                ? `All candidates were REFUSED at Dreamer seeding (candidate_kind_invalid): the persisted recommendation_kind values are not valid kinds, so no task was created. Repair the candidate rows or re-run the diagnosis.`
                 : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
@@ -1076,6 +1105,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           // visible with its review guidance, never silently absent.
           console.log(`    ${ir.candidateId}: REUSE REVIEW REQUIRED${ir.reusedPrincipleId ? ` — suspected duplicate of existing Principle ${ir.reusedPrincipleId}` : ' — suspected duplicate'}`);
           console.log(`      Next action: ${ir.nextAction}`);
+        } else if (ir.status === 'refused') {
+          // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.9): the seed refusal must be
+          // visible in TTY output with its structured reason — never folded
+          // into the consumed line above.
+          console.log(`    ${ir.candidateId}: DREAMER SEED REFUSED — ${ir.reason}`);
+          if (ir.nextAction) console.log(`      Next action: ${ir.nextAction}`);
         } else if (ir.status === 'dreamer_seed_suppressed') {
           // Phase 7.2 B2.5 (CodeRabbit): the suppression must be visible in
           // TTY output too — with the reason and the resolved target.
@@ -1104,7 +1139,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           console.log(`    pd candidate review --candidate-id ${ir.candidateId} --decide reuse|create`);
         }
       }
-      const internalizable = candidates.filter((c) => !parkedResults.some((ir) => ir.candidateId === c.candidateId));
+      // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.8): refused candidates must not be
+      // offered `pd candidate internalize` on the TTY path either.
+      const seedRefusedIdSet = new Set(intakeResults.filter((ir) => ir.status === 'refused').map((ir) => ir.candidateId));
+      const internalizable = candidates.filter((c) => !parkedResults.some((ir) => ir.candidateId === c.candidateId) && !seedRefusedIdSet.has(c.candidateId));
       if (internalizable.length > 0) {
         console.log(`\n  Next Action:`);
         console.log(`  Candidates generated but internalization has NOT started automatically.`);

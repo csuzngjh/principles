@@ -30,6 +30,7 @@ import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_M
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
 import { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
+import { validateRecommendationKind } from './store/candidate/recommendation-kind-resolver.js';
 import {
   parsePainIngressV1Payload,
   checkIngressTopLevelConsistency,
@@ -42,6 +43,7 @@ import type { PainIngressV1Payload, PainDeviationAnchor } from './pain-ingress-p
 import type { PainRecoveryDisposition } from './pain-admission-disposition.js';
 import { sanitizeStringUnbounded } from './evidence-sanitizer.js';
 import type { PainAnchor, PainCorrectionEvidence } from './context-payload.js';
+import { deviationAnchorToPainAnchor } from './context-payload.js';
 
 export type { PainProvenance };
 
@@ -482,7 +484,17 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     provenanceReason: provenanceReason(provenance),
     ...(data.hostKind ? { hostKind: data.hostKind } : {}),
     ...(data.deviationAnchor ? { deviationAnchor: data.deviationAnchor } : {}),
-    ...(data.anchor ? { anchor: data.anchor } : {}),
+    // D2 single-track: the structured anchor wins; when it is absent but a
+    // verified deviation pair is present (historical/non-MCP entries), derive
+    // the canonical anchor from that pair instead of losing it downstream.
+    ...(data.anchor
+      ? { anchor: data.anchor }
+      : (data.deviationAnchor !== undefined
+          ? (() => {
+              const derived = deviationAnchorToPainAnchor(data.deviationAnchor);
+              return derived !== undefined ? { anchor: derived } : {};
+            })()
+          : {})),
     evidence: data.evidence ?? [],
     workspaceDir: workspaceDir ?? null,
     // PRI-844: the Owner's verbatim correction rides as its own top-level
@@ -1744,6 +1756,27 @@ export class PainSignalBridge {
           continue;
         }
 
+        // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.6): the seed gate validates the
+        // RAW persisted kind first. `recommendationKind` is the fail-open
+        // read view (an invalid persisted value folds to 'principle'), which
+        // is exactly how a candidate Intake already refused for
+        // `candidate_kind_invalid` could still be seeded here. Invalid or
+        // missing raw kind → ZERO seeding + a structured telemetry event.
+        const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
+        if (rawKind === null) {
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'candidate_seed_refused',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: {
+              candidateId: candidate.candidateId,
+              reason: 'candidate_kind_invalid',
+              rawRecommendationKind: typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+            },
+          });
+          continue;
+        }
+
         // Phase 7.2 B2.5 — Dreamer seed suppression. A candidate already
         // resolved onto an existing principle (Owner reuse decision, INV-R07
         // replay, or the B1 exact-duplicate guard — all durable via the
@@ -1763,7 +1796,9 @@ export class PainSignalBridge {
               identity: resolveIdentity.call(
                 this.ledgerAdapter,
                 candidate.candidateId,
-                candidate.recommendationKind ?? 'principle',
+                // D4: the RAW persisted kind — the normalized view folds invalid
+                // values to 'principle' and bypasses candidate_kind_invalid.
+                candidate.rawRecommendationKind,
               ),
               processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
               ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
@@ -1789,7 +1824,8 @@ export class PainSignalBridge {
         // concurrent writer won the insert (CodeRabbit PR #2684 #9 follow-up).
         let seedTaskIdForAdoption: string | null = null;
         try {
-          const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
+          // D4: route on the validated RAW kind — never the fail-open view.
+          const route = CANDIDATE_KIND_TO_ROUTE[rawKind];
           if (route) {
             // PRI-539: `ready` reflects only whether the route maps to a channel.
             // Let computeBridgeDecision() itself decide MVP-disabled so the
