@@ -43,6 +43,23 @@ import { SystemLogger } from '../core/system-logger.js';
 import { describeExperimentWorkspaceViolation } from '../core/experiment-workspace-guard.js';
 import { readOpenClawWorkspaceOwnership } from '../openclaw-worker.js';
 import { writeGatewayQuiesceAck, type GatewayQuiesceAck } from './gateway-quiesce-ack.js';
+import {
+  gatewayConsumerLeaseToken,
+  writeGatewayConsumerLease,
+  clearGatewayConsumerLease,
+  foreignConsumerLeaseStatus,
+} from './gateway-consumer-lease.js';
+
+/**
+ * PRI-1282 P1-3: identity of THIS process's consumer instance. The lease
+ * (<workspace>/.pd/gateway-consumer-lease.json) is the workspace-scoped
+ * liveness record that makes "a foreign Gateway consumer is alive"
+ * decidable across a Gateway restart — a fresh process that sees a blocking
+ * marker may only ack "quiesced" when no live foreign lease exists, and a
+ * parked consumer may only resume when no live foreign lease exists. PID
+ * liveness is the sole authority; anything unverifiable fails closed.
+ */
+const consumerLeaseToken = gatewayConsumerLeaseToken();
 
 // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: the interval is no longer
 // a fixed constant. The FIRST cycle keeps its original delay; every later delay
@@ -306,6 +323,14 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
       return;
     }
 
+    // Claim the workspace consumer lease — the liveness record that lets a
+    // blocked sibling process and the resume path arbitrate "is a foreign
+    // consumer alive" by PID, not by assumption (PRI-1282 P1-3).
+    const leaseWrite = writeGatewayConsumerLease({ workspaceDir, token: consumerLeaseToken, state: 'consuming' });
+    if (!leaseWrite.ok) {
+      logger.warn(`[PD:AutoConsumer] Consumer lease write failed for ${workspaceDir}: ${leaseWrite.reason}`);
+    }
+
     state.stopped = false;
     state.quiescing = false;
     state.consecutiveEmptyCycles = 0;
@@ -354,6 +379,9 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
         void quiesceAndWatch(workspaceDir, state, tickOwnership, logger, 'timer_tick');
         return;
       }
+      // Renew the consumer lease at each cycle start so a blocked sibling
+      // observes OUR live PID for the whole consuming window.
+      writeGatewayConsumerLease({ workspaceDir, token: consumerLeaseToken, state: 'consuming' });
       const startedAtMs = Date.now();
       const outcomeHolder: { current: InternalizationConsumerCycleOutcome | undefined } = { current: undefined };
       const cycle: Promise<void> = (async () => {
@@ -472,11 +500,15 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
         state.timeoutId = null;
       }
       workspaceStates.delete(workspaceDir);
+      // Release OUR consumer lease (token-gated — a successor instance's
+      // lease is never deleted). PID-liveness readers then see 'none'.
+      clearGatewayConsumerLease(workspaceDir, consumerLeaseToken);
     } else {
-      for (const [, state] of workspaceStates) {
+      for (const [dir, state] of workspaceStates) {
         state.stopped = true;
         if (state.timeoutId) clearTimeout(state.timeoutId);
         state.timeoutId = null;
+        clearGatewayConsumerLease(dir, consumerLeaseToken);
       }
       workspaceStates.clear();
     }
@@ -531,16 +563,35 @@ async function quiesceAndWatch(
     }
   }
   if (ownership.state !== 'manifest_unreadable') {
-    writeGatewayQuiesceAck({
-      workspaceDir,
-      state: ownership.state,
-      operationId: ownership.operationId,
-      generation: ownership.generation,
-      inFlightCycles,
-      outcome,
-      startedVia,
-    });
-    state.ackedOperation = { state: ownership.state, operationId: ownership.operationId, generation: ownership.generation };
+    // PRI-1282 P1-3: 'quiesced' means "the workspace's consumer stopped" —
+    // this process's empty in-flight only proves THIS process stopped. A
+    // live foreign consumer lease (a sibling Gateway still holding the
+    // workspace) makes that claim dishonest: do not ack; keep watching and
+    // let the real holder's ack (or the handover's timeout) arbitrate.
+    // Anything unverifiable fails closed the same way.
+    const foreign = foreignConsumerLeaseStatus(workspaceDir);
+    const mayClaimQuiesced = outcome !== 'quiesced' || foreign === 'none';
+    if (outcome === 'quiesced' && foreign !== 'none') {
+      logger.warn(`[PD:AutoConsumer] Foreign consumer lease status=${foreign} for ${workspaceDir}; refusing to ack 'quiesced' — only the lease holder may claim the workspace quiesced.`);
+    }
+    if (mayClaimQuiesced) {
+      const written = writeGatewayQuiesceAck({
+        workspaceDir,
+        state: ownership.state,
+        operationId: ownership.operationId,
+        generation: ownership.generation,
+        inFlightCycles,
+        outcome,
+        startedVia,
+      });
+      // PRI-1282 P2-2: only suppress re-acks when the write actually landed;
+      // a failed write must be retried on the next watch tick.
+      if (written.ok) {
+        state.ackedOperation = { state: ownership.state, operationId: ownership.operationId, generation: ownership.generation };
+      } else {
+        logger.error(`[PD:AutoConsumer] Quiesce ACK write failed for ${workspaceDir}: ${written.reason}; the handover will fail closed on timeout.`);
+      }
+    }
   }
   armOwnershipWatch(workspaceDir, state, logger);
 }
@@ -566,6 +617,14 @@ async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerStat
   if (state.stopped) return;
   const ownership = evaluateOwnershipForConsumption(workspaceDir);
   if (!ownership.blocked) {
+    // PRI-1282 P1-3: before resuming, arbitrate against a foreign live
+    // consumer lease — a sibling Gateway instance must not double-resume.
+    const foreign = foreignConsumerLeaseStatus(workspaceDir);
+    if (foreign !== 'none') {
+      logger.warn(`[PD:AutoConsumer] Ownership returned to legacy_owned but foreign consumer lease status=${foreign} for ${workspaceDir}; staying parked (fail-closed against double consumption).`);
+      armOwnershipWatch(workspaceDir, state, logger);
+      return;
+    }
     state.quiescing = false;
     state.ackedOperation = null;
     SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RESUMED', JSON.stringify({
@@ -595,16 +654,22 @@ async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerStat
       || state.ackedOperation.operationId !== ownership.operationId
       || state.ackedOperation.generation !== ownership.generation;
     if (changed) {
-      writeGatewayQuiesceAck({
-        workspaceDir,
-        state: ownership.state,
-        operationId: ownership.operationId,
-        generation: ownership.generation,
-        inFlightCycles: state.inFlight !== null ? 1 : 0,
-        outcome: 'quiesced',
-        startedVia: 'timer_tick',
-      });
-      state.ackedOperation = { state: ownership.state, operationId: ownership.operationId, generation: ownership.generation };
+      // Same foreign-lease honesty gate as quiesceAndWatch (PRI-1282 P1-3).
+      const foreign = foreignConsumerLeaseStatus(workspaceDir);
+      if (foreign === 'none') {
+        const written = writeGatewayQuiesceAck({
+          workspaceDir,
+          state: ownership.state,
+          operationId: ownership.operationId,
+          generation: ownership.generation,
+          inFlightCycles: state.inFlight !== null ? 1 : 0,
+          outcome: 'quiesced',
+          startedVia: 'timer_tick',
+        });
+        if (written.ok) {
+          state.ackedOperation = { state: ownership.state, operationId: ownership.operationId, generation: ownership.generation };
+        }
+      }
     }
   }
   armOwnershipWatch(workspaceDir, state, logger);

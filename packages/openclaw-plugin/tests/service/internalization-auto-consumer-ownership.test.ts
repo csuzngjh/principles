@@ -261,3 +261,39 @@ describe('stop semantics are unchanged for other workspaces', () => {
     }
   });
 });
+
+describe('consumer lease arbitration (PRI-1282 P1-3)', () => {
+  // A lease written by ANOTHER (live) pid — simulated with the test runner's
+  // parent process so PID liveness stays real (no probe mocks).
+  function foreignLeaseFile(): void {
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'gateway-consumer-lease.json'), JSON.stringify({
+      schemaVersion: 'pd.gateway-consumer-lease.v1',
+      token: 'foreign-token', pid: process.ppid ?? 1, host: os.hostname(),
+      workspaceDir, state: 'consuming',
+      startedAt: '2026-11-23T00:00:00.000Z', updatedAt: '2026-11-23T00:00:00.000Z',
+    }), 'utf8');
+  }
+
+  it('a live FOREIGN consumer lease suppresses the quiesced ack — this process stopping proves nothing about the OTHER consumer', async () => {
+    ownership(preparingRecord('op-foreign-1', 3));
+    foreignLeaseFile();
+    startService();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(systemLogEvents()).toContain('INTERNALIZATION_CONSUMER_OWNERSHIP_BLOCKED');
+    expect(readGatewayQuiesceAck(workspaceDir)).toBeNull();
+    expect(runInternalizationConsumerCycle).not.toHaveBeenCalled();
+  });
+
+  it('a live FOREIGN consumer lease keeps the parked consumer parked when ownership returns to legacy_owned', async () => {
+    ownership(preparingRecord('op-foreign-2', 3));
+    startService();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readGatewayQuiesceAck(workspaceDir)).not.toBeNull();
+    // A sibling Gateway now holds the workspace; rollback completed meanwhile.
+    foreignLeaseFile();
+    ownership(LEGACY);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(systemLogEvents()).not.toContain('INTERNALIZATION_CONSUMER_RESUMED');
+    expect(runInternalizationConsumerCycle).not.toHaveBeenCalled();
+  });
+});

@@ -139,7 +139,7 @@ export async function handleOpenClawWorker(options: OpenClawWorkerOptions): Prom
   const workerModule = await import('principles-disciple/openclaw-worker');
 
   if (options.readiness === true) {
-    const readiness: OpenClawWorkerReadinessResultShape = workerModule.computeOpenClawWorkerReadiness(workspace);
+    const readiness: OpenClawWorkerReadinessResultShape = await workerModule.computeOpenClawWorkerReadiness(workspace);
     if (options.json === true) {
       console.log(JSON.stringify(readiness));
     } else {

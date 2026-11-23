@@ -19,6 +19,12 @@ export interface HandoverBindingResult {
   readonly openclawClaimed: boolean;
   /** Cross-host conflict owner(s); `null` when unambiguous. */
   readonly foreignOwner: string | null;
+  /**
+   * PRI-1282 review (P1-4): a binding file that could not be read or parsed
+   * is NOT "no claim" — it means foreign ownership cannot be proven either
+   * way, and the handover must fail closed. Lists the offending files.
+   */
+  readonly bindingUnverifiable: string | null;
 }
 
 export function collectHostWorkspaceClaimsFor(
@@ -27,7 +33,7 @@ export function collectHostWorkspaceClaimsFor(
   env?: Readonly<Record<string, string | undefined>>,
 ): HandoverBindingResult {
   const identity = resolveCoordinatorInstallIdentity(env ?? process.env, { trustedHomeDir: homeDir });
-  if (!identity.ok) return { openclawClaimed: false, foreignOwner: 'install_identity_unresolved' };
+  if (!identity.ok) return { openclawClaimed: false, foreignOwner: 'install_identity_unresolved', bindingUnverifiable: null };
   const diagnostics: BindingReadDiagnostic[] = [];
   const options = claimOptionsFor(identity.identity, diagnostics);
   const claims = collectHostWorkspaceClaims(options);
@@ -50,5 +56,11 @@ export function collectHostWorkspaceClaimsFor(
   const openclawClaimed = claims.some((claim) => claim.host === 'openclaw' && samePath(claim.workspaceDir));
   const foreign = findForeignWorkspaceOwner('openclaw', canonical, options);
   const foreignOwner = foreign.owners.length > 0 ? foreign.owners.join('+') : null;
-  return { openclawClaimed, foreignOwner };
+  // PRI-1282 review (P1-4): an unreadable/malformed binding file was skipped
+  // during claim collection — treat "cannot verify foreign ownership" as a
+  // blocking fact, not as silence. The caller fails closed on this.
+  const bindingUnverifiable = diagnostics.length > 0
+    ? diagnostics.map((d) => `${d.file}(${d.status})`).join(', ')
+    : null;
+  return { openclawClaimed, foreignOwner, bindingUnverifiable };
 }

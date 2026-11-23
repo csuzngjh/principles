@@ -68,6 +68,15 @@ export interface CasLockAcquireOptions {
   now?: () => Date;
   /** Test seam: real fs by default. */
   fsOps?: CasFsOps;
+  /**
+   * Holder-liveness probe for the PID recorded in a stale lock's owner
+   * metadata. Default: `process.kill(pid, 0)` semantics
+   * (alive / ESRCH→dead / EPERM→alive / anything else→unknown). Tests
+   * inject fakes; an inconclusive answer MUST be 'unknown' (fail-closed).
+   */
+  probes?: {
+    readonly processAlive?: (pid: number) => 'alive' | 'dead' | 'unknown';
+  };
 }
 
 export interface CasLockHandle {
@@ -119,6 +128,24 @@ function toError(error: unknown): Error {
 /** Type-guard narrowing for untrusted JSON values (rc-2: never an `as`). */
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Default holder-liveness probe: signal-0 semantics, the same contract the
+ * service-run-lock uses — 'alive' includes EPERM-observable processes
+ * (exists, we just can't signal it); 'unknown' means the platform could not
+ * produce a reliable verdict and reclaim MUST fail closed on it.
+ */
+function defaultProcessAlive(pid: number): 'alive' | 'dead' | 'unknown' {
+  try {
+    process.kill(pid, 0);
+    return 'alive';
+  } catch (error) {
+    const code = errnoOf(error);
+    if (code === 'ESRCH') return 'dead';
+    if (code === 'EPERM') return 'alive';
+    return 'unknown';
+  }
 }
 
 function busyWaitMs(ms: number): void {
@@ -223,15 +250,18 @@ function ownerFileName(): string {
  * Acquire the per-manifest CAS critical section. Fails loud (never
  * auto-overwrites a live lock); a lock whose owner metadata is unreadable
  * after a bounded retry is `lock_invalid` — fail-closed for a human, because
- * an unattributable lock may be mid-write. A lock older than the stale TTL is
- * provably abandoned (the critical section is millisecond-scale) and is
- * reclaimed via rename-quarantine + token re-verification so a fresh holder
- * acquired between read and delete can never be deleted.
+ * an unattributable lock may be mid-write. A lock is reclaimed ONLY when its
+ * recorded holder PID is provably dead on this host (PRI-1282 review: file
+ * age alone never proves abandonment — a stalled-but-live holder would
+ * resume and delete the replacement lock it believed it still held).
+ * Reclaim is rename-quarantine + token re-verification + restore-on-mismatch
+ * so a lock that changed hands mid-reclaim is put back, never destroyed.
  */
 export function acquireBackgroundExecutionCasLock(options: CasLockAcquireOptions): CasLockAcquireResult {
   const fsOps = options.fsOps ?? realFsOps;
   const now = options.now ?? (() => new Date());
   const staleMs = options.staleMs ?? DEFAULT_CAS_LOCK_STALE_MS;
+  const processAlive = options.probes?.processAlive ?? defaultProcessAlive;
   const lockDir = `${options.manifestPath}.cas.lock`;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -261,19 +291,31 @@ export function acquireBackgroundExecutionCasLock(options: CasLockAcquireOptions
           lockDir,
           owner,
           release: () => {
-            // Token check: never delete a lock this handle no longer owns.
-            const current = fsOps.readJson(path.join(lockDir, ownerFileName()));
-            if (current.ok) {
-              const parsed = parseLockOwner(current.value);
-              if (parsed !== null && parsed.token === owner.token) {
-                fsOps.removeDir(lockDir);
-                return;
-              }
+            // Move-then-verify release: the directory at lockDir is renamed
+            // aside atomically and only deleted when its owner.json still
+            // carries OUR token. A read-then-delete-by-path is NOT used —
+            // between the token check and the delete a stale reclaimer could
+            // have quarantined this lock and a fresh holder could have taken
+            // the path, letting us delete a lock we no longer own (PRI-1282
+            // review). A foreign lock moved aside is restored, never deleted.
+            const aside = `${lockDir}.release-${owner.token}`;
+            const moved = fsOps.rename(lockDir, aside);
+            if (!moved.ok) {
+              // Already gone — the stale-reclaimer quarantined it or a crash
+              // cleanup removed it; nothing to do.
+              return;
             }
-            // Missing owner file + our directory: the stale-reclaimer may have
-            // quarantined it already; nothing to do. A DIFFERENT token in the
-            // same path means the lock was reclaimed after TTL — also nothing
-            // to do (we lost the right to clean it up by expiring).
+            const current = fsOps.readJson(path.join(aside, ownerFileName()));
+            const parsed = current.ok ? parseLockOwner(current.value) : null;
+            if (parsed !== null && parsed.token === owner.token) {
+              fsOps.removeDir(aside);
+              return;
+            }
+            // The directory we moved is NOT our lock — put it back exactly
+            // where contenders expect it. If a fresh holder already acquired
+            // lockDir in the gap, the restore fails and the aside directory
+            // stays for a human — a foreign lock is NEVER deleted either way.
+            fsOps.rename(aside, lockDir);
           },
         },
       };
@@ -296,27 +338,43 @@ export function acquireBackgroundExecutionCasLock(options: CasLockAcquireOptions
     }
     const ageMs = Date.parse(holder.createdAt);
     const age = Number.isFinite(ageMs) ? now().getTime() - ageMs : Number.POSITIVE_INFINITY;
-    if (age > staleMs) {
+    // Reclaim authority is PID liveness, never file age (PRI-1282 review):
+    // a lock whose recorded holder PID is PROVABLY dead is abandoned by
+    // construction — the dead holder cannot be inside the critical section
+    // and cannot resume to delete a replacement lock. A live holder past the
+    // stale TTL keeps its lock (the critical section is millisecond-scale,
+    // so >TTL liveness is a bug elsewhere — fail-closed busy, never evict a
+    // lock that may still be held). A holder on a different host or with an
+    // unverifiable PID is likewise never reclaimed.
+    const liveness = holder.host === os.hostname() && holder.pid > 0
+      ? processAlive(holder.pid)
+      : ('unknown' as const);
+    if (liveness === 'dead') {
       // Quarantine-then-verify: rename the stale lock away (atomic), re-read
-      // the token inside the renamed directory, and only then delete. If the
-      // rename lost a race (someone else already reclaimed), just retry.
+      // the token inside the renamed directory, and only then delete. A
+      // directory that changed identity between our read and the rename is
+      // a DIFFERENT (possibly live) holder's lock — restore it exactly,
+      // never move or delete a lock we cannot prove is the dead one.
       const quarantine = `${lockDir}.stale-${randomToken()}`;
       const renamed = fsOps.rename(lockDir, quarantine);
       if (!renamed.ok) continue;
       const verify = fsOps.readJson(path.join(quarantine, ownerFileName()));
       const verified = verify.ok ? parseLockOwner(verify.value) : null;
       if (verified === null || verified.token !== holder.token) {
-        // The directory changed identity mid-reclaim — leave quarantine for a
-        // human and fail closed rather than guess.
-        return { ok: false, reason: 'lock_invalid', message: `stale CAS lock reclaim at ${lockDir} observed an identity change; inspect ${quarantine}` };
+        const restored = fsOps.rename(quarantine, lockDir);
+        if (!restored.ok) {
+          return { ok: false, reason: 'lock_invalid', message: `stale CAS lock reclaim at ${lockDir} observed an identity change and could not restore the moved lock; inspect ${quarantine}` };
+        }
+        continue; // re-evaluate the (restored or fresh) lock
       }
       fsOps.removeDir(quarantine);
-      continue; // retry acquisition with the stale lock gone
+      continue; // retry acquisition with the dead lock gone
     }
+    void staleMs;
     return {
       ok: false,
       reason: 'lock_busy',
-      message: `CAS lock held by operation=${holder.operation} pid=${holder.pid} host=${holder.host} ageMs=${Math.max(0, Math.round(age))} target=${holder.workspaceDir}`,
+      message: `CAS lock held by operation=${holder.operation} pid=${holder.pid} host=${holder.host} ageMs=${Math.max(0, Math.round(age))} target=${holder.workspaceDir} liveness=${liveness} (a lock is only reclaimed when its holder PID is provably dead)`,
       holder,
     };
   }
@@ -559,6 +617,8 @@ export interface TransitionBackgroundExecutionInput {
   fsOps?: CasFsOps;
   /** Realpath probe for alias identity (default: native realpath). */
   realpath?: RealpathProbe;
+  /** Forwarded to the CAS lock acquire (holder-liveness test seam). */
+  probes?: CasLockAcquireOptions['probes'];
 }
 
 export interface TransitionBackgroundExecutionSuccess {
@@ -673,6 +733,7 @@ export function transitionWorkspaceBackgroundExecution(
     staleMs: input.staleMs,
     now,
     fsOps,
+    probes: input.probes,
   });
   if (!lock.ok) {
     return { ok: false, reason: lock.reason === 'lock_busy' ? 'lock_busy' : lock.reason === 'lock_invalid' ? 'lock_invalid' : 'lock_io_error', message: lock.message };

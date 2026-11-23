@@ -23,6 +23,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import Database from 'better-sqlite3';
 import {
   HOST_TOOL_DECLARATION_VERSION,
   createWorkspaceBehaviorEvidencePort,
@@ -41,7 +42,13 @@ import {
   resolvePdHome,
   type WorkspaceBackgroundOwnership,
 } from '@principles/install-layout';
-import { checkAgentRuntimeReadiness, resolveAgentRuntimeBinding } from '@principles/core/runtime';
+import {
+  AGENT_NAME_FOR_TASK_KIND,
+  checkAgentRuntimeReadiness,
+  createRuntimeStateHandle,
+  resolveAgentRuntimeBinding,
+  type InternalAgentName,
+} from '@principles/core/runtime';
 import { AGENT_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, READ_ONLY_TOOL_NAMES } from './constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS, OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from './constants/tool-semantics.js';
 import { SystemLogger } from './core/system-logger.js';
@@ -247,9 +254,14 @@ export interface OpenClawWorkerReadinessResult {
  * directory, §8.4 ownership readability, a loadable tool declaration, a
  * readable trajectory evidence port and resolvable provider credentials.
  */
-export function computeOpenClawWorkerReadiness(workspaceDir: string, options?: {
+export async function computeOpenClawWorkerReadiness(workspaceDir: string, options?: {
   ownership?: () => WorkspaceBackgroundOwnership;
-}): OpenClawWorkerReadinessResult {
+  /**
+   * Test seam: the pending-task-kind scan the credentials check uses
+   * (default: a readonly open of the workspace runtime store).
+   */
+  pendingTaskKinds?: () => Promise<readonly string[]>;
+}): Promise<OpenClawWorkerReadinessResult> {
   const workspaceDirResolved = path.resolve(workspaceDir);
   const checks = {
     workspaceDirectory: directoryExists(workspaceDirResolved),
@@ -275,26 +287,61 @@ export function computeOpenClawWorkerReadiness(workspaceDir: string, options?: {
 
   try {
     const port = createWorkspaceBehaviorEvidencePort(workspaceDirResolved, OPENCLAW_TOOL_SEMANTICS);
-    // The port resolves the trajectory DB path lazily per assemble; probe the
-    // file's existence the same way the workspace evidence port does.
     const trajectoryDb = path.join(workspaceDirResolved, '.state', 'trajectory.db');
-    checks.evidencePort = typeof port.assemble === 'function' && fs.existsSync(trajectoryDb);
+    // PRI-1282 review P2-1: file EXISTENCE is not evidence readability —
+    // open the trajectory DB readonly (fileMustExist, never creates) and
+    // verify the tables the evidence port actually queries.
+    let db: InstanceType<typeof Database> | undefined;
+    try {
+      db = new Database(trajectoryDb, { readonly: true, fileMustExist: true });
+      const tables = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('tool_calls', 'pain_events')",
+      ).all() as { name: string }[];
+      checks.evidencePort = typeof port.assemble === 'function' && tables.length === 2;
+    } finally {
+      db?.close();
+    }
   } catch {
     checks.evidencePort = false;
   }
 
-  // Credentials: check the profile the consuming cycle ACTUALLY binds —
-  // the diagnostician agent's resolved RuntimeProfile via the same
-  // resolveAgentRuntimeBinding + checkAgentRuntimeReadiness pair
-  // resolveRuntimeConfigFromPdConfig runs at cycle time (PRI-1282 review:
-  // "any configured credential exists" wrongly passed a workspace whose
-  // bound profile's own secret was missing). Resolution reads env first
-  // (non-empty wins), then the console-saved credentials file.
+  // Credentials: the consuming cycle resolves a RuntimeProfile PER pending
+  // task kind (AGENT_NAME_FOR_TASK_KIND → resolveRuntimeConfigForAgent), so
+  // readiness must prove every kind's bound profile — a workspace whose
+  // dreamer/scribe/… secret is missing must NOT pass (PRI-1282 review
+  // P2-1). Resolution reads env first (non-empty wins), then the
+  // console-saved credentials file. A workspace whose runtime store cannot
+  // be opened contributes no pending kinds (diagnostician still checked).
   try {
     const config = loadPdConfigForPlugin(workspaceDirResolved);
-    const binding = config.ok ? resolveAgentRuntimeBinding(config.effective, 'diagnostician') : { ok: false as const };
-    checks.credentials = binding.ok === true
-      && checkAgentRuntimeReadiness(binding.profile, (name) => process.env[name]).readiness === 'ready';
+    const pendingTaskKinds = options?.pendingTaskKinds ?? (async (): Promise<readonly string[]> => {
+      try {
+        const handle = await createRuntimeStateHandle({ workspaceDir: workspaceDirResolved, readonly: true, bootstrapIfMissing: false });
+        try {
+          const [pending, retryWait] = await Promise.all([
+            handle.stateManager.listTasks({ status: 'pending' }),
+            handle.stateManager.listTasks({ status: 'retry_wait' }),
+          ]);
+          return [...pending, ...retryWait].map((task) => task.taskKind);
+        } finally {
+          await handle.close();
+        }
+      } catch {
+        return [];
+      }
+    });
+    const kinds = await pendingTaskKinds();
+    const agents = new Set<InternalAgentName>(['diagnostician']);
+    for (const kind of kinds) {
+      const agentName = AGENT_NAME_FOR_TASK_KIND[kind];
+      if (agentName !== undefined) agents.add(agentName);
+    }
+    checks.credentials = config.ok === true
+      && [...agents].every((agentName) => {
+        const binding = resolveAgentRuntimeBinding(config.effective, agentName);
+        return binding.ok === true
+          && checkAgentRuntimeReadiness(binding.profile, (name) => process.env[name]).readiness === 'ready';
+      });
   } catch {
     checks.credentials = false;
   }

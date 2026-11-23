@@ -316,19 +316,73 @@ describe('cross-process lock', () => {
       .toMatchObject({ ok: true });
   });
 
-  it('reclaims a stale lock older than the TTL', () => {
+  it('reclaims a lock whose holder PID is provably dead (PRI-1282 P1-2: PID liveness, not file age, is the reclaim authority)', () => {
     const file = seedManifest('lock-stale');
     const fakePast = () => new Date(Date.now() - 60_000);
     const holder = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'begin_handover', workspaceDir: WS, now: fakePast });
     expect(holder.ok).toBe(true);
-    // NOT released — simulates a crashed holder. A fresh transition with the
-    // default clock must quarantine + reclaim it, complete its work, and
-    // release cleanly (no lock residue, no quarantine residue).
-    const result = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-s1' });
+    // NOT released — simulates a crashed holder. A fresh transition whose
+    // liveness probe proves the recorded PID dead must quarantine + reclaim
+    // it, complete its work, and release cleanly (no lock residue, no
+    // quarantine residue).
+    const result = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-s1', probes: { processAlive: () => 'dead' } });
     expect(result).toMatchObject({ ok: true });
     expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
     const residue = fs.readdirSync(path.dirname(file)).filter((name) => name.includes('.stale-'));
     expect(residue).toEqual([]);
+  });
+
+  it('a stale-but-LIVE lock is never reclaimed — file age alone proves nothing (PRI-1282 P1-2)', () => {
+    const file = seedManifest('lock-stale-live');
+    const fakePast = () => new Date(Date.now() - 60_000);
+    const holder = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'begin_handover', workspaceDir: WS, now: fakePast });
+    expect(holder.ok).toBe(true);
+    if (!holder.ok) return;
+    // Older than the TTL but the recorded PID is still alive (default probe
+    // on process.pid) → fail-closed busy, never an eviction the live holder
+    // would resume under.
+    const blocked = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-s2' });
+    expect(blocked).toMatchObject({ ok: false, reason: 'lock_busy' });
+    holder.handle.release();
+    expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
+  });
+
+  it('stale reclaim RESTORES a lock that changed hands between read and rename (PRI-1282 P1-2)', () => {
+    const file = seedManifest('lock-reclaim-race');
+    const real = defaultCasFsOps();
+    const holderA = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-A', workspaceDir: WS });
+    expect(holderA.ok).toBe(true);
+    if (!holderA.ok) return;
+    const lockDir = `${file}.cas.lock`;
+    const ownerA = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8')) as Record<string, unknown>;
+    const ownerB = { ...ownerA, token: 'FOREIGN-B-TOKEN' };
+    let swapped = false;
+    const fsOps = {
+      ...real,
+      rename: (from: string, to: string) => {
+        const result = real.rename(from, to);
+        if (!swapped && result.ok && from === lockDir && to.includes('.stale-')) {
+          // Between the contender's owner read and the quarantine rename,
+          // the directory became a DIFFERENT lock — verification must catch
+          // the identity change and restore rather than delete it.
+          fs.writeFileSync(path.join(to, 'owner.json'), JSON.stringify(ownerB), 'utf8');
+          swapped = true;
+        }
+        return result;
+      },
+    };
+    // First probe call answers 'dead' (for A's recorded PID); once B is
+    // restored the probe reports 'alive' — the restored lock must stay.
+    let probeCalls = 0;
+    const contender = acquireBackgroundExecutionCasLock({
+      manifestPath: file, operation: 'op-B', workspaceDir: WS, fsOps,
+      probes: { processAlive: () => (probeCalls += 1) === 1 ? 'dead' : 'alive' },
+    });
+    expect(contender).toMatchObject({ ok: false, reason: 'lock_busy' });
+    // The foreign lock came back to the lock path untouched (fail-closed).
+    const restored = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8')) as { token: string };
+    expect(restored.token).toBe('FOREIGN-B-TOKEN');
+    fs.rmSync(lockDir, { recursive: true, force: true });
   });
 
   it('fails closed on a lock with malformed owner metadata', () => {
@@ -356,5 +410,36 @@ describe('cross-process lock', () => {
     expect(fs.existsSync(path.join(staleDir, 'owner.json'))).toBe(true);
     second.handle.release();
     expect(fs.existsSync(staleDir)).toBe(false);
+  });
+
+  it('release that observes a REPLACED lock restores it instead of deleting (PRI-1282 P1-2)', () => {
+    const file = seedManifest('lock-release-race');
+    const real = defaultCasFsOps();
+    const fsOps = {
+      ...real,
+      rename: (from: string, to: string) => {
+        const result = real.rename(from, to);
+        if (result.ok && to.includes('.release-')) {
+          // Between the release's rename-aside and its owner verification,
+          // the lock changed hands — the move-then-verify release must put
+          // the foreign lock back, never delete it.
+          const ownerPath = path.join(to, 'owner.json');
+          const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) as Record<string, unknown>;
+          owner.token = 'FOREIGN-REPLACEMENT-TOKEN';
+          fs.writeFileSync(ownerPath, JSON.stringify(owner), 'utf8');
+        }
+        return result;
+      },
+    };
+    const first = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-a', workspaceDir: WS, fsOps });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    first.handle.release();
+    // The foreign lock was restored at the lock path — nothing was deleted.
+    const restoredPath = path.join(`${file}.cas.lock`, 'owner.json');
+    expect(fs.existsSync(restoredPath)).toBe(true);
+    const restored = JSON.parse(fs.readFileSync(restoredPath, 'utf8')) as { token: string };
+    expect(restored.token).toBe('FOREIGN-REPLACEMENT-TOKEN');
+    fs.rmSync(`${file}.cas.lock`, { recursive: true, force: true });
   });
 });

@@ -125,9 +125,13 @@ export function readGatewayQuiesceAck(workspaceDir: string): GatewayQuiesceAck |
   if (parsed.outcome !== 'quiesced' && parsed.outcome !== 'in_flight_timeout') return null;
   if (typeof parsed.completedAt !== 'string' || parsed.completedAt.length === 0) return null;
   if (parsed.outcome === 'quiesced' && parsed.inFlightCycles !== 0) return null;
+  // PRI-1282 P2-2: workspaceDir is persisted identity, never caller-filled —
+  // backfilling it from the reader's argument would let a different
+  // workspace's ack satisfy this workspace's handover gate.
+  if (typeof parsed.workspaceDir !== 'string' || parsed.workspaceDir.length === 0) return null;
   return {
     schemaVersion: GATEWAY_QUIESCE_ACK_SCHEMA_VERSION,
-    workspaceDir: typeof parsed.workspaceDir === 'string' ? parsed.workspaceDir : path.resolve(workspaceDir),
+    workspaceDir: parsed.workspaceDir,
     state: parsed.state as GatewayQuiesceAck['state'],
     operationId: parsed.operationId as string | null,
     generation: parsed.generation,

@@ -15,6 +15,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   computeOpenClawWorkerReadiness,
@@ -142,7 +143,7 @@ describe('runOpenClawWorkspaceWorkerCycle — real bounded cycle', () => {
 });
 
 describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
-  it('requires the credential of the profile the diagnostician ACTUALLY binds — not any configured one (PRI-1282 review)', () => {
+  it('requires the credential of the profile the diagnostician ACTUALLY binds — not any configured one (PRI-1282 review)', async () => {
     // Two profiles: pd.a's secret IS exported, pd.b's is not. The
     // diagnostician binds pd.b, so the workspace is NOT ready even though a
     // configured credential exists (the consuming cycle would hit
@@ -163,7 +164,7 @@ describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
     process.env.PD_TEST_BOUND_A_KEY = 'a-secret';
     delete process.env.PD_TEST_UNBOUND_B_KEY;
     try {
-      const readiness = computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
+      const readiness = await computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
       expect(readiness.checks.credentials).toBe(false);
 
       // Rebind the diagnostician to pd.a — now readiness answers for the
@@ -181,7 +182,7 @@ describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
         '    diagnostician: { enabled: true }',
         '',
       ].join('\n'));
-      const rebound = computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
+      const rebound = await computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
       expect(rebound.checks.credentials).toBe(true);
     } finally {
       delete process.env.PD_TEST_BOUND_A_KEY;
@@ -190,8 +191,8 @@ describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
   });
 
 
-  it('is degraded while the workspace has no declaration / trajectory / credentials', () => {
-    const readiness = computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
+  it('is degraded while the workspace has no declaration / trajectory / credentials', async () => {
+    const readiness = await computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
     expect(readiness.mode).toBe('degraded');
     expect(readiness.checks.workspaceDirectory).toBe(true);
     expect(readiness.checks.ownership).toBe(true);
@@ -204,10 +205,12 @@ describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
     // Land the declaration the real way (the worker cycle persists it).
     await runOpenClawWorkspaceWorkerCycle({ workspaceDir, logger, ownership: ownership(SERVICE_HOST_OWNED) });
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
-    fs.closeSync(fs.openSync(path.join(workspaceDir, '.state', 'trajectory.db'), 'w'));
+    const trajectoryDb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    trajectoryDb.exec('CREATE TABLE tool_calls (id INTEGER PRIMARY KEY); CREATE TABLE pain_events (id INTEGER PRIMARY KEY);');
+    trajectoryDb.close();
     process.env.OPENROUTER_API_KEY = 'test-value';
     try {
-      const readiness = computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
+      const readiness = await computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
       // This minimal fixture declares no runtimeProfiles, so the credential
       // check is honestly degraded — assert the full matrix instead of
       // pretending a profile-less workspace is credential-ready.
@@ -218,8 +221,8 @@ describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
     }
   });
 
-  it('fails closed when the ownership marker is unreadable', () => {
-    const readiness = computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(UNREADABLE) });
+  it('fails closed when the ownership marker is unreadable', async () => {
+    const readiness = await computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(UNREADABLE) });
     expect(readiness.mode).toBe('degraded');
     expect(readiness.checks.ownership).toBe(false);
   });

@@ -52,9 +52,17 @@ import { createOpenClawWorkerAdapter } from './worker-adapter-openclaw.js';
 import { runWorkerProcess } from './worker-process.js';
 import type { WorkerProcessResult } from './worker-process.js';
 
+/* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
+
 export const DEFAULT_HANDOVER_ACK_WAIT_MS = 15 * 60_000;
 export const DEFAULT_HANDOVER_STEP_TIMEOUT_MS = 2 * 60_000;
 export const DEFAULT_ROLLBACK_RESUME_WAIT_MS = 90_000;
+/**
+ * Bounded wait for the last in-flight worker cycle to release the workspace
+ * run mutex during rollback (PRI-1282 P1-1). Matches the consumer cycle's
+ * own bound; on expiry the workspace stays rollback_pending and resumable.
+ */
+export const DEFAULT_ROLLBACK_DRAIN_WAIT_MS = 10 * 60_000;
 const HANDOVER_EVIDENCE_SCHEMA = 'pd.service-handover-evidence.v1';
 const HANDOVER_INTENT_SCHEMA = 'pd.service-handover-intent.v1';
 
@@ -121,9 +129,34 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-/** Sanitized single-line key for the evidence directory (no path separators). */
+/**
+ * Sanitized single-line key for the evidence directory (no path
+ * separators). A readable stem ALONE is a real collision surface
+ * (`/tmp/a b` vs `/tmp/a_b` → same key → cross-workspace evidence mixing,
+ * PRI-1282 review P1-6), so the full path's SHA-256 suffix is the actual
+ * identity; the stem only keeps the directory browsable.
+ */
 function workspaceEvidenceKey(canonicalDir: string): string {
-  return canonicalDir.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-120);
+  const stem = canonicalDir.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-48);
+  const digest = crypto.createHash('sha256').update(canonicalDir, 'utf8').digest('hex').slice(0, 16);
+  return `${stem}-${digest}`;
+}
+
+/**
+ * operationId is the operation's idempotency key AND a filename component
+ * under <pdHome>/service/handover/ — an operator-supplied value that
+ * reached the filesystem unchecked allowed path traversal (PRI-1282 review
+ * P1-6). Whitelisted to characters that are safe on every filesystem.
+ */
+const SAFE_OPERATION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+function isSafeOperationId(operationId: string): boolean {
+  return SAFE_OPERATION_ID.test(operationId);
+}
+
+function errnoOf(error: unknown): string {
+  return typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+    ? String(Reflect.get(error, 'code'))
+    : '';
 }
 
 export function handoverEvidencePath(pdHome: string, canonicalDir: string, operationId: string): string {
@@ -143,12 +176,12 @@ export interface HandoverEvidence {
 }
 
 export function writeHandoverEvidence(evidence: HandoverEvidence, pdHome: string): { ok: boolean; path: string; reason?: string } {
+  if (!isSafeOperationId(evidence.operationId)) {
+    return { ok: false, path: handoverEvidencePath(pdHome, evidence.workspaceDir, 'invalid'), reason: 'operation_id_invalid' };
+  }
   const target = handoverEvidencePath(pdHome, evidence.workspaceDir, evidence.operationId);
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    // Write-once: an existing evidence document for this operationId is the
-    // audit record; a rerun appends nothing and never rewrites history.
-    if (fs.existsSync(target)) return { ok: true, path: target, reason: 'already_exists' };
     const tmp = `${target}.${process.pid}.${crypto.randomUUID().slice(0, 8)}.tmp`;
     const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
     try {
@@ -156,7 +189,27 @@ export function writeHandoverEvidence(evidence: HandoverEvidence, pdHome: string
     } finally {
       fs.closeSync(fd);
     }
-    fs.renameSync(tmp, target);
+    try {
+      // Write-once, ATOMICALLY: link() fails with EEXIST instead of
+      // replacing — rename() would silently overwrite a concurrently
+      // published document (PRI-1282 review P1-6).
+      fs.linkSync(tmp, target);
+    } catch (linkError) {
+      try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+      if (errnoOf(linkError) === 'EEXIST') {
+        // An existing document is accepted ONLY when it parses as THIS
+        // operation's evidence for THIS workspace — a same-named
+        // different-identity document is a conflict, never a no-op
+        // (PRI-1282 review P1-6: the pre-check accepted anything).
+        const existing = readHandoverEvidence(pdHome, evidence.workspaceDir, evidence.operationId);
+        if (existing !== null && existing.kind === evidence.kind) {
+          return { ok: true, path: target, reason: 'already_exists' };
+        }
+        return { ok: false, path: target, reason: 'evidence_identity_conflict' };
+      }
+      throw linkError;
+    }
+    fs.unlinkSync(tmp);
     return { ok: true, path: target };
   } catch (error) {
     return { ok: false, path: target, reason: error instanceof Error ? error.message : String(error) };
@@ -251,6 +304,10 @@ export function readHandoverEvidence(pdHome: string, canonicalDir: string, opera
     if (parsed.schemaVersion !== HANDOVER_EVIDENCE_SCHEMA) return null;
     if (parsed.kind !== 'handover' && parsed.kind !== 'rollback') return null;
     if (!isNonEmptyString(parsed.operationId) || !isNonEmptyString(parsed.workspaceDir)) return null;
+    // PRI-1282 review P1-6: the document must BE this operation's evidence
+    // for THIS workspace — a field check, not just path keying (path keying
+    // alone let a colliding wskey satisfy a foreign workspace's resume).
+    if (parsed.operationId !== operationId || parsed.workspaceDir !== canonicalDir) return null;
     if (!isNonEmptyString(parsed.startedAt) || !isNonEmptyString(parsed.completedAt)) return null;
     if (parsed.outcome !== 'completed' && parsed.outcome !== 'aborted' && parsed.outcome !== 'failed') return null;
     if (!Array.isArray(parsed.steps)) return null;
@@ -314,11 +371,12 @@ export function handoverIntentPath(pdHome: string, canonicalDir: string, operati
 }
 
 export function writeHandoverIntent(intent: HandoverCommitIntent, pdHome: string): { ok: boolean; path: string; reason?: string } {
+  if (!isSafeOperationId(intent.operationId)) {
+    return { ok: false, path: handoverIntentPath(pdHome, intent.workspaceDir, 'invalid'), reason: 'operation_id_invalid' };
+  }
   const target = handoverIntentPath(pdHome, intent.workspaceDir, intent.operationId);
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    // Write-once, same posture as the evidence document.
-    if (fs.existsSync(target)) return { ok: true, path: target, reason: 'already_exists' };
     const tmp = `${target}.${process.pid}.${crypto.randomUUID().slice(0, 8)}.tmp`;
     const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
     try {
@@ -326,7 +384,21 @@ export function writeHandoverIntent(intent: HandoverCommitIntent, pdHome: string
     } finally {
       fs.closeSync(fd);
     }
-    fs.renameSync(tmp, target);
+    try {
+      // Atomic no-replace publish, same posture as the evidence document.
+      fs.linkSync(tmp, target);
+    } catch (linkError) {
+      try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+      if (errnoOf(linkError) === 'EEXIST') {
+        const existing = readHandoverIntent(pdHome, intent.workspaceDir, intent.operationId);
+        if (existing !== null) {
+          return { ok: true, path: target, reason: 'already_exists' };
+        }
+        return { ok: false, path: target, reason: 'intent_identity_conflict' };
+      }
+      throw linkError;
+    }
+    fs.unlinkSync(tmp);
     return { ok: true, path: target };
   } catch (error) {
     return { ok: false, path: target, reason: error instanceof Error ? error.message : String(error) };
@@ -506,6 +578,12 @@ export type HandoverRunResult =
 export async function runWorkspaceHandover(workspaceDir: string, options: HandoverRunOptions): Promise<HandoverRunResult> {
   const context = establishHandoverContext(workspaceDir, options);
   if (!context.ok) return { ok: false, outcome: 'blocked', reason: context.reason, nextAction: context.nextAction };
+  // operationId enters file paths and CAS records — a filesystem-safe
+  // whitelist at the command boundary, before anything keys off it
+  // (PRI-1282 review P1-6).
+  if (options.resumeOperationId !== undefined && !isSafeOperationId(options.resumeOperationId)) {
+    return { ok: false, outcome: 'blocked', reason: 'operation_id_invalid', nextAction: 'operationId may only contain letters, digits, dots, underscores and hyphens (1-128 chars).' };
+  }
   const ackWaitMs = options.ackWaitMs ?? DEFAULT_HANDOVER_ACK_WAIT_MS;
   const stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_HANDOVER_STEP_TIMEOUT_MS;
   const startedAt = nowIso();
@@ -530,10 +608,19 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
     const priorOp = options.resumeOperationId ?? '';
     const priorEvidence = priorOp !== '' ? readHandoverEvidence(context.pdHome, context.workspaceDir, priorOp) : null;
     const priorIntent = priorOp !== '' ? readHandoverIntent(context.pdHome, context.workspaceDir, priorOp) : null;
+    // PRI-1282 review P1-6: 'completed' alone is not resumable — the
+    // evidence must be THIS workspace's handover whose committed ownership
+    // matches the CURRENT marker generation, else a stale/foreign document
+    // could impersonate the committed run.
+    const evidenceMatches = priorEvidence !== null
+      && priorEvidence.kind === 'handover'
+      && priorEvidence.outcome === 'completed'
+      && priorEvidence.finalOwnership.status === 'service_host_owned'
+      && priorEvidence.finalOwnership.generation === initial.generation;
     const intentMatches = priorIntent !== null
       && priorIntent.workspaceDir === context.workspaceDir
       && priorIntent.committedGeneration === initial.generation;
-    if (priorOp !== '' && (priorEvidence?.outcome === 'completed' || intentMatches)) {
+    if (priorOp !== '' && (evidenceMatches || intentMatches)) {
       record('already_service_host_owned', intentMatches && priorEvidence?.outcome !== 'completed' ? 'verify_only_continuation_by_intent' : 'verify_only_continuation');
       // A crashed run may have left its Worker child alive in its own
       // process group — the child still holds the workspace run mutex, so
@@ -598,7 +685,44 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
       nextAction: 'This workspace already belongs to the Service Host. Pass --resume <operationId> of the committed handover to re-verify, or use pd service rollback to return it to the legacy consumer.',
     };
   }
+  // ── Abort handling FIRST (PRI-1282 review P1-5): binding verification
+  // cannot gate an operator's abort — a workspace stuck in
+  // handover_preparing with a missing/broken OpenClaw binding would
+  // otherwise be unrecoverable by --abort. The abort must also name the
+  // EXACT in-flight operation: a marker's operationId no longer silently
+  // overrides an explicit --resume, and generation fencing keeps a stale
+  // caller from aborting a newer generation's work.
+  const markerOp = initial.status === 'handover_preparing' ? initial.record.operationId : undefined;
+  if (options.resumeOperationId !== undefined && markerOp !== undefined && options.resumeOperationId !== markerOp) {
+    return {
+      ok: false,
+      outcome: 'blocked',
+      reason: 'operation_id_mismatch',
+      nextAction: `The in-flight handover is ${markerOp}; --resume must name that exact operation (or omit --resume to adopt it).`,
+      operationId: markerOp ?? undefined,
+    };
+  }
+  if (options.abort === true) {
+    const target = markerOp;
+    if (target === undefined || target === null) {
+      return { ok: false, outcome: 'blocked', reason: 'abort_requires_operation', nextAction: 'No handover_preparing record exists for this workspace; nothing to abort.' };
+    }
+    const abortedTransition = transitionWorkspaceBackgroundExecution({
+      manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId: target, expectedGeneration: initial.generation,
+    });
+    if (!abortedTransition.ok) return { ok: false, outcome: 'failed', reason: `abort_failed:${abortedTransition.reason}`, nextAction: abortedTransition.nextAction ?? 'Inspect the manifest ownership record.', detail: abortedTransition.message };
+    record('aborted', 'legacy_owned');
+    return { ok: false, outcome: 'aborted', reason: 'handover_aborted_by_operator', nextAction: 'The workspace is back to legacy ownership; the Gateway consumer is the sole owner.', operationId: target };
+  }
   const binding = collectHostWorkspaceClaimsFor(context.workspaceDir, context.homeDir, options.env);
+  if (binding.bindingUnverifiable !== null) {
+    return {
+      ok: false,
+      outcome: 'blocked',
+      reason: `foreign_owner_unverifiable:${binding.bindingUnverifiable}`,
+      nextAction: 'A host binding file could not be read or parsed, so cross-host ownership cannot be verified; repair the binding file(s) and retry (fail-closed per §9.1.8).',
+    };
+  }
   if (!binding.openclawClaimed) {
     return {
       ok: false,
@@ -618,19 +742,7 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
   record('binding_verified', 'openclaw_claim_present');
 
   // ── 2. begin_handover (idempotent; registers the workspace atomically). ──
-  const resumeOp = initial.status === 'handover_preparing' ? initial.record.operationId : undefined;
-  if (options.abort === true) {
-    const target = resumeOp ?? options.resumeOperationId;
-    if (target === undefined || target === null) {
-      return { ok: false, outcome: 'blocked', reason: 'abort_requires_operation', nextAction: 'No handover_preparing record exists for this workspace; nothing to abort.' };
-    }
-    const abortedTransition = transitionWorkspaceBackgroundExecution({
-      manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId: target,
-    });
-    if (!abortedTransition.ok) return { ok: false, outcome: 'failed', reason: `abort_failed:${abortedTransition.reason}`, nextAction: abortedTransition.nextAction ?? 'Inspect the manifest ownership record.', detail: abortedTransition.message };
-    record('aborted', 'legacy_owned');
-    return { ok: false, outcome: 'aborted', reason: 'handover_aborted_by_operator', nextAction: 'The workspace is back to legacy ownership; the Gateway consumer is the sole owner.', operationId: target };
-  }
+  const resumeOp = markerOp;
 
   // ── 1.5. Scheduler gate (PRI-1282 review): handing ownership to the
   // Service Host while no enabled OS trigger exists would leave the
@@ -672,7 +784,7 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
   // ── 3. No-consume readiness through the ACTIVE-RELEASE worker. ──
   const readiness = await runActiveReleaseWorkerProbe({ homeDir: context.homeDir, workspaceDir: context.workspaceDir, mode: 'readiness', timeoutMs: stepTimeoutMs, ...(options.signal !== undefined ? { signal: options.signal } : {}) });
   if (!readiness.ok) {
-    const rollback = transitionWorkspaceBackgroundExecution({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId });
+    const rollback = transitionWorkspaceBackgroundExecution({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId, expectedGeneration: preparingGeneration });
     record('readiness', 'unavailable', readiness.reason);
     if (!rollback.ok) {
       return { ok: false, outcome: 'failed', reason: `readiness_failed_and_abort_failed:${readiness.reason}|${rollback.reason}`, nextAction: 'The workspace is STUCK in handover_preparing — resolve manually (pd service handover --abort).', operationId, detail: readiness.nextAction };
@@ -681,19 +793,29 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
   }
   const readinessJson = parseWorkerJson(readiness.result.stdout);
   const readinessMode = typeof readinessJson?.mode === 'string' ? readinessJson.mode : 'unknown';
-  if (readinessMode !== 'ready') {
-    const rollback = transitionWorkspaceBackgroundExecution({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId });
-    record('readiness', readinessMode, readiness.result.stdout.slice(0, 400));
+  // PRI-1282 review P2-1: 'ready' must be corroborated by a clean process
+  // outcome — a timed-out/cancelled/failed child that managed to print
+  // mode:'ready' before dying is not evidence of readiness.
+  const readinessProcessFailed = readiness.result.exitCode !== 0
+    || readiness.result.timedOut === true
+    || readiness.result.cancelled === true
+    || readiness.result.spawnError !== undefined;
+  if (readinessMode !== 'ready' || readinessProcessFailed) {
+    const processDetail = readinessProcessFailed
+      ? `exitCode=${readiness.result.exitCode} timedOut=${readiness.result.timedOut} cancelled=${readiness.result.cancelled}${readiness.result.spawnError !== undefined ? ` spawnError=${readiness.result.spawnError}` : ''}`
+      : '';
+    const rollback = transitionWorkspaceBackgroundExecution({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId, expectedGeneration: preparingGeneration });
+    record('readiness', readinessProcessFailed ? `process_failed(${processDetail})` : readinessMode, readiness.result.stdout.slice(0, 400));
     if (!rollback.ok) {
       return { ok: false, outcome: 'failed', reason: `readiness_not_ready_and_abort_failed:${readinessMode}|${rollback.reason}`, nextAction: 'The workspace is STUCK in handover_preparing — resolve manually (pd service handover --abort).', operationId };
     }
     return {
       ok: false,
       outcome: 'blocked',
-      reason: `openclaw_worker_readiness:${readinessMode}`,
+      reason: readinessProcessFailed ? `openclaw_worker_readiness_process:${readinessMode}` : `openclaw_worker_readiness:${readinessMode}`,
       nextAction: 'Fix the failing readiness checks (declaration / evidence port / credentials) and retry; the workspace was restored to legacy ownership.',
       operationId,
-      detail: readinessJson ?? undefined,
+      detail: readinessJson ?? { exitCode: readiness.result.exitCode, timedOut: readiness.result.timedOut, cancelled: readiness.result.cancelled },
     };
   }
   record('readiness', 'ready');
@@ -705,7 +827,16 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
   while (Date.now() < ackDeadline) {
     if (aborted()) break;
     ack = ackPlugin.readGatewayQuiesceAck(context.workspaceDir);
-    if (ack !== null && ack.operationId === operationId && ack.generation === preparingGeneration && ack.outcome === 'quiesced' && ack.inFlightCycles === 0) break;
+    // PRI-1282 review P2-2: the ack must bind THIS operation's state and
+    // THIS workspace too — an ack written for handover_preparing of another
+    // workspace (or a stale-marker state) is not this operation's evidence.
+    if (ack !== null
+      && ack.operationId === operationId
+      && ack.generation === preparingGeneration
+      && ack.state === 'handover_preparing'
+      && path.resolve(ack.workspaceDir) === context.workspaceDir
+      && ack.outcome === 'quiesced'
+      && ack.inFlightCycles === 0) break;
     await wait(2_000);
   }
   const ackDefect: string | null = ack === null
@@ -714,11 +845,15 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
       ? 'gateway_quiesce_ack_operation_mismatch'
       : ack.generation !== preparingGeneration
         ? 'gateway_quiesce_ack_generation_mismatch'
-        : ack.outcome !== 'quiesced'
-          ? `gateway_quiesce_ack_not_quiesced:${ack.outcome}`
-          : null;
+        : ack.state !== 'handover_preparing'
+          ? `gateway_quiesce_ack_state_mismatch:${ack.state}`
+          : path.resolve(ack.workspaceDir) !== context.workspaceDir
+            ? 'gateway_quiesce_ack_workspace_mismatch'
+            : ack.outcome !== 'quiesced'
+              ? `gateway_quiesce_ack_not_quiesced:${ack.outcome}`
+              : null;
   if (ackDefect !== null) {
-    const rollback = transitionWorkspaceBackgroundExecution({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId });
+    const rollback = transitionWorkspaceBackgroundExecution({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId, expectedGeneration: preparingGeneration });
     record('quiesce_ack', 'missing_or_mismatched', ack === null ? 'no_ack_file' : `${ack.state}/${ack.operationId}/${ack.outcome}`);
     if (!rollback.ok) {
       return { ok: false, outcome: 'failed', reason: `quiesce_unproven_and_abort_failed:${ackDefect}|${rollback.reason}`, nextAction: 'The workspace is STUCK in handover_preparing — resolve manually (pd service handover --abort).', operationId };
@@ -893,13 +1028,17 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
     if (initial.status === 'manifest_unreadable') {
       return { ok: false, outcome: 'blocked', reason: `ownership_unreadable:${initial.reason}`, nextAction: initial.nextAction };
     }
-    // ── 4-6. begin_rollback → complete_rollback (CAS back to legacy). ──
     const resumeOp = initial.status === 'rollback_pending' ? initial.record.operationId : undefined;
     const operationId = resumeOp ?? `rollback-${crypto.randomUUID()}`;
-    // A still-running worker keeps consuming after the CAS back to legacy —
-    // the rollback refuses until the workspace mutex proves it stopped.
-    const stillRunning = refuseWhileWorkerRunning(context, operationId);
-    if (stillRunning !== null) return stillRunning;
+
+    // ── 4-6. begin_rollback FIRST, then drain, then complete_rollback
+    // (PRI-1282 review P1-1 — ordering, not a new lock): flipping the marker
+    // to rollback_pending closes the worker gate (`service_host_owned` is
+    // the only consumable state) BEFORE we wait, so a worker that starts
+    // after this CAS can never begin consuming. Probing the workspace mutex
+    // first left a TOCTOU window: a worker launched between the probe and
+    // the CAS passed the gate and kept consuming past complete_rollback →
+    // two consumers on one workspace.
     const begin = transitionWorkspaceBackgroundExecution({
       manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'begin_rollback', operationId,
     });
@@ -907,8 +1046,41 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
       return { ok: false, outcome: 'blocked', reason: `begin_rollback_failed:${begin.reason}`, nextAction: begin.nextAction ?? 'Only a service_host_owned workspace can roll back.', operationId };
     }
     record('begin_rollback', begin.changed ? 'rollback_pending' : 'idempotent_replay', `generation=${begin.record.generation}`);
+    const rollbackGeneration = begin.record.generation;
+
+    // Now that new cycles are gated out, wait for the LAST in-flight cycle
+    // to finish — the workspace run mutex is held by the worker child for
+    // its whole cycle, so 'free' is the honest drain proof (bounded; a
+    // timeout keeps the workspace safely rollback_pending and resumable).
+    const workspaceRunLockPath = workspaceServiceRunLockPath(context.pdHome, context.workspaceDir);
+    const drainDeadline = Date.now() + (options.stepTimeoutMs ?? DEFAULT_ROLLBACK_DRAIN_WAIT_MS);
+    for (;;) {
+      const probe = probeServiceRunLockState(workspaceRunLockPath);
+      if (probe.state === 'free') break;
+      if (probe.state !== 'held') {
+        return {
+          ok: false,
+          outcome: 'blocked',
+          reason: `service_host_worker_lock_unverifiable:${probe.detail ?? 'unknown'}`,
+          nextAction: 'The workspace run mutex could not be verified; the workspace stays rollback_pending (fail-closed) — repair the stale lock under <pdHome>/service/workspace-runs/ and rerun the rollback.',
+          operationId,
+        };
+      }
+      if (Date.now() >= drainDeadline || options.signal?.aborted === true) {
+        return {
+          ok: false,
+          outcome: 'blocked',
+          reason: 'service_host_worker_drain_timeout',
+          nextAction: 'A worker cycle still holds the workspace run mutex past the drain deadline; the workspace stays rollback_pending — wait for the bounded cycle to finish and rerun the rollback.',
+          operationId,
+        };
+      }
+      await wait(2_000);
+    }
+    record('worker_drain', 'workspace_run_mutex_free');
+
     const finish = transitionWorkspaceBackgroundExecution({
-      manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'complete_rollback', operationId,
+      manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'complete_rollback', operationId, expectedGeneration: rollbackGeneration,
     });
     if (!finish.ok) {
       return { ok: false, outcome: 'failed', reason: `complete_rollback_failed:${finish.reason}`, nextAction: 'The workspace is rollback_pending — rerun the rollback command to complete it (fail-closed, never auto-cleared).', operationId };
@@ -920,6 +1092,7 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
     // on its next launch, verified separately by the gate tests). ──
     let gatewayResumption: 'observed' | 'not_verified_gateway_not_running' = 'not_verified_gateway_not_running';
     const resumeDeadline = Date.now() + (options.ackWaitMs ?? DEFAULT_ROLLBACK_RESUME_WAIT_MS);
+    const startedAtMs = Date.parse(startedAt);
     while (Date.now() < resumeDeadline) {
       if (options.signal?.aborted === true) break;
       const logsDir = path.join(context.workspaceDir, 'memory', 'logs');
@@ -927,10 +1100,21 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
         const logs = fs.readdirSync(logsDir).filter((name) => name.startsWith('SYSTEM_')).sort();
         for (const logName of logs.slice(-3)) {
           const text = fs.readFileSync(path.join(logsDir, logName), 'utf8');
-          if (text.includes('INTERNALIZATION_CONSUMER_RESUMED') || text.includes('INTERNALIZATION_CONSUMER_STARTED')) {
-            gatewayResumption = 'observed';
-            break;
+          // PRI-1282 review P2-3: a resumption event only counts when its
+          // SystemLogger timestamp is AT/AFTER this rollback started — a
+          // substring hit on an older log line fabricated 'observed' from a
+          // resumption that predates this rollback.
+          for (const line of text.split('\n')) {
+            const stamp = /^\[([^\]]+)\]\s*\[([A-Z_]+)\]/.exec(line);
+            if (stamp === null || stamp[1] === undefined || stamp[2] === undefined) continue;
+            const eventMs = Date.parse(stamp[1]);
+            if (!Number.isFinite(eventMs) || eventMs < startedAtMs) continue;
+            if (stamp[2] === 'INTERNALIZATION_CONSUMER_RESUMED' || stamp[2] === 'INTERNALIZATION_CONSUMER_STARTED') {
+              gatewayResumption = 'observed';
+              break;
+            }
           }
+          if (gatewayResumption === 'observed') break;
         }
       } catch {
         // No SystemLogger stream at all → Gateway has never run here in this
@@ -954,6 +1138,18 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
       finalOwnership,
     };
     const written = writeHandoverEvidence(evidence, context.pdHome);
+    // PRI-1282 review P2-3: the rollback did not complete if its audit
+    // record could not be persisted — the ownership flip already happened,
+    // so this reports a resumable failure, never silent success.
+    if (!written.ok) {
+      return {
+        ok: false,
+        outcome: 'failed',
+        reason: `rollback_evidence_write_failed:${written.reason ?? 'io'}`,
+        nextAction: 'Ownership already returned to the Gateway but the rollback evidence could not be persisted; fix the write failure and rerun `pd service rollback` to record it (the operation is idempotent).',
+        operationId,
+      };
+    }
     return {
       ok: true,
       outcome: 'completed',
