@@ -152,6 +152,12 @@ function summarizeConsole(console: WorkspaceHealth['console']): HealthSummaryIte
   switch (console.status) {
     case 'installed_running':
       return { status: 'ok', detail: `running at ${console.running.url}` };
+    case 'stale_running':
+      return {
+        status: 'error',
+        detail: `${console.reason ?? 'stale console process holding port'}${console.running.url ? ` at ${console.running.url}` : ''}`,
+        nextAction: console.nextAction ?? 'Run `pd console open` to replace the stale process.',
+      };
     case 'installed_not_running':
       return { status: 'ok', detail: 'installed, not running (on-demand — start with: pd console open)' };
     case 'not_installed':
@@ -509,7 +515,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
     const enforcementFailed = health.enforcement.state !== 'healthy';
     // A broken console install is the same grade as a broken MCP install:
     // a real install-integrity defect, not an absent optional component.
-    const consoleFailed = health.console.status === 'broken';
+    const consoleFailed = health.console.status === 'broken' || health.console.status === 'stale_running';
 
     if (opts.json) {
       console.log(JSON.stringify(health, null, 2));
