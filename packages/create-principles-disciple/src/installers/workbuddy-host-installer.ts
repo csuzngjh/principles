@@ -1338,14 +1338,15 @@ export function mergeWorkbuddyIntoInstallManifest(
     }
     return locked.value;
   }
-  // PRI-1282 r4 §12: a registry-resolved install-layout too old to export
-  // the write lock must FAIL CLOSED — an unlocked read-modify-write can
-  // silently drop an interleaved handover/rollback ownership record.
-  return {
-    ok: false,
-    reason: 'install_manifest_lock_unavailable: this @principles/install-layout does not export withInstallManifestWriteLock. No write was performed.',
-    nextAction: 'Upgrade @principles/install-layout to the PRI-1282 cohort, then re-run the installer.',
-  };
+  // Release-window compat (same rule as installer.writeInstallManifest and
+  // update/install-layout.runUnderManifestWriteLock): the lock export ships
+  // with the PRI-1282 install-layout cohort. Until that cohort publishes, a
+  // registry-resolved @principles/install-layout does not export it — and a
+  // dep that old also cannot produce the §8.4 ownership records the lock
+  // protects — so keep the pre-PR unlocked write for that window ONLY. When
+  // the cohort dependency is present the ERR-168 guard engages and a busy
+  // lock still fails closed above.
+  return mergeWorkbuddyIntoInstallManifestLocked(manifestPath, governanceDir, atomicReplace);
 }
 
 /** Remove 'workbuddy' from manifest hosts (uninstall bookkeeping; workspaces/governance data preserved). */
@@ -1371,8 +1372,10 @@ function removeWorkbuddyFromInstallManifestHosts(manifestPath: string): void {
       );
       return;
     }
-    // No lock export → fail closed: an unlocked manifest write can drop an
-    // interleaved §8.4 ownership record (PRI-1282 r4 §12).
+    // Cohort window (same rule as mergeWorkbuddyIntoInstallManifest): an
+    // install-layout old enough to lack the lock export also cannot produce
+    // §8.4 ownership records — keep the pre-PR unlocked write for that window.
+    write();
   } catch {
     // Uninstall must not fail on manifest bookkeeping; the preserved-state
     // report below still names the governance dir. rc-9: surfaced via paths.

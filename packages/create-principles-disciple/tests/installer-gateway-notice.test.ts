@@ -201,6 +201,12 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
+      // PRI-1282: the install-manifest CAS lock reads its owner.json through
+      // the same fs module — the generic JSON fallback below would fake a
+      // foreign lock and wedge install() on lock_invalid. Delegate the lock
+      // path to the real fs (ENOENT → 'missing' → fresh create in the
+      // throwaway HOME); mkdir/write stay mocked no-ops.
+      if (filePath.includes('.cas.lock')) return realFs.readFileSync(filePath, 'utf8');
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
       // PRI-874: the embedded product identity stamp is read through the
       // strict parser — answer with the fixture's REAL stamp file (written
