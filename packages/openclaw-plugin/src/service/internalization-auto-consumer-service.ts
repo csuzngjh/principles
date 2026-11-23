@@ -45,21 +45,33 @@ import { readOpenClawWorkspaceOwnership } from '../openclaw-worker.js';
 import { writeGatewayQuiesceAck, type GatewayQuiesceAck } from './gateway-quiesce-ack.js';
 import {
   gatewayConsumerLeaseToken,
+  gatewayConsumerInstanceId,
+  readGatewayConsumerLease,
   writeGatewayConsumerLease,
   clearGatewayConsumerLease,
   foreignConsumerLeaseStatus,
 } from './gateway-consumer-lease.js';
 
 /**
- * PRI-1282 P1-3: identity of THIS process's consumer instance. The lease
+ * PRI-1282 P1-3 + r4: identity of ONE consumer INSTANCE — minted fresh on
+ * every start(), not per process. The lease
  * (<workspace>/.pd/gateway-consumer-lease.json) is the workspace-scoped
  * liveness record that makes "a foreign Gateway consumer is alive"
- * decidable across a Gateway restart — a fresh process that sees a blocking
- * marker may only ack "quiesced" when no live foreign lease exists, and a
- * parked consumer may only resume when no live foreign lease exists. PID
- * liveness is the sole authority; anything unverifiable fails closed.
+ * decidable across a Gateway restart: PID liveness alone cannot distinguish
+ * two lifecycles of the same process, so process liveness and instance
+ * identity are judged separately and a new instance never clears or claims
+ * the old instance's lease. Anything unverifiable fails closed.
  */
-const consumerLeaseToken = gatewayConsumerLeaseToken();
+interface ConsumerIdentity {
+  readonly token: string;
+  readonly instanceId: string;
+}
+
+function freshConsumerIdentity(): ConsumerIdentity {
+  return { token: gatewayConsumerLeaseToken(), instanceId: gatewayConsumerInstanceId() };
+}
+
+let consumerIdentity = freshConsumerIdentity();
 
 // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: the interval is no longer
 // a fixed constant. The FIRST cycle keeps its original delay; every later delay
@@ -84,6 +96,28 @@ const GATEWAY_QUIESCE_WAIT_MS = 10 * 60_000;
  */
 const OWNERSHIP_WATCH_INTERVAL_MS = 30_000;
 
+/**
+ * PRI-1282 r4 §3.1: stop() drains the in-flight cycle before releasing the
+ * lease. The wait is bounded; on timeout the PROTECTIVE lease stays (the
+ * observable INTERNALIZATION_CONSUMER_STOP_DRAIN_TIMEOUT event records why)
+ * and the workspace's next consumer keeps being gated by it — stop()
+ * returning is never, by itself, proof the old consumer exited.
+ */
+const STOP_DRAIN_WAIT_MS = 30_000;
+/** Effective drain bound — the test seam may shorten it; production never does. */
+let stopDrainWaitMs = STOP_DRAIN_WAIT_MS;
+
+/** Whether the on-disk lease is ours or provably dead (safe to overwrite). */
+function leaseOursOrDead(workspaceDir: string): boolean {
+  const lease = readGatewayConsumerLease(workspaceDir);
+  if (lease === null) return false; // unreadable/malformed → unverifiable → not safe
+  if (lease.token === consumerIdentity.token || lease.instanceId === consumerIdentity.instanceId) return true;
+  return foreignConsumerLeaseStatus(workspaceDir, {
+    selfToken: consumerIdentity.token,
+    selfInstanceId: consumerIdentity.instanceId,
+  }) === 'none';
+}
+
 export interface InternalizationAutoConsumerServiceShape {
   id: string;
   start: (ctx: OpenClawPluginServiceContext) => void;
@@ -106,6 +140,23 @@ interface WorkspaceConsumerState {
 }
 
 const workspaceStates = new Map<string, WorkspaceConsumerState>();
+
+/**
+ * Deterministic test seams (PRI-1282 r4 §3.4): let lifecycle tests inject an
+ * in-flight cycle, shorten the drain bound, and read the live identity
+ * without monkey-patching node modules. Production never touches them.
+ */
+export const __autoConsumerTestSeams = {
+  workspaceStates,
+  identity: (): ConsumerIdentity => consumerIdentity,
+  getWorkspaceState,
+  injectInFlight(workspaceDir: string, inFlight: Promise<void> | null): void {
+    getWorkspaceState(workspaceDir).inFlight = inFlight;
+  },
+  setStopDrainWaitMs(ms: number): void {
+    stopDrainWaitMs = ms;
+  },
+};
 
 function getWorkspaceState(workspaceDir: string): WorkspaceConsumerState {
   let state = workspaceStates.get(workspaceDir);
@@ -325,10 +376,46 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
 
     // Claim the workspace consumer lease — the liveness record that lets a
     // blocked sibling process and the resume path arbitrate "is a foreign
-    // consumer alive" by PID, not by assumption (PRI-1282 P1-3).
-    const leaseWrite = writeGatewayConsumerLease({ workspaceDir, token: consumerLeaseToken, state: 'consuming' });
+    // consumer alive" by PID AND instance identity (PRI-1282 P1-3 + r4).
+    //
+    // A live foreign instance's lease must not be overwritten: refuse to
+    // consume and park on the ownership watch instead (an old instance may
+    // still have in-flight work). A lease that cannot be written means the
+    // liveness record cannot be published — never degrade into unprotected
+    // consumption (fail-closed).
+    consumerIdentity = freshConsumerIdentity(); // every start() mints a NEW instanceId
+    const foreignAtStart = foreignConsumerLeaseStatus(workspaceDir, {
+      selfToken: consumerIdentity.token,
+      selfInstanceId: consumerIdentity.instanceId,
+    });
+    if (foreignAtStart !== 'none') {
+      state.stopped = false;
+      state.quiescing = true;
+      SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_START_REFUSED', JSON.stringify({
+        reason: `foreign_consumer_lease_${foreignAtStart}`,
+        nextAction: 'An older consumer instance may still have in-flight work; this instance stays parked on the ownership watch until the foreign lease is provably dead.',
+      }));
+      logger.warn(`[PD:AutoConsumer] Start refused for ${workspaceDir}: foreign consumer lease status=${foreignAtStart} (fail-closed against double consumption).`);
+      armOwnershipWatch(workspaceDir, state, logger);
+      return;
+    }
+    const leaseWrite = writeGatewayConsumerLease({
+      workspaceDir,
+      token: consumerIdentity.token,
+      instanceId: consumerIdentity.instanceId,
+      state: 'consuming',
+    });
     if (!leaseWrite.ok) {
-      logger.warn(`[PD:AutoConsumer] Consumer lease write failed for ${workspaceDir}: ${leaseWrite.reason}`);
+      state.stopped = false;
+      state.quiescing = true;
+      SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_START_REFUSED', JSON.stringify({
+        reason: 'consumer_lease_write_failed',
+        detail: leaseWrite.reason,
+        nextAction: 'Fix the workspace .pd directory writability; consumption is refused until the lease can be published (fail-closed).',
+      }));
+      logger.error(`[PD:AutoConsumer] Consumer lease write failed for ${workspaceDir}: ${leaseWrite.reason}; refusing to consume unprotected.`);
+      armOwnershipWatch(workspaceDir, state, logger);
+      return;
     }
 
     state.stopped = false;
@@ -380,8 +467,37 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
         return;
       }
       // Renew the consumer lease at each cycle start so a blocked sibling
-      // observes OUR live PID for the whole consuming window.
-      writeGatewayConsumerLease({ workspaceDir, token: consumerLeaseToken, state: 'consuming' });
+      // observes OUR live identity for the whole consuming window. Renewal
+      // only overwrites our own (or a provably dead) lease — never a live
+      // foreign instance's record — and a failed write parks the chain
+      // rather than degrading into unprotected consumption.
+      if (!leaseOursOrDead(workspaceDir)) {
+        state.quiescing = true;
+        SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_LEASE_LOST', JSON.stringify({
+          reason: 'foreign_or_unverifiable_lease',
+          nextAction: 'Another consumer instance holds the lease; this chain parks on the ownership watch.',
+        }));
+        logger.warn(`[PD:AutoConsumer] Consumer lease for ${workspaceDir} is foreign or unverifiable; parking this chain (fail-closed).`);
+        armOwnershipWatch(workspaceDir, state, logger);
+        return;
+      }
+      const renew = writeGatewayConsumerLease({
+        workspaceDir,
+        token: consumerIdentity.token,
+        instanceId: consumerIdentity.instanceId,
+        state: 'consuming',
+      });
+      if (!renew.ok) {
+        state.quiescing = true;
+        SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_LEASE_LOST', JSON.stringify({
+          reason: 'consumer_lease_write_failed',
+          detail: renew.reason,
+          nextAction: 'Lease publish failed; consumption parks on the ownership watch (fail-closed).',
+        }));
+        logger.error(`[PD:AutoConsumer] Consumer lease renew failed for ${workspaceDir}: ${renew.reason}; parking this chain.`);
+        armOwnershipWatch(workspaceDir, state, logger);
+        return;
+      }
       const startedAtMs = Date.now();
       const outcomeHolder: { current: InternalizationConsumerCycleOutcome | undefined } = { current: undefined };
       const cycle: Promise<void> = (async () => {
@@ -492,24 +608,50 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
 
   stop(ctx: OpenClawPluginServiceContext): void {
     const workspaceDir = ctx?.workspaceDir;
+    const drainWorkspace = (dir: string, state: WorkspaceConsumerState): void => {
+      // §3.1 order: (1) forbid new cycles, (2) clear the next timer, (3)
+      // keep our lease while (4) in-flight cycles settle, (5) only then
+      // release OUR lease — token + instanceId gated. On the bounded wait
+      // timing out the protective lease STAYS: stop() returning is not
+      // proof the consumer exited (observable timeout event); the lease is
+      // released the moment the cycle's tracked promise actually settles.
+      state.stopped = true;
+      if (state.timeoutId) clearTimeout(state.timeoutId);
+      state.timeoutId = null;
+      const release = (): void => {
+        clearGatewayConsumerLease(dir, consumerIdentity.token, consumerIdentity.instanceId);
+      };
+      const tracked = state.inFlight;
+      if (tracked === null) {
+        release();
+        workspaceStates.delete(dir);
+        return;
+      }
+      workspaceStates.delete(dir); // the retired entry must not be re-armed
+      let completed = false;
+      tracked.then(() => { completed = true; }).catch(() => { completed = true; });
+      void Promise.race([tracked.catch(() => undefined), delayMs(stopDrainWaitMs)]).then(() => {
+        if (completed) {
+          release();
+        } else {
+          SystemLogger.log(dir, 'INTERNALIZATION_CONSUMER_STOP_DRAIN_TIMEOUT', JSON.stringify({
+            reason: 'in_flight_cycle_still_running',
+            waitMs: stopDrainWaitMs,
+            nextAction: 'The protective lease is retained; it is released when the in-flight cycle actually settles.',
+          }));
+          void tracked.then(() => release()).catch(() => release());
+        }
+      });
+    };
     if (workspaceDir) {
       const state = workspaceStates.get(workspaceDir);
       if (state) {
-        state.stopped = true;
-        if (state.timeoutId) clearTimeout(state.timeoutId);
-        state.timeoutId = null;
+        drainWorkspace(workspaceDir, state);
+      } else {
+        clearGatewayConsumerLease(workspaceDir, consumerIdentity.token, consumerIdentity.instanceId);
       }
-      workspaceStates.delete(workspaceDir);
-      // Release OUR consumer lease (token-gated — a successor instance's
-      // lease is never deleted). PID-liveness readers then see 'none'.
-      clearGatewayConsumerLease(workspaceDir, consumerLeaseToken);
     } else {
-      for (const [dir, state] of workspaceStates) {
-        state.stopped = true;
-        if (state.timeoutId) clearTimeout(state.timeoutId);
-        state.timeoutId = null;
-        clearGatewayConsumerLease(dir, consumerLeaseToken);
-      }
+      for (const [dir, state] of [...workspaceStates.entries()]) drainWorkspace(dir, state);
       workspaceStates.clear();
     }
   },
@@ -569,10 +711,29 @@ async function quiesceAndWatch(
     // workspace) makes that claim dishonest: do not ack; keep watching and
     // let the real holder's ack (or the handover's timeout) arbitrate.
     // Anything unverifiable fails closed the same way.
-    const foreign = foreignConsumerLeaseStatus(workspaceDir);
+    const foreign = foreignConsumerLeaseStatus(workspaceDir, {
+      selfToken: consumerIdentity.token,
+      selfInstanceId: consumerIdentity.instanceId,
+    });
     const mayClaimQuiesced = outcome !== 'quiesced' || foreign === 'none';
     if (outcome === 'quiesced' && foreign !== 'none') {
       logger.warn(`[PD:AutoConsumer] Foreign consumer lease status=${foreign} for ${workspaceDir}; refusing to ack 'quiesced' — only the lease holder may claim the workspace quiesced.`);
+    }
+    // §3.3: before 'quiesced' may be claimed, OUR lease lifecycle must have
+    // ended correctly — the lease transitions to 'quiesced' first, and if
+    // that write fails we cannot prove lifecycle completion → no ack.
+    if (mayClaimQuiesced && outcome === 'quiesced') {
+      const leaseEnd = writeGatewayConsumerLease({
+        workspaceDir,
+        token: consumerIdentity.token,
+        instanceId: consumerIdentity.instanceId,
+        state: 'quiesced',
+      });
+      if (!leaseEnd.ok) {
+        logger.error(`[PD:AutoConsumer] Cannot transition consumer lease to 'quiesced' for ${workspaceDir}: ${leaseEnd.reason}; refusing to ack 'quiesced' (lease lifecycle unproven).`);
+        armOwnershipWatch(workspaceDir, state, logger);
+        return;
+      }
     }
     if (mayClaimQuiesced) {
       const written = writeGatewayQuiesceAck({
@@ -619,7 +780,10 @@ async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerStat
   if (!ownership.blocked) {
     // PRI-1282 P1-3: before resuming, arbitrate against a foreign live
     // consumer lease — a sibling Gateway instance must not double-resume.
-    const foreign = foreignConsumerLeaseStatus(workspaceDir);
+    const foreign = foreignConsumerLeaseStatus(workspaceDir, {
+      selfToken: consumerIdentity.token,
+      selfInstanceId: consumerIdentity.instanceId,
+    });
     if (foreign !== 'none') {
       logger.warn(`[PD:AutoConsumer] Ownership returned to legacy_owned but foreign consumer lease status=${foreign} for ${workspaceDir}; staying parked (fail-closed against double consumption).`);
       armOwnershipWatch(workspaceDir, state, logger);
@@ -655,7 +819,10 @@ async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerStat
       || state.ackedOperation.generation !== ownership.generation;
     if (changed) {
       // Same foreign-lease honesty gate as quiesceAndWatch (PRI-1282 P1-3).
-      const foreign = foreignConsumerLeaseStatus(workspaceDir);
+      const foreign = foreignConsumerLeaseStatus(workspaceDir, {
+        selfToken: consumerIdentity.token,
+        selfInstanceId: consumerIdentity.instanceId,
+      });
       if (foreign === 'none') {
         const written = writeGatewayQuiesceAck({
           workspaceDir,

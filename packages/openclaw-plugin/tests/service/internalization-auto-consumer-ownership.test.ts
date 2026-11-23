@@ -297,3 +297,133 @@ describe('consumer lease arbitration (PRI-1282 P1-3)', () => {
     expect(runInternalizationConsumerCycle).not.toHaveBeenCalled();
   });
 });
+
+// ─── PRI-1282 review round 4 §3: consumer INSTANCE lifecycle ────────────────
+import {
+  __autoConsumerTestSeams,
+} from '../../src/service/internalization-auto-consumer-service.js';
+import {
+  foreignConsumerLeaseStatus,
+  readGatewayConsumerLease,
+  writeGatewayConsumerLease,
+} from '../../src/service/gateway-consumer-lease.js';
+
+describe('consumer instance lifecycle (PRI-1282 r4 §3)', () => {
+  const LEASE_FILE = () => path.join(workspaceDir, '.pd', 'gateway-consumer-lease.json');
+
+  /** A lease owned by a DIFFERENT instance — optionally same pid. */
+  function foreignInstanceLease(pid: number, instanceId = 'other-instance'): void {
+    fs.writeFileSync(LEASE_FILE(), JSON.stringify({
+      schemaVersion: 'pd.gateway-consumer-lease.v1',
+      token: 'foreign-token',
+      instanceId,
+      pid,
+      host: os.hostname(),
+      workspaceDir,
+      state: 'consuming',
+      startedAt: '2026-11-23T00:00:00.000Z',
+      updatedAt: '2026-11-23T00:00:00.000Z',
+    }), 'utf8');
+  }
+
+  it('same PID but a different instanceId is a DIFFERENT consumer (alive); our own identity is not foreign', () => {
+    foreignInstanceLease(process.pid, 'old-instance');
+    expect(foreignConsumerLeaseStatus(workspaceDir)).toBe('alive');
+    expect(
+      foreignConsumerLeaseStatus(workspaceDir, { selfInstanceId: 'old-instance' }),
+    ).toBe('none');
+    expect(
+      foreignConsumerLeaseStatus(workspaceDir, { selfToken: 'foreign-token' }),
+    ).toBe('none');
+    // A different instance of this process is still foreign to us.
+    expect(
+      foreignConsumerLeaseStatus(workspaceDir, { selfInstanceId: 'brand-new' }),
+    ).toBe('alive');
+  });
+
+  it('start() refuses to consume while a live foreign INSTANCE holds the lease — same PID, different instance', () => {
+    foreignInstanceLease(process.pid, 'older-instance');
+    startService();
+    expect(systemLogEvents()).toContain('INTERNALIZATION_CONSUMER_START_REFUSED');
+    expect(systemLogEvents()).not.toContain('INTERNALIZATION_CONSUMER_STARTED');
+    expect(runInternalizationConsumerCycle).not.toHaveBeenCalled();
+    // The foreign lease was NOT overwritten or removed.
+    expect(readGatewayConsumerLease(workspaceDir)).toMatchObject({
+      token: 'foreign-token',
+      instanceId: 'older-instance',
+    });
+  });
+
+  it('start() refuses to consume while a foreign-PID live lease exists (Gateway restart while old consumer alive)', () => {
+    foreignInstanceLease(process.ppid ?? 1, 'sibling-gateway');
+    startService();
+    expect(systemLogEvents()).toContain('INTERNALIZATION_CONSUMER_START_REFUSED');
+    expect(systemLogEvents()).not.toContain('INTERNALIZATION_CONSUMER_STARTED');
+    expect(runInternalizationConsumerCycle).not.toHaveBeenCalled();
+  });
+
+  it('start() refuses when the lease cannot be published (no unprotected consumption)', () => {
+    fs.rmSync(path.join(workspaceDir, '.pd'), { recursive: true, force: true });
+    fs.writeFileSync(path.join(workspaceDir, '.pd'), 'not a directory', 'utf8');
+    startService();
+    expect(systemLogEvents()).toContain('INTERNALIZATION_CONSUMER_START_REFUSED');
+    expect(systemLogEvents()).not.toContain('INTERNALIZATION_CONSUMER_STARTED');
+    expect(runInternalizationConsumerCycle).not.toHaveBeenCalled();
+  });
+
+  it('stop() holds the lease while a cycle is in-flight and releases it only after the cycle settles', async () => {
+    startService();
+    let settle!: () => void;
+    const inFlight = new Promise<void>((resolve) => { settle = resolve; });
+    __autoConsumerTestSeams.injectInFlight(workspaceDir, inFlight);
+    __autoConsumerTestSeams.setStopDrainWaitMs(5_000);
+    InternalizationAutoConsumerService.stop({ workspaceDir } as never);
+    await vi.advanceTimersByTimeAsync(0);
+    // Lease retained while the in-flight cycle may still be running.
+    expect(fs.existsSync(LEASE_FILE())).toBe(true);
+    settle();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fs.existsSync(LEASE_FILE())).toBe(false);
+  });
+
+  it('stop() drain timeout keeps the protective lease and records an observable timeout — no silent exit', async () => {
+    startService();
+    __autoConsumerTestSeams.injectInFlight(workspaceDir, new Promise<void>(() => { /* never */ }));
+    __autoConsumerTestSeams.setStopDrainWaitMs(50);
+    InternalizationAutoConsumerService.stop({ workspaceDir } as never);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(systemLogEvents()).toContain('INTERNALIZATION_CONSUMER_STOP_DRAIN_TIMEOUT');
+    expect(fs.existsSync(LEASE_FILE())).toBe(true); // protective lease retained
+    __autoConsumerTestSeams.setStopDrainWaitMs(30_000);
+  });
+
+  it('stop() does not delete a successor instance\'s lease (token + instanceId gated)', async () => {
+    startService();
+    __autoConsumerTestSeams.setStopDrainWaitMs(5_000);
+    // A successor instance claimed the lease before our stop ran.
+    const successor = writeGatewayConsumerLease({
+      workspaceDir,
+      token: 'successor-token',
+      instanceId: 'successor-instance',
+      state: 'consuming',
+    });
+    expect(successor.ok).toBe(true);
+    InternalizationAutoConsumerService.stop({ workspaceDir } as never);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readGatewayConsumerLease(workspaceDir)).toMatchObject({
+      token: 'successor-token',
+      instanceId: 'successor-instance',
+    });
+  });
+
+  it('the quiesced ack requires the lease lifecycle to end first — an unwritable lease means NO ack', async () => {
+    ownership(preparingRecord('op-leasefail', 3));
+    // Start, then break .pd writability so the lease 'quiesced' transition fails.
+    fs.rmSync(path.join(workspaceDir, '.pd', 'gateway-quiesce-ack.json'), { force: true });
+    startService();
+    fs.rmSync(path.join(workspaceDir, '.pd'), { recursive: true, force: true });
+    fs.writeFileSync(path.join(workspaceDir, '.pd'), 'not a directory', 'utf8');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readGatewayQuiesceAck(workspaceDir)).toBeNull();
+  });
+});

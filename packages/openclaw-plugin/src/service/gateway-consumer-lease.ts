@@ -28,6 +28,13 @@ export interface GatewayConsumerLease {
   schemaVersion: string;
   /** Identity of THIS consumer instance — one per process lifetime. */
   token: string;
+  /**
+   * PRI-1282 review r4: per-INSTANCE identity. A Gateway restart (or a
+   * stop()/start() inside one process) mints a new instanceId — PID alone
+   * cannot distinguish two lifecycles of the same process, and a new
+   * instance must never be mistaken for (or allowed to clear) the old one.
+   */
+  instanceId: string;
   pid: number;
   host: string;
   workspaceDir: string;
@@ -41,8 +48,13 @@ function leasePath(workspaceDir: string): string {
   return path.join(workspaceDir, '.pd', GATEWAY_CONSUMER_LEASE_FILE);
 }
 
-/** Fresh identity for this process's consumer instance. */
+/** Fresh identity for ONE consumer instance — minted per start(). */
 export function gatewayConsumerLeaseToken(): string {
+  return crypto.randomUUID();
+}
+
+/** Fresh per-instance identity (PRI-1282 r4: PID is not an instance id). */
+export function gatewayConsumerInstanceId(): string {
   return crypto.randomUUID();
 }
 
@@ -87,13 +99,14 @@ export function parseGatewayConsumerLease(raw: unknown): GatewayConsumerLease | 
     || typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0
     || typeof host !== 'string' || host.length === 0
     || typeof workspaceDir !== 'string' || workspaceDir.length === 0
+    || typeof (record.instanceId) !== 'string' || (record.instanceId as string).length === 0
     || (state !== 'consuming' && state !== 'quiesced')
     || typeof startedAt !== 'string' || startedAt.length === 0
     || typeof updatedAt !== 'string' || updatedAt.length === 0
   ) {
     return null;
   }
-  return { schemaVersion, token, pid, host, workspaceDir, state, startedAt, updatedAt };
+  return { schemaVersion, token, instanceId: record.instanceId as string, pid, host, workspaceDir, state, startedAt, updatedAt };
 }
 
 /** Read the lease; null on missing or unreadable/malformed content. */
@@ -113,6 +126,7 @@ export function readGatewayConsumerLease(workspaceDir: string): GatewayConsumerL
 export function writeGatewayConsumerLease(input: {
   workspaceDir: string;
   token: string;
+  instanceId: string;
   state: 'consuming' | 'quiesced';
   now?: () => Date;
 }): { ok: true } | { ok: false; reason: string } {
@@ -120,6 +134,7 @@ export function writeGatewayConsumerLease(input: {
   const lease: GatewayConsumerLease = {
     schemaVersion: GATEWAY_CONSUMER_LEASE_SCHEMA_VERSION,
     token: input.token,
+    instanceId: input.instanceId,
     pid: process.pid,
     host: os.hostname(),
     workspaceDir: input.workspaceDir,
@@ -155,9 +170,12 @@ export function writeGatewayConsumerLease(input: {
  * longer carries our token belongs to a successor instance — never delete
  * another consumer's liveness record.
  */
-export function clearGatewayConsumerLease(workspaceDir: string, token: string): void {
+export function clearGatewayConsumerLease(workspaceDir: string, token: string, instanceId?: string): void {
   const current = readGatewayConsumerLease(workspaceDir);
   if (current === null || current.token !== token) return;
+  // Release is gated on BOTH token and instance identity (PRI-1282 r4): a
+  // successor instance's lease is never deleted by a retiring instance.
+  if (instanceId !== undefined && current.instanceId !== instanceId) return;
   try {
     fs.unlinkSync(leasePath(workspaceDir));
   } catch {
@@ -180,12 +198,19 @@ export type ForeignConsumerLeaseStatus = 'alive' | 'none' | 'unknown';
  *  - 'unknown': lease unreadable/malformed, foreign host, or PID liveness
  *               undecidable — fail-closed: never ack "quiesced" on it.
  *
- * A lease carrying THIS process's PID is not foreign (same process → 'none'
- * unless a stale different-token file exists, which is still not foreign).
+ * Process liveness and INSTANCE identity are judged separately (PRI-1282
+ * r4): a lease carrying THIS process's PID but a different instanceId/token
+ * is a DIFFERENT consumer (an older lifecycle of this process that may still
+ * have in-flight work) — it is 'alive', never 'none'. Only our own
+ * token/instanceId yields 'none' on a same-PID lease.
  */
 export function foreignConsumerLeaseStatus(
   workspaceDir: string,
-  opts?: { processAlive?: (pid: number) => 'alive' | 'dead' | 'unknown' },
+  opts?: {
+    processAlive?: (pid: number) => 'alive' | 'dead' | 'unknown';
+    selfToken?: string;
+    selfInstanceId?: string;
+  },
 ): ForeignConsumerLeaseStatus {
   let raw: string;
   try {
@@ -201,7 +226,11 @@ export function foreignConsumerLeaseStatus(
     return 'unknown';
   }
   if (parsed === null) return 'unknown';
-  if (parsed.pid === process.pid) return 'none';
+  // A 'quiesced' lease's lifecycle provably ended — it is take-over-able
+  // evidence the consumer drained, not a live consumer.
+  if (parsed.state === 'quiesced') return 'none';
+  if (parsed.token === opts?.selfToken || parsed.instanceId === opts?.selfInstanceId) return 'none';
+  if (parsed.pid === process.pid) return 'alive'; // different instance of this process
   if (parsed.host !== os.hostname()) {
     // Remote-holder liveness is undecidable locally — fail closed.
     return 'unknown';
