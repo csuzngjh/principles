@@ -56,17 +56,20 @@ import { handleConfigRoute } from './routes/config.js';
 import { sendJson, sendNotFound, sendError } from './utils/response.js';
 import { activeReleaseRecordPath, getInstallLayoutPathsFromPdHome } from '@principles/install-layout';
 import {
-  consoleHealthUrl,
+  consoleIdentityUrl,
   decideReleaseHandoverWatch,
   HANDOVER_BIND_WAIT_MS,
   HANDOVER_HEALTHY_TIMEOUT_MS,
+  HANDOVER_RELISTEN_RETRY_MS,
   isInstalledConsoleCode,
   listenWithHandoverRetry,
   performReleaseHandover,
-  probeConsoleHealth,
+  probeConsolePid,
   startConsoleSuccessor,
   startReleaseHandoverWatch,
-  waitUntilServing,
+  stopSuccessor,
+  waitUntilAnswer,
+  type SuccessorProcess,
 } from './release-handover.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -911,13 +914,15 @@ export async function main(launch: ConsoleLaunch = {}): Promise<void> {
     isInstalledConsoleCode(path.dirname(__filename), getInstallLayoutPathsFromPdHome(pdHome).consoleDir),
   );
   let handoverOffAnnounced = false;
+  /** The successor this process started, for as long as a called-off handover may have to stop it. */
+  let successor: SuccessorProcess | null = null;
 
   // PRI-872: a second instance on an occupied port must fail with an
   // actionable message, not an unhandled 'error' stack. The usual cause is the
   // production console already listening on 3100. A handover successor is the
   // one legitimate second instance: it was started before its predecessor let
   // go of the port, so for a bounded time it retries instead of giving up.
-  listenWithHandoverRetry({
+  const listener = listenWithHandoverRetry({
     server,
     port,
     host,
@@ -942,22 +947,23 @@ export async function main(launch: ConsoleLaunch = {}): Promise<void> {
         onSuperseded: () => {
           void performReleaseHandover({
             log: (message) => console.log(message),
-            startSuccessor: () => startConsoleSuccessor(
-              { args: argv.slice(2) },
-              (message) => console.log(message),
-            ),
+            startSuccessor: () => {
+              successor = startConsoleSuccessor(
+                { args: argv.slice(2) },
+                (message) => console.log(message),
+              );
+              return successor;
+            },
             stopAccepting,
-            waitForSuccessor: () => waitUntilServing(
-              () => probeConsoleHealth(consoleHealthUrl(host, port), 1000),
+            waitForSuccessor: () => waitUntilAnswer(
+              () => probeConsolePid(consoleIdentityUrl(host, port), 1000),
               HANDOVER_HEALTHY_TIMEOUT_MS,
             ),
-            resumeAccepting: () => new Promise<void>((resolve, reject) => {
-              server.once('error', reject);
-              server.listen(port, host, () => {
-                server.off('error', reject);
-                resolve();
-              });
-            }),
+            // Only the process this one started is ever stopped, and only when
+            // it failed to answer: it may be holding the port while it does.
+            abandonSuccessor: () => stopSuccessor(successor),
+            // A successor that was just stopped may still be letting go of the port.
+            resumeAccepting: () => listener.relisten(HANDOVER_RELISTEN_RETRY_MS),
             exit: (code) => {
               void closeServices().finally(() => process.exit(code));
             },

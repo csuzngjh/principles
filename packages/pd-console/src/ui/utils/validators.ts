@@ -3905,6 +3905,17 @@ export interface ApplyUpdateResultData {
   nextAction?: string;
   /** Present when the OpenClaw gateway could not be stopped/restarted around the update (PRI-723). */
   gatewayNotice?: string;
+  /**
+   * The console process that accepted the transaction. The page keeps it as
+   * its baseline for the release handover: the first transaction answer it
+   * can read may already come from the successor.
+   */
+  serverPid?: number;
+}
+
+/** A process id as this file accepts one: a positive safe integer (the console's `serverPid`). */
+export function isProcessId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
 export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | null {
@@ -3924,6 +3935,9 @@ export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | n
   }
   if (Object.hasOwn(v, 'transactionId') && isString(v.transactionId)) {
     result.transactionId = v.transactionId;
+  }
+  if (isProcessId(v.serverPid)) {
+    result.serverPid = v.serverPid;
   }
   if (Object.hasOwn(v, 'updatedFiles') && Array.isArray(v.updatedFiles)) {
     result.updatedFiles = v.updatedFiles.filter((f: unknown): f is string => typeof f === 'string');
@@ -4118,9 +4132,7 @@ export function validateUpdateTransaction(v: unknown): UpdateTransactionData | n
     lastAt: Object.hasOwn(v, 'lastAt') && isString(v.lastAt) ? v.lastAt : null,
     productVersion: Object.hasOwn(v, 'productVersion') && isString(v.productVersion) ? v.productVersion : null,
     reason: Object.hasOwn(v, 'reason') && isString(v.reason) ? v.reason : undefined,
-    serverPid: typeof v.serverPid === 'number' && Number.isSafeInteger(v.serverPid) && v.serverPid > 0
-      ? v.serverPid
-      : undefined,
+    serverPid: isProcessId(v.serverPid) ? v.serverPid : undefined,
     // An unknown value is "not said" — never a mode the page would wait on.
     handover: isUpdateHandoverOwner(v.handover) ? v.handover : undefined,
     progress: Object.hasOwn(v, 'progress') && v.progress !== null ? validateUpdateTransactionProgress(v.progress) : null,

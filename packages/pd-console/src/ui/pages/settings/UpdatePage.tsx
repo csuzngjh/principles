@@ -29,7 +29,7 @@ import type {
   UpdateRecoveryData,
   UpdateTransactionProgress,
 } from "../../api.js";
-import { validateUpdateStatus, validateUpdateHistory, validateUpdateHistoryPruneResult, validateUpdateRecovery, validateUpdateTransaction, type UpdateHandoverOwner } from "../../utils/validators.js";
+import { validateUpdateStatus, validateUpdateHistory, validateUpdateHistoryPruneResult, validateUpdateRecovery, validateUpdateTransaction, isProcessId, type UpdateHandoverOwner } from "../../utils/validators.js";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -227,6 +227,12 @@ export function UpdatePage() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   /** The previous download sample: a rate needs two points in time. */
   const previousTransfer = useRef<TransferSample | null>(null);
+  /**
+   * The console process that accepted the update — the baseline the release
+   * handover is measured from. It comes from the acceptance, not from the first
+   * readable poll: by then the successor may already be the one answering.
+   */
+  const acceptedServerPid = useRef<number | undefined>(undefined);
 
   // History and recovery are read from local files. They gate only the first
   // paint of the page.
@@ -321,6 +327,8 @@ export function UpdatePage() {
       // Track the detached transaction; only its terminal phase ends this flow.
       setHandoverWait(null);
       previousTransfer.current = null;
+      // A server that does not name itself leaves the baseline unknown.
+      acceptedServerPid.current = isProcessId(data.serverPid) ? data.serverPid : undefined;
       setInProgress({
         transactionId: data.transactionId,
         lastState: null, startedAt: null, lastAt: null, progress: null,
@@ -408,8 +416,8 @@ export function UpdatePage() {
     let cancelled = false;
     let inFlight = false;
     let unreadablePolls = 0;
-    /** The console process this update was first seen served by — the one a handover replaces. */
-    let predecessorPid: number | undefined;
+    /** The console process this update was accepted by — the one a handover replaces. */
+    let predecessorPid: number | undefined = acceptedServerPid.current;
     const tick = async () => {
       // One poll at a time. A tick that finds its predecessor still waiting is
       // skipped, so a slow or stalled server can never stack requests behind
@@ -464,6 +472,13 @@ export function UpdatePage() {
           const version = tx.productVersion ?? '';
           // A server that does not say (`handover` absent) is not waited for.
           const owner = tx.handover ?? 'manual';
+          // The answering process is not the one that accepted: the handover
+          // already happened while this page could not read the transaction.
+          // This page is still the old version's — go to the new one now.
+          if (owner !== 'manual' && tx.serverPid !== undefined && tx.serverPid !== predecessorPid) {
+            reloadPage();
+            return;
+          }
           setHandoverWait(owner === 'manual'
             ? { transactionId, version, predecessorPid, owner, pollMs: MANUAL_HANDOVER_POLL_INTERVAL_MS, limit: MANUAL_HANDOVER_POLL_LIMIT }
             : {

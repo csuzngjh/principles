@@ -16,9 +16,11 @@
  * exits. The Owner's tab reloads into the new version with nothing to do.
  *
  * Safety properties, in order of importance:
- *  - NEVER leave the port unserved. This process stops accepting only after
- *    the successor exists, and takes the port back if the successor does not
- *    come up in time. It exits only once something answers on the port.
+ *  - NEVER leave the port unserved, and never leave it worse than before. This
+ *    process stops accepting only after the successor exists; if the successor
+ *    does not answer in time it is STOPPED first — it may be listening already —
+ *    and only then is the port taken back. This process exits only once a
+ *    console answers on the port.
  *  - The record is the ONLY trigger. It is written after the transaction
  *    journal reached `confirmed`, so a failed or rolled-back update (record
  *    unchanged) and a mid-flight update (record not yet written) never hand
@@ -26,6 +28,10 @@
  *  - One handover per change: the watch fires once, then stops.
  *  - The successor is a fixed module of the installed build — never a path
  *    this process was handed — and its launch line travels over stdin as data.
+ *  - The successor must not hold the installed runtime open. It works from the
+ *    directory its launcher was run from, like any console, never from inside
+ *    the runtime: on Windows a working directory keeps its tree from being
+ *    renamed, and the next update starts by renaming the runtime away.
  *
  * Two consoles do NOT hand themselves over, and both are decisions about
  * ownership rather than capability:
@@ -59,6 +65,10 @@ export const HANDOVER_BIND_RETRY_MS = 250;
 export const RELEASE_WATCH_INTERVAL_MS = 2_000;
 /** How long the predecessor waits for its successor to answer on the port. */
 export const HANDOVER_HEALTHY_TIMEOUT_MS = 20_000;
+/** How long to wait for a stopped successor to actually be gone. */
+export const HANDOVER_ABANDON_WAIT_MS = 5_000;
+/** How long "address in use" is tolerated while the port is taken back. */
+export const HANDOVER_RELISTEN_RETRY_MS = 5_000;
 
 /** What identifies "the release this process started on". */
 export interface ReleaseIdentity {
@@ -218,11 +228,14 @@ export function startReleaseHandoverWatch(options: ReleaseHandoverWatchOptions):
   };
 }
 
-/** The part of a forked child the handover needs; tests hand in an EventEmitter with a `pid`. */
+/** The part of a forked child the handover needs; tests hand in an EventEmitter with a `pid` and a `kill`. */
 export interface SuccessorProcess {
   readonly pid?: number;
   once(event: 'spawn', listener: () => void): unknown;
   once(event: 'error', listener: (error: Error) => void): unknown;
+  once(event: 'exit', listener: () => void): unknown;
+  /** Ends the process. Called only ever on the successor THIS process started. */
+  kill(): void;
 }
 
 /** The successor's whole launch line: this process's own command-line arguments. */
@@ -232,10 +245,9 @@ export interface ConsoleSuccessorSpec {
 
 export interface SuccessorLaunch {
   /**
-   * Directory the successor module is resolved from. Production leaves it
-   * alone: the fixed module beside this file, which an update has already
-   * replaced with the installed release's copy. Tests point at a directory
-   * of their own.
+   * Where `./successor.js` is resolved from. Production leaves it alone: the
+   * build's own directory, which an update has already replaced with the
+   * installed release's copy. Tests point at a directory holding a stand-in.
    */
   readonly cwd?: string;
 }
@@ -244,12 +256,18 @@ export interface SuccessorLaunch {
  * Starts the successor: the installed build's own successor module, detached
  * and unattended so it outlives this process, with the launch line on its
  * stdin. Null when it could not be started — the caller then keeps serving.
+ *
+ * The directory above only serves to resolve the module path: the successor
+ * is told where this process was working and leaves the build's directory at
+ * once (see successor.ts). It must not go on working from inside the installed
+ * runtime — on Windows a working directory keeps its tree from being renamed,
+ * and the next update starts by renaming the runtime away.
  */
 export function startConsoleSuccessor(spec: ConsoleSuccessorSpec, log: (message: string) => void, launch: SuccessorLaunch = {}): SuccessorProcess | null {
-  const successorDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const buildDirectory = path.dirname(fileURLToPath(import.meta.url));
   try {
     const child: ChildProcess = fork('./successor.js', [], {
-      cwd: launch.cwd ?? successorDirectory,
+      cwd: launch.cwd ?? buildDirectory,
       // stdin carries the launch line; the successor has no terminal to talk
       // to. `fork` insists on an IPC channel — the successor closes it as soon
       // as it has read its configuration, so it outlives this process.
@@ -257,7 +275,7 @@ export function startConsoleSuccessor(spec: ConsoleSuccessorSpec, log: (message:
       detached: true,
       windowsHide: true,
     });
-    child.stdin?.end(`${JSON.stringify({ args: spec.args })}\n`);
+    child.stdin?.end(`${JSON.stringify({ args: spec.args, cwd: process.cwd() })}\n`);
     child.unref();
     return child;
   } catch (error) {
@@ -266,9 +284,68 @@ export function startConsoleSuccessor(spec: ConsoleSuccessorSpec, log: (message:
   }
 }
 
-export function consoleHealthUrl(host: string, port: number): string {
+/** A transaction id that names no transaction: it only asks the console to identify itself (it matches the route's id pattern). */
+const IDENTITY_PROBE_ID = 'handover-identity-probe';
+
+/**
+ * The url that asks the console on `port` to name itself. The transaction
+ * route answers it from the journal directory alone — no diagnostics, no
+ * database — so a console can answer the moment it is listening. `/api/health`
+ * cannot serve here: it runs diagnostics with budgets longer than a handover
+ * can wait, so a healthy successor would look absent.
+ */
+export function consoleIdentityUrl(host: string, port: number): string {
   const authority = host.includes(':') ? `[${host}]:${port}` : `${host}:${port}`;
-  return `http://${authority}/api/health`;
+  return `http://${authority}/api/update/transaction/${IDENTITY_PROBE_ID}`;
+}
+
+const IDENTITY_BODY_LIMIT = 4096;
+
+/**
+ * The pid of the console answering at `url`, or null when nobody does, the
+ * answer is not a console's, or it does not arrive in time. Never rejects.
+ */
+export function probeConsolePid(url: string, timeoutMs: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (pid: number | null): void => {
+      if (settled) return;
+      settled = true;
+      resolve(pid);
+    };
+    const request = http.get(url, (response) => {
+      response.on('error', () => finish(null));
+      response.on('close', () => finish(null));
+      if (response.statusCode !== 200) {
+        response.resume();
+        finish(null);
+        return;
+      }
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => {
+        body += chunk;
+        // Bounded (rc-8): an answer this long is not the one-line fact asked for.
+        if (body.length > IDENTITY_BODY_LIMIT) request.destroy();
+      });
+      response.on('end', () => {
+        let pid: unknown;
+        try {
+          const value: unknown = JSON.parse(body);
+          const data = typeof value === 'object' && value !== null ? Reflect.get(value, 'data') : undefined;
+          pid = typeof data === 'object' && data !== null ? Reflect.get(data, 'serverPid') : undefined;
+        } catch {
+          pid = undefined;
+        }
+        finish(typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0 ? pid : null);
+      });
+    });
+    request.setTimeout(timeoutMs, () => {
+      request.destroy();
+      finish(null);
+    });
+    request.on('error', () => finish(null));
+  });
 }
 
 export interface ConsoleListenRequest {
@@ -289,39 +366,51 @@ export interface ConsoleListenRequest {
  * but only for a bounded time, after which it is the dead end it always was.
  * Any other error is never retried.
  */
-export function listenWithHandoverRetry(request: ConsoleListenRequest): void {
+export interface ConsoleListener {
+  /**
+   * Binds again after the port was released for a handover, retrying
+   * "address in use" for `retryInUseForMs` (a successor that was just stopped
+   * may still be letting go). Rejects with the error that ended the attempts.
+   * That failure is the handover's to report — it is not the dead end a
+   * boot-time bind failure is, so it never reaches `giveUp`.
+   */
+  relisten(retryInUseForMs: number): Promise<void>;
+}
+
+export function listenWithHandoverRetry(request: ConsoleListenRequest): ConsoleListener {
   const { server, port, host, onListening, giveUp } = request;
-  const deadline = Date.now() + (request.retryInUseForMs ?? 0);
   const retryMs = request.retryMs ?? HANDOVER_BIND_RETRY_MS;
+  let retryUntil = Date.now() + (request.retryInUseForMs ?? 0);
+  /** Set while a `relisten` is pending: a bind failure then is reported there. */
+  let pendingRelisten: ((error: Error & { code?: string }) => void) | null = null;
   server.on('listening', onListening);
   server.on('error', (error: Error & { code?: string }) => {
-    if (error.code === 'EADDRINUSE' && Date.now() < deadline) {
-      // Not unref'd: until the port is theirs, this retry is what keeps a
+    if (error.code === 'EADDRINUSE' && Date.now() < retryUntil) {
+      // Ref'd on purpose: until the port is theirs, this retry is what keeps a
       // successor alive.
       setTimeout(() => { server.listen(port, host); }, retryMs);
+      return;
+    }
+    const reject = pendingRelisten;
+    pendingRelisten = null;
+    if (reject !== null) {
+      reject(error);
       return;
     }
     giveUp(error);
   });
   server.listen(port, host);
-}
-
-/**
- * True once the console at `url` answers 200. Never rejects: a console that
- * cannot be reached is simply not serving.
- */
-export function probeConsoleHealth(url: string, timeoutMs: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const request = http.get(url, (response) => {
-      response.resume();
-      resolve(response.statusCode === 200);
-    });
-    request.setTimeout(timeoutMs, () => {
-      request.destroy();
-      resolve(false);
-    });
-    request.on('error', () => resolve(false));
-  });
+  return {
+    relisten: (retryInUseForMs) => new Promise<void>((resolve, reject) => {
+      pendingRelisten = reject;
+      retryUntil = Date.now() + retryInUseForMs;
+      server.once('listening', () => {
+        pendingRelisten = null;
+        resolve();
+      });
+      server.listen(port, host);
+    }),
+  };
 }
 
 export interface ServingWaitOptions {
@@ -329,31 +418,49 @@ export interface ServingWaitOptions {
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-/** Resolves true once `probe` does, false at the deadline. Never rejects. */
-export async function waitUntilServing(
-  probe: () => Promise<boolean>,
+/**
+ * Resolves with the first answer `probe` gives that is not null, or null at
+ * the deadline. Never rejects.
+ */
+export async function waitUntilAnswer<T>(
+  probe: () => Promise<T | null>,
   timeoutMs: number,
   options: ServingWaitOptions = {},
-): Promise<boolean> {
+): Promise<T | null> {
   const intervalMs = options.intervalMs ?? HANDOVER_BIND_RETRY_MS;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    if (await probe()) return true;
-    if (Date.now() >= deadline) return false;
+    const answer = await probe();
+    if (answer !== null) return answer;
+    if (Date.now() >= deadline) return null;
     await sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
   }
+}
+
+/**
+ * Stops the successor this process started, and resolves once it is gone — or
+ * when `waitMs` has passed, whichever comes first: a successor that will not
+ * die must not hold this console's decision about its own port for good.
+ */
+export async function stopSuccessor(successor: SuccessorProcess | null, waitMs: number = HANDOVER_ABANDON_WAIT_MS): Promise<void> {
+  if (successor === null) return;
+  const gone = new Promise<void>((resolve) => { successor.once('exit', () => resolve()); });
+  successor.kill();
+  await Promise.race([gone, new Promise<void>((resolve) => { setTimeout(resolve, waitMs); })]);
 }
 
 export interface ReleaseHandoverDeps {
   readonly startSuccessor: () => SuccessorProcess | null;
   /** Stops accepting connections; in-flight requests still finish. */
   readonly stopAccepting: () => Promise<void>;
-  /** True once something answers on the port again — which can only be the successor. */
-  readonly waitForSuccessor: () => Promise<boolean>;
-  /** Takes the port back when the successor never came up. */
+  /** The pid of the console answering on the port again, or null at the deadline. */
+  readonly waitForSuccessor: () => Promise<number | null>;
+  /** Ends the successor this process started, and resolves once it is gone (within a bound). */
+  readonly abandonSuccessor: () => Promise<void>;
+  /** Binds the port again. Rejects when it cannot be taken back. */
   readonly resumeAccepting: () => Promise<void>;
-  /** Ends this process. Called only after the successor is confirmed serving. */
+  /** Ends this process. Called only once the port is someone's — or when it can be nobody's. */
   readonly exit: (code: number) => void;
   readonly log?: (message: string) => void;
   readonly spawnTimeoutMs?: number;
@@ -362,9 +469,11 @@ export interface ReleaseHandoverDeps {
 /**
  * Hands the port over to a successor running the installed release.
  *
- * Every failure keeps this process serving: a successor that cannot be
- * started is reported and dropped; one that never answers has its port taken
- * back. The port goes unserved only for the successor's own boot time.
+ * Every failure keeps this process serving, or leaves it no worse off: a
+ * successor that cannot be started is reported and dropped; one that never
+ * answers is stopped before the port is taken back — it may be listening
+ * already, and binding over a live listener is not possible. The port goes
+ * unserved only for the successor's own boot time.
  */
 export async function performReleaseHandover(deps: ReleaseHandoverDeps): Promise<void> {
   const log = deps.log ?? ((message: string) => console.log(message));
@@ -401,19 +510,25 @@ export async function performReleaseHandover(deps: ReleaseHandoverDeps): Promise
   log(`[pd-console] Installed release changed — handing over to the new release (successor pid ${successor.pid}).`);
   await deps.stopAccepting();
 
-  if (await deps.waitForSuccessor()) {
+  const serving = await deps.waitForSuccessor();
+  if (serving !== null) {
     // Said plainly, because in a terminal this is the moment `pd console open`
-    // returns to the prompt: the console did not stop, it moved.
-    log(`[pd-console] Successor is serving; this console exits. The console keeps running on the new release (pid ${successor.pid ?? 'unknown'}).`);
+    // returns to the prompt: the console did not stop, it moved. Whoever
+    // answers was started after the release changed, so it runs the new code.
+    const who = serving === successor.pid ? 'The successor console' : `Another console`;
+    log(`[pd-console] ${who} (pid ${serving}) is serving on the new release; this console exits.`);
     deps.exit(0);
     return;
   }
 
-  log('[pd-console] Successor did not come up in time — taking the port back.');
+  log('[pd-console] Successor did not come up in time — stopping it and taking the port back.');
+  await deps.abandonSuccessor();
   try {
     await deps.resumeAccepting();
   } catch (error) {
     log(`[pd-console] Could not take the port back: ${error instanceof Error ? error.message : String(error)}`);
     deps.exit(1);
+    return;
   }
+  log('[pd-console] Port taken back — this console keeps serving the previous release, and will not hand itself over again before it is restarted.');
 }

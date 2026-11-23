@@ -109,7 +109,7 @@ describe('POST /api/update/apply-full starts an update only for a request that i
   /** Opens the gate; resolves with the function that answers it. */
   function holdGateOpen(): (authority: unknown) => void {
     let answer: (authority: unknown) => void = () => undefined;
-    mocks.gate = new Promise<void>((resolve) => { answer = resolve; });
+    mocks.gate = new Promise<unknown>((resolve) => { answer = (authority) => resolve(authority); });
     return (authority) => answer(authority);
   }
 
@@ -214,7 +214,16 @@ describe('POST /api/update/apply-full starts an update only for a request that i
 
     expect(response.status).toBe(200);
     const body: unknown = await response.json();
-    expect(body).toMatchObject({ success: true, data: { state: 'update_in_progress', transactionId: expect.stringMatching(TRANSACTION_ID) } });
+    expect(body).toMatchObject({
+      success: true,
+      data: {
+        state: 'update_in_progress',
+        // Names the console that took the update: the page measures the
+        // release handover from it, not from the first transaction it reads.
+        serverPid: process.pid,
+        transactionId: expect.stringMatching(TRANSACTION_ID),
+      },
+    });
     expect(mocks.spawn).toHaveBeenCalledTimes(1);
     // And nothing was abandoned.
     expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining('abandoned'));

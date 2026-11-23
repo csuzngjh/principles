@@ -3,10 +3,10 @@
  * the installed one.
  *
  * The decision logic runs against injected records; the port mechanics run
- * against REAL sockets on this loopback: the retrying bind, the health probe,
- * the gap while the port changes hands, and the fallback that takes the port
- * back. A handover that only works against fakes is exactly the kind that
- * leaves the Owner without a console.
+ * against REAL sockets on this loopback: the retrying bind, the identity
+ * probe, the gap while the port changes hands, and the fallback that stops the
+ * successor and takes the port back. A handover that only works against fakes
+ * is exactly the kind that leaves the Owner without a console.
  *
  * The contract pinned here:
  * 1. WHAT triggers it: only a readable active record naming a different
@@ -14,11 +14,15 @@
  *    probe, or the off switch — nothing happens. It fires once per change.
  * 2. WHO does it at all: only a console that runs from the installed runtime
  *    and was not launched by the Companion (which relaunches what it owns).
- * 3. NEVER leave the port unserved: stop accepting only after the successor
- *    exists; take the port back when it never answers; exit only when
- *    something answers.
+ * 3. NEVER leave the port unserved, and never leave it worse than before:
+ *    stop accepting only after the successor exists; a successor that does not
+ *    answer is STOPPED before the port is taken back (it may be listening
+ *    already); exit only once a console answers on the port.
  * 4. The successor is started as a fixed module with its launch line on
- *    stdin — never as a path on a command line.
+ *    stdin — never as a path on a command line — and leaves the build
+ *    directory at once, so it cannot hold the installed runtime open.
+ * 5. Readiness is asked from a route a console can answer the moment it
+ *    listens, and the answer names the process.
  */
 import { EventEmitter } from 'node:events';
 import { createServer, type Server } from 'node:http';
@@ -29,21 +33,22 @@ import type { ActiveReleaseRecord } from '@principles/install-layout';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CONSOLE_RELEASE_HANDOVER_ENV,
-  consoleHealthUrl,
+  consoleIdentityUrl,
   decideReleaseHandoverWatch,
   isInstalledConsoleCode,
   isReleaseSuperseded,
   listenWithHandoverRetry,
   performReleaseHandover,
-  probeConsoleHealth,
+  probeConsolePid,
   releaseHandoverOwner,
   releaseIdentityOf,
   startConsoleSuccessor,
   startReleaseHandoverWatch,
-  waitUntilServing,
+  stopSuccessor,
+  waitUntilAnswer,
   type SuccessorProcess,
 } from '../../src/server/release-handover.js';
-import { parseSuccessorLaunchConfig } from '../../src/server/successor.js';
+import { adoptWorkingDirectory, parseSuccessorLaunchConfig } from '../../src/server/successor.js';
 
 function record(generation: number, releaseId = `rel-${generation}`): ActiveReleaseRecord {
   return {
@@ -84,9 +89,39 @@ function close(server: Server): Promise<void> {
   return new Promise((resolve) => { server.close(() => resolve()); });
 }
 
+/** Ends a listener now, connections included — the way a stopped process lets go. */
+function endNow(server: Server): void {
+  server.close();
+  server.closeAllConnections();
+}
+
+/** Reserves a loopback port for a moment and gives its number back. */
+async function freePort(): Promise<number> {
+  const reservation = createServer();
+  const port = await listen(reservation);
+  await close(reservation);
+  return port;
+}
+
+/**
+ * Answers every request the way the transaction route answers an id that
+ * names no transaction — which is all the handover asks of it.
+ */
+function consoleLike(pid: number): Server {
+  return createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, data: { transactionId: 'none', exists: false, serverPid: pid, handover: 'console' } }));
+  });
+}
+
 /** A stand-in for a forked child: emits its one event on the next tick, as a real child would. */
 class FakeSuccessor extends EventEmitter implements SuccessorProcess {
   pid = 4242;
+  readonly kills: unknown[] = [];
+  kill(signal?: unknown): boolean {
+    this.kills.push(signal);
+    return true;
+  }
   static upcoming(event: 'spawn' | 'error', detail?: Error): FakeSuccessor {
     const successor = new FakeSuccessor();
     queueMicrotask(() => { successor.emit(event, detail); });
@@ -94,8 +129,14 @@ class FakeSuccessor extends EventEmitter implements SuccessorProcess {
   }
 }
 
+/** Children a test forked for real; ended after the test whatever it found. */
+const forkedChildren: SuccessorProcess[] = [];
+
 afterEach(() => {
   vi.useRealTimers();
+  for (const child of forkedChildren.splice(0)) {
+    try { child.kill(); } catch { /* already gone */ }
+  }
   for (const directory of temporaryDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -137,13 +178,13 @@ describe('which consoles hand themselves over at all', () => {
     // as somebody else's process: adopted as a foreign instance, or waited for
     // by a restart ladder that never sees its own launch succeed.
     const decision = decideReleaseHandoverWatch({ PD_INVOCATION_SOURCE: 'companion' }, fromInstalledRuntime);
-    expect(decision.watch).toBe(false);
+    if (decision.watch) throw new Error('a console the Companion launched must not hand itself over');
     expect(decision.reason).toContain('Companion');
   });
 
   it('one that does not run from the installed runtime does not — its successor would be the same code again', () => {
     const decision = decideReleaseHandoverWatch({}, false);
-    expect(decision.watch).toBe(false);
+    if (decision.watch) throw new Error('a console that is not the installed one must not hand itself over');
     expect(decision.reason).toContain('not the installed console');
   });
 
@@ -185,8 +226,9 @@ describe('whether a console runs from the installed runtime', () => {
       expect(isInstalledConsoleCode(path.join(link, 'dist', 'server'), installed)).toBe(true);
       expect(isInstalledConsoleCode(running, link)).toBe(true);
     } finally {
-      // The link itself — never what it points at.
-      fs.rmdirSync(link);
+      // The link itself — never what it points at (a junction on Windows, a
+      // symlink on POSIX; `rmSync` without `recursive` removes either).
+      fs.rmSync(link, { force: true });
     }
 
     // Windows paths are case-insensitive; POSIX ones are not.
@@ -318,13 +360,10 @@ describe('binding a port that is still being released', () => {
   };
 
   it('binds on the first try when the port is free', async () => {
-    const holder = track(createServer());
-    const port = await listen(holder);
-    await close(holder);
     const onListening = vi.fn();
     const giveUp = vi.fn();
 
-    listenWithHandoverRetry({ server: track(createServer()), port, host: '127.0.0.1', onListening, giveUp });
+    listenWithHandoverRetry({ server: track(createServer()), port: await freePort(), host: '127.0.0.1', onListening, giveUp });
 
     await vi.waitFor(() => expect(onListening).toHaveBeenCalledTimes(1));
     expect(giveUp).not.toHaveBeenCalled();
@@ -362,74 +401,137 @@ describe('binding a port that is still being released', () => {
     expect(giveUp.mock.calls[0]?.[0]).toMatchObject({ code: 'EADDRINUSE' });
     expect(onListening).not.toHaveBeenCalled();
   });
+
+  describe('and binding again after a called-off handover', () => {
+    /** A console exactly as `main()` binds one, already listening, with the port number it owns. */
+    async function boundConsole(): Promise<{ server: Server; port: number; giveUp: ReturnType<typeof vi.fn>; relisten: (ms: number) => Promise<void> }> {
+      const server = track(consoleLike(111));
+      const onListening = vi.fn();
+      const giveUp = vi.fn();
+      const port = await freePort();
+      const listener = listenWithHandoverRetry({ server, port, host: '127.0.0.1', onListening, giveUp });
+      await vi.waitFor(() => expect(onListening).toHaveBeenCalledTimes(1));
+      return { server, port, giveUp, relisten: (ms) => listener.relisten(ms) };
+    }
+
+    it('binds again once the port is free, and that is not the dead end a failed boot is', async () => {
+      const bound = await boundConsole();
+      await close(bound.server);
+
+      await bound.relisten(2000);
+
+      expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', bound.port), 1000)).toBe(111);
+      expect(bound.giveUp).not.toHaveBeenCalled();
+    });
+
+    it("retries 'address in use' while a just-stopped successor is still letting go", async () => {
+      const bound = await boundConsole();
+      await close(bound.server);
+      // Whatever still holds the port gives it up shortly.
+      const lingering = track(createServer());
+      await new Promise<void>((resolve) => { lingering.listen(bound.port, '127.0.0.1', resolve); });
+      setTimeout(() => endNow(lingering), 300);
+
+      await bound.relisten(5000);
+
+      expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', bound.port), 1000)).toBe(111);
+      expect(bound.giveUp).not.toHaveBeenCalled();
+    });
+
+    it('rejects — to the handover, not to the boot-time dead end — when the port stays taken', async () => {
+      const bound = await boundConsole();
+      await close(bound.server);
+      const squatter = track(consoleLike(999));
+      await new Promise<void>((resolve) => { squatter.listen(bound.port, '127.0.0.1', resolve); });
+
+      await expect(bound.relisten(300)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+
+      // Still somebody else's port, and this console was not ended over it.
+      expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', bound.port), 1000)).toBe(999);
+      expect(bound.giveUp).not.toHaveBeenCalled();
+    });
+  });
 });
 
-describe('noticing that the port is serving again', () => {
-  it('a console that answers /api/health with 200 is serving; a 503 is not', async () => {
-    const healthy = createServer((_req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"healthy":true}'); });
-    const unhealthy = createServer((_req, res) => { res.writeHead(503); res.end(); });
-    try {
-      const healthyPort = await listen(healthy);
-      const unhealthyPort = await listen(unhealthy);
-
-      expect(await probeConsoleHealth(`http://127.0.0.1:${healthyPort}/api/health`, 2000)).toBe(true);
-      expect(await probeConsoleHealth(`http://127.0.0.1:${unhealthyPort}/api/health`, 2000)).toBe(false);
-    } finally {
-      await close(healthy);
-      await close(unhealthy);
+describe('asking the port who is serving', () => {
+  const servers: Server[] = [];
+  afterEach(async () => {
+    for (const server of servers.splice(0)) {
+      if (server.listening) endNow(server);
     }
   });
+  const track = (server: Server): Server => {
+    servers.push(server);
+    return server;
+  };
+  const probePath = '/api/update/transaction/handover-identity-probe';
 
-  it('a port nobody listens on is not serving, and is not an error either', async () => {
-    const probe = createServer();
-    const port = await listen(probe);
-    await close(probe);
+  it('names the console that answers, and nothing else', async () => {
+    const serving = track(consoleLike(4242));
+    const notConsole = track(createServer((_req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html>a login page</html>'); }));
+    const failing = track(createServer((_req, res) => { res.writeHead(503); res.end(); }));
 
-    expect(await probeConsoleHealth(consoleHealthUrl('127.0.0.1', port), 500)).toBe(false);
+    expect(await probeConsolePid(`http://127.0.0.1:${await listen(serving)}${probePath}`, 2000)).toBe(4242);
+    expect(await probeConsolePid(`http://127.0.0.1:${await listen(notConsole)}${probePath}`, 2000)).toBeNull();
+    expect(await probeConsolePid(`http://127.0.0.1:${await listen(failing)}${probePath}`, 2000)).toBeNull();
+  });
+
+  it('a port nobody listens on is nobody, and is not an error either', async () => {
+    expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', await freePort()), 500)).toBeNull();
+  });
+
+  it('a listener that never answers is nobody', async () => {
+    const silent = track(createServer());
+
+    expect(await probeConsolePid(`http://127.0.0.1:${await listen(silent)}${probePath}`, 300)).toBeNull();
   });
 
   it('an IPv6 loopback host gets the brackets a URL needs', () => {
-    expect(consoleHealthUrl('::1', 3100)).toBe('http://[::1]:3100/api/health');
-    expect(consoleHealthUrl('127.0.0.1', 3100)).toBe('http://127.0.0.1:3100/api/health');
+    expect(consoleIdentityUrl('::1', 3100)).toBe(`http://[::1]:3100${probePath}`);
+    expect(consoleIdentityUrl('127.0.0.1', 3100)).toBe(`http://127.0.0.1:3100${probePath}`);
   });
 
-  it('waits through "not yet" and resolves once the probe turns true', async () => {
+  it('waits through "not yet" and resolves with the first real answer', async () => {
     vi.useFakeTimers();
     let answers = 0;
-    const probe = vi.fn(async () => { answers += 1; return answers >= 3; });
-    const waiting = waitUntilServing(probe, 10_000, { intervalMs: 100, sleep: (ms) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }) });
+    const probe = vi.fn(async () => { answers += 1; return answers >= 3 ? 4242 : null; });
+    const waiting = waitUntilAnswer(probe, 10_000, { intervalMs: 100, sleep: (ms) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }) });
 
     await vi.advanceTimersByTimeAsync(1000);
-    expect(await waiting).toBe(true);
+    expect(await waiting).toBe(4242);
     expect(probe).toHaveBeenCalledTimes(3);
   });
 
   it('gives up at the deadline instead of waiting forever', async () => {
     vi.useFakeTimers();
-    const waiting = waitUntilServing(async () => false, 1000, { intervalMs: 100, sleep: (ms) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }) });
+    const waiting = waitUntilAnswer(async () => null, 1000, { intervalMs: 100, sleep: (ms) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }) });
 
     await vi.advanceTimersByTimeAsync(5000);
-    expect(await waiting).toBe(false);
+    expect(await waiting).toBeNull();
   });
 });
 
-/** A predecessor exactly as `main()` runs one: a real listener with the real stop/resume/observe wiring. */
+/**
+ * A predecessor exactly as `main()` runs one: a real console-like listener
+ * bound through the real listener, with the real stop / observe / rebind.
+ */
 async function startPredecessor(): Promise<{
   readonly port: number;
-  readonly server: Server;
+  readonly giveUp: ReturnType<typeof vi.fn>;
   readonly stopAccepting: () => Promise<void>;
-  readonly resumeAccepting: () => Promise<void>;
-  readonly waitForSuccessor: () => Promise<boolean>;
+  readonly waitForSuccessor: (timeoutMs?: number) => Promise<number | null>;
+  readonly resumeAccepting: (retryMs: number) => Promise<void>;
   readonly dispose: () => Promise<void>;
 }> {
-  const server = createServer((_req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end('{"healthy":true}');
-  });
-  const port = await listen(server);
+  const server = consoleLike(111);
+  const giveUp = vi.fn();
+  const listener = listenWithHandoverRetry({ server, port: await freePort(), host: '127.0.0.1', onListening: () => undefined, giveUp });
+  await vi.waitFor(() => expect(server.listening).toBe(true));
+  const port = server.address();
+  if (port === null || typeof port === 'string') throw new Error('predecessor reported no TCP address');
   return {
-    port,
-    server,
+    port: port.port,
+    giveUp,
     stopAccepting: async () => {
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
@@ -437,23 +539,17 @@ async function startPredecessor(): Promise<{
         setTimeout(resolve, 2000).unref();
       });
     },
-    resumeAccepting: async () => {
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(port, '127.0.0.1', () => {
-          server.off('error', reject);
-          resolve();
-        });
-      });
-    },
-    waitForSuccessor: async () => waitUntilServing(() => probeConsoleHealth(consoleHealthUrl('127.0.0.1', port), 500), 3000),
+    waitForSuccessor: (timeoutMs = 3000) => waitUntilAnswer(() => probeConsolePid(consoleIdentityUrl('127.0.0.1', port.port), 500), timeoutMs),
+    resumeAccepting: (retryMs) => listener.relisten(retryMs),
     dispose: async () => {
-      if (server.listening) await close(server);
+      if (server.listening) endNow(server);
     },
   };
 }
 
 describe('handing the port over', () => {
+  const noSuccessorToStop = async (): Promise<void> => undefined;
+
   it('keeps serving when no successor can be started', async () => {
     const predecessor = await startPredecessor();
     const exit = vi.fn();
@@ -463,13 +559,14 @@ describe('handing the port over', () => {
       startSuccessor: () => null,
       stopAccepting,
       waitForSuccessor: predecessor.waitForSuccessor,
-      resumeAccepting: predecessor.resumeAccepting,
+      abandonSuccessor: noSuccessorToStop,
+      resumeAccepting: () => predecessor.resumeAccepting(0),
       exit,
     });
 
     expect(stopAccepting).not.toHaveBeenCalled();
     expect(exit).not.toHaveBeenCalled();
-    expect(await probeConsoleHealth(consoleHealthUrl('127.0.0.1', predecessor.port), 1000)).toBe(true);
+    expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', predecessor.port), 1000)).toBe(111);
     await predecessor.dispose();
   });
 
@@ -483,7 +580,8 @@ describe('handing the port over', () => {
       startSuccessor: () => { throw new Error('fork failed'); },
       stopAccepting,
       waitForSuccessor: predecessor.waitForSuccessor,
-      resumeAccepting: predecessor.resumeAccepting,
+      abandonSuccessor: noSuccessorToStop,
+      resumeAccepting: () => predecessor.resumeAccepting(0),
       exit,
       log,
     });
@@ -491,7 +589,8 @@ describe('handing the port over', () => {
       startSuccessor: () => FakeSuccessor.upcoming('error', new Error('ENOENT')),
       stopAccepting,
       waitForSuccessor: predecessor.waitForSuccessor,
-      resumeAccepting: predecessor.resumeAccepting,
+      abandonSuccessor: noSuccessorToStop,
+      resumeAccepting: () => predecessor.resumeAccepting(0),
       exit,
       log,
     });
@@ -500,7 +599,7 @@ describe('handing the port over', () => {
     expect(exit).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('fork failed'));
     expect(log).toHaveBeenCalledWith(expect.stringContaining('ENOENT'));
-    expect(await probeConsoleHealth(consoleHealthUrl('127.0.0.1', predecessor.port), 1000)).toBe(true);
+    expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', predecessor.port), 1000)).toBe(111);
     await predecessor.dispose();
   });
 
@@ -515,7 +614,8 @@ describe('handing the port over', () => {
       startSuccessor: () => silent,
       stopAccepting,
       waitForSuccessor: predecessor.waitForSuccessor,
-      resumeAccepting: predecessor.resumeAccepting,
+      abandonSuccessor: noSuccessorToStop,
+      resumeAccepting: () => predecessor.resumeAccepting(0),
       exit,
       spawnTimeoutMs: 20,
     });
@@ -528,10 +628,11 @@ describe('handing the port over', () => {
   it('hands the port to the successor and exits only once the successor answers on it', async () => {
     const predecessor = await startPredecessor();
     const exit = vi.fn();
+    const log = vi.fn();
     const order: string[] = [];
     // The successor: a console-like listener that takes the port the moment
     // the predecessor releases it, after a boot pause.
-    const successor = createServer((_req, res) => { res.writeHead(200); res.end('{"healthy":true}'); });
+    const successor = consoleLike(4242);
     try {
       await performReleaseHandover({
         startSuccessor: () => FakeSuccessor.upcoming('spawn'),
@@ -541,50 +642,159 @@ describe('handing the port over', () => {
           setTimeout(() => { successor.listen(predecessor.port, '127.0.0.1'); }, 150);
           return predecessor.waitForSuccessor();
         },
-        resumeAccepting: async () => { order.push('resumeAccepting'); await predecessor.resumeAccepting(); },
+        abandonSuccessor: async () => { order.push('abandonSuccessor'); },
+        resumeAccepting: async () => { order.push('resumeAccepting'); await predecessor.resumeAccepting(0); },
         exit: (code) => { order.push(`exit:${code}`); exit(code); },
+        log,
       });
 
       expect(order).toEqual(['stopAccepting', 'waitForSuccessor', 'exit:0']);
-      expect(await (await fetch(`http://127.0.0.1:${predecessor.port}/api/health`)).text()).toBe('{"healthy":true}');
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('successor console (pid 4242)'));
+      expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', predecessor.port), 1000)).toBe(4242);
     } finally {
-      await close(successor);
+      endNow(successor);
       await predecessor.dispose();
     }
   });
 
-  it('takes the port back when the successor never comes up, and does not exit', async () => {
+  it('exits all the same when another console has taken the port — it was started after the release changed', async () => {
     const predecessor = await startPredecessor();
     const exit = vi.fn();
+    const log = vi.fn();
 
     await performReleaseHandover({
       startSuccessor: () => FakeSuccessor.upcoming('spawn'),
       stopAccepting: predecessor.stopAccepting,
-      waitForSuccessor: () => waitUntilServing(() => probeConsoleHealth(consoleHealthUrl('127.0.0.1', predecessor.port), 200), 600),
-      resumeAccepting: predecessor.resumeAccepting,
+      waitForSuccessor: async () => 7777,
+      abandonSuccessor: async () => { throw new Error('a serving console must not be stopped'); },
+      resumeAccepting: async () => { throw new Error('a served port must not be rebound'); },
       exit,
+      log,
     });
 
-    expect(exit).not.toHaveBeenCalled();
-    expect(await probeConsoleHealth(consoleHealthUrl('127.0.0.1', predecessor.port), 1000)).toBe(true);
+    expect(exit).toHaveBeenCalledWith(0);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('Another console (pid 7777)'));
     await predecessor.dispose();
   });
 
-  it('exits with a failure when the port cannot even be taken back', async () => {
+  it('stops the successor before taking the port back, in that order, and does not exit', async () => {
     const predecessor = await startPredecessor();
     const exit = vi.fn();
+    const log = vi.fn();
+    const order: string[] = [];
 
     await performReleaseHandover({
       startSuccessor: () => FakeSuccessor.upcoming('spawn'),
-      stopAccepting: predecessor.stopAccepting,
-      waitForSuccessor: async () => false,
-      resumeAccepting: async () => { throw new Error('EADDRINUSE'); },
+      stopAccepting: async () => { order.push('stopAccepting'); await predecessor.stopAccepting(); },
+      waitForSuccessor: async () => { order.push('waitForSuccessor'); return null; },
+      // Binding over a live successor is not possible: it has to be gone first.
+      abandonSuccessor: async () => { order.push('abandonSuccessor'); },
+      resumeAccepting: async () => { order.push('resumeAccepting'); await predecessor.resumeAccepting(0); },
       exit,
+      log,
     });
 
-    expect(exit).toHaveBeenCalledTimes(1);
-    expect(exit).toHaveBeenCalledWith(1);
+    expect(order).toEqual(['stopAccepting', 'waitForSuccessor', 'abandonSuccessor', 'resumeAccepting']);
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('Port taken back'));
+    expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', predecessor.port), 1000)).toBe(111);
     await predecessor.dispose();
+  });
+
+  it('takes the port back from a successor that is BOUND but never answers — with real listeners', async () => {
+    const predecessor = await startPredecessor();
+    const exit = vi.fn();
+    // The worst case: the successor got as far as listening, and answers nothing.
+    const boundNotReady = createServer();
+    const started = FakeSuccessor.upcoming('spawn');
+    const order: string[] = [];
+    try {
+      await performReleaseHandover({
+        startSuccessor: () => started,
+        stopAccepting: async () => {
+          await predecessor.stopAccepting();
+          await new Promise<void>((resolve) => { boundNotReady.listen(predecessor.port, '127.0.0.1', resolve); });
+        },
+        waitForSuccessor: () => predecessor.waitForSuccessor(700),
+        // As a stopped process lets go: ended, and not waited for.
+        abandonSuccessor: async () => { order.push('abandonSuccessor'); started.kill(); endNow(boundNotReady); },
+        resumeAccepting: () => predecessor.resumeAccepting(5000),
+        exit,
+      });
+
+      expect(order).toEqual(['abandonSuccessor']);
+      expect(started.kills).toHaveLength(1);
+      // The predecessor is serving again, and neither exited nor hit its dead end.
+      expect(exit).not.toHaveBeenCalled();
+      expect(predecessor.giveUp).not.toHaveBeenCalled();
+      expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', predecessor.port), 1000)).toBe(111);
+    } finally {
+      endNow(boundNotReady);
+      await predecessor.dispose();
+    }
+  });
+
+  it('exits with a failure only when the port cannot be taken back at all', async () => {
+    const predecessor = await startPredecessor();
+    const exit = vi.fn();
+    const log = vi.fn();
+    // Not a console, and never letting go.
+    const squatter = createServer();
+    const order: string[] = [];
+    try {
+      await performReleaseHandover({
+        startSuccessor: () => FakeSuccessor.upcoming('spawn'),
+        stopAccepting: async () => { await predecessor.stopAccepting(); await new Promise<void>((resolve) => { squatter.listen(predecessor.port, '127.0.0.1', resolve); }); },
+        waitForSuccessor: () => predecessor.waitForSuccessor(400),
+        abandonSuccessor: async () => { order.push('abandonSuccessor'); },
+        resumeAccepting: () => predecessor.resumeAccepting(300),
+        exit: (code) => { order.push(`exit:${code}`); exit(code); },
+        log,
+      });
+
+      expect(order).toEqual(['abandonSuccessor', 'exit:1']);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('Could not take the port back'));
+    } finally {
+      endNow(squatter);
+      await predecessor.dispose();
+    }
+  });
+});
+
+describe('stopping the successor', () => {
+  it('is nothing to do when no successor was started', async () => {
+    await stopSuccessor(null);
+  });
+
+  it('ends a real successor, and resolves once it is gone', async () => {
+    const directory = tempDir('pd-successor-alive-');
+    // A stand-in that does what a stuck process does: stays alive.
+    fs.writeFileSync(path.join(directory, 'successor.js'), 'setInterval(() => {}, 1000);\n', 'utf8');
+    const child = startConsoleSuccessor({ args: ['--port', '3100'] }, vi.fn(), { cwd: directory });
+    if (child === null) throw new Error('successor did not start');
+    forkedChildren.push(child);
+    let exited = false;
+    child.once('exit', () => { exited = true; });
+    await new Promise<void>((resolve) => { child.once('spawn', resolve); });
+
+    await stopSuccessor(child);
+
+    expect(exited).toBe(true);
+  }, 20_000);
+
+  it('stops waiting after the bound, so a successor that will not die cannot hold the port decision', async () => {
+    vi.useFakeTimers();
+    const stubborn = new FakeSuccessor();
+    let stopped = false;
+
+    const stopping = stopSuccessor(stubborn, 200).then(() => { stopped = true; });
+    expect(stubborn.kills).toHaveLength(1);
+    await Promise.race([stopping, Promise.resolve()]);
+    expect(stopped).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(300);
+    await stopping;
+    expect(stopped).toBe(true);
   });
 });
 
@@ -610,7 +820,9 @@ describe('starting the successor', () => {
     const received: unknown = JSON.parse(fs.readFileSync(receivedPath, 'utf8'));
     expect(received).toEqual({
       // The launch line is data on stdin: nothing from it is on a command line.
-      input: `${JSON.stringify({ args: ['--workspace', 'D:\\a dir\\ws', '--port', '3100'] })}\n`,
+      // It carries where this process was working from, so the successor can
+      // leave the build directory for it.
+      input: `${JSON.stringify({ args: ['--workspace', 'D:\\a dir\\ws', '--port', '3100'], cwd: process.cwd() })}\n`,
       argv: [],
     });
   }, 30_000);
@@ -621,6 +833,19 @@ describe('the successor reads its launch line as untrusted input', () => {
     expect(parseSuccessorLaunchConfig('{"args":["--workspace","/w s","--port","3100"]}')).toEqual({
       args: ['--workspace', '/w s', '--port', '3100'],
     });
+  });
+
+  it('takes the working directory it is told only when that is an absolute path', () => {
+    const absolute = path.resolve(path.sep, 'where', 'the', 'launcher', 'stood');
+    expect(parseSuccessorLaunchConfig(JSON.stringify({ args: ['--port', '3100'], cwd: absolute }))).toEqual({
+      args: ['--port', '3100'],
+      cwd: absolute,
+    });
+    // A relative one would be resolved against the very directory the
+    // successor is about to leave; anything else is "not told".
+    for (const cwd of ['relative/dir', '', 42, null, 'C:\\dir\u0000', 'x'.repeat(4097)]) {
+      expect(parseSuccessorLaunchConfig(JSON.stringify({ args: ['--port', '3100'], cwd }))).toEqual({ args: ['--port', '3100'] });
+    }
   });
 
   it('refuses anything a console must not be started from', () => {
@@ -634,5 +859,40 @@ describe('the successor reads its launch line as untrusted input', () => {
     expect(parseSuccessorLaunchConfig('{"args":["--port\\u00003100"]}')).toBeNull();
     expect(parseSuccessorLaunchConfig(JSON.stringify({ args: new Array<string>(65).fill('--x') }))).toBeNull();
     expect(parseSuccessorLaunchConfig(JSON.stringify({ args: ['x'.repeat(4097)] }))).toBeNull();
+  });
+});
+
+describe('the successor leaves the build directory at once', () => {
+  // The working directory is this whole process's: every test puts it back.
+  const whereTheTestStood = process.cwd();
+  afterEach(() => { process.chdir(whereTheTestStood); });
+
+  /** Where this process is really working from — links and short names resolved, as the OS reports it. */
+  const really = (directory: string): string => fs.realpathSync.native(directory);
+
+  it('works from the directory the launcher stood in, not from the build', () => {
+    const build = tempDir('pd-build-');
+    const launcher = tempDir('pd-launcher-');
+    process.chdir(build);
+
+    adoptWorkingDirectory(launcher);
+
+    expect(process.cwd()).toBe(really(launcher));
+  });
+
+  it('falls back to the temp directory when the launcher\u2019s directory is gone', () => {
+    process.chdir(tempDir('pd-build-'));
+
+    adoptWorkingDirectory(path.join(tempDir('pd-launcher-'), 'since-deleted'));
+
+    expect(process.cwd()).toBe(really(path.resolve(os.tmpdir())));
+  });
+
+  it('falls back the same way when the launch line named no directory', () => {
+    process.chdir(tempDir('pd-build-'));
+
+    adoptWorkingDirectory(undefined);
+
+    expect(process.cwd()).toBe(really(path.resolve(os.tmpdir())));
   });
 });

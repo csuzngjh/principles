@@ -75,8 +75,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function readTransaction(): Promise<Record<string, unknown>> {
   const response = await fetch(`http://127.0.0.1:${port}/api/update/transaction/${TRANSACTION_ID}`);
   const body: unknown = await response.json();
-  if (!isRecord(body) || !isRecord(Reflect.get(body, 'data'))) throw new Error('response carries no data object');
-  return { ...Reflect.get(body, 'data') };
+  if (!isRecord(body)) throw new Error('response is not an object');
+  const data: unknown = Reflect.get(body, 'data');
+  if (!isRecord(data)) throw new Error('response carries no data object');
+  return { ...data };
 }
 
 let port = 0;

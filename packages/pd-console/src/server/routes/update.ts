@@ -147,6 +147,12 @@ async function applyFullUpdate(authority: Authority, res: ServerResponse, worksp
         success: true,
         state: 'update_in_progress',
         transactionId,
+        // The console that accepted the update. The page keeps it as the
+        // baseline for the release handover: by the time it can read the
+        // transaction, the successor may already be the one answering, and
+        // a baseline taken from the first readable poll would then be the
+        // successor's own pid — something that never "changes".
+        serverPid: process.pid,
         message: `Update transaction ${transactionId} accepted; the update keeps running even if this console stops.`,
         requiresRestart: false,
         nextAction: 'This page tracks the running update. Do not start another update until it finishes.',

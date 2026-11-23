@@ -157,6 +157,8 @@ type Answer = {
 
 const UNREADABLE: Answer = { success: true, data: { transactionId: 'update-1', exists: false, lastState: '', terminal: false } };
 const REQUEST_FAILED = { success: false as const, error: 'fetch failed', status: 0 };
+/** Anything the page may get for one poll: an answer, or a request that failed. */
+type Reply = Answer | typeof REQUEST_FAILED;
 
 function answer(state: string, extra: Partial<Answer['data']> = {}): Answer {
   return { success: true, data: { transactionId: 'update-1', exists: true, lastState: state, terminal: false, ...extra } };
@@ -208,17 +210,18 @@ async function passManualLooks(count: number): Promise<void> {
 
 /**
  * Mounts the page and starts an update, with `transaction` answering the
- * transaction polls from the very first one. Resolves with the clock at the
- * moment the update was accepted.
+ * transaction polls from the very first one and `accepted` riding on the
+ * acceptance response. Resolves with the clock at the moment the update was
+ * accepted.
  */
-async function startUpdate(transaction: () => Promise<Answer>): Promise<number> {
+async function startUpdate(transaction: () => Promise<Reply>, accepted: Record<string, unknown> = {}): Promise<number> {
   api.fetchUpdateStatus.mockResolvedValue({
     success: true,
     data: { currentVersion: '2.8.10', latestVersion: '2.8.11', hasUpdate: true, state: 'update_available' },
   });
   api.fetchUpdateHistory.mockResolvedValue({ success: true, data: [] });
   api.fetchUpdateRecovery.mockResolvedValue({ success: true, data: { needsRecovery: false, unfinished: [], superseded: [], broken: [], recoveryRequired: [] } });
-  api.applyFullUpdate.mockResolvedValue({ success: true, data: { state: 'update_in_progress', transactionId: 'update-1' } });
+  api.applyFullUpdate.mockResolvedValue({ success: true, data: { state: 'update_in_progress', transactionId: 'update-1', ...accepted } });
   api.fetchUpdateTransaction.mockImplementation(transaction);
   const acceptedAt = Date.now();
   render(createElement(UpdatePage));
@@ -401,7 +404,7 @@ describe('UpdatePage — a long update is not a timeout', () => {
 
 describe('UpdatePage — the end of an update needs no hand', () => {
   /** Starts an update whose second poll confirms it, with `predecessor` still answering. */
-  async function confirmUpdate(predecessor: Answer): Promise<void> {
+  async function confirmUpdate(predecessor: Reply): Promise<void> {
     const script = [answer('planned', { serverPid: PREDECESSOR }), confirmed({ serverPid: PREDECESSOR }), predecessor];
     await startUpdate(async () => script.shift() ?? predecessor);
     await settle();
@@ -456,6 +459,25 @@ describe('UpdatePage — the end of an update needs no hand', () => {
     expect(screen.getByText(RESTART_PROMPT)).toBeTruthy();
     // The installation is the new one now; no update is offered any more.
     await waitFor(() => expect(screen.queryByText('Update Now')).toBeNull());
+  });
+
+  it('when the first answer it can read already comes from the successor, reloads at once — nothing to wait for', async () => {
+    // The acceptance names the console that took it. The page then hears
+    // nothing while that console stops, and the next thing it reads is the
+    // finished transaction — answered by a process it has never spoken to.
+    const script = [REQUEST_FAILED];
+    await startUpdate(async () => script.shift() ?? confirmed({ serverPid: SUCCESSOR }), { serverPid: PREDECESSOR });
+    await settle();
+    expect(vi.mocked(reloadPage)).not.toHaveBeenCalled();
+
+    await passPolls();
+
+    expect(vi.mocked(reloadPage)).toHaveBeenCalledTimes(1);
+    // Not mistaken for the console that took the update, which would have
+    // meant waiting for a process change that already happened.
+    expect(screen.queryByTestId('update-switching')).toBeNull();
+    expect(screen.queryByText(FINISHED_TEXT)).toBeNull();
+    expect(screen.queryByText(RESTART_PROMPT)).toBeNull();
   });
 
   it('a console that does not report which process it is can never be told from a successor', async () => {
