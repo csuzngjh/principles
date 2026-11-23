@@ -75,6 +75,7 @@ describe('health route verifyNonce echo (P0-1)', () => {
     await handleHealthRoute(healthRequest(), res, {
       workspaceDir: process.cwd(),
       authenticationMode: 'no_auth',
+      webIndexExists: true,
     });
     expect(res.statusCode).toBe(200);
     const payload = JSON.parse(res.body) as { success: boolean; data: Record<string, unknown> };
@@ -89,6 +90,7 @@ describe('health route verifyNonce echo (P0-1)', () => {
     await handleHealthRoute(healthRequest(), res, {
       workspaceDir: process.cwd(),
       authenticationMode: 'no_auth',
+      webIndexExists: true,
     });
     expect(res.statusCode).toBe(200);
     const payload = JSON.parse(res.body) as { success: boolean; data: Record<string, unknown> };

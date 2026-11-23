@@ -715,7 +715,12 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       : `Open ${plan.url} in your browser. Press Ctrl+C to stop.`,
   };
   if (typeof child.pid === 'number') out.serverPid = child.pid;
+  if (plan.replacedStale) out.replacedStale = plan.replacedStale;
   if (plan.reason) out.reason = plan.reason;
+  // The plan's nextAction (e.g. how to reclaim the preferred port held by an
+  // unkillable stale console) is operator guidance, not a launch hint —
+  // append it to the generic browser message so both channels carry it.
+  if (plan.nextAction) out.nextAction = (out.nextAction ? `${out.nextAction} ` : '') + plan.nextAction;
   if (browserWarning) {
     out.reason = out.reason ? `${out.reason}; browser_open_failed: ${browserWarning}` : `browser_open_failed: ${browserWarning}`;
   }
@@ -727,6 +732,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     console.log(`\nConsole ready: ${plan.url}`);
     console.log(`Workspace:    ${workspaceDir}`);
     if (plan.reason) console.log(`Note:         ${plan.reason}`);
+    if (plan.nextAction) console.log(`Next:         ${plan.nextAction}`);
     if (browserOpened) {
       console.log('Browser opened. Press Ctrl+C to stop.');
     } else {
