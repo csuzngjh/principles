@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.1.1
+
+### Patch Changes
+
+- bfe31e9: Dependency bump: undici 7.x -> ^8.13.0 (runtime dependency of @principles/core and the bundled installer; installer lockfile re-synced to keep  reproducible).
+
 ## 8.1.0
 
 ### Minor Changes
