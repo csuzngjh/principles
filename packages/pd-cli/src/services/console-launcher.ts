@@ -488,6 +488,18 @@ export interface ProcessIdentity {
  * Returns null when identity cannot be obtained — callers must treat that as
  * unverified and refuse to kill.
  */
+/**
+ * procfs appends ' (deleted)' to a readlink result when the directory itself
+ * was deleted. Strip it only after confirming the stripped path is genuinely
+ * gone — a directory really named '<x> (deleted)' must keep its name.
+ */
+export function sanitizeProcCwd(cwd: string): string {
+  const DELETED_SUFFIX = ' (deleted)';
+  if (!cwd.endsWith(DELETED_SUFFIX)) return cwd;
+  const candidate = cwd.slice(0, -DELETED_SUFFIX.length);
+  return fs.existsSync(candidate) ? cwd : candidate;
+}
+
 async function getProcessIdentity(pid: number): Promise<ProcessIdentity | null> {
   if (Object.hasOwn(globalThis, '__mockGetProcessIdentity')) {
     const mock = Reflect.get(globalThis, '__mockGetProcessIdentity') as (
@@ -509,7 +521,7 @@ async function getProcessIdentity(pid: number): Promise<ProcessIdentity | null> 
       const argv = raw.toString('utf8').split('\0').filter((s) => s.length > 0);
       if (argv.length === 0) return null;
       const cwd = await fs.promises.readlink(`/proc/${pid}/cwd`).catch(() => null);
-      return { argv, cwd };
+      return { argv, cwd: cwd === null ? null : sanitizeProcCwd(cwd) };
     } catch {
       return null;
     }

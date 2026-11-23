@@ -32,6 +32,7 @@ import {
   probeConsoleHealth,
   classifyStaleConsoleInstance,
   argvMatchesServerEntry,
+  sanitizeProcCwd,
   socketAddrAnswersHost,
   parseSsListenOwners,
   parseLsofListenOwners,
@@ -1481,6 +1482,80 @@ describe('planConsoleLaunch — stale console eviction', () => {
       expect(killSpy).not.toHaveBeenCalled();
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  // Full no-mocks verification: real child process with a relative entry arg,
+  // real deleted cwd (procfs ' (deleted)' marker), real /proc identity read,
+  // real ss socket-owner query, real SIGTERM. Covers the system path the
+  // mock-seam tests cannot.
+  it.runIf(process.platform === 'linux')(
+    'evicts a console whose cwd was deleted — real /proc, real socket-owner query, real signal',
+    async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-stale-delcwd-'));
+      fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+      const entry = path.join(dir, 'console', 'dist', 'server.js');
+      fs.writeFileSync(
+        entry,
+        `require('http').createServer((q,s)=>{` +
+          `if(q.url==='/api/health'){s.end(JSON.stringify({success:true,data:{overall:'degraded',` +
+          `instance:{pid:process.pid,serverEntry:process.argv[1],webIndexExists:false}}}))}` +
+          `else{s.statusCode=404;s.end('{}')}}).listen(0,'127.0.0.1',function(){` +
+          `console.log(String(this.address().port))});`,
+      );
+      const child = childProcessModule.spawn(process.execPath, ['console/dist/server.js'], {
+        cwd: dir,
+        stdio: ['ignore', 'pipe', 'inherit'],
+      });
+      const port = await new Promise<number>((resolve, reject) => {
+        child.stdout?.once('data', (d: Buffer) => resolve(Number(d.toString().trim())));
+        child.once('exit', () => reject(new Error('child exited before binding')));
+      });
+      // Attach before the kill path — the exit may fire while the launcher is
+      // still waiting for the port to free.
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      // The process now runs from a deleted working directory —
+      // /proc/<pid>/cwd reads '<dir> (deleted)'.
+      fs.rmSync(dir, { recursive: true, force: true });
+      try {
+        const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
+        expect(result.status).toBe('started');
+        expect(result.replacedStale?.pid).toBe(child.pid);
+        await exited;
+        await expect(
+          new Promise<void>((resolve, reject) => {
+            const sock = net.connect(port, '127.0.0.1');
+            sock.once('connect', () => { sock.destroy(); reject(new Error('port still bound')); });
+            sock.once('error', () => resolve());
+          }),
+        ).resolves.toBeUndefined();
+      } finally {
+        child.kill('SIGKILL');
+      }
+    },
+    25_000,
+  );
+});
+
+// ─── procfs cwd sanitization ─────────────────────────────────────────────────
+
+describe('sanitizeProcCwd', () => {
+  it('strips the (deleted) marker only when the stripped path is truly gone', () => {
+    const gone = path.join(os.tmpdir(), `pd-gone-${process.pid}-${Date.now()}`);
+    expect(sanitizeProcCwd(`${gone} (deleted)`)).toBe(gone);
+  });
+
+  it('keeps a real directory literally named with a (deleted) suffix', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-realcwd-'));
+    const literal = `${base} (deleted)`;
+    fs.mkdirSync(literal);
+    try {
+      // The stripped candidate exists → the marker is part of the real name.
+      fs.mkdirSync(base, { recursive: true });
+      expect(sanitizeProcCwd(literal)).toBe(literal);
+    } finally {
+      fs.rmSync(literal, { recursive: true, force: true });
+      fs.rmSync(base, { recursive: true, force: true });
     }
   });
 });
