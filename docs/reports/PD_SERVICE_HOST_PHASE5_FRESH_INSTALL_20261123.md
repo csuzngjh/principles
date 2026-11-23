@@ -73,7 +73,6 @@
 - 结论：**平台门禁未解除**。需要在允许创建当前用户计划任务的 Windows 主机（非受限策略）上重跑该链路后，才能对生产 Workspace 执行批量切换。
 
 ## 6. 完整发布包安装链路（npm pack → installer）
-
 - `tests/smoke-packaged-install.test.ts` 的 “production self-contained bundle installs with no npm invocation” **真实通过**（169.5s）：`npm pack` 生成自包含发布资产 → 真实 CLI 从 `PD_INSTALL_PLUGIN_DIR` 安装到全新临时 HOME → 组件 verified/configured、Story A passed、无 npm 调用。
 - 该链路使用显式 `--host openclaw`（PRI-1278 Phase 5 起 `--host` 不再有默认值）。
 - 该环境的 OS 计划任务创建被拒，因此安装过程中调度器步骤以结构化警告记录，**没有**翻转任何 Workspace Owner（符合“调度器失败不翻转 Owner”）。
@@ -104,7 +103,7 @@
 3. Companion / OpenClaw 的“完全删除旧生命周期代码”未做：保留为 legacy_owned Workspace 的显式 fallback（符合 SPEC §11 Phase 5 的“移除或显式降级为 manual fallback”）。Service-Host-owned Workspace 的旧消费者已被门禁阻止。
 4. 首次 managed cycle 的超时预算为 180s；更长的真实任务周期由下一次 OS 触发从持久化状态继续。
 5. Windows 之外的 Scheduler 注册仍是既有 `NOT_VERIFIED`（Phase 3 遗留）。
-6. 本机 `create-principles-disciple` 套件存在 3 例环境性失败（2 例 gateway-notice mock 超时、1 例 Windows chmod 文件模式），改动前同样失败（Phase 4 报告已记录）。
+6. 本机 `create-principles-disciple` 套件存在环境性失败（gateway-notice mock 超时、Windows chmod 文件模式、并行构建 EPERM），与本 PR 无关；**PR CI 全绿**（含 `Test create-principles-disciple`、`Test pd-cli`、`Test pd-cli (Windows)`、`Test packaged install smoke`、`Verify Merge Gate`、CodeQL、e2e）。
 
 ## 10. 结论
 
