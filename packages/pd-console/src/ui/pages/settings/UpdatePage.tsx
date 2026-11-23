@@ -44,7 +44,18 @@ import { formatDate } from "../../utils/format-date.js";
 
 // ── Main page component ──────────────────────────────────────────────────────
 
-type LoadingState = "loading" | "loaded" | "error";
+type LoadingState = "loading" | "loaded";
+
+// PRI-853: how often the page asks for the detached update's transaction, and
+// how long one such poll may wait for an answer before it is abandoned (the
+// next tick simply asks again).
+const TRANSACTION_POLL_INTERVAL_MS = 3_000;
+const TRANSACTION_POLL_TIMEOUT_MS = 15_000;
+
+// SPEC-PD-UIUX-002 §7: a wait that outlives a few seconds without explanation
+// reads as "broken". The first-paint skeleton says so through PageLoading; the
+// version check now runs beside a readable page, so it says so in place.
+const CHECK_SLOW_AFTER_MS = 2_000;
 
 // Owner-facing history display: newest first, at most 5 entries visible until
 // expanded. The API returns file order (append order, oldest first) — the page
@@ -64,13 +75,30 @@ export function sortHistoryDesc(updates: UpdateHistoryEntry[]): UpdateHistoryEnt
   return [...updates].sort((a, b) => factTimeMs(b.timestamp) - factTimeMs(a.timestamp));
 }
 
+/** True once `active` has stayed true for `afterMs`; false the moment it ends. */
+function useLastedLongerThan(active: boolean, afterMs: number): boolean {
+  const [lastedLong, setLastedLong] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    const timer = setTimeout(() => setLastedLong(true), afterMs);
+    return () => {
+      clearTimeout(timer);
+      setLastedLong(false);
+    };
+  }, [active, afterMs]);
+  return active && lastedLong;
+}
+
 export function UpdatePage() {
   const { t, i18n } = useTranslation();
   const [statusData, setStatusData] = useState<UpdateStatusData | null>(null);
   const [historyData, setHistoryData] = useState<UpdateHistoryData | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
+  /** A version check is in flight — on mount, after a change, or by hand. */
   const [checking, setChecking] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  /** Why the last version check failed; shown until a check succeeds. */
+  const [statusLoadError, setStatusLoadError] = useState<string | null>(null);
+  const checkSlow = useLastedLongerThan(checking, CHECK_SLOW_AFTER_MS);
   const [historyErrorReason, setHistoryErrorReason] = useState<string | null>(null);
   const [updateResult, setUpdateResult] = useState<{
     success: boolean;
@@ -95,30 +123,14 @@ export function UpdatePage() {
   // transaction instead of treating the accepted request as "success".
   const [inProgress, setInProgress] = useState<{ transactionId: string; phase: string | null } | null>(null);
 
-  const loadData = useCallback(async () => {
-    setLoadingState("loading");
-    setErrorMessage(null);
+  // History and recovery are read from local files. They gate only the first
+  // paint of the page.
+  const loadHistoryAndRecovery = useCallback(async () => {
     setHistoryErrorReason(null);
-
-    const [statusResult, historyResult, recoveryResult] = await Promise.all([
-      fetchUpdateStatus(),
+    const [historyResult, recoveryResult] = await Promise.all([
       fetchUpdateHistory(),
       fetchUpdateRecovery(),
     ]);
-
-    // Validate status data (H section / ERR-001/005)
-    if (!statusResult.success) {
-      setLoadingState("error");
-      setErrorMessage(statusResult.error);
-      return;
-    }
-    const validatedStatus = validateUpdateStatus(statusResult.data);
-    if (validatedStatus === null) {
-      setLoadingState("error");
-      setErrorMessage("Update status data has unexpected shape");
-      return;
-    }
-    setStatusData(validatedStatus);
 
     // Validate history data (ERR-002: degradation with reason)
     if (!historyResult.success) {
@@ -139,31 +151,53 @@ export function UpdatePage() {
     } else {
       setRecoveryData(null);
     }
+  }, []);
 
-    setLoadingState("loaded");
+  // The version check refreshes signed release metadata over the network and
+  // can spend the server's whole request budget. It never gates the page:
+  // history, recovery and an already-known status stay on screen while it runs,
+  // and the check button shows that a check is in progress. Resolves false
+  // when the check failed — the caller decides how to say so.
+  const refreshStatus = useCallback(async (): Promise<boolean> => {
+    setChecking(true);
+    const result = await fetchUpdateStatus();
+    setChecking(false);
+    const validated = result.success ? validateUpdateStatus(result.data) : null;
+    if (validated === null) {
+      // rc-9: the reason stays available until a check succeeds.
+      setStatusLoadError(result.success ? "Update status data has unexpected shape" : result.error);
+      return false;
+    }
+    setStatusLoadError(null);
+    setStatusData(validated);
+    return true;
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    void loadHistoryAndRecovery().finally(() => setLoadingState("loaded"));
+    void refreshStatus();
+  }, [loadHistoryAndRecovery, refreshStatus]);
 
   const handleCheckForUpdates = useCallback(async () => {
-    setChecking(true);
-    const result = await fetchUpdateStatus();
-    if (!result.success) {
-      toast.error(t("pages.update.checkFailed"));
-      setChecking(false);
-      return;
-    }
-    const validated = validateUpdateStatus(result.data);
-    if (validated === null) {
-      toast.error(t("pages.update.checkFailed"));
-      setChecking(false);
-      return;
-    }
-    setStatusData(validated);
-    setChecking(false);
-  }, [t]);
+    if (!(await refreshStatus())) toast.error(t("pages.update.checkFailed"));
+  }, [refreshStatus, t]);
+
+  // Re-read everything after the page's own actions. Unlike the first paint it
+  // keeps what is already on screen: the update result the Owner is reading is
+  // never replaced by a loading state while data refreshes.
+  const loadData = useCallback(async (): Promise<boolean> => {
+    const [, statusOk] = await Promise.all([loadHistoryAndRecovery(), refreshStatus()]);
+    return statusOk;
+  }, [loadHistoryAndRecovery, refreshStatus]);
+
+  // Re-read everything after an update changed the installation. The status on
+  // screen described the OLD installation, so it is dropped first: should the
+  // re-check then fail, the page says it cannot load the status rather than go
+  // on offering the update that was just applied.
+  const reloadAfterUpdate = useCallback(async (): Promise<boolean> => {
+    setStatusData(null);
+    return loadData();
+  }, [loadData]);
 
   const handleApplyFullUpdate = useCallback(async () => {
     setShowFullUpdateDialog(false);
@@ -194,7 +228,7 @@ export function UpdatePage() {
         gatewayNotice: data.gatewayNotice,
       });
       toast.success(t('pages.update.fullUpdateSuccess'));
-      await loadData();
+      if (!(await reloadAfterUpdate())) toast.error(t('pages.update.checkFailed'));
     } else {
       setUpdateResult({
         success: false,
@@ -206,7 +240,7 @@ export function UpdatePage() {
       });
       toast.error(t('pages.update.updateFailed', { message: data.message }));
     }
-  }, [t, loadData, statusData?.currentVersion]);
+  }, [t, reloadAfterUpdate, statusData?.currentVersion]);
 
   // Owner history cleanup: keep the newest COLLAPSED_HISTORY_LIMIT entries,
   // delete the rest. The server reports the row accounting; the toast surfaces
@@ -227,44 +261,56 @@ export function UpdatePage() {
     }
     toast.success(t("pages.update.cleanupSuccess", { count: data.removed }));
     setShowAllHistory(false);
-    await loadData();
+    if (!(await loadData())) toast.error(t("pages.update.checkFailed"));
   }, [t, loadData]);
 
   // PRI-853: poll the detached update's transaction until a terminal phase.
   useEffect(() => {
     if (!inProgress) return;
     let cancelled = false;
+    let inFlight = false;
     let attempts = 0;
     const tick = async () => {
-      if (cancelled) return;
+      // One poll at a time. A tick that finds its predecessor still waiting is
+      // skipped, so a slow or stalled server can never stack requests behind
+      // each other and starve everything else the page asks for.
+      if (cancelled || inFlight) return;
+      inFlight = true;
       attempts += 1;
-      const result = await fetchUpdateTransaction(inProgress.transactionId);
-      if (cancelled) return;
-      const tx = result.success ? validateUpdateTransaction(result.data) : null;
-      if (tx === null || !tx.exists) {
-        if (attempts >= 200) {
-          setInProgress(null);
-          setUpdateResult({ success: false, message: t('pages.update.inProgressTimeout'), reason: 'transaction_unresolved' });
+      try {
+        const result = await fetchUpdateTransaction(inProgress.transactionId, TRANSACTION_POLL_TIMEOUT_MS);
+        if (cancelled) return;
+        const tx = result.success ? validateUpdateTransaction(result.data) : null;
+        if (tx === null || !tx.exists) {
+          if (attempts >= 200) {
+            setInProgress(null);
+            setUpdateResult({ success: false, message: t('pages.update.inProgressTimeout'), reason: 'transaction_unresolved' });
+          }
+          return;
         }
-        return;
+        setInProgress({ transactionId: inProgress.transactionId, phase: tx.lastState });
+        if (!tx.terminal) return;
+        setInProgress(null);
+        if (tx.lastState === 'confirmed') {
+          setUpdateResult({ success: true, message: t('pages.update.inProgressConfirmed', { version: tx.productVersion ?? '' }), requiresRestart: true });
+          toast.success(t('pages.update.fullUpdateSuccess'));
+        } else {
+          setUpdateResult({ success: false, message: t('pages.update.inProgressEnded', { state: tx.lastState ?? '' }) });
+        }
+        if (!(await reloadAfterUpdate())) toast.error(t("pages.update.checkFailed"));
+      } finally {
+        inFlight = false;
       }
-      setInProgress({ transactionId: inProgress.transactionId, phase: tx.lastState });
-      if (!tx.terminal) return;
-      setInProgress(null);
-      if (tx.lastState === 'confirmed') {
-        setUpdateResult({ success: true, message: t('pages.update.inProgressConfirmed', { version: tx.productVersion ?? '' }), requiresRestart: true });
-        toast.success(t('pages.update.fullUpdateSuccess'));
-      } else {
-        setUpdateResult({ success: false, message: t('pages.update.inProgressEnded', { state: tx.lastState ?? '' }) });
-      }
-      await loadData();
     };
-    const timer = setInterval(tick, 3000);
+    const timer = setInterval(() => void tick(), TRANSACTION_POLL_INTERVAL_MS);
     void tick();
     return () => { cancelled = true; clearInterval(timer); };
-  }, [inProgress?.transactionId, t, loadData]);
+  }, [inProgress?.transactionId, t, reloadAfterUpdate]);
 
   // ── Loading state ────────────────────────────────────────────────────────
+  // First paint only: history and recovery are local reads. The version check
+  // runs beside it and reports inside the status card (ERR-002: a check that
+  // fails degrades with its reason, it never blanks the page).
   if (loadingState === "loading") {
     return (
       <PageShell width="table">
@@ -273,26 +319,6 @@ export function UpdatePage() {
           label={t("common.loading")}
           slowLabel={t("pages.update.slowHint")}
         />
-      </PageShell>
-    );
-  }
-
-  // ── Error state (ERR-002: degradation with reason) ───────────────────────
-  if (loadingState === "error") {
-    return (
-      <PageShell width="table">
-        <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
-          {t("pages.update.eyebrow")}
-        </div>
-        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
-          {t("pages.update.title")}
-        </h1>
-        <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
-          <p>{t("pages.update.loadError")}</p>
-          {errorMessage && (
-            <p className="mt-2 text-ink-4 text-body font-mono">{errorMessage}</p>
-          )}
-        </div>
       </PageShell>
     );
   }
@@ -411,7 +437,9 @@ export function UpdatePage() {
                     {t("pages.update.blockedBadge")}
                   </span>
                 )}
-                {updateState === 'up_to_date' && (
+                {/* No badge while the first check is still running: "no answer
+                    yet" is not "up to date". */}
+                {statusData !== null && updateState === 'up_to_date' && (
                   <span className="inline-flex items-center border border-green/35 text-green rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
                     {t("pages.update.upToDate")}
                   </span>
@@ -446,6 +474,24 @@ export function UpdatePage() {
             <div className="mt-4 pt-3 border-t border-line text-[12px] text-ink-4 font-mono">
               {t("pages.update.checkError")}: {statusData.error}
             </div>
+          )}
+
+          {/* No version status at all yet and the check failed: say so where the
+              status would be, with its reason. History and recovery below stay
+              readable, and the check button retries. */}
+          {statusData === null && statusLoadError !== null && (
+            <div className="mt-4 pt-3 border-t border-line">
+              <p className="text-ink-2 text-sm">{t("pages.update.loadError")}</p>
+              <p className="mt-1 text-ink-4 text-body font-mono">{statusLoadError}</p>
+            </div>
+          )}
+
+          {/* The check is taking a while: say what is being checked, where the
+              Owner is looking for its answer. */}
+          {checkSlow && (
+            <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="update-check-slow">
+              {t("pages.update.slowHint")}
+            </p>
           )}
 
           {/* PRI-853: in-progress panel — the accepted detached transaction is

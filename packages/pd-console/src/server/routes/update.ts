@@ -12,6 +12,15 @@ import type * as authorityModule from 'create-principles-disciple/update-console
 
 type AuthorityModule = typeof authorityModule;
 type Authority = ReturnType<AuthorityModule['createReleaseManagerAuthority']>;
+/**
+ * The seam as this Console finds it on disk. An update swaps the runtime
+ * components one by one, so a Console can start against a release-manager
+ * deployed before the async factory existed. The synchronous factory is then
+ * the fallback, and `await` takes its result unchanged.
+ */
+type AuthoritySeam = Omit<AuthorityModule, 'createReleaseManagerAuthorityAsync'> & {
+  createReleaseManagerAuthorityAsync?: AuthorityModule['createReleaseManagerAuthorityAsync'];
+};
 const REPAIR_ACTION = 'Resolve the reported cause, or run the official installer (npx create-principles-disciple) to repair the installation, then retry.';
 
 function appendGovernedUpdateHistory(workspaceDir: string, entry: Parameters<typeof appendUpdateHistory>[1]): void {
@@ -261,7 +270,12 @@ export async function handleUpdateRoute(
   } else {
     try {
       mod = await import('create-principles-disciple/update-console');
-      authority = mod.createReleaseManagerAuthority({
+      // Awaited: the readiness gate re-hashes the deployed executor tree, and
+      // awaiting it lets this server keep serving other requests while the
+      // tree is read.
+      const seam: AuthoritySeam = mod;
+      const createAuthority = seam.createReleaseManagerAuthorityAsync ?? seam.createReleaseManagerAuthority;
+      authority = await createAuthority({
         pdHome: getPdHome().pdHome,
         metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
       });

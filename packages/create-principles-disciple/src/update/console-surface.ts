@@ -15,6 +15,7 @@
 
 export {
   createReleaseManagerAuthority,
+  createReleaseManagerAuthorityAsync,
   mapReleaseManagerError,
   type ReleaseManagerAuthority,
   type ReleaseManagerAuthorityOptions,
