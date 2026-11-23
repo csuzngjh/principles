@@ -15,10 +15,15 @@ updates:
     # @principles/* 是 monorepo workspace 内部包：dependabot 按 registry 版本
     # 改写 workspace manifest 的 spec，会让 npm 绕过 workspace link 装已发布
     # tarball，破坏 parity（PR #1541 实证；与 openclaw-plugin 目录同款规则）。
+    # i18next 27 的 TFunction 类型不再可赋给项目内简单翻译函数签名，全线
+    # typecheck 失败（PR #2765 实证）；须专门迁移，先挡 27.x 自动 PR，
+    # 26.x 补丁照旧放行。
     ignore:
       - dependency-name: '@tufjs/models'
         update-types: ['version-update:semver-major']
       - dependency-name: '@principles/*'
+      - dependency-name: 'i18next'
+        versions: ['27.x']
     commit-message:
       prefix: 'chore'
       include: 'scope'
