@@ -1338,17 +1338,28 @@ export function mergeWorkbuddyIntoInstallManifest(
     }
     return locked.value;
   }
-  return mergeWorkbuddyIntoInstallManifestLocked(manifestPath, governanceDir, atomicReplace);
+  // PRI-1282 r4 §12: a registry-resolved install-layout too old to export
+  // the write lock must FAIL CLOSED — an unlocked read-modify-write can
+  // silently drop an interleaved handover/rollback ownership record.
+  return {
+    ok: false,
+    reason: 'install_manifest_lock_unavailable: this @principles/install-layout does not export withInstallManifestWriteLock. No write was performed.',
+    nextAction: 'Upgrade @principles/install-layout to the PRI-1282 cohort, then re-run the installer.',
+  };
 }
 
 /** Remove 'workbuddy' from manifest hosts (uninstall bookkeeping; workspaces/governance data preserved). */
 function removeWorkbuddyFromInstallManifestHosts(manifestPath: string): void {
   const write = (): void => {
+    // Re-read inside the lock: the bytes outside the critical section are
+    // stale the moment they were read (PRI-1282 r4 §12).
     const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf-8'));
     if (!isRecord(parsed) || !Array.isArray(parsed.hosts)) return;
     const hosts = parsed.hosts.filter((h): h is InstallHost => typeof h === 'string' && h !== 'workbuddy');
     const payload: Record<string, unknown> = { ...parsed, hosts };
-    writeFileSync(manifestPath, JSON.stringify(payload, null, 2) + '\n', 'utf-8');
+    // tmp+rename atomic land — a mid-write failure must leave either the
+    // old or the new manifest, never a torn file.
+    atomicReplaceTextFile(manifestPath, JSON.stringify(payload, null, 2) + '\n');
   };
   try {
     // Same §8.4 CAS lock as every other manifest writer (PRI-1282 review).
@@ -1360,7 +1371,8 @@ function removeWorkbuddyFromInstallManifestHosts(manifestPath: string): void {
       );
       return;
     }
-    write();
+    // No lock export → fail closed: an unlocked manifest write can drop an
+    // interleaved §8.4 ownership record (PRI-1282 r4 §12).
   } catch {
     // Uninstall must not fail on manifest bookkeeping; the preserved-state
     // report below still names the governance dir. rc-9: surfaced via paths.

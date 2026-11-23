@@ -159,6 +159,29 @@ function isSafeOperationId(operationId: string): boolean {
   return SAFE_OPERATION_ID.test(operationId);
 }
 
+/**
+ * Canonical-directory equality for the persisted quiesce ack (PRI-1282 r4
+ * §11): writer, reader and this context all key off REAL directory
+ * identity — an ack recorded under a symlinked alias spelling of the same
+ * directory binds it; a spelling that resolves elsewhere does not. An
+ * unresolvable spelling fails closed (no match).
+ */
+function ackWorkspaceMatches(recorded: string, canonicalDir: string): boolean {
+  let realRecorded: string;
+  try {
+    realRecorded = fs.realpathSync.native(recorded);
+  } catch {
+    realRecorded = path.resolve(recorded);
+  }
+  let realCanonical: string;
+  try {
+    realCanonical = fs.realpathSync.native(canonicalDir);
+  } catch {
+    realCanonical = path.resolve(canonicalDir);
+  }
+  return realRecorded === realCanonical;
+}
+
 function errnoOf(error: unknown): string {
   return typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
     ? String(Reflect.get(error, 'code'))
@@ -930,10 +953,19 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
   const readinessProcessFailed = readiness.result.exitCode !== 0
     || readiness.result.timedOut === true
     || readiness.result.cancelled === true
-    || readiness.result.spawnError !== undefined;
-  if (readinessMode !== 'ready' || readinessProcessFailed) {
+    || readiness.result.spawnError !== undefined
+    || readiness.result.stdoutTruncated === true
+    // close-observed is required: a worker whose stdout was captured but
+    // whose process never provably terminated cannot attest readiness
+    // (PRI-1282 r4 §10).
+    || readiness.result.terminationConfirmed !== true;
+  // The readiness document must attest THIS workspace — an out-of-band or
+  // stale 'ready' printed for another dir is not this workspace's proof.
+  const readinessWorkspaceMismatch = typeof readinessJson?.workspaceDir === 'string'
+    && path.resolve(readinessJson.workspaceDir) !== context.workspaceDir;
+  if (readinessMode !== 'ready' || readinessProcessFailed || readinessWorkspaceMismatch) {
     const processDetail = readinessProcessFailed
-      ? `exitCode=${readiness.result.exitCode} timedOut=${readiness.result.timedOut} cancelled=${readiness.result.cancelled}${readiness.result.spawnError !== undefined ? ` spawnError=${readiness.result.spawnError}` : ''}`
+      ? `exitCode=${readiness.result.exitCode} timedOut=${readiness.result.timedOut} cancelled=${readiness.result.cancelled} stdoutTruncated=${readiness.result.stdoutTruncated} terminationConfirmed=${readiness.result.terminationConfirmed ?? false}${readiness.result.spawnError !== undefined ? ` spawnError=${readiness.result.spawnError}` : ''}`
       : '';
     const rollback = transitionWorkspaceBackgroundExecution({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId, expectedGeneration: preparingGeneration });
     record('readiness', readinessProcessFailed ? `process_failed(${processDetail})` : readinessMode, readiness.result.stdout.slice(0, 400));
@@ -943,7 +975,9 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
     return {
       ok: false,
       outcome: 'blocked',
-      reason: readinessProcessFailed ? `openclaw_worker_readiness_process:${readinessMode}` : `openclaw_worker_readiness:${readinessMode}`,
+      reason: readinessWorkspaceMismatch
+        ? 'openclaw_worker_readiness_workspace_mismatch'
+        : readinessProcessFailed ? `openclaw_worker_readiness_process:${readinessMode}` : `openclaw_worker_readiness:${readinessMode}`,
       nextAction: 'Fix the failing readiness checks (declaration / evidence port / credentials) and retry; the workspace was restored to legacy ownership.',
       operationId,
       detail: readinessJson ?? { exitCode: readiness.result.exitCode, timedOut: readiness.result.timedOut, cancelled: readiness.result.cancelled },
@@ -965,7 +999,10 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
       && ack.operationId === operationId
       && ack.generation === preparingGeneration
       && ack.state === 'handover_preparing'
-      && path.resolve(ack.workspaceDir) === context.workspaceDir
+      // PRI-1282 r4 §11: compare REAL directory identity, not lexical
+      // spelling — an ack persisted under a symlinked alias spelling must
+      // still bind this workspace (and a foreign spelling must not).
+      && ackWorkspaceMatches(ack.workspaceDir, context.workspaceDir)
       && ack.outcome === 'quiesced'
       && ack.inFlightCycles === 0) break;
     await wait(2_000);
@@ -978,7 +1015,7 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
         ? 'gateway_quiesce_ack_generation_mismatch'
         : ack.state !== 'handover_preparing'
           ? `gateway_quiesce_ack_state_mismatch:${ack.state}`
-          : path.resolve(ack.workspaceDir) !== context.workspaceDir
+          : !ackWorkspaceMatches(ack.workspaceDir, context.workspaceDir)
             ? 'gateway_quiesce_ack_workspace_mismatch'
             : ack.outcome !== 'quiesced'
               ? `gateway_quiesce_ack_not_quiesced:${ack.outcome}`
