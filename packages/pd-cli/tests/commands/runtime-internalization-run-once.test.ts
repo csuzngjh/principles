@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
 
 const VALID_DREAMER_CANDIDATES = [{ candidateIndex: 0, badDecision: 'Ignored validation', betterDecision: 'Validate inputs', rationale: 'Prevents errors', confidence: 0.9, riskLevel: 'low' as const, strategicPerspective: 'defensive-programming' }];
@@ -109,6 +109,13 @@ vi.mock('@principles/core/runtime', () => ({
       return null;
     }
   }),
+  // PRI-1284: faithful copy of the production candidate-chain membership
+  // predicate (correlationId OR embedded taskId match) — the --only-candidates
+  // allowlist the handler builds on top of it.
+  piTaskBelongsToCandidates: vi.fn().mockImplementation(
+    (piTask: { taskId: string; correlationId?: string }, candidateIds: readonly string[]) =>
+      candidateIds.some((id) => id !== '' && (piTask.correlationId === id || piTask.taskId.includes(id))),
+  ),
   EvaluatorRunner: vi.fn().mockImplementation(function () {
     return { run: mockRun };
   }),
@@ -2180,3 +2187,4 @@ describe('PRI-1221: run-once auto-discovery when --runner omitted', () => {
     expect(output.taskId).toBe('task-artificer-td');
   });
 });
+

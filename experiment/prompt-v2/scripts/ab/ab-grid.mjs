@@ -26,8 +26,17 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..', '..');
 
-const argv = process.argv.slice(2);
-const USAGE = 'usage: node ab-grid.mjs --config <experiment-config.json> --run-id <id> [--parallel 1..8] [--arms <armA>,<armB>] [--simulate-failure <index>]';
+// PRI-1284 r2 (review): normalize `--flag=value` into `--flag value` — the
+// equals form used to return null from every lookup and fall back to the
+// default budget without a word (rc-9 no-silent-fallback).
+const argv = process.argv.slice(2).flatMap((a) => {
+  if (a.startsWith('--') && a.includes('=')) {
+    const eq = a.indexOf('=');
+    return [a.slice(0, eq), a.slice(eq + 1)];
+  }
+  return [a];
+});
+const USAGE = 'usage: node ab-grid.mjs --config <experiment-config.json> --run-id <id> [--parallel 1..8] [--arms <armA>,<armB>] [--simulate-failure <index>] [--reps N] [--formation-depth N]';
 // PRI-1254 r2 (review 0001 / P1-04): keep the config OBJECT (validated, for
 // this parent process) strictly apart from the config FILE PATH (the
 // normalized string every shard child receives via --config). The previous
@@ -41,8 +50,21 @@ const runId = getOpt('--run-id', null);
 const parallel = Number(getOpt('--parallel', 6));
 const armsOpt = getOpt('--arms', null);
 const simulateFailureIndex = getOpt('--simulate-failure', null);
+const repsOpt = getOpt('--reps', null);
+const formationDepthOpt = getOpt('--formation-depth', null);
 if (!runId) throw new Error('--run-id required');
 if (!Number.isInteger(parallel) || parallel < 1 || parallel > 8) throw new Error('--parallel must be 1..8');
+// Budget flags are forwarded verbatim to every shard child (PRI-1284 —
+// the shard launcher used to drop them, so lab:run silently reverted to
+// dataset reps and unbounded formation depth). Validate them HERE, before
+// any side effect, with the same positive-integer contract ab-run enforces.
+const positiveIntOpt = (flag, raw) => {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${flag} must be a positive integer — got ${JSON.stringify(raw)}`);
+  return n;
+};
+let reps = repsOpt === null ? null : positiveIntOpt('--reps', repsOpt);
+let formationDepth = formationDepthOpt === null ? null : positiveIntOpt('--formation-depth', formationDepthOpt);
 
 // Arms: config pair by default; --arms must be exactly that pair (any order).
 const configuredArms = configArms();
@@ -84,7 +106,35 @@ const gridManifest = {
   shards: shards.map((s, i) => ({ index: i, samples: s, exitCode: null })),
   startedAt: new Date().toISOString(),
 };
-fs.writeFileSync(path.join(runDirPath, `grid-manifest.json`), JSON.stringify(gridManifest, null, 2) + '\n', 'utf8');
+// PRI-1284 r2 (review): the effective budget belongs to the RUN, not to this
+// invocation. On resume, read the budget recorded by the first writer — an
+// omitted flag adopts it and is forwarded to the shards; an explicitly
+// different value is refused BEFORE the manifest is rewritten and BEFORE
+// any shard launches, because completed records keep the old budget while
+// ab-metrics aggregates them all under one run id.
+const gridManifestPath = path.join(runDirPath, 'grid-manifest.json');
+// (readFileSync directly — existsSync-then-read would be a file-system race;
+// ENOENT simply means this run id's first launch.)
+let priorBudget = null;
+try {
+  priorBudget = JSON.parse(fs.readFileSync(gridManifestPath, 'utf8')).budget ?? null;
+} catch (err) {
+  if (err && err.code !== 'ENOENT') throw err;
+}
+if (priorBudget) {
+  for (const key of ['reps', 'formationDepth']) {
+    const cur = key === 'reps' ? reps : formationDepth;
+    if (cur !== null && cur !== priorBudget[key]) {
+      console.error(`budget mismatch on resume: this run's grid manifest recorded ${key}=${priorBudget[key]}, invocation passed ${cur} — refusing to mix budgets under one run id; use a new --run-id for a different budget`);
+      process.exit(1);
+    }
+    if (cur === null && priorBudget[key] !== null && priorBudget[key] !== undefined) {
+      if (key === 'reps') reps = priorBudget[key]; else formationDepth = priorBudget[key];
+    }
+  }
+}
+gridManifest.budget = { reps, formationDepth };
+fs.writeFileSync(gridManifestPath, JSON.stringify(gridManifest, null, 2) + '\n', 'utf8');
 console.log(`run=${runId} parallel=${shards.length} shards=${JSON.stringify(shards.map((_, i) => i))}`);
 
 const children = shards.map((shard, i) => new Promise((resolve) => {
@@ -98,6 +148,10 @@ const children = shards.map((shard, i) => new Promise((resolve) => {
     '--shard-id', String(i),
     '--arms', arms.join(','),
   ];
+  // Forward the budget flags verbatim: without this the shard silently ran
+  // with dataset repeatRunPicks and unbounded formation depth (PRI-1284).
+  if (reps !== null) childArgs.push('--reps', String(reps));
+  if (formationDepth !== null) childArgs.push('--formation-depth', String(formationDepth));
   if (simulateFailureIndex !== null && Number(simulateFailureIndex) === i) {
     // Deliberate failure hook (Gate 0): exit non-zero without side effects.
     resolve({ index: i, code: 42, simulated: true });

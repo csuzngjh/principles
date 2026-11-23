@@ -47,6 +47,91 @@ describe('parseIntentDocSections', () => {
     expect(s.why).toBeDefined();
     expect(s.desiredOutcome).toBeDefined();
   });
+  // Regression (2026-11-22, intent ON/OFF pilot ON arm): a heading with a
+  // separator-introduced localization annotation — `## 1. Why — 为什么存在`
+  // — parsed as missing, silently degrading the whole Intent chain to
+  // not_configured while the file carried full Owner content. The canonical
+  // title followed by an em/en dash or colon annotation must stay canonical.
+  it('parses sections with separator-introduced heading annotations (zh-CN style)', () => {
+    const s = parseIntentDocSections(`# INTENT.zh-CN.md
+
+## 1. Why — 为什么存在
+
+帮助 Agent 形成可观察的行为改进。
+
+## 2. Desired Outcome: 期望结果
+
+Agent 依据可追溯证据做判断。
+
+## 3. Non-negotiables —不可妥协事项
+
+不编造事实。
+
+## 4. Stop / Escalation — 停止与升级条件
+
+关键证据缺失时停止。
+
+## 5. Current Strategic Focus — 当前战略重点
+
+建立证据驱动的迭代闭环。
+`);
+    expect(s.why).toContain('可观察的行为改进');
+    expect(s.desiredOutcome).toContain('可追溯证据');
+    expect(s.nonNegotiables).toContain('不编造事实');
+    expect(s.stopEscalation).toContain('关键证据缺失');
+    expect(s.currentStrategicFocus).toContain('迭代闭环');
+  });
+  it('still rejects headings where the title continues into other words', () => {
+    const s = parseIntentDocSections('## 1. Why not do this\n\nbody\n');
+    expect(s.why).toBeUndefined();
+  });
+  // Regression (PR #2750 review P1-1): the annotation gap used `\s`, which
+  // matches `\n` — a body line beginning with `—`, `–` or `:` directly under
+  // a heading was folded INTO the header match and silently dropped from the
+  // section body (data loss the IntentEditor could then persist back to
+  // disk). Heading whitespace is now same-line only; a dash/colon on the
+  // NEXT line is body content, never an annotation.
+  it('does not swallow a body line starting with — (em dash)', () => {
+    const s = parseIntentDocSections('## 3. Non-negotiables\n\n— 不得编造事实。\n— 必须保留证据。\n');
+    expect(s.nonNegotiables).toBe('— 不得编造事实。\n— 必须保留证据。');
+  });
+  it('does not swallow a body line starting with – (en dash)', () => {
+    const s = parseIntentDocSections('## 3. Non-negotiables\n\n– first constraint\n– second constraint\n');
+    expect(s.nonNegotiables).toBe('– first constraint\n– second constraint');
+  });
+  it('does not swallow a body line starting with a colon', () => {
+    const s = parseIntentDocSections('## 3. Non-negotiables\n\n: first constraint\n: second constraint\n');
+    expect(s.nonNegotiables).toBe(': first constraint\n: second constraint');
+  });
+  it('keeps a dash/colon body line even when the heading carries no annotation', () => {
+    const s = parseIntentDocSections('## 1. Why\n\n— a leading dash is content\n: a leading colon is content\nplain line\n');
+    expect(s.why).toBe('— a leading dash is content\n: a leading colon is content\nplain line');
+  });
+  it('keeps the annotation bound to its own line: next-line dash stays body', () => {
+    const s = parseIntentDocSections('## 1. Why — annotation\n\n— body line, not annotation\n');
+    expect(s.why).toBe('— body line, not annotation');
+  });
+  it('round-trips all five sections through assemble/parse, annotated headings included', () => {
+    const sections: IntentDocSections = {
+      why: 'why-content',
+      desiredOutcome: 'outcome-content',
+      nonNegotiables: '— 不得编造事实。\n— 必须保留证据。',
+      stopEscalation: 'stop-content',
+      currentStrategicFocus: 'focus-content',
+    };
+    const s = parseIntentDocSections(assembleIntentDoc(sections));
+    expect(s.why).toBe('why-content');
+    expect(s.desiredOutcome).toBe('outcome-content');
+    expect(s.nonNegotiables).toBe('— 不得编造事实。\n— 必须保留证据。');
+    expect(s.stopEscalation).toBe('stop-content');
+    expect(s.currentStrategicFocus).toBe('focus-content');
+  });
+  it('round-trips: assemble output still parses under the tolerant regexes', () => {
+    const sections: IntentDocSections = { why: 'w-content', desiredOutcome: 'd-content' };
+    const s = parseIntentDocSections(assembleIntentDoc(sections));
+    expect(s.why).toBe('w-content');
+    expect(s.desiredOutcome).toBe('d-content');
+  });
 });
 
 describe('assembleIntentDoc', () => {
