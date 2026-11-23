@@ -1,12 +1,16 @@
 # SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案
 
-- **版本**：v0.5
+- **版本**：v0.6
 - **日期**：2026-11-23
 - **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
-- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.5）](./SPEC-PD-PIPELINE-SPINE-001.md)
+- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.6）](./SPEC-PD-PIPELINE-SPINE-001.md)
 - **源码事实基线**：`origin/main@679dcc93f`
 - **规范性数据契约**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)、[MVP Core Loop Contract](../architecture/MVP_CORE_LOOP_CONTRACT.md)
 - **标注约定**：文中标注 `〔现有能力〕` 的符号已在当前源码中存在；标注 `〔新增能力〕` 的符号当前不存在，实施前不得以现有能力名义引用；标注 `〔收编删除〕` 的代码块为重复组装，迁移后删除。
+- **v0.6 关键技术修订摘要**：
+  1. §3.4.2 注 3 升级：`pain-signal-bridge.ts`（`:1766` 身份解析 + `:1792` 路由）与 `diagnose.ts`（`:859` kind 取值、`:877` 抑制输入、seed 循环 `status === 'consumed'` 闸）两条自动入口的归一化 kind 缺口由"实施期可选"升为 **Phase 1B 强制修复**——已核实 `diagnose.ts` 中 Intake 拒绝（非异常）仍记录 `status: 'consumed'`（附 `ledgerWriteRefused`），seed 循环会以 `'consumed'` 放行并用折叠后的 `'principle'` 完成播种，被 Intake 拒绝的非法原始 kind 可进入 Dreamer 链。修法：seed 闸前 `validateRecommendationKind(candidate.rawRecommendationKind)`，非法一律零播种，身份解析传原始字段，合法 `rule`/`prompt` 路由不变，不把所有 Intake 拒绝改为停止处理；双入口各增非法 kind 零播种测试。
+  2. §3.8 补 Phase 0 阈值校准条款：≤5s / ≤60s 为未校准建议值，校准前超窗缺失按 `skew_window_candidate` 输出并标注"阈值未校准"，不判确定流失。
+  3. §3.8 明确 `stageWalSnapshot` 改造边界：当前生产实现为私有函数返回 `{ ok: true, root }`；`dispose()` 改造必须保留 `ok` 成败判别，调用点判 `ok` 后再取 `dispose`。
 - **v0.5 关键技术修订摘要**：
   1. §3.4.2 修正 D4 候选类型数据源：`resolveCandidatePrincipleIdentity` 必须传 `candidate.rawRecommendationKind`（`recommendationKind` 是 `candidate-store.ts` 明文标注的 fail-open 归一化读视图，禁止用于写边界判定）；`rule` 放行以验证后原始类型为准；登记 `pain-signal-bridge.ts:1766` 与 `diagnose.ts` 现存传归一化 kind 的同类隐患。
   2. §3.8 修正 Phase 0 数据库路径：`state.db` 位于 `.pd/`（非 `.state/`），脚本复用 `resolveStateDbPath` / `resolveTrajectoryDbPath`；偏斜窗口拆分为快照偏差（两 T1 之差 ≤5s）与跨库写入允许延迟（≤60s）两层语义，关联缺失以记录自身时间戳 vs 对方 T1 判定；`dispose()` 前先关闭 SQLite 连接（Windows 文件占用）。
@@ -328,7 +332,7 @@ if (identity.status !== 'resolved') {
 >
 > 注 2：现有 `diagnose.ts:877` 与 `candidate.ts:1231` 的抑制输入采用 `admissionDoc.ok ? ... : undefined` 折叠写法（历史惯例）。本门禁是新增的 fail-closed 判定点，**不得**复制该惯例；上述两个既有调用点是否同步收紧列为实施期可选项，不属本 PR 范围。
 >
-> 注 3（v0.5）：同类隐患亦存在于 kind 数据源——`pain-signal-bridge.ts:1766` 与 `diagnose.ts` 向 `resolveCandidatePrincipleIdentity` 传入归一化的 `candidate.recommendationKind ?? 'principle'`（而非 `rawRecommendationKind`），非法持久化 kind 在这两条既有路径上同样无法触发 `candidate_kind_invalid`。本门禁必须使用 `rawRecommendationKind`；既有两处的同步修正列为实施期可选修复（与注 2 的 `ok:false` 折叠写法一并评估）。
+> 注 3（v0.6 升级为 Phase 1B 强制项）：同类缺口亦存在于两条自动入口——`pain-signal-bridge.ts:1766` 向 `resolveCandidatePrincipleIdentity` 传入归一化的 `candidate.recommendationKind ?? 'principle'`、`:1792` 路由 `CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? '']`；`diagnose.ts:859` 取 `const kind = candidate.recommendationKind` 供 `:879` 身份解析与路由使用。且 `diagnose.ts` 存在已核实的执行窗口：Intake 拒绝（非异常）路径仍记录 `status: 'consumed'`（附 `ledgerWriteRefused`），而 Dreamer seed 循环仅以 `intakeResult.status !== 'consumed'` 为闸——非法原始 kind 被折叠为 `'principle'` 后 `candidate_kind_invalid` 不触发、`'principle'` 路由命中，被 Intake 拒绝的候选仍可完成播种。**修复契约**：两条入口在 seed 判定前执行 `const rawKind = validateRecommendationKind(candidate.rawRecommendationKind)`，`rawKind === null` 一律零播种（`diagnose` 记录结构化 `refused`，bridge 发 telemetry），身份解析与 `rule` 放行判定一律传 `candidate.rawRecommendationKind`；合法 `rule`/`prompt` 候选路由行为不变；**不得**把所有 Intake 拒绝改为停止处理（`consumed` + `ledgerWriteRefused` 语义保留，仅在 seed 闸前加原始 kind 校验）。两入口各补一个非法原始 kind 零播种测试。注 2 的 `ok:false` 折叠写法维持实施期可选项。
 
 ---
 
@@ -454,8 +458,8 @@ export async function resolveAuthoritativeCorrelationId(
 ### 3.8 Phase 0、Phase 4、Phase 5 实施要点
 
 1. **Phase 0（复用 WAL 安全暂存快照的漏斗分析脚本，v0.4 修订）**：
-   - **受控快照接口**：在 `packages/principles-core/src/runtime/pain-recall-read-model.ts` 调整 `stageWalSnapshot` 导出形态——返回值携带受控 `dispose()` 闭包负责清理暂存目录（`{ stagedDbPath, fingerprint, capturedAt, dispose }`），**不导出**通用目录删除函数 `removeStagingRoot`（避免把任意路径删除能力暴露给所有消费者）。存量 `pd pain recall` 调用点同步改用 `dispose()`。
-   - **跨库非原子性约束（v0.5 细化语义）**：`stageWalSnapshot` 每次只处理**单个**数据库；`state.db`（`.pd/state.db`）与 `trajectory.db`（`.state/trajectory.db`）两次调用是两个独立线性化点，不构成跨库原子快照。**快照时间偏差不等于跨库写入延迟**——例如 `state.db` 快照完成 1s 后 `trajectory.db` 快照完成，其关联写入可能 10s 后才落盘。脚本必须：① `capturedAt` 取各库快照的 **T1 线性化点**（非拷贝开始时间）；② 分别记录两库 T1 与文件指纹写入报告；③ 区分两层窗口——**快照偏差窗口**（两 T1 之差，建议 ≤5s，超差自动重试一次，仍超差在报告中标注）与**跨库写入允许延迟**（关联写入允许晚于先快照库 T1 的时长，建议 ≤60s）；④ 跨库关联缺失以**现存记录自身时间戳 vs 对方库 T1** 判定（不能依赖不存在的记录自己的时间戳）：记录时间早于对方 T1 且超出写入允许延迟→判定流失；否则标 `skew_window_candidate`（可延迟复查）。若未来需要严格跨库一致性，另行设计共享快照/写入协调机制，不在本期范围。
+   - **受控快照接口**：在 `packages/principles-core/src/runtime/pain-recall-read-model.ts` 调整 `stageWalSnapshot` 导出形态——返回值携带受控 `dispose()` 闭包负责清理暂存目录（`{ stagedDbPath, fingerprint, capturedAt, dispose }`），**不导出**通用目录删除函数 `removeStagingRoot`（避免把任意路径删除能力暴露给所有消费者）。存量 `pd pain recall` 调用点同步改用 `dispose()`。**改造边界（v0.6）**：当前生产实现仍为模块私有函数，成功返回 `{ ok: true, root }`——改造时必须保留 `ok` 成败判别语义（调用点先判 `ok` 再取 `dispose`），不得把现有失败分支语义折叠掉。
+   - **跨库非原子性约束（v0.5 细化语义）**：`stageWalSnapshot` 每次只处理**单个**数据库；`state.db`（`.pd/state.db`）与 `trajectory.db`（`.state/trajectory.db`）两次调用是两个独立线性化点，不构成跨库原子快照。**快照时间偏差不等于跨库写入延迟**——例如 `state.db` 快照完成 1s 后 `trajectory.db` 快照完成，其关联写入可能 10s 后才落盘。脚本必须：① `capturedAt` 取各库快照的 **T1 线性化点**（非拷贝开始时间）；② 分别记录两库 T1 与文件指纹写入报告；③ 区分两层窗口——**快照偏差窗口**（两 T1 之差，建议 ≤5s，超差自动重试一次，仍超差在报告中标注）与**跨库写入允许延迟**（关联写入允许晚于先快照库 T1 的时长，建议 ≤60s）；④ 跨库关联缺失以**现存记录自身时间戳 vs 对方库 T1** 判定（不能依赖不存在的记录自己的时间戳）：记录时间早于对方 T1 且超出写入允许延迟→判定流失；否则标 `skew_window_candidate`（可延迟复查）。**阈值校准条款（v0.6）**：≤5s / ≤60s 为建议值，尚无生产写入链路实证依据——报告须逐条记录所依据的表/时间字段与两库 T1；校准完成前，超出建议窗口的缺失一律按 `skew_window_candidate` 输出并标注"阈值未校准"，不得直接判定为确定流失（校准以 Phase 0 首份基线报告中的实测偏斜分布为依据）。若未来需要严格跨库一致性，另行设计共享快照/写入协调机制，不在本期范围。
    - 新增 `scripts/dev/pipeline-funnel-snapshot.mjs`：经 canonical `resolveStateDbPath` / `resolveTrajectoryDbPath` 定位工作区的 `state.db` 与 `trajectory.db`（**不硬编码路径**），调用 `stageWalSnapshot`（自动完成 `main + -wal` 双文件拷贝、副本哈希校验与 `main → wal → main` T1 线性化点复核；若遇并发写入竞争则最多有限重试 3 次，仍不一致则 fail-loud 退出，绝不读取半截快照，也绝不在源工作区创建 `-shm`），在临时目录以 `{ readonly: true, fileMustExist: true }` 打开统计；**`dispose()` 前先关闭全部 SQLite 连接**（Windows 下未关闭连接会导致临时文件占用、清理失败），输出 `docs/reports/PD_PIPELINE_FUNNEL_BASELINE_<YYYYMMDD>.md`。
 2. **Phase 4（开关死分支清理与阶段合并评估门）**：保持 `Backlog` 门控；阶段合并必须走 `npm run lab:*`（AGENTS §25A）。
 3. **Phase 5（原则有效性只读派生读模型）**：保持 `Backlog` 门控；严格只读聚合，证据不足一律返回 `insufficient_evidence`。
@@ -470,7 +474,7 @@ export async function resolveAuthoritativeCorrelationId(
 
 ---
 
-## 5. Linear 工单拆分映射（同步至 v0.5 口径）
+## 5. Linear 工单拆分映射（同步至 v0.6 口径）
 
 | 工单号 | 层级 | 对应阶段 | 标题 | 归属 Project | 状态 | 前置阻塞 |
 |---|---|---|---|---|---|---|

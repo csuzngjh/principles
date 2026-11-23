@@ -1,9 +1,13 @@
 # SPEC-PD-PIPELINE-SPINE-001 — PD 核心管道主干收敛规范
 
-- **版本**：v0.5
+- **版本**：v0.6
 - **日期**：2026-11-23
 - **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
 - **修订记录**：
+  - **v0.6（PR #2763 第四轮独立复核修订）**：
+    1. **两自动入口归一化 kind 隐患升级为 Phase 1B 强制项**：核实 `diagnose.ts` 存在真实执行窗口——Intake 拒绝（非异常）路径仍记录 `status: 'consumed'`（附 `ledgerWriteRefused`），而 Dreamer seed 循环仅以 `status === 'consumed'` 为闸且用归一化 `candidate.recommendationKind` 做身份解析与路由，被 Intake 拒绝的非法原始 kind 可经 `'principle'` 折叠完成播种；`pain-signal-bridge.ts:1766/1792` 同类。两入口修正（`rawRecommendationKind` + `validateRecommendationKind`、非法零播种、保留合法 `rule`/`prompt` 路由、双入口零播种测试）由"实施期可选"升为 `PRI-1291` 强制验收；`admissionDoc.ok` 折叠写法维持可选项。
+    2. **Phase 0 阈值校准条款**：≤5s / ≤60s 为建议值未经实证校准；校准完成前超窗缺失报告为 `skew_window_candidate`（标注阈值未校准），不判定确定流失。
+    3. **`stageWalSnapshot` 改造约束**：当前生产实现为私有函数返回 `{ ok: true, root }`；`dispose()` 改造必须保留 `ok` 成败判别语义。
   - **v0.5（PR #2763 第三轮独立复核修订）**：
     1. **修正 D4 候选类型数据源**：`candidate.recommendationKind` 是 `candidate-store.ts` 明文标注的 fail-open 归一化读视图（非法值折叠为 `'principle'`，"DO NOT use this field for write-boundary decisions"），改用原始持久化字段 `candidate.rawRecommendationKind`——非法 kind 才能被 `resolveCandidatePrincipleIdentity` 正确判为 `candidate_kind_invalid` fail-closed，`rule` 放行亦以验证后的原始类型为准；同时登记 `pain-signal-bridge.ts:1766` 与 `diagnose.ts` 现存传归一化 kind 的同类隐患为实施期可选修复。
     2. **修正 Phase 0 数据库路径**：`state.db` 真实位置为 `.pd/state.db`（`PD_CONFIG='.pd'`，`storage-paths.ts:48`），非 `.state/state.db`；脚本复用 canonical `resolveStateDbPath` / `resolveTrajectoryDbPath`，不硬编码路径。
@@ -24,7 +28,7 @@
   - **v0.2（对抗式自审修订）**：修正 `runtimeKind` / `hostKind` 混淆；按 P2.1 删除 `createPipelineRuntime` 大门面；用探针值端到端测试替代静态字段清单；删除 `PITaskMetadata` 三分组重排。
 - **范围**：Pain → 诊断 → 候选准入与账本入库 → 内化 → 激活 → 注入/拦截 → 行为证据 这条核心链路的协作者装配、跨跳数据连通性与有效性闭环
 - **事实基线**：`origin/main@679dcc93f`。§3 的全部数字与代码锚点均在该基线上实测，复跑命令见附录 A。
-- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.5）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
+- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.6）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
 - **不改变**：Pain 语义、诊断/内化业务规则、Owner 审批权、任务状态机（`MVP_CORE_LOOP_CONTRACT` INV-01..08）、物理数据库布局、Workspace 数据归属
 - **关联**：
   - `docs/architecture/MVP_CORE_LOOP_CONTRACT.md`（语义基线，本 SPEC 不修改）
@@ -228,7 +232,7 @@ New external/network capability: NO
 ### Phase 0 — 生产工作区 WAL 安全快照漏斗基线（零生产运行时改动）
 
 - **做什么**：新增只读开发分析脚本 `scripts/dev/pipeline-funnel-snapshot.mjs`，经 canonical `resolveStateDbPath` / `resolveTrajectoryDbPath` 定位两库（`state.db` 在 `.pd/`、`trajectory.db` 在 `.state/`，不硬编码），直接复用 `pain-recall-read-model.ts` 的 `stageWalSnapshot`（对两库及其活跃 `-wal` 执行 T0/T1 双端 SHA-256 指纹校验暂存拷贝到系统临时隔离目录；若检测到并发写入/checkpoint 竞争则拒绝失真快照并安全重试），在暂存副本上统计全量与近 30 天各阶段数量、转化率与失败/拒绝 `reasonCode` 分布。
-- **跨库非原子性约束（v0.5 细化语义）**：`stageWalSnapshot` 每次只处理**单个**数据库，`state.db`（`.pd/state.db`）与 `trajectory.db`（`.state/trajectory.db`）是两个独立线性化点。快照 `capturedAt` 一律取该库快照的 **T1 线性化点**；报告必须：① 分别记录两库的 T1 快照时间与文件指纹；② **快照偏差窗口**（两 T1 之差，建议 ≤5s）与**跨库写入允许延迟**（关联写入允许晚于先快照库的时长，建议 ≤60s）分开定义；③ 跨库关联缺失以**现存记录自身时间戳 vs 对方库 T1** 判定——缺失方数据可能尚未落盘的窗口内一律标 `skew_window_candidate`（可延迟复查），超出写入允许延迟才判定为流失。
+- **跨库非原子性约束（v0.5 细化语义）**：`stageWalSnapshot` 每次只处理**单个**数据库，`state.db`（`.pd/state.db`）与 `trajectory.db`（`.state/trajectory.db`）是两个独立线性化点。快照 `capturedAt` 一律取该库快照的 **T1 线性化点**；报告必须：① 分别记录两库的 T1 快照时间与文件指纹；② **快照偏差窗口**（两 T1 之差，建议 ≤5s）与**跨库写入允许延迟**（关联写入允许晚于先快照库的时长，建议 ≤60s）分开定义；③ 跨库关联缺失以**现存记录自身时间戳 vs 对方库 T1** 判定——缺失方数据可能尚未落盘的窗口内一律标 `skew_window_candidate`（可延迟复查），超出写入允许延迟才判定为流失。**阈值校准条款（v0.6）**：≤5s / ≤60s 为建议值，尚未有生产写入链路实证依据；校准完成前，报告须逐条记录所依据的表/时间字段与两库 T1，超窗缺失标注"阈值未校准"并按 `skew_window_candidate` 输出，不得直接判定为确定流失。
 - **受控清理接口**：不导出通用目录删除能力；`stageWalSnapshot` 返回值携带受控 `dispose()` 闭包负责清理暂存目录；**`dispose()` 前必须先关闭所有 SQLite 连接**（Windows 下未关闭连接会导致临时文件占用、清理失败）。
 - **硬边界**：严禁直接打开 `<workspace>/.pd/`、`~/.pd/runtime/` 原位数据库，严禁在源目录产生 `-shm` 副作用（AGENTS §1.1）。
 - **产出**：漏斗基线报告落盘至 `docs/reports/`，指导后续瓶颈排序。
@@ -242,8 +246,8 @@ New external/network capability: NO
 - **做什么**：
   1. **修 D1**：`PainToPrincipleServiceOptions` 补齐 `sourceMaterialAuthorization` 并按同步/异步模式收紧类型；补齐 `pain-record.ts`、`openclaw-plugin/src/hooks/pain.ts`、`openclaw-plugin/src/commands/pain.ts` 的授权与轨迹读取器接线。
   2. **修 D2**：`context-payload.ts` 增加 `deviationAnchorToPainAnchor`；`pain-ingress.ts` / `pain-signal-bridge.ts` 同步产出规范 `anchor`；`SqliteContextAssembler` 兼容读取历史 `deviationAnchor`（损坏值写入 `ambiguityNotes`）。
-  3. **修 D4**：`handleCandidateInternalize` 在可内化路由判定与**既有任务去重**之后接入 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`，严格拒绝未入账本 `principle` 候选（正确提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`）与已复用/待裁决候选，保留未绑定 `rule` 候选的合法播种；Admission 文档 `ok:false` 一律 fail-closed。
-- **验收**：Phase 1A 三层测试与 CLI 契约测试（`cli-1..cli-7`）全部由红转绿。
+  3. **修 D4（含两自动入口，v0.6 强制）**：`handleCandidateInternalize` 在可内化路由判定与**既有任务去重**之后接入 `resolveCandidatePrincipleIdentity` + `evaluateDreamerSeedSuppression`，严格拒绝未入账本 `principle` 候选（正确提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`）与已复用/待裁决候选，保留未绑定 `rule` 候选的合法播种；Admission 文档 `ok:false` 一律 fail-closed。**同步修复两条自动入口的归一化 kind 缺口**：`diagnose.ts` Dreamer seed 循环与 `pain-signal-bridge.ts` 播种路径必须改用 `validateRecommendationKind(candidate.rawRecommendationKind)`——非法原始 kind 一律零播种（fail-closed，结构化 `refused`/telemetry），身份解析与放行判定均传原始字段；合法 `rule`/`prompt` 候选路由行为不变；**不得**把所有 Intake 拒绝粗暴改为停止处理（`consumed` + `ledgerWriteRefused` 的账本语义保持，仅在 seed 闸前增加原始 kind 校验）。
+- **验收**：Phase 1A 三层测试与 CLI 契约测试（`cli-1..cli-7`）全部由红转绿；`diagnose` 与 `PainSignalBridge` 两条自动入口各自增加**非法原始 kind 零播种测试**（`rawRecommendationKind` 为非法值/缺失时不得创建 `dreamer` 任务，合法 `rule`/`prompt` 候选路由不受影响）。
 
 ### Phase 2 — 协作者打包、CLI 手搓 Runner 收编与构造点守卫
 
@@ -294,7 +298,7 @@ New external/network capability: NO
 ## 9. Owner 决策记录与待确认项
 
 1. **D4 处置策略（已采用严格拒绝）**：`pd candidate internalize` 对未完成账本入库的 `principle` 候选执行**严格拒绝**并提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`，绝不在 `internalize` 命令内隐式执行正式账本写入。
-2. **启动确认**：批准 v0.5 后，并行启动 **Phase 0（`PRI-1290`）** 与 **Phase 1A/1B（`PRI-1291`）**；Phase 4（`PRI-1294`）与 Phase 5（`PRI-1295`）保持 `Backlog` 条件门控，未经漏斗数据与 Owner 单独批准不启动。
+2. **启动确认**：批准 v0.6 后，并行启动 **Phase 0（`PRI-1290`）** 与 **Phase 1A/1B（`PRI-1291`）**；Phase 4（`PRI-1294`）与 Phase 5（`PRI-1295`）保持 `Backlog` 条件门控，未经漏斗数据与 Owner 单独批准不启动。
 
 ---
 
@@ -342,4 +346,4 @@ rg -c "^\s*id: '" packages/principles-core/src/runtime/feature-flags/feature-fla
 | 租约续期、阶段预算与父任务心跳默认契约 | `docs/specs/SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001-v1.0.md` |
 | 后台触发所有权与 OS Scheduler | `docs/specs/SPEC-PD-SERVICE-HOST-001.md` |
 | 提交身份预绑定、回执兜底与授权撤回清理 | `docs/specs/SPEC-PD-FEEDBACK-RESILIENCE-001.md` |
-| **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.5）** |
+| **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.6）** |
