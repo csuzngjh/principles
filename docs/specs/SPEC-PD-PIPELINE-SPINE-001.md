@@ -1,9 +1,14 @@
 # SPEC-PD-PIPELINE-SPINE-001 — PD 核心管道主干收敛规范
 
-- **版本**：v0.4
+- **版本**：v0.5
 - **日期**：2026-11-23
 - **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
 - **修订记录**：
+  - **v0.5（PR #2763 第三轮独立复核修订）**：
+    1. **修正 D4 候选类型数据源**：`candidate.recommendationKind` 是 `candidate-store.ts` 明文标注的 fail-open 归一化读视图（非法值折叠为 `'principle'`，"DO NOT use this field for write-boundary decisions"），改用原始持久化字段 `candidate.rawRecommendationKind`——非法 kind 才能被 `resolveCandidatePrincipleIdentity` 正确判为 `candidate_kind_invalid` fail-closed，`rule` 放行亦以验证后的原始类型为准；同时登记 `pain-signal-bridge.ts:1766` 与 `diagnose.ts` 现存传归一化 kind 的同类隐患为实施期可选修复。
+    2. **修正 Phase 0 数据库路径**：`state.db` 真实位置为 `.pd/state.db`（`PD_CONFIG='.pd'`，`storage-paths.ts:48`），非 `.state/state.db`；脚本复用 canonical `resolveStateDbPath` / `resolveTrajectoryDbPath`，不硬编码路径。
+    3. **细化 Phase 0 偏斜窗口语义**：`capturedAt` 对应 T1 线性化点；快照偏差与跨库写入允许延迟分别定义；跨库关联缺失以**记录自身时间戳 vs 对方快照 T1** 判定；窗口内数据可延迟复查；`dispose()` 前必须先关闭所有 SQLite 连接（Windows 文件占用）。
+    4. **补齐 Phase 3 根全盲边界**：根 `dreamer` 三个身份来源（`taskId`、`diagnosticJson`、自身 `correlationId`）全部无法佐证时，仅后代携带的 `correlationId` 不得采纳，fail-closed；测试矩阵 11→12 场景。
   - **v0.4（PR #2763 第二轮独立复核修订）**：
     1. **补齐 D1 类型联合的调用方条件构造要求**：`pain-record.ts:450` 的 `asyncMode` 是运行时 `boolean`，无法直接满足 `asyncMode: true | (asyncMode?: false)` 可辨识联合；明确各构造点必须用条件对象字面量分支构造（同步分支以字面量 `false` 收窄并强制携带 `trajectoryTurnReader` + `sourceMaterialAuthorization`），禁止用类型断言掩盖依赖缺失。
     2. **加固 Phase 3 根身份双源交叉校验与悬空父引用**：`candidateIdFromDreamerSeed(diagnosticJson)` 与 `candidateIdFromDreamerTaskId(taskId)` 是两个独立持久化事实，`??` 链只信前者会放过 `taskId=A / seed=B` 的冲突根；改为双源必须一致才可采纳（`A+A` 通过、`A+B` 拒绝、单边缺失用单边、双缺失拒绝）；子任务有 `correlationId` 但 `parentTaskId` 悬空（`getTask` 返回 `null`）时 fail-closed。测试矩阵由 7 个扩至 11 个场景。
@@ -19,7 +24,7 @@
   - **v0.2（对抗式自审修订）**：修正 `runtimeKind` / `hostKind` 混淆；按 P2.1 删除 `createPipelineRuntime` 大门面；用探针值端到端测试替代静态字段清单；删除 `PITaskMetadata` 三分组重排。
 - **范围**：Pain → 诊断 → 候选准入与账本入库 → 内化 → 激活 → 注入/拦截 → 行为证据 这条核心链路的协作者装配、跨跳数据连通性与有效性闭环
 - **事实基线**：`origin/main@679dcc93f`。§3 的全部数字与代码锚点均在该基线上实测，复跑命令见附录 A。
-- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.4）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
+- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.5）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
 - **不改变**：Pain 语义、诊断/内化业务规则、Owner 审批权、任务状态机（`MVP_CORE_LOOP_CONTRACT` INV-01..08）、物理数据库布局、Workspace 数据归属
 - **关联**：
   - `docs/architecture/MVP_CORE_LOOP_CONTRACT.md`（语义基线，本 SPEC 不修改）
@@ -170,12 +175,13 @@ New external/network capability: NO
 2. **`handleCandidateInternalize` 权威身份与抑制门禁（修 D4，采用严格拒绝策略）**：
    - 门禁置于准入检查与 `decideInternalizationRoute` / 可生成 Dreamer seed 判定**之后**、`findExistingDreamerTask` 既有任务去重**之后**、`createTask` **之前**。去重必须先于身份门禁执行：已存在 `dreamer` 任务的候选一律返回既有 `status: 'existing'`（账本后续身份变化不得把存量任务误报为拒绝）；`defer` / `implementation` 等本来不可内化的候选维持既有 `no_task_created` 返回。
    - **Admission 文档 `ok:false` fail-closed**：按 `candidate-store.ts` 契约，`{ ok: false }` 是损坏/不可读文档，**不得**折叠为“无历史文档”。优先复用 `enforceFullAdmissionForWrite` 已验证的文档快照避免二次读取；若必须二次读取，遇 `ok:false` 一律结构化 `refused`（`admission_document_unreadable`），绝不放行。
-   - 单次快照调用 `identity = ledgerAdapter.resolveCandidatePrincipleIdentity(candidateId, candidate.recommendationKind ?? 'principle')`，并调用 `evaluateDreamerSeedSuppression({ identity, processing, pendingOwnerDecision })`：
+   - 单次快照调用 `identity = ledgerAdapter.resolveCandidatePrincipleIdentity(candidateId, candidate.rawRecommendationKind)`——**必须传原始持久化字段**（`recommendationKind` 是 fail-open 归一化读视图，非法值折叠为 `'principle'` 会绕过 `candidate_kind_invalid`；`candidate-store.ts` 明文禁止用于写边界判定），并调用 `evaluateDreamerSeedSuppression({ identity, processing, pendingOwnerDecision })`：
      - 若命中抑制（`reuse_resolved_to_existing_principle` / `reuse_park_pending_owner` / `owner_decision_pending`）：结构化 `refused` 并给出对应 `nextAction`，禁止重复创建 Dreamer 任务；
      - 若 `identity.status === 'unresolved'`：
        - `ledger_unavailable` / `ledger_corrupt` / `ambiguous` / `conflicting_authorities` / `binding_revoked` / `target_missing` / `target_ineligible` / `candidate_kind_invalid` → 一律 fail-closed `refused`；
-       - `reason === 'missing'` 且 `candidate.recommendationKind !== 'rule'`（例如 `--no-intake` 留下的 `principle` 候选）→ **严格拒绝**（不做隐式账本写入），返回 `reason: 'candidate_not_in_ledger'` 与真实可执行命令：`pd candidate intake --candidate-id <id> --workspace "<workspaceDir>"`；
-       - `reason === 'missing'` 且 `candidate.recommendationKind === 'rule'` → 与 `PainSignalBridge` / `diagnose.ts` 自动主干保持一致，允许创建 `dreamer` 任务，由下游 `ScribeRunner` 预检停靠 `awaiting_owner_binding` 等待 Owner 绑定。
+       - `reason === 'candidate_kind_invalid'`（原始 `rawRecommendationKind` 非法，已被归一化视图掩盖）→ 与其他 `unresolved` 原因一致 fail-closed 拒绝；
+       - `reason === 'missing'` 且原始 `rawRecommendationKind` 不是 `'rule'`（例如 `--no-intake` 留下的 `principle` 候选）→ **严格拒绝**（不做隐式账本写入），返回 `reason: 'candidate_not_in_ledger'` 与真实可执行命令：`pd candidate intake --candidate-id <id> --workspace "<workspaceDir>"`；
+       - `reason === 'missing'` 且原始 `rawRecommendationKind === 'rule'` → 与 `PainSignalBridge` / `diagnose.ts` 自动主干保持一致，允许创建 `dreamer` 任务，由下游 `ScribeRunner` 预检停靠 `awaiting_owner_binding` 等待 Owner 绑定。
 3. **内化链 `correlationId` 父子一致性与历史恢复（Phase 3）**：
    - **作用域隔离**：严格限定在 `isPeerRunnerKind(taskKind)` 内化任务（`dreamer → philosopher → scribe → artificer → evaluator → rollout_reviewer` 及其修订/修复循环）；**`DiagnosticianStageKind`（`diag_rootcause → diag_distiller → diag_router`）保持既有 `parentTaskId + dependencyTaskIds` 机制，绝不套用 `correlationId` 门禁**。
    - **有界父链回溯校验**：通过 `resolveAuthoritativeCorrelationId(piTask, getTask)` 沿 `parentTaskId` 有界向上回溯（上限 10 跳，带环检测）：
@@ -183,6 +189,7 @@ New external/network capability: NO
      - 若链上任意父子节点的非空 `correlationId` 互相冲突（如父为 `cand-A`、子为 `cand-B`），立即返回 `conflict` 并 fail-closed 拒绝生成后继；
      - **根身份双源交叉校验**：根 `dreamer` 任务的 `candidateIdFromDreamerTaskId(taskId)` 与 `candidateIdFromDreamerSeed(diagnosticJson)` 是两个独立持久化事实，必须一致才可采纳——`A+A` 通过、`A+B` 返回 `conflict` 拒绝、单边缺失采纳单边、双缺失拒绝；禁止 `??` 链静默偏向其中一个；
      - 若历史在途链（含已走到 `philosopher` / `scribe` 的后代任务）全链未写 `correlationId`，但可沿 `parentTaskId` 唯一追溯到根 `dreamer` 任务并经上述双源交叉校验恢复出 `candidateId`，则采纳该根身份并写入新后继任务；
+     - **根全盲佐证要求（v0.5）**：链上唯一非空 `correlationId` 必须获得根侧佐证（`rootSeedId` 一致，或根任务自身携带同一 `correlationId`）；若根 `dreamer` 的 `taskId`、`diagnosticJson` 与自身 `correlationId` 三个身份来源全部无法佐证，仅后代携带的 `correlationId` 不得采纳，fail-closed 拒绝；
      - 无法唯一定位根身份或超出跳数上限时 fail-closed 拒绝（`rc-6`）。
 
 ### 4.5 分层 Canary Spine 与入口组合根测试架构（遵守单向包依赖）
@@ -220,9 +227,9 @@ New external/network capability: NO
 
 ### Phase 0 — 生产工作区 WAL 安全快照漏斗基线（零生产运行时改动）
 
-- **做什么**：新增只读开发分析脚本 `scripts/dev/pipeline-funnel-snapshot.mjs`，直接复用 `pain-recall-read-model.ts` 的 `stageWalSnapshot`（对 `state.db` 与 `trajectory.db` 及其活跃 `-wal` 执行 T0/T1 双端 SHA-256 指纹校验暂存拷贝到系统临时隔离目录；若检测到并发写入/checkpoint 竞争则拒绝失真快照并安全重试），在暂存副本上统计全量与近 30 天各阶段数量、转化率与失败/拒绝 `reasonCode` 分布。
-- **跨库非原子性约束**：`stageWalSnapshot` 每次只处理**单个**数据库，`state.db` 与 `trajectory.db` 是两个独立线性化点，期间发生的 Pain/轨迹写入可能造成跨库关联缺失的假断线。报告必须：① 记录两库各自的快照时间与文件指纹；② 限定两快照允许的最大时间偏差（超差重试或标注）；③ 跨库关联缺失仅在超出时间窗口后才判定为流失，窗口内一律标 `skew_window_candidate`。
-- **受控清理接口**：不导出通用目录删除能力；`stageWalSnapshot` 返回值携带受控 `dispose()` 闭包负责清理暂存目录。
+- **做什么**：新增只读开发分析脚本 `scripts/dev/pipeline-funnel-snapshot.mjs`，经 canonical `resolveStateDbPath` / `resolveTrajectoryDbPath` 定位两库（`state.db` 在 `.pd/`、`trajectory.db` 在 `.state/`，不硬编码），直接复用 `pain-recall-read-model.ts` 的 `stageWalSnapshot`（对两库及其活跃 `-wal` 执行 T0/T1 双端 SHA-256 指纹校验暂存拷贝到系统临时隔离目录；若检测到并发写入/checkpoint 竞争则拒绝失真快照并安全重试），在暂存副本上统计全量与近 30 天各阶段数量、转化率与失败/拒绝 `reasonCode` 分布。
+- **跨库非原子性约束（v0.5 细化语义）**：`stageWalSnapshot` 每次只处理**单个**数据库，`state.db`（`.pd/state.db`）与 `trajectory.db`（`.state/trajectory.db`）是两个独立线性化点。快照 `capturedAt` 一律取该库快照的 **T1 线性化点**；报告必须：① 分别记录两库的 T1 快照时间与文件指纹；② **快照偏差窗口**（两 T1 之差，建议 ≤5s）与**跨库写入允许延迟**（关联写入允许晚于先快照库的时长，建议 ≤60s）分开定义；③ 跨库关联缺失以**现存记录自身时间戳 vs 对方库 T1** 判定——缺失方数据可能尚未落盘的窗口内一律标 `skew_window_candidate`（可延迟复查），超出写入允许延迟才判定为流失。
+- **受控清理接口**：不导出通用目录删除能力；`stageWalSnapshot` 返回值携带受控 `dispose()` 闭包负责清理暂存目录；**`dispose()` 前必须先关闭所有 SQLite 连接**（Windows 下未关闭连接会导致临时文件占用、清理失败）。
 - **硬边界**：严禁直接打开 `<workspace>/.pd/`、`~/.pd/runtime/` 原位数据库，严禁在源目录产生 `-shm` 副作用（AGENTS §1.1）。
 - **产出**：漏斗基线报告落盘至 `docs/reports/`，指导后续瓶颈排序。
 
@@ -249,7 +256,7 @@ New external/network capability: NO
 
 ### Phase 3 — 内化链 `correlationId` 有界父链校验与历史恢复
 
-- **做什么**：在 `InternalizationOrchestrator` 的 `PeerRunnerKind` 后继提议、提交、Evaluator 修复任务与 `reopenTaskForRevision` 路径接入 `resolveAuthoritativeCorrelationId(piTask, getTask)`，隔离 `DiagnosticianStageKind` 子任务，跑通全部 11 类正负向与历史兼容场景测试（含根任务 `taskId`/`diagnosticJson` 双源冲突、有 `correlationId` 但父任务缺失、父链环、深度 10/11 边界）。
+- **做什么**：在 `InternalizationOrchestrator` 的 `PeerRunnerKind` 后继提议、提交、Evaluator 修复任务与 `reopenTaskForRevision` 路径接入 `resolveAuthoritativeCorrelationId(piTask, getTask)`，隔离 `DiagnosticianStageKind` 子任务，跑通全部 12 类正负向与历史兼容场景测试（含根任务 `taskId`/`diagnosticJson` 双源冲突、有 `correlationId` 但父任务缺失、父链环、深度 10/11 边界、根全盲仅后代带 `correlationId`）。
 
 ### Phase 4 — 开关退役与阶段合并评估（远期门控，须 Owner 逐项拍板）
 
@@ -287,7 +294,7 @@ New external/network capability: NO
 ## 9. Owner 决策记录与待确认项
 
 1. **D4 处置策略（已采用严格拒绝）**：`pd candidate internalize` 对未完成账本入库的 `principle` 候选执行**严格拒绝**并提示 `pd candidate intake --candidate-id <id> --workspace "<path>"`，绝不在 `internalize` 命令内隐式执行正式账本写入。
-2. **启动确认**：批准 v0.4 后，并行启动 **Phase 0（`PRI-1290`）** 与 **Phase 1A/1B（`PRI-1291`）**；Phase 4（`PRI-1294`）与 Phase 5（`PRI-1295`）保持 `Backlog` 条件门控，未经漏斗数据与 Owner 单独批准不启动。
+2. **启动确认**：批准 v0.5 后，并行启动 **Phase 0（`PRI-1290`）** 与 **Phase 1A/1B（`PRI-1291`）**；Phase 4（`PRI-1294`）与 Phase 5（`PRI-1295`）保持 `Backlog` 条件门控，未经漏斗数据与 Owner 单独批准不启动。
 
 ---
 
@@ -335,4 +342,4 @@ rg -c "^\s*id: '" packages/principles-core/src/runtime/feature-flags/feature-fla
 | 租约续期、阶段预算与父任务心跳默认契约 | `docs/specs/SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001-v1.0.md` |
 | 后台触发所有权与 OS Scheduler | `docs/specs/SPEC-PD-SERVICE-HOST-001.md` |
 | 提交身份预绑定、回执兜底与授权撤回清理 | `docs/specs/SPEC-PD-FEEDBACK-RESILIENCE-001.md` |
-| **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.4）** |
+| **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.5）** |

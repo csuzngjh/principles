@@ -1,12 +1,16 @@
 # SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案
 
-- **版本**：v0.4
+- **版本**：v0.5
 - **日期**：2026-11-23
 - **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
-- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.4）](./SPEC-PD-PIPELINE-SPINE-001.md)
+- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.5）](./SPEC-PD-PIPELINE-SPINE-001.md)
 - **源码事实基线**：`origin/main@679dcc93f`
 - **规范性数据契约**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)、[MVP Core Loop Contract](../architecture/MVP_CORE_LOOP_CONTRACT.md)
 - **标注约定**：文中标注 `〔现有能力〕` 的符号已在当前源码中存在；标注 `〔新增能力〕` 的符号当前不存在，实施前不得以现有能力名义引用；标注 `〔收编删除〕` 的代码块为重复组装，迁移后删除。
+- **v0.5 关键技术修订摘要**：
+  1. §3.4.2 修正 D4 候选类型数据源：`resolveCandidatePrincipleIdentity` 必须传 `candidate.rawRecommendationKind`（`recommendationKind` 是 `candidate-store.ts` 明文标注的 fail-open 归一化读视图，禁止用于写边界判定）；`rule` 放行以验证后原始类型为准；登记 `pain-signal-bridge.ts:1766` 与 `diagnose.ts` 现存传归一化 kind 的同类隐患。
+  2. §3.8 修正 Phase 0 数据库路径：`state.db` 位于 `.pd/`（非 `.state/`），脚本复用 `resolveStateDbPath` / `resolveTrajectoryDbPath`；偏斜窗口拆分为快照偏差（两 T1 之差 ≤5s）与跨库写入允许延迟（≤60s）两层语义，关联缺失以记录自身时间戳 vs 对方 T1 判定；`dispose()` 前先关闭 SQLite 连接（Windows 文件占用）。
+  3. §3.6.2/§3.6.3 补齐根全盲边界：根 `dreamer` 三个身份来源全盲时仅后代携带的 `correlationId` 不得采纳；测试矩阵 11→12 场景。
 - **v0.4 关键技术修订摘要**：
   1. §3.1.2 补充**调用方条件构造契约**：运行期 `boolean` 的 `asyncMode`（`pain-record.ts:450` 的 `asyncFlagEnabled && !opts.wait`）无法直接满足可辨识联合，必须分支构造两个字面量对象，禁止断言绕过。
   2. §3.4.2 修正 D4 执行顺序与 Admission 文档 fail-closed：`findExistingDreamerTask` 去重明确前移至身份门禁之前；`getAdmissionDocument` 的 `{ ok: false }`（按 `candidate-store.ts` 契约=损坏文档，不得当作缺失）一律 `refused`，优先复用 `enforceFullAdmissionForWrite` 已验证快照。
@@ -277,8 +281,12 @@ enforceFullAdmissionForWrite          （准入写门禁，内部已 getAdmissio
 
 ```ts
 const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-const candidateKind = candidate.recommendationKind ?? 'principle';
-const identity = ledgerAdapter.resolveCandidatePrincipleIdentity(opts.candidateId, candidateKind);
+// v0.5：必须传原始持久化字段。candidate.recommendationKind 是
+// resolveRecommendationKind() 的 fail-open 归一化视图（非法值折叠为 'principle'，
+// candidate-store.ts 明文 "DO NOT use this field for write-boundary decisions"）；
+// 传归一化值会让非法 kind 永远绕过 candidate_kind_invalid 分支。
+const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
+const identity = ledgerAdapter.resolveCandidatePrincipleIdentity(opts.candidateId, candidate.rawRecommendationKind);
 
 // 优先复用 enforceFullAdmissionForWrite 已验证过的 Admission 文档快照（可由该门禁
 // 返回已读文档，或在本函数顶部共享一次读取结果），避免第二次独立读取窗口。
@@ -301,7 +309,9 @@ if (suppression.suppress) {
 }
 
 if (identity.status !== 'resolved') {
-  const allowUnboundRuleSeed = candidateKind === 'rule' && identity.reason === 'missing';
+  // rule 放行必须基于 validateRecommendationKind() 校验后的原始类型（null = 非法 kind，
+  // 已由 candidate_kind_invalid fail-closed，不会到达此分支）。
+  const allowUnboundRuleSeed = rawKind === 'rule' && identity.reason === 'missing';
   if (!allowUnboundRuleSeed) {
     const nextAction = identity.reason === 'missing'
       ? `pd candidate intake --candidate-id ${opts.candidateId} --workspace "${workspaceDir}"`
@@ -317,6 +327,8 @@ if (identity.status !== 'resolved') {
 > 注 1：已核实 `packages/pd-cli/src/program.ts:1356-1364`，`pd candidate intake` 的真实参数为 `--candidate-id <id> [-w, --workspace <path>] [--json] [--dry-run]`，不含 `--confirm`。
 >
 > 注 2：现有 `diagnose.ts:877` 与 `candidate.ts:1231` 的抑制输入采用 `admissionDoc.ok ? ... : undefined` 折叠写法（历史惯例）。本门禁是新增的 fail-closed 判定点，**不得**复制该惯例；上述两个既有调用点是否同步收紧列为实施期可选项，不属本 PR 范围。
+>
+> 注 3（v0.5）：同类隐患亦存在于 kind 数据源——`pain-signal-bridge.ts:1766` 与 `diagnose.ts` 向 `resolveCandidatePrincipleIdentity` 传入归一化的 `candidate.recommendationKind ?? 'principle'`（而非 `rawRecommendationKind`），非法持久化 kind 在这两条既有路径上同样无法触发 `candidate_kind_invalid`。本门禁必须使用 `rawRecommendationKind`；既有两处的同步修正列为实施期可选修复（与注 2 的 `ok:false` 折叠写法一并评估）。
 
 ---
 
@@ -386,11 +398,11 @@ export async function resolveAuthoritativeCorrelationId(
      | `null` | `B` | `rootSeedId = B` |
      | `null` | `null` | `rootSeedId = null`（进入不可恢复分支） |
    - **根锚点核对**：若链上非空 `correlationId` 与非空 `rootSeedId` 不一致，返回 `conflicting_parent_correlation_id`；
-   - **正常命中**：若链上存在唯一非空 `correlationId`（且与可解析的根一致），返回 `{ ok: true, correlationId, recoveredFromLegacyRoot: false }`；
+   - **正常命中（v0.5 根佐证要求）**：若链上存在唯一非空 `correlationId`，还须获得根侧佐证——`rootSeedId` 与其一致，或根任务自身携带同一 `correlationId`；若根 `dreamer` 的 `taskId`、`diagnosticJson` 与自身 `correlationId` 三个身份来源全部无法佐证（例如仅某个后代节点携带 `correlationId`），视为无法证明血缘来源，返回 `{ ok: false, reason: 'missing_correlation_id_lineage' }`；
    - **历史无 `correlationId` 在途链恢复**：若整条链（例如历史 `Dreamer → Philosopher → Scribe` 均无 `correlationId`）能够沿 `parentTaskId` 追溯到 `rootTask.taskKind === 'dreamer'` 且 `rootSeedId !== null`（经上述双源校验），返回 `{ ok: true, correlationId: rootSeedId, recoveredFromLegacyRoot: true }`，并在新生成的后继任务中前向持久化该 `correlationId`；
    - **不可恢复孤儿任务**：其余情况返回 `{ ok: false, reason: 'missing_correlation_id_lineage' }`，`commitNextTaskProposal` / `reopenTaskForRevision` fail-closed 拒绝创建无血缘后继。
 
-#### 3.6.3 Phase 3 必测矩阵（v0.4 扩至 11 个场景）
+#### 3.6.3 Phase 3 必测矩阵（v0.5 扩至 12 个场景）
 
 | # | 测试场景 | 预期结果 |
 |---|---|---|
@@ -405,6 +417,7 @@ export async function resolveAuthoritativeCorrelationId(
 | 9 | 根 `Dreamer`：`taskId` 含 `cand-A` 而 `diagnosticJson` 写 `cand-B` | 拒绝（`conflicting_root_identity_sources`） |
 | 10 | 父链自环（`A.parentTaskId = B`、`B.parentTaskId = A`） | 拒绝（`parent_chain_cycle_or_depth_exceeded`） |
 | 11 | 链深恰好 10 跳 / 11 跳边界 | 10 跳内正常裁决；11 跳拒绝（`parent_chain_cycle_or_depth_exceeded`） |
+| 12 | 根 `Dreamer` 全盲（`taskId` 不可解析、`diagnosticJson` 无 candidateId、自身无 `correlationId`），仅后代 `Philosopher` 带 `correlationId = cand-A` | fail-closed 拒绝（`missing_correlation_id_lineage`） |
 
 ---
 
@@ -442,8 +455,8 @@ export async function resolveAuthoritativeCorrelationId(
 
 1. **Phase 0（复用 WAL 安全暂存快照的漏斗分析脚本，v0.4 修订）**：
    - **受控快照接口**：在 `packages/principles-core/src/runtime/pain-recall-read-model.ts` 调整 `stageWalSnapshot` 导出形态——返回值携带受控 `dispose()` 闭包负责清理暂存目录（`{ stagedDbPath, fingerprint, capturedAt, dispose }`），**不导出**通用目录删除函数 `removeStagingRoot`（避免把任意路径删除能力暴露给所有消费者）。存量 `pd pain recall` 调用点同步改用 `dispose()`。
-   - **跨库非原子性约束（v0.4 新增）**：`stageWalSnapshot` 每次只处理**单个**数据库；`state.db` 与 `trajectory.db` 两次调用是两个独立线性化点，不构成跨库原子快照。脚本必须：① 记录两库各自的快照时间与指纹并写入报告；② 限定两快照最大时间偏差（建议 ≤5s，超差自动重试一次，仍超差在报告中显式标注）；③ 跨库关联缺失（如 `state.db` 有任务而 `trajectory.db` 无对应轨迹）仅当缺失方时间戳早于对方快照点超出偏差窗口时判定为流失，窗口内一律标 `skew_window_candidate` 而非断线。若未来需要严格跨库一致性，另行设计共享快照/写入协调机制，不在本期范围。
-   - 新增 `scripts/dev/pipeline-funnel-snapshot.mjs`：对目标工作区的 `.state/state.db` 与 `.state/trajectory.db` 调用 `stageWalSnapshot`（自动完成 `main + -wal` 双文件拷贝、副本哈希校验与 `main → wal → main` T1 线性化点复核；若遇并发写入竞争则最多有限重试 3 次，仍不一致则 fail-loud 退出，绝不读取半截快照，也绝不在源工作区创建 `-shm`），在临时目录以 `{ readonly: true, fileMustExist: true }` 打开统计后经 `dispose()` 清理，输出 `docs/reports/PD_PIPELINE_FUNNEL_BASELINE_<YYYYMMDD>.md`。
+   - **跨库非原子性约束（v0.5 细化语义）**：`stageWalSnapshot` 每次只处理**单个**数据库；`state.db`（`.pd/state.db`）与 `trajectory.db`（`.state/trajectory.db`）两次调用是两个独立线性化点，不构成跨库原子快照。**快照时间偏差不等于跨库写入延迟**——例如 `state.db` 快照完成 1s 后 `trajectory.db` 快照完成，其关联写入可能 10s 后才落盘。脚本必须：① `capturedAt` 取各库快照的 **T1 线性化点**（非拷贝开始时间）；② 分别记录两库 T1 与文件指纹写入报告；③ 区分两层窗口——**快照偏差窗口**（两 T1 之差，建议 ≤5s，超差自动重试一次，仍超差在报告中标注）与**跨库写入允许延迟**（关联写入允许晚于先快照库 T1 的时长，建议 ≤60s）；④ 跨库关联缺失以**现存记录自身时间戳 vs 对方库 T1** 判定（不能依赖不存在的记录自己的时间戳）：记录时间早于对方 T1 且超出写入允许延迟→判定流失；否则标 `skew_window_candidate`（可延迟复查）。若未来需要严格跨库一致性，另行设计共享快照/写入协调机制，不在本期范围。
+   - 新增 `scripts/dev/pipeline-funnel-snapshot.mjs`：经 canonical `resolveStateDbPath` / `resolveTrajectoryDbPath` 定位工作区的 `state.db` 与 `trajectory.db`（**不硬编码路径**），调用 `stageWalSnapshot`（自动完成 `main + -wal` 双文件拷贝、副本哈希校验与 `main → wal → main` T1 线性化点复核；若遇并发写入竞争则最多有限重试 3 次，仍不一致则 fail-loud 退出，绝不读取半截快照，也绝不在源工作区创建 `-shm`），在临时目录以 `{ readonly: true, fileMustExist: true }` 打开统计；**`dispose()` 前先关闭全部 SQLite 连接**（Windows 下未关闭连接会导致临时文件占用、清理失败），输出 `docs/reports/PD_PIPELINE_FUNNEL_BASELINE_<YYYYMMDD>.md`。
 2. **Phase 4（开关死分支清理与阶段合并评估门）**：保持 `Backlog` 门控；阶段合并必须走 `npm run lab:*`（AGENTS §25A）。
 3. **Phase 5（原则有效性只读派生读模型）**：保持 `Backlog` 门控；严格只读聚合，证据不足一律返回 `insufficient_evidence`。
 
@@ -457,7 +470,7 @@ export async function resolveAuthoritativeCorrelationId(
 
 ---
 
-## 5. Linear 工单拆分映射（同步至 v0.4 口径）
+## 5. Linear 工单拆分映射（同步至 v0.5 口径）
 
 | 工单号 | 层级 | 对应阶段 | 标题 | 归属 Project | 状态 | 前置阻塞 |
 |---|---|---|---|---|---|---|
