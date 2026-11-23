@@ -1314,6 +1314,34 @@ function mergeWorkbuddyIntoInstallManifestLocked(
   }
 }
 
+/**
+ * Whether the pd runtime INSTALLED on this machine can perform §8.4
+ * handover/rollback manifest writes. The bundled pd resolves its own
+ * `~/.pd/runtime/install-layout` copy, independent of the installer's npm
+ * dep version — so "our dep predates the lock export" does NOT prove "no
+ * ownership writer exists on this machine" (PRI-1282 review r7).
+ */
+type InstalledOwnershipCapability = 'pre_cohort' | 'cohort' | 'unverifiable';
+
+function installedOwnershipCapability(): InstalledOwnershipCapability {
+  const transitionModule = path.join(getHomeDir(), '.pd', 'runtime', 'install-layout', 'dist', 'background-execution-transition.js');
+  let content: string;
+  try {
+    content = readFileSync(transitionModule, 'utf-8');
+  } catch (error) {
+    return errnoCode(error) === 'ENOENT' ? 'pre_cohort' : 'unverifiable';
+  }
+  return content.includes('withInstallManifestWriteLock') ? 'cohort' : 'pre_cohort';
+}
+
+function cohortWindowUnlockedWriteUnsafe(operation: string, capability: InstalledOwnershipCapability): { ok: false; reason: string; nextAction: string } {
+  return {
+    ok: false,
+    reason: `install_manifest_lock_unavailable: the bundled @principles/install-layout predates the §8.4 manifest write lock while the installed runtime ${capability === 'cohort' ? 'IS ownership-capable' : 'capability could not be verified'} — an unlocked ${operation} could clobber an in-flight handover/rollback write. No write was performed.`,
+    nextAction: 'Update @principles/install-layout to a release that exports withInstallManifestWriteLock, or re-run the installer once the dependency resolves to that cohort.',
+  };
+}
+
 export function mergeWorkbuddyIntoInstallManifest(
   manifestPath: string,
   governanceDir: string,
@@ -1338,14 +1366,12 @@ export function mergeWorkbuddyIntoInstallManifest(
     }
     return locked.value;
   }
-  // Release-window compat (same rule as installer.writeInstallManifest and
-  // update/install-layout.runUnderManifestWriteLock): the lock export ships
-  // with the PRI-1282 install-layout cohort. Until that cohort publishes, a
-  // registry-resolved @principles/install-layout does not export it — and a
-  // dep that old also cannot produce the §8.4 ownership records the lock
-  // protects — so keep the pre-PR unlocked write for that window ONLY. When
-  // the cohort dependency is present the ERR-168 guard engages and a busy
-  // lock still fails closed above.
+  // Cohort window (r7): an unlocked merge is only safe when the INSTALLED
+  // runtime is also pre-§8.4 — a cohort-capable pd on this machine can write
+  // ownership records concurrently even though our dep is old. Unverifiable
+  // capability fails closed.
+  const capability = installedOwnershipCapability();
+  if (capability !== 'pre_cohort') return cohortWindowUnlockedWriteUnsafe('workbuddy.mergeInstallManifest', capability);
   return mergeWorkbuddyIntoInstallManifestLocked(manifestPath, governanceDir, atomicReplace);
 }
 
@@ -1372,10 +1398,11 @@ function removeWorkbuddyFromInstallManifestHosts(manifestPath: string): void {
       );
       return;
     }
-    // Cohort window (same rule as mergeWorkbuddyIntoInstallManifest): an
-    // install-layout old enough to lack the lock export also cannot produce
-    // §8.4 ownership records — keep the pre-PR unlocked write for that window.
-    write();
+    // Cohort window (same rule as mergeWorkbuddyIntoInstallManifest, r7):
+    // unlocked removal only when the installed runtime cannot produce §8.4
+    // ownership writes; otherwise skip the bookkeeping rather than risk a
+    // clobber (the preserved-state report below still names the paths).
+    if (installedOwnershipCapability() === 'pre_cohort') write();
   } catch {
     // Uninstall must not fail on manifest bookkeeping; the preserved-state
     // report below still names the governance dir. rc-9: surfaced via paths.

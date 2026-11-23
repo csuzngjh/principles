@@ -688,3 +688,27 @@ describe('cross-process lease registration (PRI-1282 r6)', () => {
     vi.useFakeTimers();
   }, 40_000);
 });
+
+describe('gated lease mutations (PRI-1282 r7)', () => {
+  it('write and clear serialize on the arbitration gate — a parked transaction refuses them instead of silently overwriting', async () => {
+    vi.useRealTimers();
+    const { default: Database } = await import('better-sqlite3');
+    const gatePath = path.join(workspaceDir, '.pd', 'gateway-consumer-lease.json.gate.db');
+    const holder = new Database(gatePath);
+    holder.exec('PRAGMA busy_timeout = 250');
+    holder.exec('BEGIN IMMEDIATE');
+    try {
+      const write = writeGatewayConsumerLease({ workspaceDir, token: 'tok', instanceId: 'inst', state: 'consuming' });
+      expect(write).toMatchObject({ ok: false });
+      if (!write.ok) expect(write.reason).toContain('consumer lease gate');
+      // clear is a read→filter→replace of the same file — same gate class.
+      expect(() => clearGatewayConsumerLease(workspaceDir, 'tok', 'inst')).not.toThrow();
+    } finally {
+      holder.exec('ROLLBACK');
+      holder.close();
+    }
+    // Gate released → the write goes through.
+    expect(writeGatewayConsumerLease({ workspaceDir, token: 'tok', instanceId: 'inst', state: 'consuming' })).toEqual({ ok: true });
+    vi.useFakeTimers();
+  });
+});

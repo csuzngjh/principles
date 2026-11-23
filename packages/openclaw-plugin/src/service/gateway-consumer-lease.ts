@@ -171,8 +171,25 @@ export function readGatewayConsumerLease(workspaceDir: string): GatewayConsumerL
  * Publish the lease atomically (tmp file + rename). Always writes, keyed by
  * OUR token — the lease is a liveness record, not a lock: whoever holds the
  * consuming role rewrites it each cycle.
+ *
+ * PRI-1282 r7: the read→merge→replace MUST run inside the arbitration gate.
+ * An unguarded write lets a concurrent Gateway's just-written 'quiesced'
+ * record be clobbered back to 'consuming' (lost update) — afterwards the
+ * revived 'consuming' record blinds every resume check forever.
  */
 export function writeGatewayConsumerLease(input: {
+  workspaceDir: string;
+  token: string;
+  instanceId: string;
+  state: 'consuming' | 'quiesced';
+  now?: () => Date;
+  openGate?: (path: string) => ConsumerLeaseGateLike;
+}): { ok: true } | { ok: false; reason: string } {
+  const gated = withConsumerLeaseGate(input.workspaceDir, () => writeGatewayConsumerLeaseUngated(input), input.openGate);
+  return gated.ok ? gated.value : { ok: false, reason: gated.reason };
+}
+
+function writeGatewayConsumerLeaseUngated(input: {
   workspaceDir: string;
   token: string;
   instanceId: string;
@@ -252,6 +269,12 @@ export function writeGatewayConsumerLease(input: {
  * another consumer's liveness record.
  */
 export function clearGatewayConsumerLease(workspaceDir: string, token: string, instanceId?: string): void {
+  // r7: release is also a read→filter→replace — same lost-update class as a
+  // write, so it runs inside the arbitration gate.
+  void withConsumerLeaseGate(workspaceDir, () => { clearGatewayConsumerLeaseUngated(workspaceDir, token, instanceId); });
+}
+
+function clearGatewayConsumerLeaseUngated(workspaceDir: string, token: string, instanceId?: string): void {
   const current = readGatewayConsumerLease(workspaceDir);
   if (current === null) return;
   const writers = leaseWriters(current);
@@ -382,7 +405,9 @@ export function registerGatewayConsumerLease(input: {
       if (foreign !== 'none') {
         return { refused: foreign } as const;
       }
-      return writeGatewayConsumerLease({
+      // Already inside the arbitration gate — call the ungated write
+      // directly (better-sqlite3 rejects nested BEGIN IMMEDIATE).
+      return writeGatewayConsumerLeaseUngated({
         workspaceDir: input.workspaceDir,
         token: input.token,
         instanceId: input.instanceId,
@@ -405,6 +430,10 @@ export function registerGatewayConsumerLease(input: {
  * async release is still pending, or leftovers of a crashed drain (r5).
  */
 export function clearGatewayConsumerLeaseByPid(workspaceDir: string, pid: number): void {
+  void withConsumerLeaseGate(workspaceDir, () => { clearGatewayConsumerLeaseByPidUngated(workspaceDir, pid); });
+}
+
+function clearGatewayConsumerLeaseByPidUngated(workspaceDir: string, pid: number): void {
   const current = readGatewayConsumerLease(workspaceDir);
   if (current === null) return;
   const writers = leaseWriters(current);
