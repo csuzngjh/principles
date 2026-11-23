@@ -625,6 +625,36 @@ describe('handing the port over', () => {
     await predecessor.dispose();
   });
 
+  it('an error the successor reports after it started is not read as a skipped handover', async () => {
+    const predecessor = await startPredecessor();
+    const exit = vi.fn();
+    const log = vi.fn();
+    const order: string[] = [];
+    // Started, then — while it is being stopped for not answering — it fails.
+    const started = new FakeSuccessor();
+    queueMicrotask(() => { started.emit('spawn'); });
+    try {
+      await performReleaseHandover({
+        startSuccessor: () => started,
+        stopAccepting: async () => { await predecessor.stopAccepting(); started.emit('error', new Error('kill EPERM')); },
+        waitForSuccessor: () => predecessor.waitForSuccessor(400),
+        abandonSuccessor: async () => { order.push('abandonSuccessor'); },
+        resumeAccepting: () => predecessor.resumeAccepting(3000),
+        exit,
+        log,
+      });
+
+      expect(order).toEqual(['abandonSuccessor']);
+      expect(exit).not.toHaveBeenCalled();
+      // The handover was under way: this is the successor misbehaving, not a handover that never happened.
+      expect(log).not.toHaveBeenCalledWith(expect.stringContaining('Release handover skipped'));
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('reported an error after it started'));
+      expect(await probeConsolePid(consoleIdentityUrl('127.0.0.1', predecessor.port), 1000)).toBe(111);
+    } finally {
+      await predecessor.dispose();
+    }
+  });
+
   it('hands the port to the successor and exits only once the successor answers on it', async () => {
     const predecessor = await startPredecessor();
     const exit = vi.fn();

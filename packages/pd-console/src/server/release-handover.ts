@@ -493,14 +493,22 @@ export async function performReleaseHandover(deps: ReleaseHandoverDeps): Promise
     return;
   }
 
+  let spawned = false;
   const created = await new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => resolve(false), deps.spawnTimeoutMs ?? 10_000);
     successor?.once('error', (error: Error) => {
       clearTimeout(timer);
+      if (spawned) {
+        // Still this process's child (it is stopped below if it never
+        // answers), so it can still report — but the handover is under way.
+        log(`[pd-console] The successor reported an error after it started: ${error.message}`);
+        return;
+      }
       keepServing(`successor failed to start: ${error.message}`);
       resolve(false);
     });
     successor?.once('spawn', () => {
+      spawned = true;
       clearTimeout(timer);
       resolve(true);
     });
