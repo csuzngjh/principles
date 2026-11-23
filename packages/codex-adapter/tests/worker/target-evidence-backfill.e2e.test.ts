@@ -640,16 +640,20 @@ describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backf
         const read = readGovernanceCheckpoint({ workspaceDir: ws.root, hostKind: 'codex', rolloutIdentity: ROOT_SESSION });
         return read !== null && 'byteOffset' in read ? read.byteOffset : null;
       };
-      const fileSize = fs.statSync(ws.transcriptPath).size;
+      // Single-read snapshot (CodeQL race): the test owns this file — one
+      // read yields both the content and its size; the completion rewrite
+      // writes the whole file back rather than stat-then-append.
+      const heldContent = fs.readFileSync(ws.transcriptPath, 'utf8');
+      const heldSize = Buffer.byteLength(heldContent, 'utf8');
       const heldCheckpoint = checkpointOf();
       expect(heldCheckpoint).not.toBeNull();
-      expect(heldCheckpoint ?? 0).toBeLessThan(fileSize);
+      expect(heldCheckpoint ?? 0).toBeLessThan(heldSize);
       const rowBefore = diagnosticRow(ws.root, taskId);
       const diagnosticBefore = JSON.parse(rowBefore?.diagnostic_json ?? '{}') as Record<string, unknown>;
       const evidenceBefore = diagnosticBefore.evidence;
       const entryCountBefore = (diagnosticBefore.painIngress as Record<string, unknown>).evidenceClass;
 
-      fs.appendFileSync(ws.transcriptPath, tailRemainder + '\n');
+      fs.writeFileSync(ws.transcriptPath, heldContent + tailRemainder + '\n');
       const runsBefore = runCount(ws.root, taskId);
       const secondModel = deterministicModelBoundary(ws.root);
       const secondCycle = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
@@ -658,7 +662,7 @@ describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backf
       expect(secondModel.rootCausePrompts).toEqual([]);
       expect(runCount(ws.root, taskId)).toBe(runsBefore);
       // The completed tail is consumed: the checkpoint advances to EOF.
-      expect(checkpointOf()).toBe(fs.statSync(ws.transcriptPath).size);
+      expect(checkpointOf()).toBe(Buffer.byteLength(fs.readFileSync(ws.transcriptPath, 'utf8'), 'utf8'));
       // The evidence array and its count survive the completion cycle
       // byte-identical — no duplicate backfill, no count drift.
       const row = diagnosticRow(ws.root, taskId);
