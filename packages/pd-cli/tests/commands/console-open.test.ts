@@ -31,7 +31,11 @@ import {
   planConsoleLaunch,
   probeConsoleHealth,
   classifyStaleConsoleInstance,
-  commandLineMatchesServerEntry,
+  argvMatchesServerEntry,
+  socketAddrAnswersHost,
+  parseSsListenOwners,
+  parseLsofListenOwners,
+  parseNetTcpOwners,
   openBrowser,
 } from '../../src/services/console-launcher.js';
 
@@ -1302,7 +1306,7 @@ describe('classifyStaleConsoleInstance', () => {
 describe('planConsoleLaunch — stale console eviction', () => {
   afterEach(() => {
     delete (globalThis as any).__mockIsPortInUse;
-    delete (globalThis as any).__mockGetProcessCommandLine;
+    delete (globalThis as any).__mockGetProcessIdentity;
     delete (globalThis as any).__mockGetListenPortOwnerPids;
     vi.restoreAllMocks();
   });
@@ -1336,7 +1340,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
     (globalThis as any).__mockIsPortInUse = async () => !killed;
     // Live cmdline proves pid 424242 runs the reported (deleted) entry, and
     // the OS confirms the same pid owns the listen socket on the port.
-    (globalThis as any).__mockGetProcessCommandLine = async () => `node ${missingEntry} --port ${port}`;
+    (globalThis as any).__mockGetProcessIdentity = async () => ({ argv: ['node', missingEntry, '--port', String(port)], cwd: null });
     (globalThis as any).__mockGetListenPortOwnerPids = async () => [424242];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { killed = true; return true; });
     try {
@@ -1362,7 +1366,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
     });
     let killed = false;
     (globalThis as any).__mockIsPortInUse = async () => !killed;
-    (globalThis as any).__mockGetProcessCommandLine = async () => `node "${entry}" --workspace /w`;
+    (globalThis as any).__mockGetProcessIdentity = async () => ({ argv: ['node', entry, '--workspace', '/w'], cwd: null });
     (globalThis as any).__mockGetListenPortOwnerPids = async () => [424243];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { killed = true; return true; });
     try {
@@ -1402,7 +1406,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
       pid: 424242, serverEntry: missingEntry, webIndexExists: null,
     });
     (globalThis as any).__mockIsPortInUse = async () => true;
-    (globalThis as any).__mockGetProcessCommandLine = async () => `node ${missingEntry} --port ${port}`;
+    (globalThis as any).__mockGetProcessIdentity = async () => ({ argv: ['node', missingEntry, '--port', String(port)], cwd: null });
     (globalThis as any).__mockGetListenPortOwnerPids = async () => [424242];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     try {
@@ -1429,7 +1433,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
     (globalThis as any).__mockIsPortInUse = async () => true;
     // The responder names pid 424242, but that pid actually runs an
     // unrelated binary — self-reported instance JSON is not proof.
-    (globalThis as any).__mockGetProcessCommandLine = async () => 'C:\\Tools\\unrelated.exe --serve';
+    (globalThis as any).__mockGetProcessIdentity = async () => ({ argv: ['C:\\Tools\\unrelated.exe', '--serve'], cwd: null });
     (globalThis as any).__mockGetListenPortOwnerPids = async () => [424242];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     try {
@@ -1448,7 +1452,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
       pid: 424242, serverEntry: missingEntry, webIndexExists: null,
     });
     (globalThis as any).__mockIsPortInUse = async () => true;
-    (globalThis as any).__mockGetProcessCommandLine = async () => null;
+    (globalThis as any).__mockGetProcessIdentity = async () => null;
     (globalThis as any).__mockGetListenPortOwnerPids = async () => [424242];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     try {
@@ -1468,7 +1472,7 @@ describe('planConsoleLaunch — stale console eviction', () => {
     (globalThis as any).__mockIsPortInUse = async () => true;
     // The crafted responder's cmdline claim even matches — but the OS says a
     // different pid owns the socket, so pid 424242 is a victim, not the holder.
-    (globalThis as any).__mockGetProcessCommandLine = async () => `node ${missingEntry} --port ${port}`;
+    (globalThis as any).__mockGetProcessIdentity = async () => ({ argv: ['node', missingEntry, '--port', String(port)], cwd: null });
     (globalThis as any).__mockGetListenPortOwnerPids = async () => [7777];
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     try {
@@ -1503,31 +1507,105 @@ describe('probeConsoleHealth — instance block', () => {
   });
 });
 
-// ─── commandLineMatchesServerEntry ───────────────────────────────────────────
+// ─── argvMatchesServerEntry ──────────────────────────────────────────────────
 
-describe('commandLineMatchesServerEntry', () => {
+describe('argvMatchesServerEntry', () => {
   const entry = '/checkout/packages/pd-console/dist/server.js';
 
   it('matches an absolute entry argument verbatim', () => {
-    expect(commandLineMatchesServerEntry(`node ${entry} --port 3100`, entry)).toBe(true);
+    expect(argvMatchesServerEntry(['node', entry, '--port', '3100'], entry, null)).toBe(true);
   });
 
-  it('matches a quoted Windows path with backslashes', () => {
+  it('matches an entry path containing spaces — argv boundaries are preserved', () => {
+    const spaced = '/home/Alice Smith/.pd/runtime/console/dist/server.js';
+    expect(argvMatchesServerEntry(['node', spaced, '--port', '3100'], spaced, null)).toBe(true);
+  });
+
+  it('matches a Windows path with backslashes, case-insensitively', () => {
     const winEntry = 'D:\\Users\\用户\\.pd\\runtime\\console\\dist\\server.js';
-    expect(commandLineMatchesServerEntry(`"D:\\Program Files\\node.exe" "${winEntry}" --port 3100`, winEntry)).toBe(true);
+    const argv = ['D:\\Program Files\\node.exe', 'd:\\users\\用户\\.pd\\runtime\\console\\dist\\server.js', '--port', '3100'];
+    expect(argvMatchesServerEntry(argv, winEntry, null)).toBe(true);
   });
 
-  it('matches a relative dev entry reported absolutely (npm run dev keeps the relative argv)', () => {
+  it('resolves a relative dev entry against the live process cwd (npm run dev)', () => {
     const abs = '/checkout/packages/pd-console/src/server/index.ts';
-    expect(commandLineMatchesServerEntry('npm run dev -- node src/server/index.ts --port 3100', abs)).toBe(true);
-    expect(commandLineMatchesServerEntry('node ./src/server/index.ts', abs)).toBe(true);
+    const cwd = '/checkout/packages/pd-console';
+    expect(argvMatchesServerEntry(['node', 'src/server/index.ts', '--port', '3100'], abs, cwd)).toBe(true);
+    expect(argvMatchesServerEntry(['node', './src/server/index.ts'], abs, cwd)).toBe(true);
+  });
+
+  it('refuses a relative arg whose live cwd resolves elsewhere — no loose suffix when cwd is known', () => {
+    const abs = '/checkout/packages/pd-console/src/server/index.ts';
+    // Same-shaped relative arg, but the process actually lives in /tmp/other —
+    // it is a victim named by a crafted responder, not our console.
+    expect(argvMatchesServerEntry(['node', 'src/server/index.ts'], abs, '/tmp/other')).toBe(false);
+  });
+
+  it('accepts a strict suffix path only when the OS cannot report the cwd', () => {
+    const abs = '/checkout/packages/pd-console/src/server/index.ts';
+    expect(argvMatchesServerEntry(['npm', 'run', 'dev', '--', 'node', 'src/server/index.ts'], abs, null)).toBe(true);
   });
 
   it('refuses a bare basename token — filename alone is not proof', () => {
-    expect(commandLineMatchesServerEntry('node server.js --port 3100', entry)).toBe(false);
+    expect(argvMatchesServerEntry(['node', 'server.js', '--port', '3100'], entry, null)).toBe(false);
   });
 
-  it('refuses a cmdline running an unrelated binary', () => {
-    expect(commandLineMatchesServerEntry('C:\\Tools\\unrelated.exe --serve', entry)).toBe(false);
+  it('refuses argv running an unrelated binary', () => {
+    expect(argvMatchesServerEntry(['C:\\Tools\\unrelated.exe', '--serve'], entry, null)).toBe(false);
+  });
+});
+
+// ─── socket owner address matching + parsers ─────────────────────────────────
+
+describe('socketAddrAnswersHost', () => {
+  it('matches the exact probed address', () => {
+    expect(socketAddrAnswersHost('127.0.0.1', '127.0.0.1')).toBe(true);
+    expect(socketAddrAnswersHost('::1', '::1')).toBe(true);
+  });
+
+  it('refuses a different local address on the same port', () => {
+    expect(socketAddrAnswersHost('127.0.0.2', '127.0.0.1')).toBe(false);
+    expect(socketAddrAnswersHost('127.0.0.1', '::1')).toBe(false);
+  });
+
+  it('treats 0.0.0.0 as IPv4-only wildcard and :: as covering loopback probes', () => {
+    expect(socketAddrAnswersHost('0.0.0.0', '127.0.0.1')).toBe(true);
+    expect(socketAddrAnswersHost('0.0.0.0', '::1')).toBe(false);
+    expect(socketAddrAnswersHost('::', '127.0.0.1')).toBe(true);
+    expect(socketAddrAnswersHost('[::]', '::1')).toBe(true);
+  });
+});
+
+describe('listen-owner parsers', () => {
+  const ssFixture = [
+    'LISTEN 0      511        127.0.0.1:3100       0.0.0.0:*    users:(("node",pid=111,fd=22))',
+    'LISTEN 0      511        127.0.0.2:3100       0.0.0.0:*    users:(("node",pid=222,fd=22))',
+    'LISTEN 0      511              [::]:3100          [::]:*    users:(("node",pid=333,fd=22))',
+  ].join('\n');
+
+  it('ss: only the owner bound on the probed address counts', () => {
+    // A victim on 127.0.0.2 (or the wildcard) must not be donated to a kill.
+    expect(parseSsListenOwners(ssFixture, 3100, '127.0.0.1')).toEqual([111, 333]);
+    expect(parseSsListenOwners(ssFixture, 3100, '::1')).toEqual([333]);
+  });
+
+  it('lsof: parses owner pid with address filtering', () => {
+    const lsofFixture = [
+      'COMMAND   PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME',
+      'node      111 user   22u  IPv4 0xdeadbeef      0t0  TCP 127.0.0.1:3100 (LISTEN)',
+      'node      222 user   22u  IPv4 0xbeefdead      0t0  TCP 127.0.0.2:3100 (LISTEN)',
+    ].join('\n');
+    expect(parseLsofListenOwners(lsofFixture, 3100, '127.0.0.1')).toEqual([111]);
+  });
+
+  it('Get-NetTCPConnection CSV: LocalAddress + OwningProcess filtered by host', () => {
+    const csv = [
+      '"LocalAddress","OwningProcess"',
+      '"127.0.0.1","111"',
+      '"::1","222"',
+      '"0.0.0.0","333"',
+    ].join('\r\n');
+    expect(parseNetTcpOwners(csv, '127.0.0.1')).toEqual([111, 333]);
+    expect(parseNetTcpOwners(csv, '::1')).toEqual([222]);
   });
 });

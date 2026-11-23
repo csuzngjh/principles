@@ -18,6 +18,7 @@
 import * as net from 'net';
 import * as http from 'http';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as childProcess from 'child_process';
 
 // ─── Public types ────────────────────────────────────────────────────────────
@@ -455,19 +456,43 @@ function runEncodedPowerShell(scriptBody: string): Promise<string | null> {
 }
 
 /**
- * Read the live command line of a process we might evict. The `instance`
- * block is self-reported over loopback HTTP — before signaling `pid` we must
- * prove it is the console process it claims to be, not an arbitrary victim
- * pid a crafted responder named (verifyNonce covers installer children; this
- * covers every other leftover). Returns null when the command line cannot be
- * obtained (unsupported platform, no permission, process already gone) —
- * callers must treat that as unverified and refuse to kill.
+ * Tokenize a concatenated command-line string the way Windows / `ps` hand it
+ * to us — quoted segments keep their inner spaces, everything else splits on
+ * whitespace. Only used where raw argv is unavailable (win32 CIM, macOS ps).
  */
-async function getProcessCommandLine(pid: number): Promise<string | null> {
-  if (Object.hasOwn(globalThis, '__mockGetProcessCommandLine')) {
-    const mock = Reflect.get(globalThis, '__mockGetProcessCommandLine') as (
+export function tokenizeCommandLine(commandLine: string): string[] {
+  const tokens: string[] = [];
+  for (const m of commandLine.matchAll(/"([^"]+)"|'([^']+)'/g)) tokens.push(m[1] ?? m[2] ?? '');
+  for (const t of commandLine.replace(/"[^"]*"|'[^']*'/g, ' ').split(/\s+/)) {
+    if (t.length > 0) tokens.push(t);
+  }
+  return tokens;
+}
+
+export interface ProcessIdentity {
+  /** Raw argv elements when the OS preserves boundaries, else tokenized. */
+  argv: string[];
+  /** Live process cwd — lets a relative entry arg be resolved to an absolute
+   * path instead of trusted as a loose suffix. null when the OS cannot tell us. */
+  cwd: string | null;
+}
+
+/**
+ * Read the live argv + cwd of a process we might evict. The `instance` block
+ * is self-reported over loopback HTTP — before signaling `pid` we must prove
+ * it is the console process it claims to be, not an arbitrary victim pid a
+ * crafted responder named (verifyNonce covers installer children; this covers
+ * every other leftover). Linux reads `/proc/<pid>/cmdline` (NUL-separated, so
+ * spaces in install paths keep their argument boundaries) and
+ * `/proc/<pid>/cwd`; win32/macOS fall back to a tokenized command line.
+ * Returns null when identity cannot be obtained — callers must treat that as
+ * unverified and refuse to kill.
+ */
+async function getProcessIdentity(pid: number): Promise<ProcessIdentity | null> {
+  if (Object.hasOwn(globalThis, '__mockGetProcessIdentity')) {
+    const mock = Reflect.get(globalThis, '__mockGetProcessIdentity') as (
       p: number
-    ) => Promise<string | null>;
+    ) => Promise<ProcessIdentity | null>;
     return mock(pid);
   }
   if (process.platform === 'win32') {
@@ -476,100 +501,184 @@ async function getProcessCommandLine(pid: number): Promise<string | null> {
     );
     if (out === null) return null;
     const trimmed = out.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    return trimmed.length > 0 ? { argv: tokenizeCommandLine(trimmed), cwd: null } : null;
   }
-  // POSIX: `ps` replaces non-ASCII argv bytes with '?' under LC_ALL=C —
-  // pin a UTF-8 locale on Linux so non-ASCII install paths survive (macOS ps
-  // already passes argv bytes through).
-  const env = process.platform === 'linux'
-    ? { ...process.env, LC_ALL: 'C.UTF-8' }
-    : process.env;
+  if (process.platform === 'linux') {
+    try {
+      const raw = await fs.promises.readFile(`/proc/${pid}/cmdline`);
+      const argv = raw.toString('utf8').split('\0').filter((s) => s.length > 0);
+      if (argv.length === 0) return null;
+      const cwd = await fs.promises.readlink(`/proc/${pid}/cwd`).catch(() => null);
+      return { argv, cwd };
+    } catch {
+      return null;
+    }
+  }
+  // Other POSIX (macOS): `ps` joins argv into one string and can replace
+  // non-ASCII bytes with '?' under LC_ALL=C — best effort, boundaries lost.
   return new Promise((resolve) => {
-    childProcess.execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout: 5000, env }, (err, stdout) => {
+    childProcess.execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout: 5000 }, (err, stdout) => {
       if (err) { resolve(null); return; }
       const out = stdout.trim();
-      resolve(out.length > 0 ? out : null);
+      resolve(out.length > 0 ? { argv: tokenizeCommandLine(out), cwd: null } : null);
     });
   });
 }
 
 /**
- * Pids owning a LISTEN socket on `port`. Verification, not convenience: the
- * reported pid must own the socket it answered on, otherwise a crafted
- * responder could name any victim whose cmdline happens to match (CWE-863).
- * null = the OS did not tell us (tool missing/failed) — refuse to kill.
+ * Does the socket's local address answer connections aimed at `host`?
+ * The same PORT can be bound on several addresses (127.0.0.1, ::1, another
+ * loopback alias, wildcards) by different processes — matching only the port
+ * would let a responder donate a victim listening on a neighbouring address.
  */
-async function getListenPortOwnerPids(port: number): Promise<number[] | null> {
+export function socketAddrAnswersHost(addr: string, host: string): boolean {
+  const a = addr.toLowerCase().replace(/^\[|\]$/g, '').replace(/%.+$/, '');
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (a === h) return true;
+  if (h === 'localhost') return a === '127.0.0.1' || a === '::1';
+  // Wildcards: '0.0.0.0' is IPv4-only; '::' is IPv6 wildcard and — under the
+  // default dual-stack binding node uses — also answers IPv4 probes.
+  if (a === '0.0.0.0' || a === '*') return !h.includes(':');
+  if (a === '::' || a === '0:0:0:0:0:0:0:0' || a === '::ffff:0.0.0.0') return true;
+  return false;
+}
+
+/** Parse `ss -ltnpH 'sport = :PORT'` output → pids whose listener answers `host`. */
+export function parseSsListenOwners(ssOut: string, port: number, host: string): number[] {
+  const pids: number[] = [];
+  for (const line of ssOut.split(/\r?\n/)) {
+    const fields = line.trim().split(/\s+/);
+    // LISTEN <RecvQ> <SendQ> <LocalAddr:Port> <PeerAddr:Port> users:(...)
+    const [, , , local] = fields;
+    if (fields.length < 6 || fields[0] !== 'LISTEN' || local === undefined) continue;
+    const sep = local.lastIndexOf(':');
+    if (sep < 0 || Number(local.slice(sep + 1)) !== port) continue;
+    if (!socketAddrAnswersHost(local.slice(0, sep), host)) continue;
+    for (const m of line.matchAll(/pid=(\d+)/g)) pids.push(Number(m[1]));
+  }
+  return [...new Set(pids)];
+}
+
+/** Parse `lsof -nP -iTCP:PORT -sTCP:LISTEN` output → pids whose listener answers `host`. */
+export function parseLsofListenOwners(lsofOut: string, port: number, host: string): number[] {
+  const pids: number[] = [];
+  for (const line of lsofOut.split(/\r?\n/)) {
+    const m = /^\S+\s+(\d+)\s+.*?\sTCP\s+(\S+):(\d+)\s+\(LISTEN\)\s*$/.exec(line);
+    if (!m || m[1] === undefined || m[2] === undefined) continue;
+    if (Number(m[3]) !== port) continue;
+    if (!socketAddrAnswersHost(m[2], host)) continue;
+    pids.push(Number(m[1]));
+  }
+  return [...new Set(pids)];
+}
+
+/** Parse `Get-NetTCPConnection | Select LocalAddress,OwningProcess | ConvertTo-Csv` output. */
+export function parseNetTcpOwners(csvOut: string, host: string): number[] {
+  const pids: number[] = [];
+  for (const line of csvOut.split(/\r?\n/)) {
+    const m = /^"([^"]*)","?(\d+)"?\s*$/.exec(line) ?? /^([^,"]+),(\d+)\s*$/.exec(line);
+    if (!m || m[1] === undefined || m[2] === undefined) continue;
+    if (!socketAddrAnswersHost(m[1], host)) continue;
+    pids.push(Number(m[2]));
+  }
+  return [...new Set(pids)];
+}
+
+/**
+ * Pids owning a LISTEN socket that answers on `host:port`. Verification, not
+ * convenience: the reported pid must own the socket it answered on — matching
+ * only the port would let a responder donate a victim bound on a different
+ * local address of the same port (CWE-863). null = the OS did not tell us
+ * (tool missing/failed) — refuse to kill.
+ */
+async function getListenPortOwnerPids(port: number, host: string): Promise<number[] | null> {
   if (Object.hasOwn(globalThis, '__mockGetListenPortOwnerPids')) {
     const mock = Reflect.get(globalThis, '__mockGetListenPortOwnerPids') as (
-      p: number
+      p: number, h: string
     ) => Promise<number[] | null>;
-    return mock(port);
+    return mock(port, host);
   }
   if (process.platform === 'win32') {
     const out = await runEncodedPowerShell(
-      `(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue).OwningProcess`,
+      `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object LocalAddress,OwningProcess | ConvertTo-Csv -NoTypeInformation`,
     );
     if (out === null) return null;
-    const pids = out.split(/\r?\n/).map((l) => Number(l.trim())).filter((n) => Number.isInteger(n) && n > 0);
-    return [...new Set(pids)];
+    return parseNetTcpOwners(out, host);
   }
   const runQuery = (cmd: string, args: string[]): Promise<string | null> => new Promise((resolve) => {
     childProcess.execFile(cmd, args, { timeout: 5000 }, (err, stdout) => resolve(err ? null : stdout));
   });
   const ssOut = await runQuery('ss', ['-ltnpH', `sport = :${port}`]);
   if (ssOut !== null) {
-    const pids = [...ssOut.matchAll(/pid=(\d+)/g)].map((m) => Number(m[1]));
-    if (pids.length > 0) return [...new Set(pids)];
-    // ss ran but showed no owners — port free or owned by another user;
-    // fall through to lsof before deciding "unverifiable".
+    const pids = parseSsListenOwners(ssOut, port, host);
+    if (pids.length > 0) return pids;
+    // ss ran but showed no owners for this address — port free or owned by
+    // another user; fall through to lsof before deciding "unverifiable".
   }
-  const lsofOut = await runQuery('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']);
+  const lsofOut = await runQuery('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN']);
   if (lsofOut !== null) {
-    const pids = lsofOut.split(/\r?\n/).map((l) => Number(l.trim())).filter((n) => Number.isInteger(n) && n > 0);
-    return [...new Set(pids)];
+    return parseLsofListenOwners(lsofOut, port, host);
   }
   return null;
 }
 
+const normalizeEntryPath = (s: string): string => {
+  let p = s.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/{2,}/g, '/');
+  p = p.normalize('NFC');
+  // Case-fold only when the path is Windows-shaped (drive letter; UNC entries
+  // never reach matching — the classifier refuses them before existence
+  // checks). POSIX filesystems are case-sensitive.
+  if (/^[a-z]:\//i.test(p)) p = p.toLowerCase();
+  return p;
+};
+
 /**
- * Does the live command line prove `pid` actually runs `serverEntry`?
- * Separators and case are normalized — a console may report a Windows path
- * while the OS stores either separator. `npm run dev`-style launches keep a
- * RELATIVE script arg (`src/server/index.ts`) while health reports the
- * absolute argv[1], so a path-bearing cmdline token also matches when it is a
- * suffix path of the reported entry — never a bare basename.
+ * Does the live argv prove `pid` actually runs `serverEntry`?
+ * A path-bearing argv element must EQUAL the reported entry after
+ * normalization. `npm run dev`-style launches keep a RELATIVE script arg
+ * (`src/server/index.ts`) while health reports the absolute argv[1] — when
+ * the process cwd is known (Linux `/proc/<pid>/cwd`) the arg is resolved to
+ * an absolute path and compared exactly. Only when the OS cannot report the
+ * cwd do we fall back to accepting the arg as a strict suffix path of the
+ * entry — never a bare basename, and always alongside socket ownership.
  */
-export function commandLineMatchesServerEntry(commandLine: string, serverEntry: string): boolean {
-  const norm = (s: string): string => s.replace(/\\/g, '/').toLowerCase();
-  const nse = norm(serverEntry);
-  const tokens: string[] = [];
-  for (const m of commandLine.matchAll(/"([^"]+)"|'([^']+)'/g)) tokens.push(m[1] ?? m[2] ?? '');
-  for (const t of commandLine.replace(/"[^"]*"|'[^']*'/g, ' ').split(/\s+/)) {
-    if (t.length > 0) tokens.push(t);
-  }
-  for (const raw of tokens) {
-    const tok = norm(raw).replace(/^\.\//, '');
+export function argvMatchesServerEntry(argv: string[], serverEntry: string, cwd: string | null): boolean {
+  const nse = normalizeEntryPath(serverEntry);
+  const normCwd = cwd === null ? null : normalizeEntryPath(cwd);
+  for (const raw of argv) {
+    const stripped = raw.replace(/^["']|["']$/g, '');
+    const tok = normalizeEntryPath(stripped);
     if (!tok.includes('/')) continue;
-    if (nse === tok || nse.endsWith(`/${tok}`)) return true;
+    const isAbsolute = tok.startsWith('/') || /^[a-z]:\//i.test(tok);
+    if (isAbsolute) {
+      if (tok === nse) return true;
+      continue;
+    }
+    if (normCwd !== null) {
+      if (path.posix.resolve(normCwd, tok) === nse) return true;
+      continue;
+    }
+    if (nse.endsWith(`/${tok}`)) return true;
   }
   return false;
 }
 
 /**
  * Terminate a stale console process and wait for its port to free up.
- * Fails closed: no signal is sent unless BOTH the live command line proves
- * the pid runs the reported entry AND the pid owns the listen socket on the
- * port it answered on — self-reported instance JSON alone is never enough to
- * kill on. Returns true only when the port accepts no further connections.
+ * Fails closed: no signal is sent unless BOTH the live argv proves the pid
+ * runs the reported entry AND that pid owns the listen socket answering on
+ * the probed host:port — self-reported instance JSON alone is never enough
+ * to kill on, and a victim bound on a different local address of the same
+ * port does not qualify. Returns true only when the port accepts no further
+ * connections.
  */
 async function evictStaleConsole(host: string, port: number, stale: StaleConsoleVerdict): Promise<boolean> {
   if (!(await isPortInUse(host, port, 300))) return true;
-  const [cmdline, ownerPids] = await Promise.all([
-    getProcessCommandLine(stale.pid),
-    getListenPortOwnerPids(port),
+  const [identity, ownerPids] = await Promise.all([
+    getProcessIdentity(stale.pid),
+    getListenPortOwnerPids(port, host),
   ]);
-  if (cmdline === null || !commandLineMatchesServerEntry(cmdline, stale.serverEntry)) {
+  if (identity === null || !argvMatchesServerEntry(identity.argv, stale.serverEntry, identity.cwd)) {
     return false;
   }
   if (ownerPids === null || !ownerPids.includes(stale.pid)) {
