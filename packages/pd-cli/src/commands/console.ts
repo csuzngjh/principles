@@ -715,6 +715,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       : `Open ${plan.url} in your browser. Press Ctrl+C to stop.`,
   };
   if (typeof child.pid === 'number') out.serverPid = child.pid;
+  if (plan.replacedStale) out.replacedStale = plan.replacedStale;
   if (plan.reason) out.reason = plan.reason;
   if (browserWarning) {
     out.reason = out.reason ? `${out.reason}; browser_open_failed: ${browserWarning}` : `browser_open_failed: ${browserWarning}`;

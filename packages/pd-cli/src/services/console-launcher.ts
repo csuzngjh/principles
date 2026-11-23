@@ -17,6 +17,8 @@
 
 import * as net from 'net';
 import * as http from 'http';
+import * as fs from 'fs';
+import * as childProcess from 'child_process';
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
@@ -53,6 +55,11 @@ export interface ConsoleLaunchResult {
    * another process, so this launcher cannot know its PID).
    */
   serverPid?: number;
+  /**
+   * Set when a stale console process was evicted from the bound port before
+   * this launch — surfaced so the user knows a leftover process was replaced.
+   */
+  replacedStale?: StaleConsoleVerdict;
 }
 
 export interface ConsoleLaunchOptions {
@@ -153,10 +160,21 @@ export interface HealthProbeOptions {
   timeoutMs?: number;
 }
 
+/**
+ * Instance identity a PD console reports on /api/health. Absent on consoles
+ * built before the field existed — treat those as opaque (legacy reuse).
+ */
+export interface ConsoleInstanceInfo {
+  pid: number | null;
+  serverEntry: string | null;
+  webIndexExists: boolean | null;
+}
+
 /** Probe a port to see if it serves a healthy PD Console. */
 export interface ConsoleHealthProbeResult {
   healthy: boolean;
   authenticationMode?: ConsoleAuthenticationMode;
+  instance?: ConsoleInstanceInfo;
   reason?: string;
   failureKind?: 'invalid_response' | 'unreachable';
 }
@@ -193,9 +211,18 @@ export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<Cons
                 const dataValue = Object.hasOwn(body, 'data') ? Reflect.get(body, 'data') : undefined;
                 const payloadRecord = isRecord(dataValue) ? dataValue : body;
                 const mode = Reflect.get(payloadRecord, 'authenticationMode');
+                const rawInstance = Reflect.get(payloadRecord, 'instance');
+                const instance: ConsoleInstanceInfo | undefined = isRecord(rawInstance)
+                  ? {
+                      pid: typeof rawInstance.pid === 'number' ? rawInstance.pid : null,
+                      serverEntry: typeof rawInstance.serverEntry === 'string' ? rawInstance.serverEntry : null,
+                      webIndexExists: typeof rawInstance.webIndexExists === 'boolean' ? rawInstance.webIndexExists : null,
+                    }
+                  : undefined;
                 resolve({
                   healthy: true,
                   ...(mode === 'authenticated' || mode === 'no_auth' ? { authenticationMode: mode } : {}),
+                  ...(instance !== undefined ? { instance } : {}),
                 });
               } else {
                 resolve({ healthy: false, reason: 'console health JSON was missing healthy/success markers' });
@@ -349,6 +376,117 @@ export async function openBrowser(rawUrl: string): Promise<{ opened: boolean; re
   });
 }
 
+// ─── Stale console detection & eviction ──────────────────────────────────────
+
+/**
+ * A healthy-answering console process can still be unusable: an orphaned
+ * test/dev instance whose files were deleted underneath it (fixture cleanup,
+ * interrupted update) serves /api/health from memory but 404s every page —
+ * the "Run npm run build:ui first" trap. Reuse must only happen when the
+ * responder proves its on-disk deployment is intact.
+ */
+export type StaleConsoleKind = 'orphaned_entry_removed' | 'web_bundle_missing';
+export interface StaleConsoleVerdict {
+  kind: StaleConsoleKind;
+  pid: number;
+  serverEntry: string;
+}
+
+/**
+ * Entry-path sanity bound for auto-kill: only processes whose reported entry
+ * looks like a pd-console server are ever terminated. Dev-mode (tsx
+ * src/server/index.ts under packages/pd-console) and installed/legacy
+ * layouts (…/console/dist/server.js) both match; a foreign local service
+ * that happens to mimic the instance JSON shape does not.
+ */
+const CONSOLE_SERVER_ENTRY_PATTERN = /pd-console[\\/]|[\\/]console[\\/]dist[\\/]server\.js$/i;
+
+export function classifyStaleConsoleInstance(
+  instance: ConsoleInstanceInfo | undefined,
+  ownPid: number = process.pid,
+): StaleConsoleVerdict | null {
+  if (instance === undefined) return null;
+  const { pid } = instance;
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0 || pid === ownPid) return null;
+  const entry = typeof instance.serverEntry === 'string' && instance.serverEntry.length > 0
+    ? instance.serverEntry
+    : null;
+  if (entry === null || !CONSOLE_SERVER_ENTRY_PATTERN.test(entry)) return null;
+  if (!fs.existsSync(entry)) {
+    return { kind: 'orphaned_entry_removed', pid, serverEntry: entry };
+  }
+  if (instance.webIndexExists === false) {
+    return { kind: 'web_bundle_missing', pid, serverEntry: entry };
+  }
+  return null;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/**
+ * Read the live command line of a process we might evict. The `instance`
+ * block is self-reported over loopback HTTP — before signaling `pid` we must
+ * prove it is the console process it claims to be, not an arbitrary victim
+ * pid a crafted responder named (verifyNonce covers installer children; this
+ * covers every other leftover). Returns null when the command line cannot be
+ * obtained (unsupported platform, no permission, process already gone) —
+ * callers must treat that as unverified and refuse to kill.
+ */
+async function getProcessCommandLine(pid: number): Promise<string | null> {
+  if (Object.hasOwn(globalThis, '__mockGetProcessCommandLine')) {
+    const mock = Reflect.get(globalThis, '__mockGetProcessCommandLine') as (
+      p: number
+    ) => Promise<string | null>;
+    return mock(pid);
+  }
+  const [cmd, args] = process.platform === 'win32'
+    ? ['powershell', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`]]
+    : ['ps', ['-p', String(pid), '-o', 'command=']];
+  return new Promise((resolve) => {
+    childProcess.execFile(cmd, args, { timeout: 5000 }, (err, stdout) => {
+      if (err) { resolve(null); return; }
+      const out = stdout.trim();
+      resolve(out.length > 0 ? out : null);
+    });
+  });
+}
+
+/**
+ * Does the live command line prove `pid` actually runs `serverEntry`?
+ * Separators and case are normalized — a console may report a Windows path
+ * while the OS stores either separator.
+ */
+export function commandLineMatchesServerEntry(commandLine: string, serverEntry: string): boolean {
+  const norm = (s: string): string => s.replace(/\\/g, '/').toLowerCase();
+  return norm(commandLine).includes(norm(serverEntry));
+}
+
+/**
+ * Terminate a stale console process and wait for its port to free up.
+ * Fails closed: no signal is sent unless the live command line proves the
+ * pid runs the reported server entry — self-reported instance JSON alone is
+ * never enough to kill on. Returns true only when the port accepts no
+ * further connections.
+ */
+async function evictStaleConsole(host: string, port: number, stale: StaleConsoleVerdict): Promise<boolean> {
+  const cmdline = await getProcessCommandLine(stale.pid);
+  if (cmdline === null || !commandLineMatchesServerEntry(cmdline, stale.serverEntry)) {
+    return false;
+  }
+  const waitFree = async (budgetMs: number): Promise<boolean> => {
+    const deadline = Date.now() + budgetMs;
+    while (Date.now() < deadline) {
+      if (!(await isPortInUse(host, port, 300))) return true;
+      await sleep(150);
+    }
+    return !(await isPortInUse(host, port, 300));
+  };
+  try { process.kill(stale.pid, 'SIGTERM'); } catch { /* already gone or no handle — still wait for the port */ }
+  if (await waitFree(3000)) return true;
+  try { process.kill(stale.pid, 'SIGKILL'); } catch { /* same reasoning as above */ }
+  return waitFree(2000);
+}
+
 // ─── Main launcher orchestrator ──────────────────────────────────────────────
 
 /**
@@ -360,7 +498,11 @@ export async function openBrowser(rawUrl: string): Promise<{ opened: boolean; re
  * NOTE: This function does NOT spawn the server. The caller (CLI command) is
  * responsible for actually launching the child process; the result returned
  * here tells the caller which port to bind to and whether the existing port
- * already serves a console.
+ * already serves a console. Side effect: when the process answering on the
+ * preferred port proves itself a stale PD console (deployment gone/broken)
+ * whose live command line confirms the reported entry, this function
+ * terminates that process so the port can be rebound — the verdict is
+ * reported via `replacedStale`, never silently.
  */
 export interface OrchestratorResult {
   status: ConsoleStatus;
@@ -370,6 +512,11 @@ export interface OrchestratorResult {
   reused: boolean;
   reason?: string;
   nextAction?: string;
+  /**
+   * Set when a stale console process was evicted from the chosen port before
+   * the 'started' verdict — the caller should surface this to the user.
+   */
+  replacedStale?: StaleConsoleVerdict;
 }
 
 export interface OrchestratorInput {
@@ -403,20 +550,46 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
 
   // Step 1: Is there already a healthy console on the preferred port?
   const health = await probeConsoleHealth({ host, port: preferredPort });
+  let staleHolder: StaleConsoleVerdict | null = null;
   if (health.healthy) {
-    return {
-      status: 'reused',
-      url: buildConsoleUrl(host, preferredPort),
-      port: preferredPort,
-      host,
-      reused: true,
-    };
+    const stale = classifyStaleConsoleInstance(health.instance);
+    if (stale === null) {
+      return {
+        status: 'reused',
+        url: buildConsoleUrl(host, preferredPort),
+        port: preferredPort,
+        host,
+        reused: true,
+      };
+    }
+    // Stale PD console: provably broken deployment (its entry file is gone or
+    // its web bundle is missing) — it can only ever serve 404s, so evict it
+    // and let the caller bind a healthy console on the preferred port.
+    if (await evictStaleConsole(host, preferredPort, stale)) {
+      return {
+        status: 'started',
+        url: buildConsoleUrl(host, preferredPort),
+        port: preferredPort,
+        host,
+        reused: false,
+        replacedStale: stale,
+        reason: `replaced stale console process pid ${stale.pid} (${stale.kind})`,
+      };
+    }
+    // Eviction failed (identity unverifiable or port refused to free) — the
+    // holder must still be named in the outcome, then fall through to the
+    // busy-port path rather than reusing a console that can only return 404.
+    staleHolder = stale;
   }
 
   // Step 2: Is the preferred port simply occupied by something else?
   const preferredInUse = await isPortInUse(host, preferredPort);
 
   if (preferredInUse) {
+    const holder = staleHolder;
+    const staleNote = holder !== null
+      ? `stale console process pid ${holder.pid} (${holder.kind}) holds port ${preferredPort} and resisted automatic termination`
+      : null;
     // Try to find a free port in the fallback range.
     const freePort = await findAvailablePort(host, preferredPort + 1, PORT_FALLBACK_LIMIT - 1);
     if (freePort === null) {
@@ -426,8 +599,12 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
         port: preferredPort,
         host,
         reused: false,
-        reason: `No available port in ${preferredPort + 1}..${preferredPort + PORT_FALLBACK_LIMIT}`,
-        nextAction: `Stop the process holding port ${preferredPort} (e.g., another Console instance), or free a port in the fallback range.`,
+        reason: staleNote !== null
+          ? `${staleNote}; no available port in ${preferredPort + 1}..${preferredPort + PORT_FALLBACK_LIMIT}`
+          : `No available port in ${preferredPort + 1}..${preferredPort + PORT_FALLBACK_LIMIT}`,
+        nextAction: holder !== null
+          ? `Stop the stale console manually (kill pid ${holder.pid}) or free a port in the fallback range.`
+          : `Stop the process holding port ${preferredPort} (e.g., another Console instance), or free a port in the fallback range.`,
       };
     }
     return {
@@ -436,7 +613,12 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
       port: freePort,
       host,
       reused: false,
-      reason: `Preferred port ${preferredPort} was busy; using ${freePort} instead`,
+      reason: staleNote !== null
+        ? `${staleNote}; using ${freePort} instead`
+        : `Preferred port ${preferredPort} was busy; using ${freePort} instead`,
+      ...(holder !== null
+        ? { nextAction: `Stop the stale console manually (kill pid ${holder.pid}) to reclaim port ${preferredPort}.` }
+        : {}),
     };
   }
 

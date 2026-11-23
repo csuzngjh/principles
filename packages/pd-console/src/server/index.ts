@@ -765,6 +765,7 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
         asyncHandler(() => handleHealthRoute(req, res, {
           workspaceDir: services.workspaceDir,
           authenticationMode: 'no_auth',
+          webIndexExists: fs.existsSync(path.join(WEB_ROOT, 'index.html')),
         }))(req, res);
         return;
       }

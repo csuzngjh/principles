@@ -92,7 +92,7 @@ describe('/api/health codexGovernance — explicit unknown is not healthy (revie
     const { res, payload, statusOf } = createMockRes();
 
     try {
-      await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth' });
+      await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth', webIndexExists: true });
     } catch (error) {
       throw new Error('route threw: ' + String(error instanceof Error ? error.stack : error));
     }
@@ -114,7 +114,7 @@ describe('/api/health codexGovernance — explicit unknown is not healthy (revie
     mockCollect.mockResolvedValue({ status: 'ok', health: okHealth({ ready: false, readyBlockers: ['consent: not granted'] }) });
     const { res, payload } = createMockRes();
 
-    await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth' });
+    await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth', webIndexExists: true });
 
     const body = payload();
     const envelope = body?.data as Record<string, unknown> | undefined;
@@ -128,7 +128,7 @@ describe('/api/health codexGovernance — explicit unknown is not healthy (revie
     mockCollect.mockResolvedValue({ status: 'ok', health: okHealth() });
     const { res, payload, statusOf } = createMockRes();
 
-    await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth' });
+    await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth', webIndexExists: true });
 
     const envelope = payload()?.data as Record<string, unknown> | undefined;
     const block = envelope?.codexGovernance as Record<string, unknown>;
@@ -140,7 +140,7 @@ describe('/api/health codexGovernance — explicit unknown is not healthy (revie
     mockCheckSystemHealth.mockRejectedValue(new Error('database locked'));
     const { res, payload, statusOf } = createMockRes();
 
-    await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth' });
+    await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth', webIndexExists: true });
 
     expect(statusOf()).toBe(500);
     expect(payload()?.error).toBe('health_check_error');

@@ -30,6 +30,7 @@ import {
   findAvailablePort,
   planConsoleLaunch,
   probeConsoleHealth,
+  classifyStaleConsoleInstance,
   openBrowser,
 } from '../../src/services/console-launcher.js';
 
@@ -1218,6 +1219,247 @@ describe('checkConsoleRuntimeDependencies', () => {
       expect(err).toContain('package.json');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── classifyStaleConsoleInstance ────────────────────────────────────────────
+
+describe('classifyStaleConsoleInstance', () => {
+  it('flags an instance whose server entry file no longer exists (orphaned fixture)', () => {
+    const missingEntry = path.join(os.tmpdir(), 'pd-stale-nonexistent', 'console', 'dist', 'server.js');
+    const verdict = classifyStaleConsoleInstance({
+      pid: 424242, serverEntry: missingEntry, webIndexExists: null,
+    });
+    expect(verdict).toEqual({ kind: 'orphaned_entry_removed', pid: 424242, serverEntry: missingEntry });
+  });
+
+  it('flags an intact entry whose web bundle is gone (dev-mode server without build:ui)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-stale-entry-'));
+    try {
+      const entry = path.join(dir, 'pd-console', 'src', 'server', 'index.ts');
+      fs.mkdirSync(path.dirname(entry), { recursive: true });
+      fs.writeFileSync(entry, '// fixture');
+      const verdict = classifyStaleConsoleInstance({
+        pid: 424242, serverEntry: entry, webIndexExists: false,
+      });
+      expect(verdict).toEqual({ kind: 'web_bundle_missing', pid: 424242, serverEntry: entry });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an intact console reusable (entry + web bundle present)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-stale-ok-'));
+    try {
+      const entry = path.join(dir, 'pd-console', 'dist', 'server.js');
+      fs.mkdirSync(path.dirname(entry), { recursive: true });
+      fs.writeFileSync(entry, '// fixture');
+      expect(classifyStaleConsoleInstance({
+        pid: 424242, serverEntry: entry, webIndexExists: true,
+      })).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not trust an entry path that does not look like a pd-console server', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-stale-foreign-'));
+    try {
+      const entry = path.join(dir, 'other-tool', 'server.js');
+      fs.mkdirSync(path.dirname(entry), { recursive: true });
+      fs.writeFileSync(entry, '// fixture');
+      expect(classifyStaleConsoleInstance({
+        pid: 424242, serverEntry: entry, webIndexExists: false,
+      })).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a verdict for absent instance, missing pid, or the probe own pid', () => {
+    expect(classifyStaleConsoleInstance(undefined)).toBeNull();
+    const entry = path.join('x', '.pd', 'runtime', 'console', 'dist', 'server.js');
+    expect(classifyStaleConsoleInstance({ pid: process.pid, serverEntry: entry, webIndexExists: false })).toBeNull();
+    expect(classifyStaleConsoleInstance({ pid: null, serverEntry: entry, webIndexExists: false })).toBeNull();
+  });
+});
+
+// ─── planConsoleLaunch: stale console eviction ───────────────────────────────
+
+describe('planConsoleLaunch — stale console eviction', () => {
+  afterEach(() => {
+    delete (globalThis as any).__mockIsPortInUse;
+    delete (globalThis as any).__mockGetProcessCommandLine;
+    vi.restoreAllMocks();
+  });
+
+  /** Real HTTP responder that is "healthy" at /api/health but 404s the UI — the orphan's exact shape. */
+  function serveStaleHealthyConsole(instance: Record<string, unknown>): Promise<{ server: http.Server; port: number }> {
+    const server = http.createServer((req, res) => {
+      if (req.url === '/api/health') {
+        res.statusCode = 200;
+        res.end(JSON.stringify({ success: true, data: { overall: 'degraded', instance } }));
+        return;
+      }
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: 'not_found', message: 'Run npm run build:ui first' }));
+    });
+    return new Promise((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address();
+        if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+        resolve({ server, port: addr.port });
+      });
+    });
+  }
+
+  it('evicts an orphaned console whose files were deleted, then binds the preferred port fresh', async () => {
+    const missingEntry = path.join(os.tmpdir(), 'pd-stale-e2e-nonexistent', 'console', 'dist', 'server.js');
+    const { server, port } = await serveStaleHealthyConsole({
+      pid: 424242, serverEntry: missingEntry, webIndexExists: null,
+    });
+    let killed = false;
+    (globalThis as any).__mockIsPortInUse = async () => !killed;
+    // Live cmdline proves pid 424242 runs the reported (deleted) entry.
+    (globalThis as any).__mockGetProcessCommandLine = async () => `node ${missingEntry} --port ${port}`;
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { killed = true; return true; });
+    try {
+      const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
+      expect(result.status).toBe('started');
+      expect(result.reused).toBe(false);
+      expect(result.replacedStale).toEqual({ kind: 'orphaned_entry_removed', pid: 424242, serverEntry: missingEntry });
+      expect(result.port).toBe(port);
+      expect(result.reason).toContain('424242');
+      expect(killSpy).toHaveBeenCalledWith(424242, 'SIGTERM');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('evicts a console that self-reports its web bundle missing', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-stale-dev-'));
+    const entry = path.join(dir, 'pd-console', 'dist', 'server.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, '// fixture');
+    const { server, port } = await serveStaleHealthyConsole({
+      pid: 424243, serverEntry: entry, webIndexExists: false,
+    });
+    let killed = false;
+    (globalThis as any).__mockIsPortInUse = async () => !killed;
+    (globalThis as any).__mockGetProcessCommandLine = async () => `node "${entry}" --workspace /w`;
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { killed = true; return true; });
+    try {
+      const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
+      expect(result.status).toBe('started');
+      expect(result.replacedStale).toEqual({ kind: 'web_bundle_missing', pid: 424243, serverEntry: entry });
+      expect(killSpy).toHaveBeenCalledWith(424243, 'SIGTERM');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('still reuses a healthy console whose instance proves an intact deployment', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-stale-ok-'));
+    const entry = path.join(dir, 'pd-console', 'dist', 'server.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, '// fixture');
+    const { server, port } = await serveStaleHealthyConsole({
+      pid: 424244, serverEntry: entry, webIndexExists: true,
+    });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
+      expect(result.status).toBe('reused');
+      expect(result.replacedStale).toBeUndefined();
+      expect(killSpy).not.toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('escalates to SIGKILL and refuses to reuse when eviction cannot free the port', async () => {
+    const missingEntry = path.join(os.tmpdir(), 'pd-stale-e2e-nonexistent', 'console', 'dist', 'server.js');
+    const { server, port } = await serveStaleHealthyConsole({
+      pid: 424242, serverEntry: missingEntry, webIndexExists: null,
+    });
+    (globalThis as any).__mockIsPortInUse = async () => true;
+    (globalThis as any).__mockGetProcessCommandLine = async () => `node ${missingEntry} --port ${port}`;
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
+      // Port never frees: the stale console is NOT reused, and every fallback
+      // port is also busy — the outcome is a structured failure that still
+      // names the stale pid, not a silent 404.
+      expect(result.status).toBe('failed');
+      expect(result.reason).toContain('424242');
+      expect(result.nextAction).toContain('424242');
+      const signals = killSpy.mock.calls.map((c) => c[1]);
+      expect(signals).toContain('SIGTERM');
+      expect(signals).toContain('SIGKILL');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
+
+  it('never signals a pid whose live command line does not run the reported entry (crafted responder)', async () => {
+    const missingEntry = path.join(os.tmpdir(), 'pd-stale-e2e-nonexistent', 'console', 'dist', 'server.js');
+    const { server, port } = await serveStaleHealthyConsole({
+      pid: 424242, serverEntry: missingEntry, webIndexExists: null,
+    });
+    (globalThis as any).__mockIsPortInUse = async () => true;
+    // The responder names pid 424242, but that pid actually runs an
+    // unrelated binary — self-reported instance JSON is not proof.
+    (globalThis as any).__mockGetProcessCommandLine = async () => 'C:\\Tools\\unrelated.exe --serve';
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
+      expect(result.status).toBe('failed');
+      expect(result.reason).toContain('424242');
+      expect(killSpy).not.toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('never signals a pid whose command line cannot be read (fail closed)', async () => {
+    const missingEntry = path.join(os.tmpdir(), 'pd-stale-e2e-nonexistent', 'console', 'dist', 'server.js');
+    const { server, port } = await serveStaleHealthyConsole({
+      pid: 424242, serverEntry: missingEntry, webIndexExists: null,
+    });
+    (globalThis as any).__mockIsPortInUse = async () => true;
+    (globalThis as any).__mockGetProcessCommandLine = async () => null;
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      const result = await planConsoleLaunch({ workspaceDir: '/tmp/w', preferredPort: port, host: '127.0.0.1' });
+      expect(result.status).toBe('failed');
+      expect(killSpy).not.toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+// ─── probeConsoleHealth: instance block ──────────────────────────────────────
+
+describe('probeConsoleHealth — instance block', () => {
+  it('surfaces the responder-reported instance identity', async () => {
+    const instance = { pid: 7, serverEntry: '/x/.pd/runtime/console/dist/server.js', webIndexExists: false };
+    const server = http.createServer((_req, res) => {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true, data: { instance } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port });
+      expect(h.healthy).toBe(true);
+      expect(h.instance).toEqual(instance);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });
