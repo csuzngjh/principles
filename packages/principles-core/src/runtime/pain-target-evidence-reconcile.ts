@@ -329,30 +329,38 @@ export async function reconcileWaitingTargetEvidenceTasks(
       // PRI-1273 / PRI-1283: a source-material denial is a DIFFERENT state
       // from waiting — persist the block with its reason code so the read
       // model shows why, and never mix it back into the waiting set.
-      const disposition: PainRecoveryDisposition = {
-        ...facts.existingDisposition,
-        state: 'blocked_by_source_material_consent',
-        reasonCode: `target_turn_source_material_${read.reason}`,
-        attemptCount: facts.existingDisposition.attemptCount + 1,
-        lastCheckedAt: input.nowIso,
-      };
-      const updated = await input.stateManager.updateTaskIfDiagnosticJsonUnchanged(
-        task.taskId,
-        facts.diagnosticText,
-        { diagnosticJson: JSON.stringify({ ...parsedRecord, recovery: disposition }) },
-        {
-          expectedStatus: task.status,
-          expectedLeaseOwner: task.leaseOwner ?? null,
-          expectedLeaseExpiresAt: task.leaseExpiresAt ?? null,
-          expectedLeaseGeneration: task.leaseGeneration ?? 0,
-          expectedAttemptCount: task.attemptCount,
-        },
-      );
-      if (updated !== null) {
-        blocked += 1;
-      } else {
-        // Lost a race — the concurrent writer's state wins; re-checked next cycle.
-        stillWaiting += 1;
+      // CodeRabbit: this write is inside the per-task error boundary — a
+      // transient store failure becomes one bounded error line and the loop
+      // continues with the next task; it must never abort the whole pass
+      // (the already-flipped tasks' report would be lost with it).
+      try {
+        const disposition: PainRecoveryDisposition = {
+          ...facts.existingDisposition,
+          state: 'blocked_by_source_material_consent',
+          reasonCode: `target_turn_source_material_${read.reason}`,
+          attemptCount: facts.existingDisposition.attemptCount + 1,
+          lastCheckedAt: input.nowIso,
+        };
+        const updated = await input.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+          task.taskId,
+          facts.diagnosticText,
+          { diagnosticJson: JSON.stringify({ ...parsedRecord, recovery: disposition }) },
+          {
+            expectedStatus: task.status,
+            expectedLeaseOwner: task.leaseOwner ?? null,
+            expectedLeaseExpiresAt: task.leaseExpiresAt ?? null,
+            expectedLeaseGeneration: task.leaseGeneration ?? 0,
+            expectedAttemptCount: task.attemptCount,
+          },
+        );
+        if (updated !== null) {
+          blocked += 1;
+        } else {
+          // Lost a race — the concurrent writer's state wins; re-checked next cycle.
+          stillWaiting += 1;
+        }
+      } catch (error: unknown) {
+        errors.push(`target_evidence_reconcile_failed:taskId=${task.taskId}:${error instanceof Error ? Array.from(error.message).slice(0, 80).join('') : 'unknown'}`);
       }
       continue;
     }

@@ -48,6 +48,7 @@ import {
   MOCK_ROUTER_OUTPUTS,
 } from '../../../principles-core/src/runtime/adapter/split-pipeline-fixtures.js';
 import { runCodexWorkspaceWorkerCycle } from '../../src/worker/workspace-worker.js';
+import { readGovernanceCheckpoint } from '@principles/host-runtime';
 import { runHookExecutable } from '../helpers/pd-hook-runner.js';
 import { writeGrantedCodexConsent } from '../helpers/consent.js';
 
@@ -58,6 +59,11 @@ const ROOT_SESSION = 'e27d3a10-0000-4000-8000-1273e2a40001';
 const turnId = (n: number): string => `e27d3a10-0000-4000-8000-1273e2t${String(n).padStart(4, '0')}`;
 const userMarker = (n: number): string => `E2E-1273-T${n}-USER-MARKER`;
 const assistantMarker = (n: number): string => `E2E-1273-T${n}-ASSISTANT-MARKER`;
+/** Lines the initial fixture holds (header + `turns` × 5 records) — appended
+ * deltas must slice AFTER this so the growth appends ONLY new turns
+ * (CodeRabbit: slicing lines re-appends old records and turns the scenario
+ * into a replay-tolerance test). */
+const rolloutLineCount = (turns: number): number => 1 + turns * 5;
 
 function rolloutLines(count: number): string[] {
   const lines: string[] = [{
@@ -292,7 +298,13 @@ function deterministicModelBoundary(wsRoot: string): { rootCausePrompts: string[
 }
 
 describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backfill → diagnosis → admission', () => {
-  const suite = fs.existsSync(MCP_DIST_ENTRY) ? describe : describe.skip;
+  // CodeRabbit: a silent skip on a fresh clone hides the missing artifact —
+  // warn loudly instead (the merge gate always builds first, so CI still
+  // exercises this suite; the precedent is PRI-1274's process test).
+  const suite = fs.existsSync(MCP_DIST_ENTRY) ? describe : (() => {
+    console.warn('[pd-1273-e2e] pd-mcp-server dist not built — skipping the real-stdio acceptance suite; run the pd-mcp-server build to exercise it');
+    return describe.skip;
+  })();
   let ws: E2eWorkspace;
 
   beforeEach(() => {
@@ -408,7 +420,7 @@ describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backf
       expect(preCycle.report?.diagnostician).toBeNull();
 
       // ── Phase C: the transcript GREW — turns 10–12 arrive late ───────────
-      fs.appendFileSync(ws.transcriptPath, `${rolloutLines(12).slice(9).map((l) => JSON.stringify(l)).join('\n')}\n`);
+      fs.appendFileSync(ws.transcriptPath, `${rolloutLines(12).slice(rolloutLineCount(9)).map((l) => JSON.stringify(l)).join('\n')}\n`);
 
       const model = deterministicModelBoundary(ws.root);
       const cycle = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
@@ -503,7 +515,7 @@ describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backf
       // The Owner revokes; the body arrives (file grows); the worker runs.
       const { writeCodexConsent } = await import('../helpers/consent.js');
       writeCodexConsent(ws.root, 'revoked');
-      fs.appendFileSync(ws.transcriptPath, `${rolloutLines(12).slice(9).map((l) => JSON.stringify(l)).join('\n')}\n`);
+      fs.appendFileSync(ws.transcriptPath, `${rolloutLines(12).slice(rolloutLineCount(9)).map((l) => JSON.stringify(l)).join('\n')}\n`);
       const model = deterministicModelBoundary(ws.root);
       const cycle = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
       expect(cycle.report?.targetEvidenceReconcile).toMatchObject({ blocked: 1, flipped: 0, backfilled: 0 });
@@ -574,14 +586,23 @@ describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backf
       };
       const turn10Records = rolloutLines(12).filter((line) => turnOf(line) === turnId(10));
       const turn11Records = rolloutLines(12).filter((line) => turnOf(line) === turnId(11));
+      // The incomplete tail must be GENUINELY partial JSON (a line missing
+      // only its newline parses optimistically and is consumed — the decoder
+      // only HOLDS an unparseable tail, the PRI-1261 shape). Truncate the
+      // last record mid-JSON; write 2 below appends the exact remainder.
+      const lastLine = JSON.stringify(turn11Records[turn11Records.length - 1]);
+      if (lastLine === undefined) throw new Error('fixture: turn 11 records missing');
+      const truncatedTail = lastLine.slice(0, lastLine.length - 30);
+      const tailRemainder = lastLine.slice(truncatedTail.length);
       fs.appendFileSync(
         ws.transcriptPath,
         [
           oversizedRecord.trimEnd(),
           ...turn10Records.map((l) => JSON.stringify(l)),
-          ...turn11Records.map((l) => JSON.stringify(l)),
+          ...turn11Records.slice(0, -1).map((l) => JSON.stringify(l)),
+          truncatedTail,
         ].join('\n'),
-      ); // deliberately NO trailing newline → turn 11's last line is an incomplete tail
+      );
 
       // Convergence loop — the real worker cycles repeatedly, and PRI-1261
       // semantics need a bounded number of passes over the oversized record
@@ -610,10 +631,25 @@ describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backf
       expect(model.rootCausePrompts.length).toBe(1);
       expect(model.rootCausePrompts[0]).toContain(userMarker(10));
 
-      // Phase C, write 2: the tail completes (the writer finished its line)
-      // plus the newline. A later cycle consumes it with no duplicate
-      // backfill and no second diagnosis of the SAME task.
-      fs.appendFileSync(ws.transcriptPath, '\n');
+      // Phase C, write 2: the interrupted writer FINISHES the partial line
+      // (the exact remainder + newline). A later cycle consumes it with no
+      // duplicate backfill and no second diagnosis of the SAME task.
+      // CodeRabbit: prove the checkpoint was actually HOLDING the tail before
+      // completion, and that the evidence array survives byte-identical.
+      const checkpointOf = (): number | null => {
+        const read = readGovernanceCheckpoint({ workspaceDir: ws.root, hostKind: 'codex', rolloutIdentity: ROOT_SESSION });
+        return read !== null && 'byteOffset' in read ? read.byteOffset : null;
+      };
+      const fileSize = fs.statSync(ws.transcriptPath).size;
+      const heldCheckpoint = checkpointOf();
+      expect(heldCheckpoint).not.toBeNull();
+      expect(heldCheckpoint ?? 0).toBeLessThan(fileSize);
+      const rowBefore = diagnosticRow(ws.root, taskId);
+      const diagnosticBefore = JSON.parse(rowBefore?.diagnostic_json ?? '{}') as Record<string, unknown>;
+      const evidenceBefore = diagnosticBefore.evidence;
+      const entryCountBefore = (diagnosticBefore.painIngress as Record<string, unknown>).evidenceClass;
+
+      fs.appendFileSync(ws.transcriptPath, tailRemainder + '\n');
       const runsBefore = runCount(ws.root, taskId);
       const secondModel = deterministicModelBoundary(ws.root);
       const secondCycle = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
@@ -621,12 +657,16 @@ describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backf
       expect(secondCycle.report?.diagnostician).toBeNull();
       expect(secondModel.rootCausePrompts).toEqual([]);
       expect(runCount(ws.root, taskId)).toBe(runsBefore);
+      // The completed tail is consumed: the checkpoint advances to EOF.
+      expect(checkpointOf()).toBe(fs.statSync(ws.transcriptPath).size);
+      // The evidence array and its count survive the completion cycle
+      // byte-identical — no duplicate backfill, no count drift.
       const row = diagnosticRow(ws.root, taskId);
       const diagnostic = JSON.parse(row?.diagnostic_json ?? '{}') as Record<string, unknown>;
+      expect(diagnostic.evidence).toEqual(evidenceBefore);
+      expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual(entryCountBefore);
       expect((diagnostic.evidence as Array<{ sourceRef: string }>).every((entry) =>
         entry.sourceRef.startsWith(`governance_observation:codex|${ROOT_SESSION}|${turnId(10)}|`))).toBe(true);
-      expect(((diagnostic.painIngress as Record<string, unknown>).evidenceClass as Record<string, unknown>).entryCount)
-        .toBe((diagnostic.evidence as unknown[]).length);
     });
   });
 });

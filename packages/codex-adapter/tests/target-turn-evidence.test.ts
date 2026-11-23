@@ -47,10 +47,13 @@ function observation(overrides: Partial<Parameters<typeof ingestGovernanceObserv
     hostTurnId: TARGET_TURN,
     kind: 'user_turn' as const,
     logicalObservationKey: `codex|${SESSION}|${TARGET_TURN}|user_turn`,
+    // CodeRabbit: a FIXED timestamp would expire past the 7-day retention
+    // bound once the wall clock moves on (the PRI-1271 time-bomb class) —
+    // default to now; the expiry test overrides observedAt explicitly.
     visibleText: 'the target turn body: the verification step was skipped',
     source: 'transcript' as const,
     completeness: 'complete' as const,
-    observedAt: '2026-11-23T10:00:00.000Z',
+    observedAt: new Date().toISOString(),
     ...overrides,
   };
 }

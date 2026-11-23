@@ -679,7 +679,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
   it('the reader receives the EXACT (session, target turn) — turn 12\'s submission reads turn 10 only', async () => {
     const painId = 'mcp_1700000001273_a0000001';
     await submitTargetingTurn10(painId);
-    const seen: Array<[string, string]> = [];
+    const seen: [string, string][] = [];
     const report = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: (sessionId, turnId) => {
@@ -927,7 +927,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     const report = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       nowIso: new Date().toISOString(),
-    } as Parameters<typeof reconcileWaitingTargetEvidenceTasks>[0]);
+    });
     expect(report.checked).toBe(1);
     expect(report.flipped + report.blocked).toBe(0);
     expect(report.errors.some((line) => line.includes('target_evidence_reconcile_unconfigured') && line.includes(taskId))).toBe(true);
