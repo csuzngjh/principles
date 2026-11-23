@@ -67,6 +67,7 @@
 ## 5. Windows Task Scheduler 真实注册
 
 - 本机执行 `pd service install --json --pd-home <sandbox>`：OS 返回 `System.UnauthorizedAccessException`（`E_ACCESSDENIED`）。
+- 独立最小复现（不经过 PD）：`schtasks /Create /TN PDPhase5SchedulerProbe /TR "powershell.exe -NoProfile -Command Write-Output pd-phase5-probe" /SC ONLOGON /F` 同样返回 `ERROR: Access is denied.`（`DELETE` 也报找不到该任务）。这证明拒绝来自主机策略，不是 PD 的注册代码。
 - PD 的行为是正确的：结构化 `scheduler_mutation_failed` + nextAction，**没有**误报为未注册，也没有静默跳过。
 - 因此本轮**无法**在本机完成“真实注册 → 启用 → OS 触发 → 禁用 → 卸载”的正向链路；`scheduler-windows.process.test.ts` 在本机 afterAll 清理阶段 120s 超时（同一环境门禁）。
 - 状态读取本身可工作：`registered=false`、`enabled=false`、taskName/triggerConfiguration 均从 OS 见证读取。
