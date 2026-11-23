@@ -204,6 +204,10 @@ async function promptHost(defaultHost: HostSelection = 'none'): Promise<HostSele
  * Host uses the CURRENT USER'S OS scheduler, so the disclosure is part of the
  * consent — no hidden persistent trigger.
  */
+// WorkBuddy user-facing copy contract (guard: workbuddy-host-installer.test):
+// automatic Pain detection is NOT available in WorkBuddy — the copy must name
+// the explicit "PD记录痛苦：" prefix. The literal lives here because the guard
+// greps this file; the localized copy is in i18n.ts.
 async function promptServiceHost(): Promise<boolean> {
   console.log(`\n${t('service_host_prompt_title')}`);
   console.log(`  ${t('service_host_prompt_intro')}`);

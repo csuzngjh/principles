@@ -227,7 +227,11 @@ const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
 // Shared components use ~/.pd/runtime. The plugin package is host-neutral for
 // Codex-only installs; OpenClaw/all still receive their adapter copy under
 // ~/.openclaw/extensions for host discovery.
-let activeHostTarget: HostSelection = 'none';
+// Library-level legacy default for helpers called OUTSIDE an install run
+// (tests, diagnostics, backup helpers). install() overwrites it from the
+// operator's explicit host selection before any deployment step — the CLI
+// itself never defaults to OpenClaw anymore (PRI-1278 Phase 5).
+let activeHostTarget: HostSelection = 'openclaw';
 function installsOpenClaw(host: HostSelection): boolean {
   return host === 'openclaw' || host === 'all';
 }
@@ -1695,7 +1699,7 @@ function verifyCopiedTree(source: string, copy: string): number {
 /**
  * Exported for real-filesystem tests (tests/backup-location.test.ts).
  */
-export function backupExistingInstall(host: HostSelection = 'none'): BackupResult {
+export function backupExistingInstall(host: HostSelection = 'openclaw'): BackupResult {
   const extDir = getPluginExtDir();
   const runtimeDir = getPdRuntimeDir();
   const hasExt = installsOpenClaw(host) && existsSync(extDir);
