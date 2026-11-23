@@ -1226,6 +1226,73 @@ class PromotionMissingError extends Error {
   }
 }
 
+// ── PRI-1273 (A2, devin BUG_0002): exact-turn CONVERSATIONAL texts ───────────
+
+/** A retained conversational row for an exact (host, rollout, turn). */
+export interface GovernanceConversationTextRow {
+  readonly id: number;
+  readonly kind: 'user_turn' | 'assistant_turn';
+  readonly logicalKey: string;
+  readonly visibleText: string;
+  readonly observedAt: string;
+}
+
+export interface ListGovernanceConversationTextsInput {
+  readonly workspaceDir: string;
+  readonly hostKind: GovernanceObservationInput['hostKind'];
+  readonly rolloutIdentity: string;
+  readonly hostTurnId: string;
+  /**
+   * The turn's LAST N readable conversational rows (a long turn whose final
+   * answer sits behind dozens of tool/reasoning observations must still
+   * surface it — the generic list's `ORDER BY id LIMIT` window would cut it).
+   */
+  readonly limit?: number;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type ListGovernanceConversationTextsResult =
+  | { readonly ok: true; readonly rows: readonly GovernanceConversationTextRow[] }
+  | { readonly ok: false; readonly reason: string; readonly nextAction: string };
+
+/**
+ * The ONE selection rule for an exact target turn's readable text, shared by
+ * the worker's evidence backfill, the diagnosis-time exact-turn reader and
+ * the submit path's opportunistic enrichment (devin BUG_0002): filter
+ * host/session/turn + conversational kind + retained readable text INSIDE
+ * the SQL, then take the LAST N by id (reversed back to capture order) —
+ * never a generic early window over all observation kinds.
+ */
+export function listGovernanceConversationTextsForHostTurn(
+  input: ListGovernanceConversationTextsInput,
+): ListGovernanceConversationTextsResult {
+  const opened = openStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const limit = Math.min(Math.max(input.limit ?? 12, 1), 64);
+    const rows = db.prepare([
+      'SELECT id, kind, logical_key, visible_text, observed_at FROM governance_observations',
+      'WHERE host_kind = ? AND rollout_identity = ? AND host_turn_id = ?',
+      "AND kind IN ('user_turn','assistant_turn')",
+      "AND retention_class IN ('operational','promoted')",
+      "AND visible_text IS NOT NULL AND TRIM(visible_text) <> ''",
+      'ORDER BY id DESC LIMIT ?',
+    ].join(' ')).all(input.hostKind, input.rolloutIdentity, input.hostTurnId, limit) as Record<string, unknown>[];
+    const mapped = rows.map((row) => ({
+      id: Number(rowField(row, 'id')),
+      kind: rowField(row, 'kind') === 'assistant_turn' ? 'assistant_turn' as const : 'user_turn' as const,
+      logicalKey: String(rowField(row, 'logical_key')),
+      visibleText: String(rowField(row, 'visible_text')),
+      observedAt: String(rowField(row, 'observed_at')),
+    }));
+    mapped.reverse();
+    return { ok: true, rows: mapped };
+  } finally {
+    close();
+  }
+}
+
 export function promoteGovernanceEvidence(input: PromoteGovernanceEvidenceInput): PromoteGovernanceEvidenceResult {
   const opened = openStore(input.workspaceDir, input.databaseFactory);
   if (!('db' in opened)) return { ok: false, reason: opened.reason, nextAction: opened.nextAction };

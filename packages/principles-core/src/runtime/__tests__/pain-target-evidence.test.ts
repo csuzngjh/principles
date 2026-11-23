@@ -890,4 +890,48 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect(after.evidence).toEqual(existing);
     expect(((after.painIngress as Record<string, unknown>).evidenceClass as Record<string, unknown>).entryCount).toBe(1);
   });
+
+  it('devin BUG_0001: the LEGACY boolean probe still works against this Core (old published adapter) — flip-only, no evidence, no consent classification, never a throw', async () => {
+    const painId = 'mcp_1700000001273_a0000011';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+
+    // Legacy probe false: still waiting, no write.
+    const before = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      targetTurnTextAvailable: () => false,
+      nowIso: new Date().toISOString(),
+    });
+    expect(before).toMatchObject({ checked: 1, flipped: 0, stillWaiting: 1 });
+
+    // Legacy probe true: the disposition flips with NO evidence write —
+    // exactly the pre-PRI-1273 behavior an old adapter expects.
+    const after = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      targetTurnTextAvailable: () => true,
+      nowIso: new Date().toISOString(),
+    });
+    expect(after).toMatchObject({ checked: 1, flipped: 1, backfilled: 0, blocked: 0 });
+    const diagnostic = await readDiagnostic(taskId);
+    expect((diagnostic.recovery as Record<string, unknown>).state).toBe('ready_for_diagnosis');
+    expect(diagnostic.evidence).toEqual([]);
+    // The class keeps its creation-time honest `unavailable` — a legacy
+    // flip must never fabricate availability without entries.
+    expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'unavailable', reason: 'not_applicable_unbound' });
+  });
+
+  it('devin BUG_0001: a caller wiring NEITHER probe gets a loud per-task error, never a throw that degrades the whole cycle', async () => {
+    const painId = 'mcp_1700000001273_a0000012';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      nowIso: new Date().toISOString(),
+    } as Parameters<typeof reconcileWaitingTargetEvidenceTasks>[0]);
+    expect(report.checked).toBe(1);
+    expect(report.flipped + report.blocked).toBe(0);
+    expect(report.errors.some((line) => line.includes('target_evidence_reconcile_unconfigured') && line.includes(taskId))).toBe(true);
+    const task = await stateManager.getTask(taskId);
+    expect(task?.status).toBe('pending');
+  });
 });

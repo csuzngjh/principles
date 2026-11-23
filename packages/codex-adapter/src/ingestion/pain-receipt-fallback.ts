@@ -28,7 +28,7 @@
  * `tool_call` rows, or look-alike strings (SPEC TD §1.3).
  */
 import * as path from 'node:path';
-import { listGovernanceObservations, readSourceMaterialAuthorization } from '@principles/host-runtime';
+import { listGovernanceConversationTextsForHostTurn, readSourceMaterialAuthorization } from '@principles/host-runtime';
 import { isSentinelSessionId } from '@principles/core/runtime';
 import type { TargetTurnEvidenceRead } from '@principles/core/runtime';
 import {
@@ -134,24 +134,20 @@ export function readCodexTargetTurnEvidence(workspaceDir: string, sessionId: str
     return { status: 'blocked_by_consent', reason: authorization.reason };
   }
   try {
-    const result = listGovernanceObservations({
+    const result = listGovernanceConversationTextsForHostTurn({
       workspaceDir,
       hostKind: 'codex',
       rolloutIdentity: sessionId,
       hostTurnId: turnId,
-      limit: 64,
+      limit: 12,
     });
     if (!result.ok) {
       return { status: 'read_failed', reason: result.reason };
     }
-    const entries = result.observations.flatMap((row) =>
-      (row.kind === 'user_turn' || row.kind === 'assistant_turn')
-        && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
-        && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
-        ? [{ sourceRef: 'governance_observation:' + row.logicalKey, note: row.visibleText.slice(0, 2000) }]
-        : [],
-      // Rows are capture-ordered; retain the final turns on long conversations.
-    ).slice(-12);
+    const entries = result.rows.map((row) => ({
+      sourceRef: 'governance_observation:' + row.logicalKey,
+      note: row.visibleText.slice(0, 2000),
+    }));
     return entries.length > 0
       ? { status: 'available', entries }
       : { status: 'not_found' };

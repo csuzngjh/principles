@@ -36,7 +36,7 @@
  */
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from '@principles/host-runtime/pd-config';
-import { listGovernanceObservations, listGovernanceTurnTexts, readSourceMaterialAuthorization } from '@principles/host-runtime';
+import { listGovernanceConversationTextsForHostTurn, listGovernanceTurnTexts, readSourceMaterialAuthorization } from '@principles/host-runtime';
 import {
   computeFeatureFlagsFromConfig,
   hostSessionClaimConflictsWithContext,
@@ -112,25 +112,23 @@ function readTargetTurnEvidence(input: {
     return { status: 'blocked_by_consent', reason: authorization.reason };
   }
   try {
-    const result = listGovernanceObservations({
+    // PRI-1273 (devin BUG_0002): the shared exact-turn selection rule — the
+    // turn's LAST readable conversational rows, not a generic early window.
+    const result = listGovernanceConversationTextsForHostTurn({
       workspaceDir: input.workspaceDir,
       hostKind: input.host,
       rolloutIdentity: input.sessionId,
       hostTurnId: input.targetTurnId,
-      limit: 64,
+      limit: 12,
     });
     if (!result.ok) {
       console.error('[pd-submit] target-turn evidence read degraded: read_failed (' + result.reason + '); submission continues without turn evidence');
       return { status: 'read_failed', reason: result.reason };
     }
-    const entries = result.observations.flatMap((row) =>
-      (row.kind === 'user_turn' || row.kind === 'assistant_turn')
-        && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
-        && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
-        ? [{ sourceRef: 'governance_observation:' + row.logicalKey, note: row.visibleText.slice(0, 2000) }]
-        : [],
-      // Rows are capture-ordered; retain the final turns on long conversations.
-    ).slice(-12);
+    const entries = result.rows.map((row) => ({
+      sourceRef: 'governance_observation:' + row.logicalKey,
+      note: row.visibleText.slice(0, 2000),
+    }));
     return entries.length > 0
       ? { status: 'available', entries }
       : { status: 'not_found' };

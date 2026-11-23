@@ -83,8 +83,22 @@ export interface ReconcileWaitingTargetEvidenceInput {
    * (session, target turn). Owns host/workspace semantics AND the
    * source-material consent gate: a denied read returns `blocked_by_consent`,
    * never a fake not-found. The backfill persists exactly what this returns.
+   *
+   * Optional at the TYPE level for one reason: published-package mixing
+   * (devin BUG_0001). An older `codex-adapter` compiled against the
+   * PRI-1274 contract still passes only `targetTurnTextAvailable`; against
+   * this newer Core that call must keep working at its OLD semantics
+   * (flip-only, no evidence, no consent classification) rather than
+   * throwing at the first waiting task and degrading the worker cycle.
    */
-  readonly readTargetTurnEvidence: (sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead;
+  readonly readTargetTurnEvidence?: (sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead;
+  /**
+   * PRI-1274 boolean probe (LEGACY). Used only when `readTargetTurnEvidence`
+   * is absent — the old adapter contract: text exists → flip WITHOUT
+   * backfill; no text → keep waiting. Consent denials cannot be classified
+   * through a boolean and stay waiting under this mode, exactly as before.
+   */
+  readonly targetTurnTextAvailable?: (sessionId: string, targetTurnId: string) => boolean;
   readonly nowIso: string;
   readonly limit?: number;
 }
@@ -238,6 +252,19 @@ export async function reconcileWaitingTargetEvidenceTasks(
   let stillWaiting = 0;
   const errors: string[] = [];
 
+  // Mode resolution (devin BUG_0001): the structured reader is the PRI-1273
+  // contract; the legacy boolean probe keeps old published adapters working
+  // at their old flip-only semantics. A caller wiring NEITHER gets a loud
+  // per-task error, never a throw that would degrade the whole worker cycle.
+  type ResolvedRead = TargetTurnEvidenceRead | { readonly status: 'legacy_available' } | { readonly status: 'misconfigured' };
+  const structuredRead = input.readTargetTurnEvidence;
+  const legacyProbe = input.targetTurnTextAvailable;
+  const resolveRead = (sessionId: string, targetTurnId: string): ResolvedRead => {
+    if (structuredRead !== undefined) return structuredRead(sessionId, targetTurnId);
+    if (legacyProbe !== undefined) return legacyProbe(sessionId, targetTurnId) ? { status: 'legacy_available' } : { status: 'not_found' };
+    return { status: 'misconfigured' };
+  };
+
   // r2b (devin finding 0002): rotate through the waiting set — resume after
   // the last examined task of the previous FULL page; a short page means the
   // set's tail was reached, so the cursor resets and the next pass wraps to
@@ -273,8 +300,13 @@ export async function reconcileWaitingTargetEvidenceTasks(
       errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
       continue;
     }
-    const read = input.readTargetTurnEvidence(facts.sessionId, facts.targetTurnId);
+    const read = resolveRead(facts.sessionId, facts.targetTurnId);
     if (read.status === 'not_found') {
+      stillWaiting += 1;
+      continue;
+    }
+    if (read.status === 'misconfigured') {
+      errors.push(`target_evidence_reconcile_unconfigured:taskId=${task.taskId}`);
       stillWaiting += 1;
       continue;
     }
@@ -324,15 +356,29 @@ export async function reconcileWaitingTargetEvidenceTasks(
       }
       continue;
     }
-    // read.status === 'available'
-    const entries = validateEvidenceEntries(read.entries);
-    if (entries === null || entries.length === 0) {
-      errors.push(`target_evidence_read_invalid_entries:taskId=${task.taskId}`);
-      stillWaiting += 1;
-      continue;
-    }
     try {
-      const patch = buildBackfillPatch({ diagnostic: parsedRecord, facts, entries, nowIso: input.nowIso });
+      // `legacy_available` (old adapter probe) flips WITHOUT evidence — the
+      // exact pre-PRI-1273 behavior; `available` backfills in the same CAS.
+      let patch: { readonly newRecord: Record<string, unknown>; readonly backfilled: boolean };
+      if (read.status === 'legacy_available') {
+        const disposition: PainRecoveryDisposition = {
+          ...facts.existingDisposition,
+          state: 'ready_for_diagnosis',
+          reasonCode: 'target_evidence_arrived',
+          attemptCount: facts.existingDisposition.attemptCount + 1,
+          lastCheckedAt: input.nowIso,
+          resolvedAt: input.nowIso,
+        };
+        patch = { newRecord: { ...parsedRecord, recovery: disposition }, backfilled: false };
+      } else {
+        const entries = validateEvidenceEntries(read.entries);
+        if (entries === null || entries.length === 0) {
+          errors.push(`target_evidence_read_invalid_entries:taskId=${task.taskId}`);
+          stillWaiting += 1;
+          continue;
+        }
+        patch = buildBackfillPatch({ diagnostic: parsedRecord, facts, entries, nowIso: input.nowIso });
+      }
       // Status/lease preconditions (P1-4 parity): a worker that leased or
       // finished the task in the read→write window defeats the flip in the
       // same statement as the diagnostic_json comparison.

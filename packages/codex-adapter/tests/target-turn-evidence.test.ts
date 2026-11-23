@@ -103,6 +103,25 @@ describe('readCodexTargetTurnEvidence — the EXACT turn only', () => {
     });
   });
 
+  it('devin BUG_0002: a long turn whose final answer sits behind 70 tool/reasoning rows is still fully backfilled', () => {
+    const ws = workspace(true);
+    const rows = [observation({ kind: 'user_turn', logicalObservationKey: `codex|${SESSION}|${TARGET_TURN}|user`, visibleText: 'long turn user instruction' })];
+    for (let i = 0; i < 70; i += 1) {
+      rows.push(observation({
+        kind: i % 2 === 0 ? 'tool_call' : 'reasoning',
+        logicalObservationKey: `codex|${SESSION}|${TARGET_TURN}|noise-${i}`,
+        visibleText: undefined,
+        toolFacts: { i },
+      }));
+    }
+    rows.push(observation({ kind: 'assistant_turn', logicalObservationKey: `codex|${SESSION}|${TARGET_TURN}|final`, visibleText: 'long turn FINAL ANSWER' }));
+    seed(ws, rows);
+    const read = readCodexTargetTurnEvidence(ws, SESSION, TARGET_TURN);
+    expect(read.status).toBe('available');
+    if (read.status !== 'available') return;
+    expect(read.entries.map((entry) => entry.note)).toEqual(['long turn user instruction', 'long turn FINAL ANSWER']);
+  });
+
   it('the same text under ANOTHER session never satisfies this session\'s target (同文异会话)', () => {
     const ws = workspace(true);
     seed(ws, [observation({ rolloutIdentity: 'rollout-other-session', rootSessionId: 'rollout-other-session' })]);
