@@ -76,7 +76,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Node.js
-        uses: actions/setup-node@v7.1.0
+        uses: actions/setup-node@v7
         with:
           # 22 (the CI default) instead of 24: `npm audit` resolves the tree
           # from package-lock.json and is Node-version agnostic. VERIFIED
