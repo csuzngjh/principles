@@ -24,6 +24,16 @@ import * as path from 'node:path';
 export const GATEWAY_CONSUMER_LEASE_SCHEMA_VERSION = 'pd.gateway-consumer-lease.v1';
 export const GATEWAY_CONSUMER_LEASE_FILE = 'gateway-consumer-lease.json';
 
+export interface GatewayConsumerLeaseWriter {
+  token: string;
+  instanceId: string;
+  pid: number;
+  host: string;
+  state: 'consuming' | 'quiesced';
+  startedAt: string;
+  updatedAt: string;
+}
+
 export interface GatewayConsumerLease {
   schemaVersion: string;
   /** Identity of THIS consumer instance — one per process lifetime. */
@@ -42,6 +52,14 @@ export interface GatewayConsumerLease {
   state: 'consuming' | 'quiesced';
   startedAt: string;
   updatedAt: string;
+  /**
+   * PRI-1282 review r5: EVERY writer that has published to this lease,
+   * keyed by instanceId (upserted per publish). A single top-level record
+   * can only name the last writer — a quiesce confirmation that only
+   * consults it is blind to an earlier writer still running a cycle.
+   * Liveness is judged per writer.
+   */
+  writers?: GatewayConsumerLeaseWriter[];
 }
 
 function leasePath(workspaceDir: string): string {
@@ -106,7 +124,34 @@ export function parseGatewayConsumerLease(raw: unknown): GatewayConsumerLease | 
   ) {
     return null;
   }
-  return { schemaVersion, token, instanceId: record.instanceId as string, pid, host, workspaceDir, state, startedAt, updatedAt };
+  const writers = Array.isArray(record.writers)
+    ? record.writers.filter((w): w is GatewayConsumerLeaseWriter => parseWriter(w) !== null)
+    : undefined;
+  return { schemaVersion, token, instanceId: record.instanceId as string, pid, host, workspaceDir, state, startedAt, updatedAt, writers };
+}
+
+function parseWriter(raw: unknown): GatewayConsumerLeaseWriter | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const w = raw as Record<string, unknown>;
+  if (
+    typeof w.token !== 'string' || w.token.length === 0
+    || typeof w.instanceId !== 'string' || w.instanceId.length === 0
+    || typeof w.pid !== 'number' || !Number.isInteger(w.pid) || w.pid <= 0
+    || typeof w.host !== 'string' || w.host.length === 0
+    || (w.state !== 'consuming' && w.state !== 'quiesced')
+    || typeof w.startedAt !== 'string' || w.startedAt.length === 0
+    || typeof w.updatedAt !== 'string' || w.updatedAt.length === 0
+  ) return null;
+  return { token: w.token, instanceId: w.instanceId, pid: w.pid, host: w.host, state: w.state, startedAt: w.startedAt, updatedAt: w.updatedAt };
+}
+
+/** Every writer recorded on the lease (falls back to the top-level record). */
+function leaseWriters(lease: GatewayConsumerLease): GatewayConsumerLeaseWriter[] {
+  if (Array.isArray(lease.writers) && lease.writers.length > 0) return lease.writers;
+  return [{
+    token: lease.token, instanceId: lease.instanceId, pid: lease.pid, host: lease.host,
+    state: lease.state, startedAt: lease.startedAt, updatedAt: lease.updatedAt,
+  }];
 }
 
 /** Read the lease; null on missing or unreadable/malformed content. */
@@ -131,18 +176,31 @@ export function writeGatewayConsumerLease(input: {
   now?: () => Date;
 }): { ok: true } | { ok: false; reason: string } {
   const now = input.now ?? (() => new Date());
-  const lease: GatewayConsumerLease = {
-    schemaVersion: GATEWAY_CONSUMER_LEASE_SCHEMA_VERSION,
+  const existing = readGatewayConsumerLease(input.workspaceDir);
+  const ours: GatewayConsumerLeaseWriter = {
     token: input.token,
     instanceId: input.instanceId,
     pid: process.pid,
     host: os.hostname(),
-    workspaceDir: input.workspaceDir,
     state: input.state,
-    startedAt: readGatewayConsumerLease(input.workspaceDir)?.token === input.token
-      ? (readGatewayConsumerLease(input.workspaceDir)?.startedAt ?? now().toISOString())
-      : now().toISOString(),
+    startedAt: existing?.writers?.find((w) => w.instanceId === input.instanceId)?.startedAt
+      ?? (existing?.instanceId === input.instanceId ? existing.startedAt : now().toISOString()),
     updatedAt: now().toISOString(),
+  };
+  // Upsert OUR writer; every other recorded writer stays visible so quiesce
+  // confirmation and restart arbitration see the full liveness set (r5).
+  const writers = existing === null ? [ours] : [...leaseWriters(existing).filter((w) => w.instanceId !== input.instanceId), ours];
+  const lease: GatewayConsumerLease = {
+    schemaVersion: GATEWAY_CONSUMER_LEASE_SCHEMA_VERSION,
+    token: ours.token,
+    instanceId: ours.instanceId,
+    pid: ours.pid,
+    host: ours.host,
+    workspaceDir: input.workspaceDir,
+    state: ours.state,
+    startedAt: ours.startedAt,
+    updatedAt: ours.updatedAt,
+    writers: writers.slice(-16),
   };
   const dir = path.join(input.workspaceDir, '.pd');
   try {
@@ -172,15 +230,74 @@ export function writeGatewayConsumerLease(input: {
  */
 export function clearGatewayConsumerLease(workspaceDir: string, token: string, instanceId?: string): void {
   const current = readGatewayConsumerLease(workspaceDir);
-  if (current === null || current.token !== token) return;
-  // Release is gated on BOTH token and instance identity (PRI-1282 r4): a
-  // successor instance's lease is never deleted by a retiring instance.
-  if (instanceId !== undefined && current.instanceId !== instanceId) return;
+  if (current === null) return;
+  const writers = leaseWriters(current);
+  // Release is gated on BOTH token and instance identity (PRI-1282 r4/r5):
+  // a successor instance's writer entry is never deleted by a retiring
+  // instance, and other consumers' liveness records survive our release.
+  const remaining = writers.filter((w) => {
+    if (instanceId !== undefined) return w.instanceId !== instanceId;
+    return w.token !== token;
+  });
+  if (remaining.length === writers.length) return; // nothing of ours recorded
+  if (remaining.length === 0) {
+    try {
+      fs.unlinkSync(leasePath(workspaceDir));
+    } catch {
+      // Missing already or removal failed — a dead-holder lease is a stale
+      // record the next reader detects via PID liveness; harmless either way.
+    }
+    return;
+  }
+  const latest = remaining[remaining.length - 1]!; // remaining.length > 0 here
+  const next: GatewayConsumerLease = {
+    ...current,
+    token: latest.token,
+    instanceId: latest.instanceId,
+    pid: latest.pid,
+    host: latest.host,
+    state: latest.state,
+    startedAt: latest.startedAt,
+    updatedAt: latest.updatedAt,
+    writers: remaining,
+  };
+  const tmpPath = `${leasePath(workspaceDir)}.tmp-${process.pid}-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
   try {
-    fs.unlinkSync(leasePath(workspaceDir));
+    fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });
+    fs.renameSync(tmpPath, leasePath(workspaceDir));
   } catch {
-    // Missing already or removal failed — a dead-holder lease is a stale
-    // record the next reader detects via PID liveness; harmless either way.
+    try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+  }
+}
+
+/**
+ * Remove every writer entry belonging to a given PID (this process). Used
+ * when a workspace has no live consumer state — retired instances whose
+ * async release is still pending, or leftovers of a crashed drain (r5).
+ */
+export function clearGatewayConsumerLeaseByPid(workspaceDir: string, pid: number): void {
+  const current = readGatewayConsumerLease(workspaceDir);
+  if (current === null) return;
+  const writers = leaseWriters(current);
+  const remaining = writers.filter((w) => w.pid !== pid);
+  if (remaining.length === writers.length) return;
+  if (remaining.length === 0) {
+    try { fs.unlinkSync(leasePath(workspaceDir)); } catch { /* best effort */ }
+    return;
+  }
+  const latest = remaining[remaining.length - 1]!;
+  const next: GatewayConsumerLease = {
+    ...current,
+    token: latest.token, instanceId: latest.instanceId, pid: latest.pid, host: latest.host,
+    state: latest.state, startedAt: latest.startedAt, updatedAt: latest.updatedAt,
+    writers: remaining,
+  };
+  const tmpPath = `${leasePath(workspaceDir)}.tmp-${process.pid}-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });
+    fs.renameSync(tmpPath, leasePath(workspaceDir));
+  } catch {
+    try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
   }
 }
 
@@ -226,15 +343,30 @@ export function foreignConsumerLeaseStatus(
     return 'unknown';
   }
   if (parsed === null) return 'unknown';
-  // A 'quiesced' lease's lifecycle provably ended — it is take-over-able
-  // evidence the consumer drained, not a live consumer.
-  if (parsed.state === 'quiesced') return 'none';
-  if (parsed.token === opts?.selfToken || parsed.instanceId === opts?.selfInstanceId) return 'none';
-  if (parsed.pid === process.pid) return 'alive'; // different instance of this process
-  if (parsed.host !== os.hostname()) {
-    // Remote-holder liveness is undecidable locally — fail closed.
-    return 'unknown';
+  // Judge EVERY recorded writer, not just the last one (PRI-1282 r5): the
+  // top-level record only names the most recent publisher — a quiesced
+  // Gateway followed by a still-consuming Gateway must surface as 'alive'.
+  let sawUnknown = false;
+  let sawAlive = false;
+  for (const w of leaseWriters(parsed)) {
+    // A 'quiesced' writer's lifecycle provably ended — take-over-able
+    // evidence that consumer drained, not a live consumer.
+    if (w.state === 'quiesced') continue;
+    if (w.token === opts?.selfToken || w.instanceId === opts?.selfInstanceId) continue;
+    if (w.pid === process.pid) {
+      sawAlive = true; // different instance of this process
+      continue;
+    }
+    if (w.host !== os.hostname()) {
+      sawUnknown = true; // remote-holder liveness undecidable — fail closed
+      continue;
+    }
+    const alive = (opts?.processAlive ?? processAliveProbe)(w.pid);
+    if (alive === 'dead') continue;
+    if (alive === 'alive') sawAlive = true;
+    else sawUnknown = true;
   }
-  const alive = (opts?.processAlive ?? processAliveProbe)(parsed.pid);
-  return alive === 'dead' ? 'none' : 'alive';
+  if (sawAlive) return 'alive';
+  if (sawUnknown) return 'unknown';
+  return 'none';
 }

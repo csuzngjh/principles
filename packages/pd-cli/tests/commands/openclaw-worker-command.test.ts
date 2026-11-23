@@ -31,6 +31,11 @@ vi.mock('principles-disciple/openclaw-worker', () => ({
   })),
 }));
 
+vi.mock('../../src/services/service-host/workspace-handover.js', () => ({
+  runWorkspaceHandover: vi.fn(async () => ({ ok: true, outcome: 'completed', operationId: 'op-handover', generation: 1, workspaceDir: '/mock/ws', readiness: 'ready', quiesceAck: {}, workerCycle: {}, evidencePath: '/mock/ws/.pd/evidence' })),
+  runWorkspaceRollback: vi.fn(async () => ({ ok: true, outcome: 'completed', operationId: 'op-rollback', generation: 1, workspaceDir: '/mock/ws', gatewayResumption: 'observed', workerHandback: {}, evidencePath: '/mock/ws/.pd/evidence' })),
+}));
+
 let logs: string[];
 let errors: string[];
 let program: Command;
@@ -51,6 +56,16 @@ beforeEach(() => {
   for (const opt of worker?.options ?? []) {
     if (opt.long !== undefined) {
       worker?.setOptionValue(opt.long.replace(/^--/, '').replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase()), opt.defaultValue);
+    }
+  }
+  // Same leakage guard for the service subcommands (a parsed --resume
+  // persists on the singleton otherwise).
+  const service = program.commands.find((c) => c.name() === 'service');
+  for (const sub of service?.commands ?? []) {
+    for (const opt of sub.options) {
+      if (opt.long !== undefined) {
+        sub.setOptionValue(opt.long.replace(/^--/, '').replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase()), opt.defaultValue);
+      }
     }
   }
 });
@@ -136,6 +151,24 @@ describe('pd service handover / rollback — registration', () => {
     const handover = findCommand(findCommand(program, 'service'), 'handover');
     const rollback = findCommand(findCommand(program, 'service'), 'rollback');
     expect(handover.options.map((option) => option.long)).toEqual(expect.arrayContaining(['--workspace', '--pd-home', '--ack-wait-ms', '--abort', '--resume', '--json']));
-    expect(rollback.options.map((option) => option.long)).toEqual(expect.arrayContaining(['--workspace', '--pd-home', '--json']));
+    expect(rollback.options.map((option) => option.long)).toEqual(expect.arrayContaining(['--workspace', '--pd-home', '--resume', '--json']));
+  });
+
+  it('cli-7: `service rollback --resume <op>` parses through Commander and the operation id reaches the resume logic', async () => {
+    const { runWorkspaceRollback } = await import('../../src/services/service-host/workspace-handover.js');
+    await run(['service', 'rollback', '--workspace', '/mock/ws', '--resume', 'op-2026-11-23-abc', '--json']);
+    expect(vi.mocked(runWorkspaceRollback)).toHaveBeenCalledWith(
+      '/mock/ws',
+      expect.objectContaining({ resumeOperationId: 'op-2026-11-23-abc' }),
+    );
+  });
+
+  it('cli-7: `service handover --resume <op>` delivers the operation id to the handover resume path', async () => {
+    const { runWorkspaceHandover } = await import('../../src/services/service-host/workspace-handover.js');
+    await run(['service', 'handover', '--workspace', '/mock/ws', '--resume', 'op-2026-11-23-def', '--json']);
+    expect(vi.mocked(runWorkspaceHandover)).toHaveBeenCalledWith(
+      '/mock/ws',
+      expect.objectContaining({ resumeOperationId: 'op-2026-11-23-def' }),
+    );
   });
 });

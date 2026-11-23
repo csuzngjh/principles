@@ -28,6 +28,7 @@ import {
   HOST_TOOL_DECLARATION_VERSION,
   createWorkspaceBehaviorEvidencePort,
   loadHostToolDeclarations,
+  loadFeatureFlagFromConfig,
   loadPdConfigForPlugin,
   runInternalizationConsumerCycle,
   runPendingDiagnosticianOnce,
@@ -46,7 +47,11 @@ import {
   AGENT_NAME_FOR_TASK_KIND,
   checkAgentRuntimeReadiness,
   createRuntimeStateHandle,
+  DEFAULT_CONSUMER_RUNNER_KINDS,
+  FULL_CHAIN_CONSUMER_RUNNER_KINDS,
+  isRuntimeConfigError,
   resolveAgentRuntimeBinding,
+  resolveRuntimeConfigForAgent,
   type InternalAgentName,
 } from '@principles/core/runtime';
 import { AGENT_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, READ_ONLY_TOOL_NAMES } from './constants/tools.js';
@@ -297,7 +302,17 @@ export async function computeOpenClawWorkerReadiness(workspaceDir: string, optio
       const tables = db.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('tool_calls', 'pain_events')",
       ).all() as { name: string }[];
-      checks.evidencePort = typeof port.assemble === 'function' && tables.length === 2;
+      // PRI-1282 r5 F8: table NAMES alone are not consumable evidence — the
+      // port's queries (workspace-behavior-evidence.ts) need these columns;
+      // an older schema missing them must degrade, not pass.
+      const hasColumns = (table: string, required: readonly string[]): boolean => {
+        const cols = db!.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+        const names = new Set(cols.map((c) => c.name));
+        return required.every((c) => names.has(c));
+      };
+      checks.evidencePort = typeof port.assemble === 'function' && tables.length === 2
+        && hasColumns('tool_calls', ['id', 'session_id', 'tool_name', 'outcome', 'params_json'])
+        && hasColumns('pain_events', ['id', 'session_id', 'canonical_pain_id']);
     } finally {
       db?.close();
     }
@@ -331,17 +346,37 @@ export async function computeOpenClawWorkerReadiness(workspaceDir: string, optio
       }
     });
     const kinds = await pendingTaskKinds();
-    const agents = new Set<InternalAgentName>(['diagnostician']);
+    // PRI-1282 r5 F4: stage tasks are gated with the CONSUMING CYCLE's own
+    // stage set and `ignoreAgentEnabled: true` — the shipped default
+    // disables philosopher/evaluator/rolloutReviewer yet the full-chain
+    // consumer runs them (internalization-consumer-cycle.ts), so the
+    // agents[].enabled flag must not fail readiness here. Kinds the cycle
+    // would not run contribute nothing; the diagnostician keeps its
+    // existing enabled-binding gate.
+    const runnerKinds = new Set<string>(
+      loadFeatureFlagFromConfig(workspaceDirResolved, 'internalization_full_chain').enabled
+        ? FULL_CHAIN_CONSUMER_RUNNER_KINDS
+        : DEFAULT_CONSUMER_RUNNER_KINDS,
+    );
+    const stageAgents = new Set<InternalAgentName>();
     for (const kind of kinds) {
+      if (!runnerKinds.has(kind)) continue;
       const agentName = AGENT_NAME_FOR_TASK_KIND[kind];
-      if (agentName !== undefined) agents.add(agentName);
+      if (agentName !== undefined) stageAgents.add(agentName);
     }
+    const diagnosticianReady = (() => {
+      const binding = resolveAgentRuntimeBinding(config.effective, 'diagnostician');
+      return binding.ok === true
+        && checkAgentRuntimeReadiness(binding.profile, (name) => process.env[name]).readiness === 'ready';
+    })();
     checks.credentials = config.ok === true
-      && [...agents].every((agentName) => {
-        const binding = resolveAgentRuntimeBinding(config.effective, agentName);
-        return binding.ok === true
-          && checkAgentRuntimeReadiness(binding.profile, (name) => process.env[name]).readiness === 'ready';
-      });
+      && diagnosticianReady
+      && [...stageAgents].every((agentName) => !isRuntimeConfigError(
+        resolveRuntimeConfigForAgent(config.effective, agentName, {
+          getEnvVar: (name) => process.env[name],
+          ignoreAgentEnabled: true,
+        }),
+      ));
   } catch {
     checks.credentials = false;
   }

@@ -24,6 +24,7 @@ import {
   runOpenClawWorkspaceWorkerCycle,
 } from '../../src/openclaw-worker.js';
 import { runConsumerCycle } from '../../src/service/internalization-auto-consumer-service.js';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import { SystemLogger } from '../../src/core/system-logger.js';
 import { runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
 import type { WorkspaceBackgroundOwnership } from '@principles/install-layout';
@@ -206,7 +207,15 @@ describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
     await runOpenClawWorkspaceWorkerCycle({ workspaceDir, logger, ownership: ownership(SERVICE_HOST_OWNED) });
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
     const trajectoryDb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
-    trajectoryDb.exec('CREATE TABLE tool_calls (id INTEGER PRIMARY KEY); CREATE TABLE pain_events (id INTEGER PRIMARY KEY);');
+    // Real production shape: the evidence port queries
+    // tool_calls(id, session_id, tool_name, outcome, params_json) and
+    // pain_events(id, session_id, canonical_pain_id)
+    // (workspace-behavior-evidence.ts) — a bare `id` fixture would pass the
+    // check while the port could never consume it (PRI-1282 r5 F8).
+    trajectoryDb.exec(
+      'CREATE TABLE tool_calls (id INTEGER PRIMARY KEY, session_id TEXT, tool_name TEXT, outcome TEXT, params_json TEXT);'
+      + 'CREATE TABLE pain_events (id INTEGER PRIMARY KEY, session_id TEXT, canonical_pain_id TEXT);',
+    );
     trajectoryDb.close();
     process.env.OPENROUTER_API_KEY = 'test-value';
     try {
@@ -219,6 +228,44 @@ describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
     } finally {
       delete process.env.OPENROUTER_API_KEY;
     }
+  });
+
+  it('degrades when the trajectory schema is an older shape missing evidence columns', async () => {
+    await runOpenClawWorkspaceWorkerCycle({ workspaceDir, logger, ownership: ownership(SERVICE_HOST_OWNED) });
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    const trajectoryDb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    // Old schema: tables exist but lack session_id/canonical_pain_id — the
+    // port's queries would throw at consume time; readiness must degrade.
+    trajectoryDb.exec('CREATE TABLE tool_calls (id INTEGER PRIMARY KEY); CREATE TABLE pain_events (id INTEGER PRIMARY KEY);');
+    trajectoryDb.close();
+    const readiness = await computeOpenClawWorkerReadiness(workspaceDir, { ownership: ownership(SERVICE_HOST_OWNED) });
+    expect(readiness.mode).toBe('degraded');
+    expect(readiness.checks.evidencePort).toBe(false);
+    expect(readiness.checks.declaration).toBe(true);
+  });
+
+  it('gates a pending DEFAULT-DISABLED stage task by credentials, not agents[].enabled (PRI-1282 r5 F4)', async () => {
+    // Real configured profile; agent section left at shipped defaults —
+    // philosopher is disabled by default yet the full-chain consumer runs it.
+    const config = getDefaultPdConfig();
+    (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {
+      type: 'pi-ai', provider: 'test-provider', model: 'test-model',
+      apiKeyEnv: 'PD_TEST_STAGE_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
+    };
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    const pending = { pendingTaskKinds: async () => ['philosopher'] as const, ownership: ownership(SERVICE_HOST_OWNED) };
+    // Credential present → a disabled-by-default stage agent still passes:
+    // the consuming cycle resolves it with ignoreAgentEnabled: true.
+    process.env.PD_TEST_STAGE_KEY = 'test-value';
+    try {
+      const readiness = await computeOpenClawWorkerReadiness(workspaceDir, pending);
+      expect(readiness.checks.credentials).toBe(true);
+    } finally {
+      delete process.env.PD_TEST_STAGE_KEY;
+    }
+    // Credential missing → honestly rejected.
+    const denied = await computeOpenClawWorkerReadiness(workspaceDir, pending);
+    expect(denied.checks.credentials).toBe(false);
   });
 
   it('fails closed when the ownership marker is unreadable', async () => {

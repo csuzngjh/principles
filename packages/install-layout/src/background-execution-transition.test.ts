@@ -13,7 +13,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { fork } from 'node:child_process';
-import { DatabaseSync } from 'node:sqlite';
+import Database from 'better-sqlite3';
 import { pathToFileURL } from 'node:url';
 import {
   acquireBackgroundExecutionCasLock,
@@ -358,10 +358,10 @@ describe('cross-process lock', () => {
     expect(holderA.ok).toBe(true);
     const fsOps = {
       ...real,
-      removeDir: (dir: string) =>
-        dir === `${file}.cas.lock`
+      rename: (from: string, to: string) =>
+        from === `${file}.cas.lock`
           ? ({ ok: false as const, code: 'io' as const, error: new Error('EIO injected') })
-          : real.removeDir(dir),
+          : real.rename(from, to),
     };
     const contender = acquireBackgroundExecutionCasLock({
       manifestPath: file, operation: 'op-B', workspaceDir: WS, fsOps,
@@ -419,12 +419,21 @@ describe('cross-process lock', () => {
     fs.rmSync(`${file}.cas.lock`, { recursive: true, force: true });
   });
 
-  it('an orphaned lock dir without owner metadata is lock_invalid, never auto-reclaimed', () => {
+  it('an orphaned lock dir (crashed mid-create) is reclaimed atomically under the gate', () => {
     const file = seedManifest('lock-orphan');
-    fs.mkdirSync(`${file}.cas.lock`, { recursive: false });
+    const orphanDir = `${file}.cas.lock`;
+    fs.mkdirSync(orphanDir, { recursive: false });
+    // Inside the gate transaction a live cooperator cannot be mid-create, so
+    // an owner-less dir is provably a crash remnant — it is moved aside
+    // atomically, not deleted in place, and never blocks later writers.
     const result = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-x', workspaceDir: WS });
-    expect(result).toMatchObject({ ok: false, reason: 'lock_invalid' });
-    fs.rmSync(`${file}.cas.lock`, { recursive: true, force: true });
+    expect(result.ok).toBe(true);
+    const owner = JSON.parse(fs.readFileSync(path.join(orphanDir, 'owner.json'), 'utf8')) as { operation: string };
+    expect(owner.operation).toBe('op-x');
+    // No tombstone or orphan junk survives at or beside the lock path.
+    const siblings = fs.readdirSync(path.dirname(orphanDir)).filter((entry) => entry.startsWith(path.basename(orphanDir)));
+    expect(siblings).toEqual([path.basename(orphanDir)]);
+    fs.rmSync(orphanDir, { recursive: true, force: true });
   });
 
   it('an unavailable arbitration gate fails closed as lock_io_error (no decision outside arbitration)', () => {
@@ -441,7 +450,7 @@ describe('cross-process lock', () => {
     const file = seedManifest('lock-gate-held');
     // Hold the arbitration gate ourselves: the contender's serialized
     // section cannot even start.
-    const db = new DatabaseSync(casGatePath(file));
+    const db = new Database(casGatePath(file));
     try {
       db.exec('PRAGMA busy_timeout = 0');
       db.exec('BEGIN IMMEDIATE');
@@ -467,7 +476,7 @@ describe('cross-process lock', () => {
       probes: {
         gateSync: (phase) => { phases.push(phase); },
         openGate: (gatePath) => {
-          const db = new DatabaseSync(gatePath);
+          const db = new Database(gatePath);
           return {
             exec: (sql: string) => { gateStatements.push(sql); db.exec(sql); },
             close: () => { db.close(); },

@@ -303,6 +303,7 @@ import {
   __autoConsumerTestSeams,
 } from '../../src/service/internalization-auto-consumer-service.js';
 import {
+  clearGatewayConsumerLease,
   foreignConsumerLeaseStatus,
   readGatewayConsumerLease,
   writeGatewayConsumerLease,
@@ -426,4 +427,161 @@ describe('consumer instance lifecycle (PRI-1282 r4 §3)', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(readGatewayQuiesceAck(workspaceDir)).toBeNull();
   });
+});
+
+// ─── PRI-1282 review round 5 F1/F7: per-workspace identity + multi-writer lease ──
+describe('dual-workspace isolation (PRI-1282 r5 F1)', () => {
+  let workspaceDirB: string;
+
+  beforeEach(() => {
+    workspaceDirB = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ownership-gate-b-'));
+    fs.mkdirSync(path.join(workspaceDirB, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDirB, '.pd', 'config.yaml'), [
+      'version: 1',
+      'features:',
+      '  internalization_auto_consumer:',
+      '    category: quiet',
+      '    enabled: true',
+      '',
+    ].join('\n'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspaceDirB, { recursive: true, force: true });
+  });
+
+  const ctxFor = (dir: string): never => ({
+    config: undefined,
+    workspaceDir: dir,
+    stateDir: path.join(dir, '.state'),
+    logger,
+  } as never);
+
+  it('starting workspace B does not clobber workspace A: both keep cycling and release their leases independently', async () => {
+    InternalizationAutoConsumerService.start(ctxFor(workspaceDir));
+    InternalizationAutoConsumerService.start(ctxFor(workspaceDirB));
+
+    const idA = __autoConsumerTestSeams.identity(workspaceDir);
+    const idB = __autoConsumerTestSeams.identity(workspaceDirB);
+    expect(idA.instanceId).not.toBe(idB.instanceId);
+
+    // Both run their cycle and renew their OWN lease.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(vi.mocked(runInternalizationConsumerCycle)).toHaveBeenCalled();
+    expect(readGatewayConsumerLease(workspaceDir)).toMatchObject({
+      token: idA.token, instanceId: idA.instanceId, state: 'consuming',
+    });
+    expect(readGatewayConsumerLease(workspaceDirB)).toMatchObject({
+      token: idB.token, instanceId: idB.instanceId, state: 'consuming',
+    });
+    // A's lease is NOT foreign to A: A keeps cycling after B started.
+    expect(foreignConsumerLeaseStatus(workspaceDir, {
+      selfToken: idA.token, selfInstanceId: idA.instanceId,
+    })).toBe('none');
+
+    // Independent release: stopping A clears ONLY A's lease.
+    InternalizationAutoConsumerService.stop(ctxFor(workspaceDir));
+    expect(readGatewayConsumerLease(workspaceDir)).toBeNull();
+    expect(readGatewayConsumerLease(workspaceDirB)).toMatchObject({ instanceId: idB.instanceId });
+
+    // B still cycles; its writer entry is untouched.
+    vi.mocked(runInternalizationConsumerCycle).mockClear();
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(vi.mocked(runInternalizationConsumerCycle)).toHaveBeenCalled();
+  });
+});
+
+describe('multi-writer consumer lease (PRI-1282 r5 F7)', () => {
+  const LEASE_FILE = () => path.join(workspaceDir, '.pd', 'gateway-consumer-lease.json');
+
+  it('every writer is recorded: a quiesced writer + a still-consuming writer reports alive', () => {
+    const base = {
+      workspaceDir,
+      pid: process.pid,
+      host: os.hostname(),
+      startedAt: '2026-11-23T00:00:00.000Z',
+      updatedAt: '2026-11-23T00:00:00.000Z',
+    };
+    // Gateway A writes quiesced, then Gateway B writes consuming — BOTH
+    // writer entries must be retained; the old single-record shape dropped A.
+    writeGatewayConsumerLease({ ...base, token: 'tok-a', instanceId: 'gw-a', state: 'quiesced' });
+    writeGatewayConsumerLease({ ...base, token: 'tok-b', instanceId: 'gw-b', state: 'consuming' });
+
+    const lease = readGatewayConsumerLease(workspaceDir);
+    expect(lease?.writers).toHaveLength(2);
+    expect(foreignConsumerLeaseStatus(workspaceDir)).toBe('alive');
+  });
+
+  it('clearing removes only the matching writer; the lease survives while another writer is live', () => {
+    const base = {
+      workspaceDir,
+      pid: process.pid,
+      host: os.hostname(),
+      startedAt: '2026-11-23T00:00:00.000Z',
+      updatedAt: '2026-11-23T00:00:00.000Z',
+    };
+    writeGatewayConsumerLease({ ...base, token: 'tok-a', instanceId: 'gw-a', state: 'consuming' });
+    writeGatewayConsumerLease({ ...base, token: 'tok-b', instanceId: 'gw-b', state: 'consuming' });
+
+    clearGatewayConsumerLease(workspaceDir, 'tok-a', 'gw-a');
+    const lease = readGatewayConsumerLease(workspaceDir);
+    expect(lease?.writers).toHaveLength(1);
+    expect(lease?.writers?.[0]).toMatchObject({ instanceId: 'gw-b' });
+    expect(lease?.instanceId).toBe('gw-b');
+    expect(fs.existsSync(LEASE_FILE())).toBe(true);
+
+    // Clearing the last writer unlinks the record entirely.
+    clearGatewayConsumerLease(workspaceDir, 'tok-b', 'gw-b');
+    expect(fs.existsSync(LEASE_FILE())).toBe(false);
+  });
+});
+
+// ─── PRI-1282 r5 F7: two REAL processes — one quiesced, one still consuming ──
+describe('cross-process lease visibility (PRI-1282 r5 F7)', () => {
+  it('a real foreign process holding a consuming lease is judged alive; after it exits its PID evidence goes dead', async () => {
+    vi.useRealTimers(); // real child-process + real time for this one
+    const { spawn } = await import('node:child_process');
+    const readyFile = path.join(workspaceDir, '.pd', 'child-ready');
+    // Child: register as a consuming writer on the REAL lease file, signal
+    // readiness, then keep running until the parent kills it.
+    const childScript = `
+      const fs = require('node:fs');
+      const os = require('node:os');
+      const lease = ${JSON.stringify(path.join(workspaceDir, '.pd', 'gateway-consumer-lease.json'))};
+      const record = {
+        schemaVersion: 'pd.gateway-consumer-lease.v1',
+        token: 'child-token', instanceId: 'child-instance',
+        pid: process.pid, host: os.hostname(),
+        workspaceDir: ${JSON.stringify(workspaceDir)},
+        state: 'consuming',
+        startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        writers: [{
+          token: 'child-token', instanceId: 'child-instance',
+          pid: process.pid, host: os.hostname(), state: 'consuming',
+          startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        }],
+      };
+      fs.writeFileSync(lease, JSON.stringify(record));
+      fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready');
+      setInterval(() => {}, 1000);
+    `;
+    const child = spawn(process.execPath, ['-e', childScript], { stdio: 'ignore' });
+    try {
+      // Deterministic wait: the child creates readyFile only after the lease lands.
+      for (let i = 0; i < 100 && !fs.existsSync(readyFile); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(fs.existsSync(readyFile)).toBe(true);
+      expect(foreignConsumerLeaseStatus(workspaceDir)).toBe('alive');
+    } finally {
+      child.kill('SIGKILL');
+    }
+    // Deterministic wait for the child's death to be observable.
+    for (let i = 0; i < 100; i += 1) {
+      try { process.kill(child.pid!, 0); await new Promise((r) => setTimeout(r, 50)); }
+      catch { break; }
+    }
+    expect(foreignConsumerLeaseStatus(workspaceDir)).toBe('none');
+    vi.useFakeTimers();
+  }, 20_000);
 });

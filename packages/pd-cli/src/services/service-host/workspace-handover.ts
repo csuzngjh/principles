@@ -1287,6 +1287,33 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Rollba
           operationId: options.resumeOperationId,
         };
       }
+      // PRI-1282 r5 F6 — resume of an ALREADY-EVIDENCED operation returns
+      // the ORIGINAL recorded conclusion, never a fabricated re-verification:
+      // if the first run persisted evidence (including its real
+      // gateway_resumption observation) and then crashed, the stored
+      // document is the answer.
+      const existingEvidence = readHandoverEvidence(context.pdHome, context.workspaceDir, options.resumeOperationId);
+      if (existingEvidence !== null && existingEvidence.kind === 'rollback') {
+        if (existingEvidence.outcome !== 'completed') {
+          return {
+            ok: false,
+            outcome: 'failed',
+            reason: `prior_operation_outcome:${existingEvidence.outcome}`,
+            nextAction: 'The persisted evidence records this operation did not complete; inspect the evidence document, then run a NEW rollback.',
+            operationId: options.resumeOperationId,
+          };
+        }
+        const observedStep = existingEvidence.steps.find((entry) => entry.step === 'gateway_resumption');
+        return {
+          ok: true,
+          outcome: 'completed',
+          operationId: options.resumeOperationId,
+          workspaceDir: context.workspaceDir,
+          generation: initial.generation,
+          gatewayResumption: observedStep?.outcome === 'observed' ? 'observed' : 'not_verified_gateway_not_running',
+          evidencePath: handoverEvidencePath(context.pdHome, context.workspaceDir, options.resumeOperationId),
+        };
+      }
       // Evidence-only continuation: ownership already returned to the
       // Gateway at exactly the intent's committed generation — rewrite ONLY
       // the missing evidence, never re-run the transition (§8.6).

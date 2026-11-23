@@ -49,6 +49,7 @@ import {
   readGatewayConsumerLease,
   writeGatewayConsumerLease,
   clearGatewayConsumerLease,
+  clearGatewayConsumerLeaseByPid,
   foreignConsumerLeaseStatus,
 } from './gateway-consumer-lease.js';
 
@@ -67,11 +68,15 @@ interface ConsumerIdentity {
   readonly instanceId: string;
 }
 
+/**
+ * Identity is minted per `WorkspaceConsumerState` (PRI-1282 review r5):
+ * a module-level identity shared across workspaces meant starting
+ * workspace B reset the identity workspace A still renewed with — A's own
+ * lease then looked foreign and A parked forever.
+ */
 function freshConsumerIdentity(): ConsumerIdentity {
   return { token: gatewayConsumerLeaseToken(), instanceId: gatewayConsumerInstanceId() };
 }
-
-let consumerIdentity = freshConsumerIdentity();
 
 // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: the interval is no longer
 // a fixed constant. The FIRST cycle keeps its original delay; every later delay
@@ -107,14 +112,13 @@ const STOP_DRAIN_WAIT_MS = 30_000;
 /** Effective drain bound — the test seam may shorten it; production never does. */
 let stopDrainWaitMs = STOP_DRAIN_WAIT_MS;
 
-/** Whether the on-disk lease is ours or provably dead (safe to overwrite). */
-function leaseOursOrDead(workspaceDir: string): boolean {
+/** Whether no foreign live consumer is recorded for this workspace. */
+function noForeignConsumer(workspaceDir: string, identity: ConsumerIdentity): boolean {
   const lease = readGatewayConsumerLease(workspaceDir);
   if (lease === null) return false; // unreadable/malformed → unverifiable → not safe
-  if (lease.token === consumerIdentity.token || lease.instanceId === consumerIdentity.instanceId) return true;
   return foreignConsumerLeaseStatus(workspaceDir, {
-    selfToken: consumerIdentity.token,
-    selfInstanceId: consumerIdentity.instanceId,
+    selfToken: identity.token,
+    selfInstanceId: identity.instanceId,
   }) === 'none';
 }
 
@@ -125,6 +129,8 @@ export interface InternalizationAutoConsumerServiceShape {
 }
 
 interface WorkspaceConsumerState {
+  /** Immutable per-lifecycle identity of THIS workspace's consumer (r5). */
+  readonly identity: ConsumerIdentity;
   stopped: boolean;
   quiescing: boolean;
   timeoutId: ReturnType<typeof setTimeout> | null;
@@ -148,7 +154,7 @@ const workspaceStates = new Map<string, WorkspaceConsumerState>();
  */
 export const __autoConsumerTestSeams = {
   workspaceStates,
-  identity: (): ConsumerIdentity => consumerIdentity,
+  identity: (workspaceDir: string): ConsumerIdentity => getWorkspaceState(workspaceDir).identity,
   getWorkspaceState,
   injectInFlight(workspaceDir: string, inFlight: Promise<void> | null): void {
     getWorkspaceState(workspaceDir).inFlight = inFlight;
@@ -162,6 +168,7 @@ function getWorkspaceState(workspaceDir: string): WorkspaceConsumerState {
   let state = workspaceStates.get(workspaceDir);
   if (!state) {
     state = {
+      identity: freshConsumerIdentity(),
       stopped: false,
       quiescing: false,
       timeoutId: null,
@@ -383,10 +390,9 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     // still have in-flight work). A lease that cannot be written means the
     // liveness record cannot be published — never degrade into unprotected
     // consumption (fail-closed).
-    consumerIdentity = freshConsumerIdentity(); // every start() mints a NEW instanceId
     const foreignAtStart = foreignConsumerLeaseStatus(workspaceDir, {
-      selfToken: consumerIdentity.token,
-      selfInstanceId: consumerIdentity.instanceId,
+      selfToken: state.identity.token,
+      selfInstanceId: state.identity.instanceId,
     });
     if (foreignAtStart !== 'none') {
       state.stopped = false;
@@ -401,8 +407,8 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     }
     const leaseWrite = writeGatewayConsumerLease({
       workspaceDir,
-      token: consumerIdentity.token,
-      instanceId: consumerIdentity.instanceId,
+      token: state.identity.token,
+      instanceId: state.identity.instanceId,
       state: 'consuming',
     });
     if (!leaseWrite.ok) {
@@ -471,7 +477,7 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
       // only overwrites our own (or a provably dead) lease — never a live
       // foreign instance's record — and a failed write parks the chain
       // rather than degrading into unprotected consumption.
-      if (!leaseOursOrDead(workspaceDir)) {
+      if (!noForeignConsumer(workspaceDir, state.identity)) {
         state.quiescing = true;
         SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_LEASE_LOST', JSON.stringify({
           reason: 'foreign_or_unverifiable_lease',
@@ -483,8 +489,8 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
       }
       const renew = writeGatewayConsumerLease({
         workspaceDir,
-        token: consumerIdentity.token,
-        instanceId: consumerIdentity.instanceId,
+        token: state.identity.token,
+        instanceId: state.identity.instanceId,
         state: 'consuming',
       });
       if (!renew.ok) {
@@ -618,8 +624,12 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
       state.stopped = true;
       if (state.timeoutId) clearTimeout(state.timeoutId);
       state.timeoutId = null;
+      // Capture the RETIRED instance's identity — the async release must
+      // clear exactly the lease writer this state published, never a
+      // successor instance's entry (r5).
+      const identity = state.identity;
       const release = (): void => {
-        clearGatewayConsumerLease(dir, consumerIdentity.token, consumerIdentity.instanceId);
+        clearGatewayConsumerLease(dir, identity.token, identity.instanceId);
       };
       const tracked = state.inFlight;
       if (tracked === null) {
@@ -648,7 +658,10 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
       if (state) {
         drainWorkspace(workspaceDir, state);
       } else {
-        clearGatewayConsumerLease(workspaceDir, consumerIdentity.token, consumerIdentity.instanceId);
+        // No live state for this workspace — drop any writer entries this
+        // PROCESS still records there (retired instances whose release is
+        // pending, or leftovers from a crashed drain).
+        clearGatewayConsumerLeaseByPid(workspaceDir, process.pid);
       }
     } else {
       for (const [dir, state] of [...workspaceStates.entries()]) drainWorkspace(dir, state);
@@ -712,8 +725,8 @@ async function quiesceAndWatch(
     // let the real holder's ack (or the handover's timeout) arbitrate.
     // Anything unverifiable fails closed the same way.
     const foreign = foreignConsumerLeaseStatus(workspaceDir, {
-      selfToken: consumerIdentity.token,
-      selfInstanceId: consumerIdentity.instanceId,
+      selfToken: state.identity.token,
+      selfInstanceId: state.identity.instanceId,
     });
     const mayClaimQuiesced = outcome !== 'quiesced' || foreign === 'none';
     if (outcome === 'quiesced' && foreign !== 'none') {
@@ -725,8 +738,8 @@ async function quiesceAndWatch(
     if (mayClaimQuiesced && outcome === 'quiesced') {
       const leaseEnd = writeGatewayConsumerLease({
         workspaceDir,
-        token: consumerIdentity.token,
-        instanceId: consumerIdentity.instanceId,
+        token: state.identity.token,
+        instanceId: state.identity.instanceId,
         state: 'quiesced',
       });
       if (!leaseEnd.ok) {
@@ -781,8 +794,8 @@ async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerStat
     // PRI-1282 P1-3: before resuming, arbitrate against a foreign live
     // consumer lease — a sibling Gateway instance must not double-resume.
     const foreign = foreignConsumerLeaseStatus(workspaceDir, {
-      selfToken: consumerIdentity.token,
-      selfInstanceId: consumerIdentity.instanceId,
+      selfToken: state.identity.token,
+      selfInstanceId: state.identity.instanceId,
     });
     if (foreign !== 'none') {
       logger.warn(`[PD:AutoConsumer] Ownership returned to legacy_owned but foreign consumer lease status=${foreign} for ${workspaceDir}; staying parked (fail-closed against double consumption).`);
@@ -820,8 +833,8 @@ async function watchOwnership(workspaceDir: string, state: WorkspaceConsumerStat
     if (changed) {
       // Same foreign-lease honesty gate as quiesceAndWatch (PRI-1282 P1-3).
       const foreign = foreignConsumerLeaseStatus(workspaceDir, {
-        selfToken: consumerIdentity.token,
-        selfInstanceId: consumerIdentity.instanceId,
+        selfToken: state.identity.token,
+        selfInstanceId: state.identity.instanceId,
       });
       if (foreign === 'none') {
         const written = writeGatewayQuiesceAck({

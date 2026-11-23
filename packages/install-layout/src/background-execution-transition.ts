@@ -21,7 +21,8 @@
  *    dedicated SQLite arbitration gate (`<manifest>.cas.gate.db`,
  *    `BEGIN IMMEDIATE` — the same proven mechanism as the service-run
  *    lock's `service-run-gate.db`, here on the dependency-free
- *    `node:sqlite` builtin). Under the gate, verify→remove→create is
+ *    `better-sqlite3`, Node ≥22.0-compatible and warning-free). Under the
+ *    gate, verify→remove→create is
  *    one serialized section: no contender can interleave between a
  *    reclaim's check and its recreate, and a release deletes only the
  *    lock whose owner token it verified inside the same transaction;
@@ -42,7 +43,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import Database from 'better-sqlite3';
 import {
   installManifestHostsForPersist,
   mergeInstallManifestWorkspaces,
@@ -94,7 +95,7 @@ export interface CasLockAcquireOptions {
      */
     readonly processAlive?: (pid: number) => 'alive' | 'dead' | 'unknown';
     /**
-     * Arbitration-gate factory. Default opens the real `node:sqlite`
+     * Arbitration-gate factory. Default opens the real `better-sqlite3`
      * gate database at `<manifest>.cas.gate.db`. Tests inject failures
      * (gate unopenable → fail-closed `lock_io_error`) or wraps to prove
      * a decision ran inside the transaction.
@@ -203,10 +204,12 @@ function busyWaitMs(ms: number): void {
 // the service-run lock's arbitration gate (`service-run-gate.db`, SQLite
 // `BEGIN IMMEDIATE`): the OS/SQLite advisory lock serializes every decision,
 // so inside the transaction a contender cannot exist between our check and
-// our action. This module uses the same mechanism on the dependency-free
-// `node:sqlite` builtin (install-layout has no runtime dependencies).
+// our action. The gate runs on `better-sqlite3` (already a runtime dep of
+// the install cohort): `node:sqlite` only exists on Node ≥22.5 — below the
+// installer's declared Node ≥22.0 floor — and emits an ExperimentalWarning
+// that contaminates every spawned consumer's stderr.
 
-/** Minimal surface of `DatabaseSync` the gate needs (test-injectable). */
+/** Minimal surface of `better-sqlite3.Database` the gate needs (test-injectable). */
 export interface CasGateLike {
   exec(sql: string): void;
   close(): void;
@@ -224,17 +227,17 @@ const CAS_GATE_BUSY_TIMEOUT_MS = 250;
 const CAS_GATE_RELEASE_BUSY_MS = 1500;
 
 function defaultOpenGate(gatePath: string): CasGateLike {
-  const db = new DatabaseSync(gatePath);
+  const db = new Database(gatePath);
   db.exec(`PRAGMA busy_timeout = ${CAS_GATE_BUSY_TIMEOUT_MS}`);
   return db;
 }
 
 function isGateBusyError(error: unknown): boolean {
-  // node:sqlite surfaces SQLITE_BUSY as errcode 5 (SQLITE_LOCKED = 6).
-  const errcode = typeof error === 'object' && error !== null && Object.hasOwn(error, 'errcode')
-    ? Number(Reflect.get(error, 'errcode'))
-    : NaN;
-  return errcode === 5 || errcode === 6;
+  // better-sqlite3 surfaces busy/locked as SqliteError.code strings.
+  const code = typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+    ? String(Reflect.get(error, 'code'))
+    : '';
+  return code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED';
 }
 
 type CasGateOutcome<T> =
@@ -405,6 +408,26 @@ function ownerFileName(): string {
 type AcquiredOwner = { ok: true; owner: CasLockOwner } | { ok: false; reason: 'lock_busy' | 'lock_invalid' | 'lock_io_error'; message: string; holder?: CasLockOwner };
 
 /**
+ * Remove a lock dir whose removal was already DECIDED inside the gate
+ * transaction: atomically move the whole directory out of the canonical
+ * lock path first, then delete the moved copy (PRI-1282 review round 5).
+ * Recursive deletion at the lock path removes owner.json before the dir,
+ * so a mid-delete kill stranded an unattributable orphan that blocked
+ * every later writer as `lock_invalid`. With move-out-first, a successor
+ * sees either the complete old lock or an absent path; a leftover
+ * `*.tombstone-*` sibling is inert garbage, not a lock.
+ */
+function removeLockDirAtomically(fsOps: CasFsOps, lockDir: string): { ok: boolean; error?: Error } {
+  const tombstone = `${lockDir}.tombstone-${randomToken()}`;
+  const moved = fsOps.rename(lockDir, tombstone);
+  if (!moved.ok) return { ok: false, error: moved.error };
+  // Best-effort: the lock path is already free; a failed rm leaves an inert
+  // tombstone sibling, never a lock at the canonical path.
+  fsOps.removeDir(tombstone);
+  return { ok: true };
+}
+
+/**
  * Acquire the per-manifest CAS critical section. Every decision — evaluate
  * the existing lock, reclaim a provably-dead holder's lock, create ours —
  * runs inside ONE `BEGIN IMMEDIATE` transaction on the per-manifest
@@ -479,9 +502,15 @@ export function acquireBackgroundExecutionCasLock(options: CasLockAcquireOptions
           return { ok: true, owner };
         }
         if (probe.code === 'exists') {
-          // Orphaned dir without owner.json — unattributable, fail-closed
-          // (same posture as malformed owner metadata).
-          return { ok: false, reason: 'lock_invalid', message: `CAS lock ${lockDir} exists without owner metadata; a human must inspect and remove it` };
+          // Orphaned dir without owner.json — a crashed mid-create (inside
+          // the gate a live cooperator cannot be mid-create). Reclaim it
+          // the same atomic way instead of failing closed forever: move it
+          // out of the canonical path, then recreate ours.
+          const cleared = removeLockDirAtomically(fsOps, lockDir);
+          if (!cleared.ok) {
+            return { ok: false, reason: 'lock_io_error', message: `failed to move the orphaned CAS lock aside: ${cleared.error?.message ?? 'io error'}` };
+          }
+          return createOwned();
         }
         return { ok: false, reason: 'lock_io_error', message: `failed to create CAS lock directory: ${probe.error?.message ?? 'io error'}` };
       }
@@ -509,11 +538,13 @@ export function acquireBackgroundExecutionCasLock(options: CasLockAcquireOptions
           holder,
         };
       }
-      // Provably-dead holder → serialized reclaim: remove + recreate inside
-      // the SAME gate transaction, so no new lock can land in between.
-      const removed = fsOps.removeDir(lockDir);
+      // Provably-dead holder → serialized reclaim: atomic move-out of the
+      // whole dir + recreate inside the SAME gate transaction, so no new
+      // lock can land in between and a mid-delete kill cannot strand an
+      // owner-less dir at the lock path.
+      const removed = removeLockDirAtomically(fsOps, lockDir);
       if (!removed.ok) {
-        return { ok: false, reason: 'lock_io_error', message: `failed to remove the dead holder's CAS lock: ${removed.error?.message ?? 'io error'}` };
+        return { ok: false, reason: 'lock_io_error', message: `failed to move the dead holder's CAS lock aside: ${removed.error?.message ?? 'io error'}` };
       }
       gateSync('stale-removed');
       return createOwned();
@@ -542,7 +573,7 @@ export function acquireBackgroundExecutionCasLock(options: CasLockAcquireOptions
             const current = fsOps.readJson(ownerFile);
             const parsed = current.ok ? parseLockOwner(current.value) : null;
             if (parsed !== null && parsed.token === owner.token) {
-              fsOps.removeDir(lockDir);
+              removeLockDirAtomically(fsOps, lockDir);
             }
             // Absent or foreign: nothing provably ours to remove — leave it.
           },
