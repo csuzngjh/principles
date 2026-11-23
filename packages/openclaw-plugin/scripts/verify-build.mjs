@@ -20,6 +20,9 @@ const rootDir = join(__dirname, '..');
 const requiredPaths = [
   'dist/bundle.js',
   'dist/governance-audit.js',
+  // package.json exports ./openclaw-worker -> dist/openclaw-worker.js;
+  // the Service Host's openclaw worker cycle resolves it (PRI-1282 review).
+  'dist/openclaw-worker.js',
   'dist/openclaw.plugin.json',
   'dist/templates',
 ];

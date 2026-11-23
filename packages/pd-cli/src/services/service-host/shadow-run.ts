@@ -69,12 +69,10 @@ import {
   type ShadowExecutionRecord,
 } from './status/service-run-status.js';
 import type {
-  WorkerAdapter,
-  WorkerHostKind,
   WorkspaceDescriptor,
   resolveActiveReleaseCliEntry,
 } from './worker-adapter.js';
-import { WORKER_HOST_KINDS } from './worker-adapter.js';
+import { WORKER_HOST_KINDS, type ShadowHostKind, type WorkerHostKind, type WorkerAdapter } from './worker-adapter.js';
 import {
   carriedProgress,
   dispatchWorkspaceAdapters,
@@ -113,8 +111,8 @@ export interface ShadowRunOptions {
   readonly trustedHomeDir?: string;
   /** Explicit workspace selections — REQUIRED, never defaulted to "all discovered". */
   readonly workspaces: readonly string[];
-  /** Restrict to one host adapter (default: every bound adapter runs). */
-  readonly hostFilter?: WorkerHostKind;
+  /** Restrict to one host adapter (default: every bound adapter runs). Shadow hosts only — openclaw is managed-mode only. */
+  readonly hostFilter?: ShadowHostKind;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly probes?: ShadowRunProbes;
@@ -228,7 +226,7 @@ function buildShadowStatus(args: {
   hostRoots: readonly HostRootReport[];
   bindingDiagnostics: readonly BindingReadDiagnostic[];
   requested: readonly string[];
-  hostFilter?: WorkerHostKind;
+  hostFilter?: ShadowHostKind;
   timeoutMs: number;
   executions: readonly ShadowExecutionRecord[];
   progressCarryVerdict: ShadowProgressVerdict;
@@ -301,7 +299,7 @@ async function completeShadowRun(identity: InstallIdentity, context: {
   holdsLock: (handle: ServiceRunLockHandle) => boolean;
   listDir: (dir: string) => 'readable' | 'missing' | 'not_directory' | 'unreadable';
   claimReaders?: HostClaimReaders;
-  adapters: Readonly<Record<WorkerHostKind, WorkerAdapter>>;
+  adapters: Readonly<Partial<Record<WorkerHostKind, WorkerAdapter>>>;
 }): Promise<ShadowRunResult> {
   const { options } = context;
   const timeoutMs = Math.max(MIN_SHADOW_WORKSPACE_TIMEOUT_MS, options.timeoutMs ?? DEFAULT_SHADOW_WORKSPACE_TIMEOUT_MS);
@@ -667,7 +665,7 @@ export async function runServiceShadowOnce(options: ShadowRunOptions): Promise<S
   }
   const handle: ServiceRunLockHandle = lock.handle;
   const releaseLock = options.probes?.releaseLock ?? releaseServiceRunLock;
-  const adapters: Record<WorkerHostKind, WorkerAdapter> = {
+  const adapters: Readonly<Partial<Record<WorkerHostKind, WorkerAdapter>>> = {
     codex: options.probes?.adapters?.codex ?? createCodexWorkerAdapter(),
     workbuddy: options.probes?.adapters?.workbuddy ?? createWorkbuddyWorkerAdapter(),
   };

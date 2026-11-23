@@ -56,6 +56,10 @@ import {
   INSTALL_LAYOUT_VERSION,
   type InstallHost,
 } from '@principles/install-layout';
+// withInstallManifestWriteLock ships with the PRI-1282 install-layout
+// cohort; a registry-resolved older dep lacks it, so the merge below
+// detects the export (same release-window posture as installer.ts).
+import * as installLayoutModule from '@principles/install-layout';
 // 2026-11-08: the shared state DEFINITIONS for pd-cli health live in
 // @principles/install-layout (interpretWorkbuddyPluginState /
 // getWorkbuddyHostConfigPaths). The installer does NOT import them at
@@ -1241,7 +1245,7 @@ function readInstallJsonRecord(manifestPath: string): Record<string, unknown> | 
  * channel/autoCheck/releaseMetadataUrl — PRI-709 P0-1) are carried through.
  * Malformed existing manifest → hard stop, zero modification.
  */
-export function mergeWorkbuddyIntoInstallManifest(
+function mergeWorkbuddyIntoInstallManifestLocked(
   manifestPath: string,
   governanceDir: string,
   atomicReplace: typeof atomicReplaceTextFile = atomicReplaceTextFile,
@@ -1310,17 +1314,107 @@ export function mergeWorkbuddyIntoInstallManifest(
   }
 }
 
-/** Remove 'workbuddy' from manifest hosts (uninstall bookkeeping; workspaces/governance data preserved). */
-function removeWorkbuddyFromInstallManifestHosts(manifestPath: string): void {
+/**
+ * Whether the pd runtime INSTALLED on this machine can perform §8.4
+ * handover/rollback manifest writes. The bundled pd resolves its own
+ * `~/.pd/runtime/install-layout` copy, independent of the installer's npm
+ * dep version — so "our dep predates the lock export" does NOT prove "no
+ * ownership writer exists on this machine" (PRI-1282 review r7).
+ */
+type InstalledOwnershipCapability = 'pre_cohort' | 'cohort' | 'unverifiable';
+
+function installedOwnershipCapability(): InstalledOwnershipCapability {
+  const transitionModule = path.join(getHomeDir(), '.pd', 'runtime', 'install-layout', 'dist', 'background-execution-transition.js');
+  let content: string;
   try {
+    content = readFileSync(transitionModule, 'utf-8');
+  } catch (error) {
+    return errnoCode(error) === 'ENOENT' ? 'pre_cohort' : 'unverifiable';
+  }
+  return content.includes('withInstallManifestWriteLock') ? 'cohort' : 'pre_cohort';
+}
+
+function cohortWindowUnlockedWriteUnsafe(operation: string, capability: InstalledOwnershipCapability): { ok: false; reason: string; nextAction: string } {
+  return {
+    ok: false,
+    reason: `install_manifest_lock_unavailable: the bundled @principles/install-layout predates the §8.4 manifest write lock while the installed runtime ${capability === 'cohort' ? 'IS ownership-capable' : 'capability could not be verified'} — an unlocked ${operation} could clobber an in-flight handover/rollback write. No write was performed.`,
+    nextAction: 'Update @principles/install-layout to a release that exports withInstallManifestWriteLock, or re-run the installer once the dependency resolves to that cohort.',
+  };
+}
+
+export function mergeWorkbuddyIntoInstallManifest(
+  manifestPath: string,
+  governanceDir: string,
+  atomicReplace: typeof atomicReplaceTextFile = atomicReplaceTextFile,
+): { ok: true; writtenContent: string } | { ok: false; reason: string; nextAction: string; committed?: boolean; writtenContent?: string } {
+  // The manifest also carries §8.4 ownership records. Every read-modify-write
+  // must join the same physical lock; an older dependency cohort without the
+  // lock export is incompatible and must not write around the ownership CAS.
+  const lock = installLayoutModule.withInstallManifestWriteLock;
+  if (typeof lock !== 'function') {
+    // An old installer dependency can coexist with a newer installed pd
+    // runtime. Unlocked writes are safe only when that runtime is verifiably
+    // pre-§8.4; otherwise it may be writing ownership concurrently.
+    const capability = installedOwnershipCapability();
+    if (capability !== 'pre_cohort') {
+      return cohortWindowUnlockedWriteUnsafe('workbuddy.mergeInstallManifest', capability);
+    }
+    return mergeWorkbuddyIntoInstallManifestLocked(manifestPath, governanceDir, atomicReplace);
+  }
+  const locked = lock(
+    { manifestPath, operation: 'workbuddy.mergeInstallManifest', context: governanceDir },
+    () => mergeWorkbuddyIntoInstallManifestLocked(manifestPath, governanceDir, atomicReplace),
+  );
+  if (!locked.ok) {
+    return {
+      ok: false,
+      reason: `install_manifest_lock_unavailable: ${locked.message}. No write was performed.`,
+      nextAction: 'Wait for the in-flight manifest operation to finish and re-run the installer; the write is never done unlocked.',
+    };
+  }
+  return locked.value;
+}
+
+/** Remove 'workbuddy' from manifest hosts (uninstall bookkeeping; workspaces/governance data preserved). */
+function removeWorkbuddyFromInstallManifestHosts(
+  manifestPath: string,
+): { ok: true } | { ok: false; reason: string; nextAction: string } {
+  if (!existsSync(manifestPath)) return { ok: true };
+  const lock = installLayoutModule.withInstallManifestWriteLock;
+  if (typeof lock !== 'function') {
+    return {
+      ok: false,
+      reason: 'install_manifest_lock_unavailable: the installed @principles/install-layout does not expose the shared manifest lock; WorkBuddy was removed but the host registration remains.',
+      nextAction: 'Update the installer/runtime cohort, then retry WorkBuddy uninstall to remove the stale host registration safely.',
+    };
+  }
+  const write = (): void => {
+    // Re-read inside the lock: bytes observed before the critical section are stale.
     const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf-8'));
     if (!isRecord(parsed) || !Array.isArray(parsed.hosts)) return;
     const hosts = parsed.hosts.filter((h): h is InstallHost => typeof h === 'string' && h !== 'workbuddy');
     const payload: Record<string, unknown> = { ...parsed, hosts };
-    writeFileSync(manifestPath, JSON.stringify(payload, null, 2) + '\n', 'utf-8');
-  } catch {
-    // Uninstall must not fail on manifest bookkeeping; the preserved-state
-    // report below still names the governance dir. rc-9: surfaced via paths.
+    atomicReplaceTextFile(manifestPath, JSON.stringify(payload, null, 2) + '\n');
+  };
+  try {
+    const locked = lock(
+      { manifestPath, operation: 'workbuddy.removeFromInstallManifest', context: path.dirname(manifestPath) },
+      write,
+    );
+    if (!locked.ok) {
+      return {
+        ok: false,
+        reason: `install_manifest_lock_unavailable: ${locked.message}; WorkBuddy host registration was preserved.`,
+        nextAction: 'Wait for the in-flight manifest operation to finish, then retry WorkBuddy uninstall.',
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `workbuddy_manifest_uninstall_write_failed: ${error instanceof Error ? error.message : String(error)}; the host registration was preserved.`,
+      nextAction: 'Inspect ~/.pd/install.json and the manifest lock, then retry WorkBuddy uninstall.',
+    };
   }
 }
 
@@ -3664,7 +3758,14 @@ export class WorkBuddyHostInstaller implements HostInstaller {
 
     // 6. Manifest bookkeeping: drop 'workbuddy' from hosts. The governance
     //    workspace entry and ALL governance data are preserved (§18 default).
-    if (!otherScopesPresent) removeWorkbuddyFromInstallManifestHosts(p.installManifestPath);
+    const manifestBookkeeping = !otherScopesPresent
+      ? removeWorkbuddyFromInstallManifestHosts(p.installManifestPath)
+      : { ok: true as const };
+    if (!manifestBookkeeping.ok) {
+      failedPaths.push(p.installManifestPath);
+      preservedPaths.push(p.installManifestPath);
+      notes.push(`${manifestBookkeeping.reason} ${manifestBookkeeping.nextAction}`);
+    }
     const governancePreservedByDesign = existsSync(p.governanceDir);
     if (governancePreservedByDesign) {
       preservedPaths.push(p.governanceDir);
@@ -3681,6 +3782,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         ? `Partially uninstalled: ${failedPaths.join(', ')} could not be removed. ${notes.join(' ')}`
         : `Uninstalled ${WORKBUDDY_PLUGIN_KEY}. ${notes.join(' ')}`.trim(),
       nextAction: [
+        ...(!manifestBookkeeping.ok ? [manifestBookkeeping.nextAction] : []),
         'Registration removal takes effect in NEW WorkBuddy sessions (or /reload-plugins in a running CLI session).',
         governancePreservedByDesign
           ? `The governance database at ${p.governanceDir} is PRESERVED by design — delete it manually only after exporting what you need.`

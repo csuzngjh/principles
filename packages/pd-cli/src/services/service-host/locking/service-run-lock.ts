@@ -86,7 +86,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 
 /**
@@ -111,6 +111,29 @@ const RELEASE_MAX_ATTEMPTS = 2;
 /** The one lock file per install: `<pdHome>/service/service-run.lock`. */
 export function serviceRunLockPath(pdHome: string): string {
   return path.join(pdHome, 'service', 'service-run.lock');
+}
+
+/**
+ * The per-workspace consumer mutex: `<pdHome>/service/workspace-runs/<hash>.lock`.
+ *
+ * A consuming Worker child holds this for the whole cycle, so an
+ * orchestrator (handover resume / rollback) can prove "an old worker is
+ * still running on THIS workspace" by holder-PID liveness instead of
+ * guessing from the coordinator's own lock. The workspace is addressed by
+ * its canonical real directory — the same spelling-or-alias identity rule
+ * the §8.4 ownership projection uses — so either path spelling reaches the
+ * same mutex (PRI-1282 review).
+ */
+export function workspaceServiceRunLockPath(pdHome: string, workspaceDir: string): string {
+  let canonical = path.resolve(workspaceDir);
+  try {
+    canonical = fs.realpathSync.native(canonical);
+  } catch {
+    // Missing/unresolvable directory: the lexical spelling still keys ONE
+    // mutex — better than diverging aliases while the dir is absent.
+  }
+  const key = createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+  return path.join(pdHome, 'service', 'workspace-runs', `${key}.lock`);
 }
 
 /**
@@ -176,6 +199,13 @@ export interface ServiceRunLockProbes {
    * (§P0). Production never sets it.
    */
   readonly gateEndFailure?: boolean;
+  /**
+   * Deterministic test seam: replace the lock-file stat (default
+   * `fs.statSync`). Lets tests reproduce EACCES/EIO/ENOTDIR stat failures on
+   * every platform without depending on OS permission behavior —
+   * production never sets it.
+   */
+  readonly statLock?: (lockPath: string) => fs.Stats;
 }
 
 /** A bounded, control-char-free echo of a lock body for diagnostics (rc-8). */
@@ -203,7 +233,10 @@ export function readLockBodyStatus(lockPath: string): LockBodyRead {
       typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
         ? String(Reflect.get(error, 'code'))
         : '';
-    if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'absent' };
+    // ONLY ENOENT means "no lock". ENOTDIR/EACCES/EPERM/EIO/EISDIR are a
+    // path-structure anomaly or a degraded read — fail-closed `unreadable`,
+    // never `absent` (PRI-1282 review round 4).
+    if (code === 'ENOENT') return { kind: 'absent' };
     return {
       kind: 'unreadable',
       detail: code || (error instanceof Error ? error.message : String(error)),
@@ -329,8 +362,9 @@ function legacyMutexOccupied(lockPath: string, processAlive: (pid: number) => Ho
       typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
         ? String(Reflect.get(error, 'code'))
         : '';
-    // ENOENT/ENOTDIR: no legacy mutex exists — proceed.
-    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+    // ONLY ENOENT proves no legacy mutex. ENOTDIR/EACCES/EIO/EPERM are a
+    // structural/degraded-read anomaly → unverifiable → fail closed.
+    if (code === 'ENOENT') return false;
     return true; // exists but unreadable → unverifiable → fail closed
   }
   const pid = holderPidOf(raw);
@@ -444,21 +478,32 @@ function sweepOrphanSidecars(
 type LockEvaluation =
   | { kind: 'absent' }
   | { kind: 'fresh' }
+  | { kind: 'stat-error'; detail: string }
   | { kind: 'stale-unreadable' }
   | { kind: 'stale-anonymous'; body: string }
   | { kind: 'stale-alive' }
   | { kind: 'dead'; body: string };
 
-function evaluateLock(
-  lockPath: string,
-  staleMs: number,
-  processAlive: (pid: number) => HolderLiveness,
-): LockEvaluation {
+interface LockEvaluationContext {
+  readonly staleMs: number;
+  readonly processAlive: (pid: number) => HolderLiveness;
+  readonly statLock?: (lockPath: string) => fs.Stats;
+}
+
+function evaluateLock(lockPath: string, ctx: LockEvaluationContext): LockEvaluation {
+  const { staleMs, processAlive, statLock } = ctx;
   let stats: fs.Stats;
   try {
-    stats = fs.statSync(lockPath);
-  } catch {
-    return { kind: 'absent' };
+    stats = (statLock ?? ((p: string) => fs.statSync(p)))(lockPath);
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? String(Reflect.get(error, 'code'))
+        : '';
+    // ONLY ENOENT proves absence. EACCES/EPERM/EIO/ENOTDIR are degraded
+    // evidence — fail-closed, never a silent 'free' (PRI-1282 review r4).
+    if (code === 'ENOENT') return { kind: 'absent' };
+    return { kind: 'stat-error', detail: code || (error instanceof Error ? error.message : String(error)) };
   }
   const stale = stats.mtimeMs < Date.now() - staleMs;
   const read = readLockBodyStatus(lockPath);
@@ -607,22 +652,22 @@ export function holdsServiceRunLock(handle: ServiceRunLockHandle): boolean {
 }
 
 /**
- * Acquire the install-level single-instance run lock. Every decision —
- * evaluate, stale takeover, create — runs inside the arbitration gate
- * (§P1-4 round 4), immediate verdicts, no wait loop (`already_running`
- * semantics, §8.2). A stale takeover additionally requires the recorded
- * holder PID to be demonstrably DEAD; a live, unknown or unverifiable
- * holder is NEVER taken over, and the verify→delete→create sequence is
- * serialized by the same transaction that a second contender's BEGIN
- * cannot enter.
+ * Shared lock engine behind {@link acquireServiceRunLock} and
+ * {@link acquireWorkspaceServiceRunLock}. Every decision — evaluate, stale
+ * takeover, create — runs inside the arbitration gate (§P1-4 round 4),
+ * immediate verdicts, no wait loop (`already_running` semantics, §8.2). A
+ * stale takeover additionally requires the recorded holder PID to be
+ * demonstrably DEAD; a live, unknown or unverifiable holder is NEVER taken
+ * over, and the verify→delete→create sequence is serialized by the same
+ * transaction that a second contender's BEGIN cannot enter.
  */
-export function acquireServiceRunLock(
-  pdHome: string,
+function acquireLockAt(
+  lockPath: string,
   options?: { staleMs?: number; probes?: ServiceRunLockProbes },
 ): AcquireServiceRunLockResult {
-  const lockPath = serviceRunLockPath(pdHome);
   const staleMs = options?.staleMs ?? SERVICE_RUN_LOCK_STALE_MS;
   const processAlive = options?.probes?.processAlive ?? defaultProcessAlive;
+  const statLock = options?.probes?.statLock;
   const takeoverSync = options?.probes?.takeoverSync;
   const token = randomUUID().replace(/-/g, '').slice(0, 16);
   const body = lockBody(token);
@@ -645,7 +690,7 @@ export function acquireServiceRunLock(
     // mid-takeover holding `.mtx`. A live/unverifiable legacy mutex means
     // fail-closed held — never run a second instance beside it.
     if (legacyMutexOccupied(lockPath, processAlive)) return heldVerdict(lockPath);
-    const evaluate = (): LockEvaluation => evaluateLock(lockPath, staleMs, processAlive);
+    const evaluate = (): LockEvaluation => evaluateLock(lockPath, { staleMs, processAlive, statLock });
     const createOwned = (staleTakenOver: boolean): AcquireServiceRunLockResult => {
       const created = tryCreate(lockPath, body);
       if (created === 'created') {
@@ -659,6 +704,10 @@ export function acquireServiceRunLock(
       switch (evaluation.kind) {
         case 'absent':
           return createOwned(false);
+        case 'stat-error':
+          // stat itself failed non-ENOENT: the lock may exist and be held —
+          // fail-closed, never acquire over degraded evidence.
+          return { ok: false, kind: 'corrupt', detail: `lock state unverifiable: ${evaluation.detail}` };
         case 'fresh':
         case 'stale-alive':
           return heldVerdict(lockPath);
@@ -719,6 +768,60 @@ export function acquireServiceRunLock(
       : { ok: false, kind: 'unwritable', detail: gated.detail };
   }
   return gated.value;
+}
+
+/** Acquire the install-level single-instance run lock (see {@link acquireLockAt}). */
+export function acquireServiceRunLock(
+  pdHome: string,
+  options?: { staleMs?: number; probes?: ServiceRunLockProbes },
+): AcquireServiceRunLockResult {
+  return acquireLockAt(serviceRunLockPath(pdHome), options);
+}
+
+/**
+ * Acquire the per-workspace consumer mutex (see
+ * {@link workspaceServiceRunLockPath}). Same protocol as the install-level
+ * lock; the Worker child holds it for its whole consuming cycle so a
+ * handover resume / rollback can prove the old worker is still running
+ * (PRI-1282 review).
+ */
+export function acquireWorkspaceServiceRunLock(
+  pdHome: string,
+  workspaceDir: string,
+  options?: { staleMs?: number; probes?: ServiceRunLockProbes },
+): AcquireServiceRunLockResult {
+  return acquireLockAt(workspaceServiceRunLockPath(pdHome, workspaceDir), options);
+}
+
+/**
+ * Non-mutating liveness probe: is a CONSUMING worker holding this lock
+ * right now? 'free' means no holder or a provably-dead one (recoverable);
+ * 'held' means a live or inconclusive holder — an orchestrator must refuse
+ * to overlap it; 'corrupt' means the body cannot be verified (fail-closed).
+ */
+export function probeServiceRunLockState(
+  lockPath: string,
+  options?: { staleMs?: number; probes?: ServiceRunLockProbes },
+): { state: 'free' | 'held' | 'corrupt'; detail?: string } {
+  const evaluation = evaluateLock(lockPath, {
+    staleMs: options?.staleMs ?? SERVICE_RUN_LOCK_STALE_MS,
+    processAlive: options?.probes?.processAlive ?? defaultProcessAlive,
+    statLock: options?.probes?.statLock,
+  });
+  switch (evaluation.kind) {
+    case 'absent':
+    case 'dead':
+      return { state: 'free' };
+    case 'stat-error':
+      return { state: 'corrupt', detail: `lock state unverifiable: ${evaluation.detail}` };
+    case 'fresh':
+    case 'stale-alive':
+      return { state: 'held' };
+    case 'stale-unreadable':
+      return { state: 'corrupt', detail: 'lock body unreadable beyond the stale window' };
+    case 'stale-anonymous':
+      return { state: 'corrupt', detail: `lock body carries no verifiable holder identity: ${bodyEcho(evaluation.body)}` };
+  }
 }
 
 /**

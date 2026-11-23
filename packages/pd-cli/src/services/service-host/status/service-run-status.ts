@@ -27,7 +27,7 @@ import { randomUUID } from 'node:crypto';
 import { readActiveReleaseRecord, type ActiveReleaseFailureReason } from '@principles/install-layout';
 import type { InstallIdentity } from '../install-identity.js';
 import type { WorkspaceDiscoveryResult } from '../workspace-discovery.js';
-import type { AdapterCycleResult } from '../worker-adapter.js';
+import type { AdapterCycleResult, ShadowHostKind, WorkerHostKind } from '../worker-adapter.js';
 
 export const SERVICE_RUN_STATUS_SCHEMA_VERSION = 'pd.service-run-status.v1';
 
@@ -167,7 +167,7 @@ export interface ShadowExecutionRecord {
   readonly requestedDir: string;
   /** Matched canonical discovery dir, or null when no authorized entry matched. */
   readonly canonicalDir: string | null;
-  readonly hostKind: 'codex' | 'workbuddy' | null;
+  readonly hostKind: ShadowHostKind | null;
   readonly admission: 'admitted' | 'refused';
   readonly refusalReason?: string;
   readonly refusalNextAction?: string;
@@ -182,7 +182,7 @@ export interface ShadowExecutionRecord {
 
 export interface ShadowRunStatusSection {
   readonly requestedWorkspaces: readonly string[];
-  readonly hostFilter?: 'codex' | 'workbuddy';
+  readonly hostFilter?: ShadowHostKind;
   readonly perWorkspaceTimeoutMs: number;
   /**
    * Health of the cross-run progress projection read at run start (F6):
@@ -198,10 +198,15 @@ export interface ShadowRunStatusSection {
  * workspace is either executed (service_host_owned + authorized + bound
  * adapter) or skipped with a structured reason — legacy workspaces keep
  * their legacy owner, transition states are never consumed.
+ *
+ * PRI-1282 Phase 4 (additive, still v1): `hostKind` widens to include
+ * `openclaw` — a managed execution may now be driven by the OpenClaw worker
+ * adapter after the workspace's §8.4 handover. Shadow records stay on the
+ * narrow codex|workbuddy set.
  */
 export interface ManagedExecutionRecord {
   readonly canonicalDir: string;
-  readonly hostKind: 'codex' | 'workbuddy' | null;
+  readonly hostKind: WorkerHostKind | null;
   /** `executed` = a real Worker cycle ran for this workspace. */
   readonly admission: 'executed' | 'skipped';
   /** Structured skip reason (skipped records only): owner state, authorization, adapter or budget. */

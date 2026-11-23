@@ -85,6 +85,18 @@ export const ALLOWED_RUNTIME_WRITERS = [
     file: 'scripts/telemetry-production-smoke.mjs',
     reason: 'Telemetry smoke: builds a synthetic runtime layout under an explicitly isolated mkdtemp HOME (never the real ~/.pd).',
   },
+  {
+    file: 'packages/install-layout/src/background-execution-transition.ts',
+    reason: 'PRI-1282 (Service Host Phase 4, SPEC §8.4): mutates ONLY PD home state — <pdHome>/install.json plus its own <manifest>.cas.lock/ directory and temp files beside it (cross-process CAS critical section, atomic rename); the canonical runtime tree appears solely through read-only resolution of manifest paths. Layout ownership of <pdHome>/runtime stays with the installer.',
+  },
+  {
+    file: 'packages/openclaw-plugin/src/openclaw-worker.ts',
+    reason: 'PRI-1282 (Service Host Phase 4): mutates ONLY workspace-owned state — the per-workspace .state/openclaw-worker-liveness.json (worker liveness evidence, codex-worker pattern, O_EXCL temp + rename) — and delegates declaration persistence to host-runtime saveHostToolDeclaration (already allowlisted authority). The canonical runtime tree appears solely in imports/comments naming @principles/host-runtime.',
+  },
+  {
+    file: 'packages/pd-cli/src/services/service-host/workspace-handover.ts',
+    reason: 'PRI-1282 (Service Host Phase 4): mutates ONLY PD-owned operational evidence — <pdHome>/service/handover/<workspace>/<operationId>.json (write-once, O_EXCL temp + rename); the manifest is mutated exclusively through the @principles/install-layout transition primitive. The canonical runtime tree appears solely through the read-only active-release entry resolution used to spawn workers.',
+  },
 ];
 
 // All first-party production source forms, including Electron/.mts/.cts entry

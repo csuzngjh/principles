@@ -38,13 +38,16 @@ import {
   type RuntimeProfileInput,
 } from './mvp-config.js';
 import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostTarget } from './installers/index.js';
-import { errnoCode } from './utils/config-file-io.js';
+import { atomicReplaceTextFile, errnoCode } from './utils/config-file-io.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import { findForeignWorkspaceOwner } from './utils/host-workspace-ownership.js';
 import type { HostWorkspaceOwnershipOptions } from './utils/host-workspace-ownership.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, resolvePdHome } from '@principles/install-layout';
+// Namespace import keeps the shared lock capability check explicit at the
+// write boundary; an incompatible older dependency cohort fails closed.
+import * as installLayoutModule from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { reconcileServiceHostScheduler } from './service-host-bridge.js';
@@ -357,44 +360,76 @@ export function planUpgradeHosts(
  * the OD-07 governance workspace (~/.workbuddy/pd-workspace) is registered the
  * same way — derived from install-layout, never hand-joined, never reused from
  * another host's state.
+ *
+ * Merge the install's workspace registrations into a manifest read INSIDE
+ * the manifest write lock (PRI-1282 review, ERR-168 follow-up): computing
+ * the merge from a pre-lock read let an interleaved §8.4 ownership write be
+ * silently dropped — a handover that registered a workspace + its record
+ * between the read and the locked write lost the workspaces[] entry, making
+ * the manifest fail validation (ownership key not in the declared list).
  */
-function resolveInstallManifestWorkspaces(workspaceDir: string, host?: HostTarget): string[] {
-  let current: unknown;
-  try {
-    current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
-  } catch (error) {
-    if (existsSync(getInstallManifestPath())) throw error;
-  }
-  const parsed = parseInstallManifest(current);
-  if (current !== undefined && !parsed.manifest) {
-    throw new Error(parsed.error ?? 'install_manifest_malformed');
-  }
-  let workspaces = mergeInstallManifestWorkspaces(parsed.manifest, path.resolve(workspaceDir));
+function mergeInstallManifestWorkspacesFor(
+  current: ReturnType<typeof parseInstallManifest>['manifest'],
+  workspaceDir: string,
+  host?: HostTarget,
+): string[] {
+  let workspaces = mergeInstallManifestWorkspaces(current, path.resolve(workspaceDir));
   if (host === 'workbuddy') {
     // Set-union via the same authority helper — order of existing entries is
     // preserved, the governance dir is appended when absent (idempotent).
     workspaces = mergeInstallManifestWorkspaces(
-      { layoutVersion: parsed.manifest?.layoutVersion ?? INSTALL_LAYOUT_VERSION, mode: parsed.manifest?.mode ?? 'canonical', hosts: parsed.manifest?.hosts ?? [], workspaces },
+      { layoutVersion: current?.layoutVersion ?? INSTALL_LAYOUT_VERSION, mode: current?.mode ?? 'canonical', hosts: current?.hosts ?? [], workspaces },
       getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
     );
   }
   return workspaces;
 }
 
-function writeInstallManifest(hosts: string[], workspaces: string[]): void {
+function writeInstallManifest(write: {
+  /**
+   * Workspaces/hosts merges are evaluated INSIDE the manifest write lock
+   * against the freshly-read manifest — never from a pre-lock snapshot.
+   */
+  readonly hosts: readonly string[] | ((current: ReturnType<typeof parseInstallManifest>['manifest']) => readonly string[]);
+  readonly workspaces: (current: ReturnType<typeof parseInstallManifest>['manifest']) => readonly string[];
+}): void {
+  const manifestPath = getInstallManifestPath();
   mkdirSync(getPdDir(), { recursive: true });
-  // PRI-709 P0-1: merge into the existing record. This file has more than one
-  // writer (the update side owns `channel` / `autoCheck` / `releaseMetadataUrl`);
-  // a wholesale replace silently deleted those fields.
-  const existing = readInstallJsonRecord(getInstallManifestPath());
-  const payload: Record<string, unknown> = {
-    ...(existing ?? {}),
-    layoutVersion: 1,
-    mode: 'canonical',
-    hosts,
-    workspaces,
+  // install.json is shared with the update executor and the ownership CAS
+  // writer. A missing lock export is an incompatible runtime cohort, never
+  // permission to fall back to an unlocked read-modify-write.
+  const lock = installLayoutModule.withInstallManifestWriteLock;
+  if (typeof lock !== 'function') {
+    throw new Error('install_manifest_lock_unavailable: the installed @principles/install-layout does not expose the shared manifest lock; no write was performed. Update the installer/runtime cohort and retry.');
+  }
+  const writeRecord = (): void => {
+    const existing = readInstallJsonRecord(manifestPath);
+    const parsedCurrent = parseInstallManifest(existing);
+    if (existing !== undefined && !parsedCurrent.manifest) {
+      throw new Error(parsedCurrent.error ?? 'install_manifest_malformed');
+    }
+    const payload: Record<string, unknown> = {
+      ...(existing ?? {}),
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: [...(typeof write.hosts === 'function' ? write.hosts(parsedCurrent.manifest) : write.hosts)],
+      workspaces: [...write.workspaces(parsedCurrent.manifest)],
+    };
+    const revalidated = parseInstallManifest(payload);
+    if (!revalidated.manifest) {
+      throw new Error(`install_manifest_write_refused: ${revalidated.error ?? 'post-merge validation failed'}`);
+    }
+    // Same-directory flushed temp + atomic replace: readers see old or new JSON,
+    // never a truncated manifest if the installer is interrupted.
+    atomicReplaceTextFile(manifestPath, JSON.stringify(payload, null, 2) + '\n');
   };
-  writeFileSync(getInstallManifestPath(), JSON.stringify(payload, null, 2) + '\n', 'utf8');
+  const locked = lock(
+    { manifestPath, operation: 'installer.writeInstallManifest', context: getPdDir() },
+    writeRecord,
+  );
+  if (!locked.ok) {
+    throw new Error(`could not acquire the install manifest write lock (installer.writeInstallManifest): ${locked.message}`);
+  }
 }
 
 /**
@@ -928,7 +963,13 @@ export function repairInstallManifestHosts(options: { apply?: boolean } = {}): I
   const backupPath = path.join(getPdRuntimeBackupsDir(), `install-manifest.backup.${Date.now()}.json`);
   mkdirSync(getPdRuntimeBackupsDir(), { recursive: true });
   writeFileSync(backupPath, readFileSync(manifestPath));
-  writeInstallManifest([...after], [...(parsed.manifest.workspaces ?? [])]);
+  // Hosts too are re-derived INSIDE the lock from the freshly-read manifest
+  // (persisted set minus the provably-absent entries), and workspaces are
+  // carried verbatim from the same locked read.
+  writeInstallManifest({
+    hosts: (current) => installManifestHostsForPersist(current).filter((host) => !removed.includes(host)),
+    workspaces: (current) => [...(current?.workspaces ?? [])],
+  });
 
   return {
     success: true,
@@ -6469,7 +6510,10 @@ export async function install(
     // host's registration still points at it — the exact A3 hazard class
     // this fix exists to close. Real install state remains file-based truth
     // (checkInstallStatus / host detect()).
-    writeInstallManifest(installManifestHosts, resolveInstallManifestWorkspaces(options.workspaceDir, options.host));
+    writeInstallManifest({
+      hosts: installManifestHosts,
+      workspaces: (current) => mergeInstallManifestWorkspacesFor(current, options.workspaceDir, options.host),
+    });
     // PRI-709 P0-1: persist the metadata source after the manifest write, so
     // the durable tier cannot be clobbered by the same install.
     persistReleaseMetadataSource();

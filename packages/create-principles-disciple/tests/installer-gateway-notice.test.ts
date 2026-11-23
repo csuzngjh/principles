@@ -201,6 +201,12 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
+      // PRI-1282: the install-manifest CAS lock reads its owner.json through
+      // the same fs module — the generic JSON fallback below would fake a
+      // foreign lock and wedge install() on lock_invalid. Delegate the lock
+      // path to the real fs (ENOENT → 'missing' → fresh create in the
+      // throwaway HOME); mkdir/write stay mocked no-ops.
+      if (filePath.includes('.cas.lock')) return realFs.readFileSync(filePath, 'utf8');
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
       // PRI-874: the embedded product identity stamp is read through the
       // strict parser — answer with the fixture's REAL stamp file (written
@@ -225,6 +231,13 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     // planted pd-cli entry — delegate to the real fs instead of the
     // auto-mocked undefined.
     vi.mocked(fs.statSync).mockImplementation((value) => realFs.statSync(String(value)));
+    // atomicReplaceTextFile stages install.json through mkdtempSync — the
+    // auto-mock returns undefined, so delegate to the real fs inside the
+    // throwaway HOME (the fake .pd parent is created for real first).
+    vi.mocked(fs.mkdtempSync).mockImplementation((prefix) => {
+      realFs.mkdirSync(path.dirname(String(prefix)), { recursive: true });
+      return realFs.mkdtempSync(String(prefix));
+    });
     vi.mocked(appendJournalTransition).mockImplementation(() => undefined);
     const httpModule = await import('http') as unknown as { get: ReturnType<typeof vi.fn> };
     answerHealthy(httpModule);

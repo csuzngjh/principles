@@ -15,6 +15,20 @@ import type { OpenClawPluginServiceContext } from '../../src/openclaw-sdk.js';
 vi.mock('../../src/core/pd-config-loader.js');
 vi.mock('../../src/core/system-logger.js');
 
+// PRI-1282 §8.4 ownership gate: these timer-chain fixtures are temp dirs
+// outside any real install manifest, so the gate's REAL reader would fail
+// closed (manifest_unreadable) and never arm a chain. Mock the reader at
+// the seam the SERVICE imports (a different module — the mock applies) to
+// the legacy default; the gate's own behaviors are covered by the dedicated
+// internalization-auto-consumer-ownership suite.
+vi.mock('../../src/openclaw-worker.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/openclaw-worker.js')>();
+  return {
+    ...actual,
+    readOpenClawWorkspaceOwnership: vi.fn(() => ({ status: 'legacy_owned' as const, source: 'no_record' as const, generation: 0 })),
+  };
+});
+
 // PRI-655: the timer-chain tests below need to inject a cycle rejection.
 // Spread-mock host-runtime (ERR-115: full-module replacement breaks on new
 // exports) — runInternalizationConsumerCycle defaults to delegating to the
@@ -178,19 +192,24 @@ describe('InternalizationAutoConsumerService', () => {
   });
 
   describe('timer chain resilience (PRI-655)', () => {
-    const timerWorkspaceDir = '/mock/workspace-timer';
+    // PRI-1282 r4: the consumer lease is a REAL file under <workspace>/.pd —
+    // a /mock path cannot host it, so the chain needs a real temp workspace.
+    let timerWorkspaceDir: string;
     const INITIAL_DELAY_MS = 30_000;
     const INTERVAL_MS = 120_000;
     const timerLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
     beforeEach(() => {
       vi.useFakeTimers();
+      timerWorkspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-auto-consumer-timer-'));
+      fs.mkdirSync(path.join(timerWorkspaceDir, '.pd'), { recursive: true });
     });
 
     afterEach(() => {
       InternalizationAutoConsumerService.stop({ workspaceDir: timerWorkspaceDir, logger: timerLogger } as OpenClawPluginServiceContext);
       vi.clearAllTimers();
       vi.useRealTimers();
+      fs.rmSync(timerWorkspaceDir, { recursive: true, force: true });
     });
 
     it('a rejected cycle logs the failure on both channels and the chain SURVIVES to the next round', async () => {

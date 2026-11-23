@@ -17,6 +17,10 @@
     "./governance-audit": {
       "types": "./dist/governance-audit.d.ts",
       "default": "./dist/governance-audit.js"
+    },
+    "./openclaw-worker": {
+      "types": "./dist/openclaw-worker.d.ts",
+      "default": "./dist/openclaw-worker.js"
     }
   },
   "repository": {
@@ -78,6 +82,7 @@
   "devDependencies": {
     "@principles/core": "^8.0.1",
     "@principles/host-runtime": "^4.5.1",
+    "@principles/install-layout": "^0.9.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/js-yaml": "^4.0.9",
     "@types/micromatch": "^4.0.10",

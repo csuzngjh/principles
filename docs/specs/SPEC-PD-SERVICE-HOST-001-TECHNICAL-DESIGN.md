@@ -168,8 +168,8 @@ OpenClaw Gateway 不运行时，不得回退到扫描 Gateway 私有内存或会
 
 - **Workspace 发现**：install manifest 的 `workspaces[]` 只在 installer / update / workbuddy-setup 路径写入；OpenClaw 运行时绑定（`ensureMcpBinding` / `syncMcpBindingFromExplicitWorkspace`）只写 `mcp-binding.json`，**不回写 install manifest**。安装后新绑定的 OpenClaw Workspace 对 manifest discovery 不可见——**已按选项 (b) 解决**：`collectHostWorkspaceClaims`（install-layout/mcp-binding-contract.ts）作为第二授权源枚举 `default` 目录 + `host_declaration` + `payload_binding` 三类 claim，跨宿主归属歧义由 `findForeignWorkspaceOwner` 裁决（详见 §5.1）。
 - **宿主归属判别**：manifest 是 `hosts[]` + `workspaces[]` 两个平铺数组，没有 per-Workspace host binding；现有 `internalization_auto_consumer` flag 不是宿主归属证据（codex workspace 也用它）。`supports(workspaceDescriptor)` 的判别输入已定：`.pd/config.yaml` `host.*` flag + `host-tool-semantics/<host>.json` 持久化声明 + `collectHostWorkspaceClaims` 验证的 payload binding；新增 manifest per-workspace `workspaceBindings` 字段仍为**设计提案，未实现**。
-- **Adaptive 调度不可直接保留**：`nextConsumerDelay` 已在 host-runtime 共享，但其输入（consecutiveEmptyCycles / consecutiveFailures / lastCycleDurationMs）是 Gateway 进程内 Map 状态，run-once 退出即丢。固定 OS 周期无法复现 backlog 驱动的更短延迟与失败退避；要么把调度状态持久化进 SPEC §9 允许的小型版本化 operational status 文件，要么在 SPEC 明确记录 V1 的队列延迟回退并接受。**未实现**。
-- **所有权交接持久层**：per-Workspace `backgroundExecutions` 记录 schema 已实现（逐状态语义校验 + 单键写入器 + legacy 单键迁移），**CAS 原子写路径与状态机迁移逻辑未实现**；Companion Supervisor 的过渡态阻塞（`handover_preparing`/`rollback_pending`/`service_host_owned` 禁止旧 Worker 启动/崩溃重启）已实现并有回归测试。
+- **Adaptive 调度不可直接保留**：`nextConsumerDelay` 已在 host-runtime 共享，但其输入（consecutiveEmptyCycles / consecutiveFailures / lastCycleDurationMs）是 Gateway 进程内 Map 状态，run-once 退出即丢。固定 OS 周期无法复现 backlog 驱动的更短延迟与失败退避；要么把调度状态持久化进 SPEC §9 允许的小型版本化 operational status 文件，要么在 SPEC 明确记录 V1 的队列延迟回退并接受。**已决策（2026-11-22，PRI-1282 Phase 4）：固定周期回退 + 量化对比与语义变化披露**（`docs/reports/PD_SERVICE_HOST_PHASE4_SCHEDULING_COMPARISON.md`：正常/稀疏负载等待分布可比；突发清空 ~2× 慢、失败退避语义变化如实记录；无任务丢失）。
+- **所有权交接持久层**：per-Workspace `backgroundExecutions` 记录 schema 已实现（逐状态语义校验 + 单键写入器 + legacy 单键迁移）；**CAS 原子写路径与状态机迁移原语已实现（2026-11-22，PRI-1282 Phase 4，阶段归属修正：Phase 5 复用而非重写）**——`@principles/install-layout` `transitionWorkspaceBackgroundExecution`（六类合法迁移 + 跨进程目录锁 + 锁内 generation fencing + operationId 幂等 + 原子 rename + 未知字段保留）与 `readWorkspaceBackgroundOwnership` 只读投影；install.json 全量写者统一经同一物理锁（ERR-168）。Companion Supervisor 的过渡态阻塞（`handover_preparing`/`rollback_pending`/`service_host_owned` 禁止旧 Worker 启动/崩溃重启）已实现并有回归测试。
 
 ## 5. Service Host 单次执行流程
 
@@ -317,12 +317,12 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 5. **Companion observer-only（Phase 5）**：删除 Worker Registry 生命周期接线，保留状态展示。
 6. **ROLLBACK**：停止该 Workspace 的 Service Host 触发 → 原子写回 `legacy` → 旧所有者重新注册。禁止双执行。
 
-**最小实现要求（当前代码中不存在，不得声称为已具备）**：
+**最小实现要求（落地状态，2026-11-22 PRI-1282 Phase 4；阶段归属修正：原"属 Phase 5"的 CAS 原语已随 Phase 4 落地，Phase 5 复用于 Codex/WorkBuddy）**：
 
-- manifest 按 Workspace 键控的 `backgroundExecutions` 记录（**schema 已落地**）+ 单次原子 CAS 写路径（generation+1，未实现）；
-- Companion 清单复析与 Gateway 注册/tick 前的 marker 读取点；
-- “旧所有者已停止”的可验证信号与“Service Host ready”的就绪探针；
-- marker 读写失败、manifest 不可读、健康证据不足时的 fail-closed 分支（保留原所有者，不进入双调度）。
+- manifest 按 Workspace 键控的 `backgroundExecutions` 记录（**schema 已落地**）+ 单次原子 CAS 写路径（**已落地**：`transitionWorkspaceBackgroundExecution`，锁内 generation+1 fencing）；
+- Companion 清单复析与 Gateway 注册/tick 前的 marker 读取点（**已落地**：Companion Supervisor 2026-11-20；Gateway start/tick/post-cycle 门禁 2026-11-22）；
+- “旧所有者已停止”的可验证信号（**已落地**：`pd.gateway-quiesce.v1` 持久化 ack，绑定 operationId+generation，in-flight 有界等待 + 诚实超时）与“Service Host ready”的就绪探针（**已落地**：`pd openclaw worker --readiness` no-consume 自检，经 active-release 入口执行）；
+- marker 读写失败、manifest 不可读、健康证据不足时的 fail-closed 分支（**已落地**：保留原所有者，不进入双调度）。
 
 进程存在性、PID、启动顺序或固定延迟**不是**所有权证明。
 

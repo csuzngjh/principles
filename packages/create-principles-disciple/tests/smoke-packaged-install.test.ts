@@ -984,6 +984,7 @@ describe('Registry-resolved dependency install (npx parity)', () => {
 
       const layoutModule = await import(pathToFileURL(resolvedLayoutEntry!).href);
       const forwardCapable = typeof layoutModule.installManifestHostsForPersist === 'function';
+      const lockCapable = typeof layoutModule.withInstallManifestWriteLock === 'function';
 
       const probe = `
         import * as fs from 'node:fs';
@@ -991,6 +992,7 @@ describe('Registry-resolved dependency install (npx parity)', () => {
         import * as path from 'node:path';
         import { pathToFileURL } from 'node:url';
         const forwardCapable = ${JSON.stringify(forwardCapable)};
+        const lockCapable = ${JSON.stringify(lockCapable)};
         const installerRoot = ${JSON.stringify(installedRoot.replaceAll('\\', '/'))};
         const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rf02-home-'));
         process.env.HOME = home;
@@ -1000,7 +1002,7 @@ describe('Registry-resolved dependency install (npx parity)', () => {
         const manifestPath = path.join(pdDir, 'install.json');
         const writeManifest = (hosts) => fs.writeFileSync(manifestPath, JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts, workspaces: [] }, null, 2));
         const readHosts = () => JSON.parse(fs.readFileSync(manifestPath, 'utf8')).hosts;
-        const results = { forwardCapable, checks: [] };
+        const results = { forwardCapable, lockCapable, checks: [] };
         const record = (name, ok, detail) => { results.checks.push({ name, ok, detail }); if (!ok) results.failed = name; };
         const { mergeInstallManifestHosts } = await import(pathToFileURL(path.join(installerRoot, 'dist', 'installer.js')).href);
         const { mergeWorkbuddyIntoInstallManifest } = await import(pathToFileURL(path.join(installerRoot, 'dist', 'installers', 'workbuddy-host-installer.js')).href);
@@ -1018,16 +1020,21 @@ describe('Registry-resolved dependency install (npx parity)', () => {
         }
 
         // Scenario 2 — workbuddy merge onto a manifest carrying an unknown host.
+        // Model an already-installed §8.4-capable pd runtime while the registry
+        // dependency may still be pre-cohort: that mixed cohort must fail closed.
+        const installedTransition = path.join(pdDir, 'runtime', 'install-layout', 'dist', 'background-execution-transition.js');
+        fs.mkdirSync(path.dirname(installedTransition), { recursive: true });
+        fs.writeFileSync(installedTransition, 'exports.withInstallManifestWriteLock = true;');
         writeManifest(['codex', 'gamma']);
         const mergeResult = mergeWorkbuddyIntoInstallManifest(manifestPath, path.join(home, 'governance'));
-        if (forwardCapable) {
+        if (lockCapable) {
           const hosts = readHosts();
           record('workbuddy install keeps unknown host', mergeResult.ok === true && hosts.includes('gamma') && hosts.includes('workbuddy'), hosts.join(','));
         } else {
           let fileAfter = null;
           try { fileAfter = readHosts(); } catch { /* unreadable counts as modification too */ }
-          record('old dependency hard-stops with zero modification',
-            mergeResult.ok === false && String(mergeResult.reason || '').includes('install_manifest_malformed')
+          record('old dependency refuses unlocked manifest write',
+            mergeResult.ok === false && String(mergeResult.reason || '').includes('install_manifest_lock_unavailable')
             && JSON.stringify(fileAfter) === JSON.stringify(['codex', 'gamma']),
             'ok=' + String(mergeResult.ok) + ' hostsAfter=' + JSON.stringify(fileAfter));
         }
