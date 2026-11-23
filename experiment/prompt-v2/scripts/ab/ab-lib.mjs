@@ -1481,7 +1481,7 @@ export function verifyCandidateLinkage(commitArtifact, candidates, context = {})
  */
 export function classifyTerminal({
   diagnoseOk, routerTaskSucceeded, routerRunSucceeded, stageArtifactsSchemaValid,
-  candidatesComplete, admissionRefused, deferOnly,
+  candidatesComplete, admissionRefused, deferOnly, formationComplete,
 }) {
   const chainOk = Boolean(diagnoseOk && routerTaskSucceeded && routerRunSucceeded && stageArtifactsSchemaValid);
   // Candidates are REQUIRED for every legitimate terminal: the commit unit
@@ -1490,7 +1490,13 @@ export function classifyTerminal({
   // done-admission-refused over that state would certify a persistence
   // failure as success. `candidatesComplete` is the r4 1:1
   // recommendation↔candidate linkage check, not merely `count > 0`.
-  const ok = chainOk && Boolean(candidatesComplete);
+  // PRI-1284 (P1-3): the formation loop's exit reason is likewise part of
+  // the contract — `formationComplete` is false only when the loop budget
+  // was exhausted while chain tasks remained executable. The by-design
+  // early stop (--formation-depth reached) and the normal chain-terminal
+  // outcome both count as complete; a budget-exhausted loop does not, and
+  // the unit falls to `incomplete` (resumable) instead of certifying `done`.
+  const ok = chainOk && Boolean(candidatesComplete) && formationComplete === true;
   const status = ok
     ? (admissionRefused ? 'done-admission-refused' : (deferOnly ? 'done-deferred' : 'done'))
     : (routerTaskSucceeded ? 'incomplete' : 'failed');

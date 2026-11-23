@@ -614,6 +614,36 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
     expect(resumedCommit.candidates[0].recommendation_kind).toBe('principle');
   }, 600_000);
 
+  it('PRI-1284: lab:run forwards --formation-depth to every shard child', () => {
+    // The ab-run child records the received depth verbatim on each unit's
+    // internalization-loop step; an unforwarded flag lands as null. A clean
+    // run at depth 1 must still terminate legitimately (depth-reached or
+    // chain-terminal → formationComplete) — never budget-exhausted.
+    const depthRunId = `${RUN_ID}-depth`;
+    fs.rmSync(path.join(expRoot, 'workspaces', 't5-fixture-control.json'), { force: true });
+    try {
+      const res = expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-grid.mjs',
+        ['--config', configPath, '--run-id', depthRunId, '--parallel', '1', '--formation-depth', '1']), 'lab:run --formation-depth 1');
+      expect(res.stdout).toContain('GRID OK');
+
+      const depthRecordPath = (sid, arm) => path.join(expRoot, 'runs', depthRunId, 'records', `${sid}.${arm}.json`);
+      for (const sid of ['smoke-s1', 'smoke-s2']) {
+        for (const arm of [BASELINE_ARM, CANDIDATE_ARM]) {
+          const rec = readJson(depthRecordPath(sid, arm));
+          const loop = rec.steps.find((s) => s.step === 'internalization-loop');
+          expect(loop, `${sid}.${arm} must reach the formation loop`).toBeTruthy();
+          expect(loop.formationDepth).toBe(1);
+          expect(['depth-reached', 'chain-terminal']).toContain(loop.formationOutcome);
+          expect(loop.formationComplete).toBe(true);
+        }
+      }
+    } finally {
+      // This suite pins the runs/ directory listing exactly — remove the
+      // auxiliary run dir so later fail-closed assertions stay unaffected.
+      fs.rmSync(path.join(expRoot, 'runs', depthRunId), { recursive: true, force: true });
+    }
+  }, 600_000);
+
   it('lab:metrics produces layer-1 metrics for the real run', () => {
     const res = expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-metrics.mjs',
       ['--config', configPath, '--run-id', RUN_ID]), 'lab:metrics');
