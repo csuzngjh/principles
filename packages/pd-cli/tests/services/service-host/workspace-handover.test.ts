@@ -104,9 +104,8 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
     }).ok).toBe(true);
 
     const result = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(),
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-integration-1' },
       env: env(),
-      resumeOperationId: 'op-integration-1',
       ackWaitMs: 5_000,
       stepTimeoutMs: 30_000,
     });
@@ -132,19 +131,19 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
       inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
     });
     const first = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-replay-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-replay-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
     expect(first.ok).toBe(true);
     // Re-run with the SAME operation id: the marker is already the terminal
     // state; the command records it and completes verification-only.
     const second = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-replay-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-replay-1' }, env: env(), resumeOperationId: 'op-replay-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
     expect(second.ok).toBe(true);
     expect(ownership()).toMatchObject({ status: 'service_host_owned', generation: 2 });
   });
 
   it('blocks and restores legacy when the Gateway never acknowledges', async () => {
     const result = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-no-ack-1', ackWaitMs: 150, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-no-ack-1' }, env: env(), ackWaitMs: 150, stepTimeoutMs: 30_000,
     });
     expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: 'gateway_quiesce_ack_absent' });
     // Fail-closed rollback of the preparing state: the Gateway stays the sole owner.
@@ -157,7 +156,7 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
       inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
     });
     const result = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-mine-1', ackWaitMs: 150, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-mine-1' }, env: env(), ackWaitMs: 150, stepTimeoutMs: 30_000,
     });
     expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: 'gateway_quiesce_ack_operation_mismatch' });
     expect(ownership()).toMatchObject({ status: 'legacy_owned' });
@@ -166,7 +165,7 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
   it('blocks and restores legacy when readiness fails', async () => {
     fs.writeFileSync(stubModeFile, 'readiness-degraded', 'utf8');
     const result = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-degraded-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-degraded-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     // PRI-1282 P2-1: a non-zero-exit readiness probe is a PROCESS failure,
     // which now takes precedence over the degraded verdict in the reason.
@@ -187,8 +186,8 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
   it('blocks when the Service Host scheduler is not enabled', async () => {
     const result = await runWorkspaceHandover(workspace, {
       pdHomeOverride: home,
-      probes: { schedulerStatus: async () => ({ ok: true as const, registered: true, enabled: false }) },
-      env: env(), resumeOperationId: 'op-nosched-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      probes: { schedulerStatus: async () => ({ ok: true as const, registered: true, enabled: false }), mintOperationId: () => 'op-nosched-1' },
+      env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: 'service_host_scheduler_not_enabled' });
     expect(ownership()).toMatchObject({ status: 'legacy_owned' });
@@ -200,8 +199,8 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
   it('blocks when the scheduler status cannot be determined', async () => {
     const result = await runWorkspaceHandover(workspace, {
       pdHomeOverride: home,
-      probes: { schedulerStatus: async () => ({ ok: false as const, reason: 'trigger_query_failed' }) },
-      env: env(), resumeOperationId: 'op-noschedq-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      probes: { schedulerStatus: async () => ({ ok: false as const, reason: 'trigger_query_failed' }), mintOperationId: () => 'op-noschedq-1' },
+      env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: 'service_host_scheduler_status_unavailable:trigger_query_failed' });
     expect(ownership()).toMatchObject({ status: 'legacy_owned' });
@@ -220,7 +219,7 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
     if (!lock.ok) return;
     try {
       const result = await runWorkspaceHandover(workspace, {
-        pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-locked-1', ackWaitMs: 150, stepTimeoutMs: 30_000,
+        pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-locked-1' }, env: env(), ackWaitMs: 150, stepTimeoutMs: 30_000,
       });
       expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: expect.stringContaining('service_run_in_progress'), operationId: 'op-locked-1' });
     } finally {
@@ -238,7 +237,7 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
     });
     fs.writeFileSync(stubModeFile, 'cycle-paused', 'utf8');
     const result = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-badcycle-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-badcycle-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     expect(result).toMatchObject({ ok: false, outcome: 'failed', reason: expect.stringContaining('first_cycle_unverified'), operationId: 'op-badcycle-1' });
     // Ownership is committed — the failure is resumable, not rolled back.
@@ -255,7 +254,7 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
       inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
     });
     const first = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-intent-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-intent-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     expect(first.ok).toBe(true);
     // Simulate the crash: the evidence never landed (the intent did).
@@ -263,7 +262,7 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
     expect(readHandoverEvidence(path.join(home, '.pd'), workspace, 'op-intent-1')).toBeNull();
 
     const resumed = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-intent-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-intent-1' }, env: env(), resumeOperationId: 'op-intent-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     expect(resumed).toMatchObject({ ok: true, outcome: 'completed', operationId: 'op-intent-1' });
     const evidence = readHandoverEvidence(path.join(home, '.pd'), workspace, 'op-intent-1');
@@ -278,7 +277,7 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
       inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
     });
     const first = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-live-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-live-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     expect(first.ok).toBe(true);
     // Simulate the crash: the evidence never landed (the intent did).
@@ -293,7 +292,7 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
     expect(held.ok).toBe(true);
     try {
       const resumed = await runWorkspaceHandover(workspace, {
-        pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-live-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+        pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-live-1' }, env: env(), resumeOperationId: 'op-live-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
       });
       expect(resumed).toMatchObject({ ok: false, outcome: 'blocked', reason: 'service_host_worker_still_running', operationId: 'op-live-1' });
     } finally {
@@ -301,7 +300,7 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
     }
     // Once the old worker provably stopped, the SAME resume proceeds.
     const after = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-live-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-live-1' }, env: env(), resumeOperationId: 'op-live-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     expect(after).toMatchObject({ ok: true, outcome: 'completed', operationId: 'op-live-1' });
   }, 60_000);
@@ -319,21 +318,21 @@ describe('runWorkspaceHandover — full §8.4 sequence', () => {
     });
     // Initiate via the ALIAS — the intent and records pin to the real dir.
     const first = await runWorkspaceHandover(link, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-alias-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-alias-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     expect(first.ok).toBe(true);
     const realWs = fs.realpathSync(workspace);
     fs.rmSync(handoverEvidencePath(path.join(home, '.pd'), workspace, 'op-alias-1'));
     // Resume via the REAL path — finds the same intent, same operation.
     const resumed = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-alias-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-alias-1' }, env: env(), resumeOperationId: 'op-alias-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000,
     });
     expect(resumed).toMatchObject({ ok: true, outcome: 'completed', operationId: 'op-alias-1' });
   }, 60_000);
 
   it('abort restores legacy from a stuck preparing state', async () => {
     await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-stuck-1', ackWaitMs: 1 });
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-stuck-1' }, env: env(), ackWaitMs: 1 });
     // (blocked, but the preparing record may exist if begin landed before the
     // ack wait — force the stuck state deterministically:)
     const fromTransition = await import('@principles/install-layout');
@@ -355,7 +354,7 @@ describe('runWorkspaceRollback', () => {
       inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
     });
     await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: operationId, ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => operationId }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
     expect(ownership()).toMatchObject({ status: 'service_host_owned' });
   }
 
@@ -439,7 +438,7 @@ describe('managed dispatch after handover (§8.5 regression)', () => {
       inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
     });
     await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-managed-1', ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-managed-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
     expect(ownership()).toMatchObject({ status: 'service_host_owned' });
 
     const { runServiceManagedOnce } = await import('../../../src/services/service-host/managed-run.js');
@@ -519,7 +518,7 @@ describe('PRI-1282 review hardening', () => {
       manifestPath, workspaceDir: workspace, kind: 'begin_handover', operationId: 'op-real', registerWorkspace: true,
     });
     const resumed = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-WRONG', ackWaitMs: 150 });
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-WRONG' }, env: env(), resumeOperationId: 'op-WRONG', ackWaitMs: 150 });
     expect(resumed).toMatchObject({ ok: false, outcome: 'blocked', reason: 'operation_id_mismatch' });
     expect(ownership()).toMatchObject({ status: 'handover_preparing' });
   });
@@ -541,7 +540,7 @@ describe('PRI-1282 review hardening', () => {
     ack.workspaceDir = '/somewhere/else';
     fs.writeFileSync(ackFile, JSON.stringify(ack), 'utf8');
     const result = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-ws-1', ackWaitMs: 150 });
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-ws-1' }, env: env(), ackWaitMs: 150 });
     expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: 'gateway_quiesce_ack_workspace_mismatch' });
     expect(ownership()).toMatchObject({ status: 'legacy_owned' });
   });
@@ -552,8 +551,80 @@ describe('PRI-1282 review hardening', () => {
       inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
     });
     const result = await runWorkspaceHandover(workspace, {
-      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-ws-2', ackWaitMs: 150 });
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-ws-2' }, env: env(), ackWaitMs: 150 });
     expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: expect.stringContaining('gateway_quiesce_ack_state_mismatch') });
     expect(ownership()).toMatchObject({ status: 'legacy_owned' });
+  });
+});
+
+describe('PRI-1282 r4 — resume identity constraints + rollback evidence recovery', () => {
+  it('§5: --resume naming a non-existent in-flight handover is refused (never silently mints)', async () => {
+    const result = await runWorkspaceHandover(workspace, {
+      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-ghost-1', ackWaitMs: 150 });
+    expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: 'no_resumable_operation', operationId: 'op-ghost-1' });
+    // No operation was started and no marker written.
+    expect(ownership()).toMatchObject({ status: 'legacy_owned' });
+    expect(fs.existsSync(handoverEvidencePath(path.join(home, '.pd'), workspace, 'op-ghost-1'))).toBe(false);
+  });
+
+  it('§5: a completed operationId cannot re-enter the execution flow', async () => {
+    writeGatewayQuiesceAck({
+      workspaceDir: workspace, state: 'handover_preparing', operationId: 'op-done-1', generation: 1,
+      inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
+    });
+    const first = await runWorkspaceHandover(workspace, {
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-done-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
+    expect(first.ok).toBe(true);
+    // Roll the workspace back to legacy, then try to "resume" the finished
+    // operationId: it must NOT mint a new handover under that name.
+    const rolled = await runWorkspaceRollback(workspace, { pdHomeOverride: home, env: env(), ackWaitMs: 150 });
+    expect(rolled.ok).toBe(true);
+    const replay = await runWorkspaceHandover(workspace, {
+      pdHomeOverride: home, probes: schedulerEnabled(), env: env(), resumeOperationId: 'op-done-1', ackWaitMs: 150 });
+    expect(replay).toMatchObject({ ok: false, outcome: 'blocked', reason: 'no_resumable_operation' });
+    expect(ownership()).toMatchObject({ status: 'legacy_owned' });
+  });
+
+  it('§8: a rollback that committed before crashing rewrites ONLY its evidence on --resume', async () => {
+    writeGatewayQuiesceAck({
+      workspaceDir: workspace, state: 'handover_preparing', operationId: 'op-ev-1', generation: 1,
+      inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
+    });
+    await runWorkspaceHandover(workspace, {
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-ev-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
+    const rolled = await runWorkspaceRollback(workspace, { pdHomeOverride: home, env: env(), ackWaitMs: 150 });
+    expect(rolled.ok).toBe(true);
+    if (!rolled.ok) return;
+    // Simulate the crash: the CAS + intent landed, the evidence did not.
+    fs.rmSync(handoverEvidencePath(path.join(home, '.pd'), workspace, rolled.operationId));
+    const before = ownership();
+    expect(before).toMatchObject({ status: 'legacy_owned' });
+    const resumed = await runWorkspaceRollback(workspace, {
+      pdHomeOverride: home, env: env(), resumeOperationId: rolled.operationId, ackWaitMs: 150 });
+    expect(resumed).toMatchObject({ ok: true, outcome: 'completed', operationId: rolled.operationId });
+    // Evidence rewritten; ownership untouched — no transition re-ran.
+    expect(readHandoverEvidence(path.join(home, '.pd'), workspace, rolled.operationId)).toMatchObject({ kind: 'rollback', outcome: 'completed' });
+    expect(ownership()).toMatchObject(before);
+  });
+
+  it('§8: rollback --resume naming nothing in-flight or committed is refused', async () => {
+    const result = await runWorkspaceRollback(workspace, {
+      pdHomeOverride: home, env: env(), resumeOperationId: 'op-ghost-9' });
+    expect(result).toMatchObject({ ok: false, outcome: 'blocked', reason: 'no_resumable_operation' });
+  });
+
+  it('§5: --resume naming a DIFFERENT in-flight rollback is refused', async () => {
+    const { transitionWorkspaceBackgroundExecution } = await import('@principles/install-layout');
+    writeGatewayQuiesceAck({
+      workspaceDir: workspace, state: 'handover_preparing', operationId: 'op-mis-1', generation: 1,
+      inFlightCycles: 0, outcome: 'quiesced', startedVia: 'service_start',
+    });
+    await runWorkspaceHandover(workspace, {
+      pdHomeOverride: home, probes: { ...schedulerEnabled(), mintOperationId: () => 'op-mis-1' }, env: env(), ackWaitMs: 5_000, stepTimeoutMs: 30_000 });
+    transitionWorkspaceBackgroundExecution({
+      manifestPath, workspaceDir: workspace, kind: 'begin_rollback', operationId: 'op-rb-real' });
+    const resumed = await runWorkspaceRollback(workspace, {
+      pdHomeOverride: home, env: env(), resumeOperationId: 'op-rb-WRONG', ackWaitMs: 150 });
+    expect(resumed).toMatchObject({ ok: false, outcome: 'blocked', reason: 'operation_id_mismatch', operationId: 'op-rb-real' });
   });
 });

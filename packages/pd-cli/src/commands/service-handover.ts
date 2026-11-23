@@ -97,6 +97,7 @@ export async function handleServiceRollback(options: ServiceHandoverOptions): Pr
   const workspace = resolveWorkspaceDir(options.workspace);
   const result = await runWorkspaceRollback(workspace, {
     ...(options.pdHome !== undefined ? { pdHomeOverride: options.pdHome } : {}),
+    ...(options.resumeOperationId !== undefined ? { resumeOperationId: options.resumeOperationId } : {}),
     signal: controller.signal,
   });
   if (json) {

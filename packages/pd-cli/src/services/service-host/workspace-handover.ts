@@ -83,6 +83,12 @@ export interface HandoverContextInput {
       | { ok: true; registered: boolean | null; enabled: boolean | null }
       | { ok: false; reason: string }
     >;
+    /**
+     * Test seam: mints the operationId for a FRESH operation (never used
+     * when a marker or --resume names one — explicit resume only continues
+     * a real in-flight operation, per PRI-1282 r4 §5).
+     */
+    readonly mintOperationId?: (kind: 'handover' | 'rollback') => string;
   };
 }
 
@@ -197,12 +203,23 @@ export function writeHandoverEvidence(evidence: HandoverEvidence, pdHome: string
     } catch (linkError) {
       try { fs.unlinkSync(tmp); } catch { /* best effort */ }
       if (errnoOf(linkError) === 'EEXIST') {
-        // An existing document is accepted ONLY when it parses as THIS
-        // operation's evidence for THIS workspace — a same-named
-        // different-identity document is a conflict, never a no-op
-        // (PRI-1282 review P1-6: the pre-check accepted anything).
+        // An existing document is accepted ONLY when its FULL immutable
+        // identity is this operation's: schemaVersion + kind + operationId
+        // + workspaceDir are already proven by readHandoverEvidence's field
+        // check; outcome and the final ownership identity (status +
+        // generation) must also match — a same-named different-identity
+        // document is a conflict, never a no-op (PRI-1282 review r4 §6.1).
+        // startedAt/completedAt/steps are NOT part of the identity: a
+        // legitimate crash-retry of the SAME operation records its own
+        // timestamps.
         const existing = readHandoverEvidence(pdHome, evidence.workspaceDir, evidence.operationId);
-        if (existing !== null && existing.kind === evidence.kind) {
+        const generationOf = (doc: HandoverEvidence): number =>
+          doc.finalOwnership.status === 'manifest_unreadable' ? -1 : doc.finalOwnership.generation;
+        if (existing !== null
+          && existing.kind === evidence.kind
+          && existing.outcome === evidence.outcome
+          && existing.finalOwnership.status === evidence.finalOwnership.status
+          && generationOf(existing) === generationOf(evidence)) {
           return { ok: true, path: target, reason: 'already_exists' };
         }
         return { ok: false, path: target, reason: 'evidence_identity_conflict' };
@@ -390,8 +407,15 @@ export function writeHandoverIntent(intent: HandoverCommitIntent, pdHome: string
     } catch (linkError) {
       try { fs.unlinkSync(tmp); } catch { /* best effort */ }
       if (errnoOf(linkError) === 'EEXIST') {
+        // Full-identity compare (PRI-1282 r4 §6.2): kind/schemaVersion are
+        // proven by the reader's field check, but the operation AND the
+        // generation pair must also match — an operationId reused across
+        // generations is a conflict, never an idempotent replay.
         const existing = readHandoverIntent(pdHome, intent.workspaceDir, intent.operationId);
-        if (existing !== null) {
+        if (existing !== null
+          && existing.workspaceDir === intent.workspaceDir
+          && existing.preparingGeneration === intent.preparingGeneration
+          && existing.committedGeneration === intent.committedGeneration) {
           return { ok: true, path: target, reason: 'already_exists' };
         }
         return { ok: false, path: target, reason: 'intent_identity_conflict' };
@@ -421,6 +445,93 @@ export function readHandoverIntent(pdHome: string, canonicalDir: string, operati
       operationId: parsed.operationId,
       workspaceDir: parsed.workspaceDir,
       preparingGeneration: parsed.preparingGeneration,
+      committedGeneration: parsed.committedGeneration,
+      writtenAt: parsed.writtenAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Rollback intent (crash recovery, PRI-1282 review r4 §8) ────────────────
+//
+// The rollback mirror of the handover commit intent: persisted AFTER
+// begin_rollback and BEFORE the complete_rollback CAS, it binds
+// operationId + workspace + pending/committed generations so a run killed
+// between the CAS and the evidence write is resumable — `--resume` then
+// only rewrites the missing evidence, never re-flips ownership.
+
+const ROLLBACK_INTENT_SCHEMA = 'pd.service-rollback-intent.v1';
+
+export interface RollbackCommitIntent {
+  schemaVersion: typeof ROLLBACK_INTENT_SCHEMA;
+  kind: 'rollback';
+  operationId: string;
+  workspaceDir: string;
+  /** Generation of the rollback_pending marker this intent belongs to. */
+  pendingGeneration: number;
+  /** Generation complete_rollback commits (pendingGeneration + 1). */
+  committedGeneration: number;
+  writtenAt: string;
+}
+
+export function rollbackIntentPath(pdHome: string, canonicalDir: string, operationId: string): string {
+  return path.join(pdHome, 'service', 'handover', workspaceEvidenceKey(canonicalDir), `${operationId}.rollback-intent.json`);
+}
+
+export function writeRollbackIntent(intent: RollbackCommitIntent, pdHome: string): { ok: boolean; path: string; reason?: string } {
+  if (!isSafeOperationId(intent.operationId)) {
+    return { ok: false, path: rollbackIntentPath(pdHome, intent.workspaceDir, 'invalid'), reason: 'operation_id_invalid' };
+  }
+  const target = rollbackIntentPath(pdHome, intent.workspaceDir, intent.operationId);
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const tmp = `${target}.${process.pid}.${crypto.randomUUID().slice(0, 8)}.tmp`;
+    const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(intent, null, 2) + '\n');
+    } finally {
+      fs.closeSync(fd);
+    }
+    try {
+      fs.linkSync(tmp, target); // atomic no-replace publish
+    } catch (linkError) {
+      try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+      if (errnoOf(linkError) === 'EEXIST') {
+        const existing = readRollbackIntent(pdHome, intent.workspaceDir, intent.operationId);
+        if (existing !== null
+          && existing.workspaceDir === intent.workspaceDir
+          && existing.pendingGeneration === intent.pendingGeneration
+          && existing.committedGeneration === intent.committedGeneration) {
+          return { ok: true, path: target, reason: 'already_exists' };
+        }
+        return { ok: false, path: target, reason: 'intent_identity_conflict' };
+      }
+      throw linkError;
+    }
+    fs.unlinkSync(tmp);
+    return { ok: true, path: target };
+  } catch (error) {
+    return { ok: false, path: target, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Read + field-validate a persisted rollback intent (null = absent/untrusted). */
+export function readRollbackIntent(pdHome: string, canonicalDir: string, operationId: string): RollbackCommitIntent | null {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(rollbackIntentPath(pdHome, canonicalDir, operationId), 'utf8'));
+    if (!isJsonObject(parsed)) return null;
+    if (parsed.schemaVersion !== ROLLBACK_INTENT_SCHEMA || parsed.kind !== 'rollback') return null;
+    if (!isNonEmptyString(parsed.operationId) || parsed.operationId !== operationId) return null;
+    if (!isNonEmptyString(parsed.workspaceDir) || !isNonEmptyString(parsed.writtenAt)) return null;
+    if (typeof parsed.pendingGeneration !== 'number' || !Number.isInteger(parsed.pendingGeneration) || parsed.pendingGeneration < 0) return null;
+    if (typeof parsed.committedGeneration !== 'number' || !Number.isInteger(parsed.committedGeneration) || parsed.committedGeneration < 1) return null;
+    return {
+      schemaVersion: ROLLBACK_INTENT_SCHEMA,
+      kind: 'rollback',
+      operationId: parsed.operationId,
+      workspaceDir: parsed.workspaceDir,
+      pendingGeneration: parsed.pendingGeneration,
       committedGeneration: parsed.committedGeneration,
       writtenAt: parsed.writtenAt,
     };
@@ -714,6 +825,20 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
     record('aborted', 'legacy_owned');
     return { ok: false, outcome: 'aborted', reason: 'handover_aborted_by_operator', nextAction: 'The workspace is back to legacy ownership; the Gateway consumer is the sole owner.', operationId: target };
   }
+  // PRI-1282 review r4 §5: an explicit --resume may ONLY continue a real
+  // in-flight operation. With no handover_preparing marker there is nothing
+  // to resume — the command must NOT silently mint a new operationId out of
+  // the name the operator passed (and a completed operation can never
+  // re-enter the execution flow).
+  if (options.resumeOperationId !== undefined && markerOp === undefined) {
+    return {
+      ok: false,
+      outcome: 'blocked',
+      reason: 'no_resumable_operation',
+      nextAction: `No in-flight handover exists for this workspace to resume as '${options.resumeOperationId}'; omit --resume to start a new handover.`,
+      operationId: options.resumeOperationId,
+    };
+  }
   const binding = collectHostWorkspaceClaimsFor(context.workspaceDir, context.homeDir, options.env);
   if (binding.bindingUnverifiable !== null) {
     return {
@@ -771,7 +896,13 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
   }
   record('scheduler_trigger', 'registered_and_enabled');
 
-  const operationId = resumeOp ?? options.resumeOperationId ?? `handover-${crypto.randomUUID()}`;
+  // operationId comes from the in-flight marker alone now — an explicit
+  // --resume was already proven equal to it above, and a fresh operation
+  // mints a fresh id. A marker name is never silently replaced.
+  const operationId = resumeOp ?? options.probes?.mintOperationId?.('handover') ?? `handover-${crypto.randomUUID()}`;
+  if (!isSafeOperationId(operationId)) {
+    return { ok: false, outcome: 'blocked', reason: 'operation_id_invalid', nextAction: 'operationId may only contain letters, digits, dots, underscores and hyphens (1-128 chars).', operationId };
+  }
   const begin = transitionWorkspaceBackgroundExecution({
     manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'begin_handover', operationId, registerWorkspace: true,
   });
@@ -917,6 +1048,32 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
       return { ok: false, outcome: 'failed', reason: `handover_intent_write_failed:${intentWritten.reason ?? 'io'}`, nextAction: 'The commit intent could not be persisted; the workspace stays handover_preparing — fix the write failure and rerun (the operation resumes).', operationId };
     }
 
+    // ── 4b. Scheduler re-check (PRI-1282 r4 §9): the §1.5 gate proved the
+    // trigger was enabled at command start, but `pd service disable` may
+    // have landed between then and now (it serializes on the SAME install
+    // lock, so an in-flight handover never overlaps a live disable — a
+    // disable that completed before our lock acquisition is what this
+    // catches). Re-verify immediately before the irreversible flip.
+    const schedulerRecheck = options.probes?.schedulerStatus !== undefined
+      ? await options.probes.schedulerStatus()
+      : await probeSchedulerEnabled(context, options.env);
+    if (!schedulerRecheck.ok || schedulerRecheck.registered !== true || schedulerRecheck.enabled !== true) {
+      const reason = !schedulerRecheck.ok
+        ? `service_host_scheduler_status_unavailable:${schedulerRecheck.reason}`
+        : 'service_host_scheduler_not_enabled';
+      const rollback = transitionWorkspaceBackgroundExecution({
+        manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'abort_handover', operationId, expectedGeneration: preparingGeneration,
+      });
+      record('cas_flip', 'aborted', `scheduler_recheck:${reason}${rollback.ok ? '' : ` (abort_handover failed: ${rollback.ok === false ? rollback.reason : '?'})`}`);
+      return {
+        ok: false,
+        outcome: 'blocked',
+        reason,
+        nextAction: 'The Service Host scheduler was disabled or became unreadable during the handover; the preparing state was rolled back — enable it (`pd service enable`) and rerun `pd service handover`.',
+        operationId,
+      };
+    }
+
     // ── 5. The single CAS flip. ──
     const flip = transitionWorkspaceBackgroundExecution({
       manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'complete_handover', operationId, expectedGeneration: preparingGeneration,
@@ -953,10 +1110,39 @@ export async function runWorkspaceHandover(workspaceDir: string, options: Handov
       };
     }
 
+    // ── 6b. Final ownership re-verification (PRI-1282 r4 §7): the worker
+    // cycle verified, but 'completed' ALSO requires the authoritative
+    // marker to still prove THIS operation's commit — status
+    // service_host_owned at exactly the committed generation, backed by the
+    // persisted commit intent bound to this operationId. A flipped-away or
+    // re-generated marker means something else owns the workspace now —
+    // report a resumable verification failure, never a completed handover.
+    const finalOwnership = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
+    const persistedIntent = readHandoverIntent(context.pdHome, context.workspaceDir, operationId);
+    const verificationDefect: string | null =
+      finalOwnership.status !== 'service_host_owned'
+        ? `final_ownership_status:${finalOwnership.status}`
+        : finalOwnership.generation !== preparingGeneration + 1
+          ? `final_ownership_generation:${finalOwnership.generation}!=${preparingGeneration + 1}`
+          : persistedIntent === null
+            ? 'commit_intent_absent'
+            : persistedIntent.operationId !== operationId || persistedIntent.committedGeneration !== finalOwnership.generation
+              ? 'commit_intent_mismatch'
+              : null;
+    if (verificationDefect !== null) {
+      return {
+        ok: false,
+        outcome: 'failed',
+        reason: `final_ownership_verification_failed:${verificationDefect}`,
+        nextAction: 'The first managed cycle verified but the final ownership state cannot be proven to be THIS operation\'s commit; rerun `pd service handover --resume` with this operationId to re-verify, or `pd service rollback` to return the workspace to the Gateway.',
+        operationId,
+      };
+    }
+    record('final_ownership_verification', 'verified', `generation=${preparingGeneration + 1}`);
+
     // ── 7. Completion evidence (write-once, operationId keyed). The
     // handover only reports completion when BOTH the verified cycle and
     // this write landed. ──
-    const finalOwnership = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
     const evidence: HandoverEvidence = {
       schemaVersion: HANDOVER_EVIDENCE_SCHEMA,
       kind: 'handover',
@@ -1002,9 +1188,17 @@ export type RollbackRunResult =
     }
   | { ok: false; outcome: 'blocked' | 'failed'; reason: string; nextAction: string; operationId?: string };
 
-export async function runWorkspaceRollback(workspaceDir: string, options: HandoverContextInput): Promise<RollbackRunResult> {
+export interface RollbackRunOptions extends HandoverContextInput {
+  /** Continue a named rollback operation (PRI-1282 r4 §8). */
+  readonly resumeOperationId?: string;
+}
+
+export async function runWorkspaceRollback(workspaceDir: string, options: RollbackRunOptions): Promise<RollbackRunResult> {
   const context = establishHandoverContext(workspaceDir, options);
   if (!context.ok) return { ok: false, outcome: 'blocked', reason: context.reason, nextAction: context.nextAction };
+  if (options.resumeOperationId !== undefined && !isSafeOperationId(options.resumeOperationId)) {
+    return { ok: false, outcome: 'blocked', reason: 'operation_id_invalid', nextAction: 'operationId may only contain letters, digits, dots, underscores and hyphens (1-128 chars).' };
+  }
   const startedAt = nowIso();
   const steps: { step: string; at: string; outcome: string; detail?: string }[] = [];
   const record = (step: string, outcome: string, detail?: string): void => {
@@ -1029,7 +1223,69 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
       return { ok: false, outcome: 'blocked', reason: `ownership_unreadable:${initial.reason}`, nextAction: initial.nextAction };
     }
     const resumeOp = initial.status === 'rollback_pending' ? initial.record.operationId : undefined;
-    const operationId = resumeOp ?? `rollback-${crypto.randomUUID()}`;
+
+    // ── --resume arbitration (PRI-1282 r4 §5/§8): an explicit resume may
+    // only continue a REAL in-flight or already-committed operation.
+    if (options.resumeOperationId !== undefined && resumeOp !== undefined && options.resumeOperationId !== resumeOp) {
+      return {
+        ok: false,
+        outcome: 'blocked',
+        reason: 'operation_id_mismatch',
+        nextAction: `The in-flight rollback is ${resumeOp}; --resume must name that exact operation (or omit --resume to adopt it).`,
+        operationId: resumeOp ?? undefined,
+      };
+    }
+    if (options.resumeOperationId !== undefined && resumeOp === undefined) {
+      const resumeIntent = readRollbackIntent(context.pdHome, context.workspaceDir, options.resumeOperationId);
+      const canCompleteEvidence = initial.status === 'legacy_owned'
+        && resumeIntent !== null
+        && resumeIntent.workspaceDir === context.workspaceDir
+        && resumeIntent.committedGeneration === initial.generation;
+      if (!canCompleteEvidence) {
+        return {
+          ok: false,
+          outcome: 'blocked',
+          reason: 'no_resumable_operation',
+          nextAction: `No in-flight or committed-but-unevidenced rollback exists for this workspace to resume as '${options.resumeOperationId}'.`,
+          operationId: options.resumeOperationId,
+        };
+      }
+      // Evidence-only continuation: ownership already returned to the
+      // Gateway at exactly the intent's committed generation — rewrite ONLY
+      // the missing evidence, never re-run the transition (§8.6).
+      record('resume', 'evidence_only_continuation', `generation=${initial.generation}`);
+      const evidence: HandoverEvidence = {
+        schemaVersion: HANDOVER_EVIDENCE_SCHEMA,
+        kind: 'rollback',
+        operationId: options.resumeOperationId,
+        workspaceDir: context.workspaceDir,
+        startedAt,
+        completedAt: nowIso(),
+        outcome: 'completed',
+        steps,
+        finalOwnership: initial,
+      };
+      const written = writeHandoverEvidence(evidence, context.pdHome);
+      if (!written.ok) {
+        return {
+          ok: false,
+          outcome: 'failed',
+          reason: `rollback_evidence_write_failed:${written.reason ?? 'io'}`,
+          nextAction: 'Ownership already returned to the Gateway but the rollback evidence still cannot be persisted; fix the write failure and rerun `pd service rollback --resume` with this operationId.',
+          operationId: options.resumeOperationId,
+        };
+      }
+      return {
+        ok: true,
+        outcome: 'completed',
+        operationId: options.resumeOperationId,
+        workspaceDir: context.workspaceDir,
+        generation: initial.generation,
+        gatewayResumption: 'not_verified_gateway_not_running',
+        evidencePath: written.path,
+      };
+    }
+    const operationId = resumeOp ?? options.probes?.mintOperationId?.('rollback') ?? `rollback-${crypto.randomUUID()}`;
 
     // ── 4-6. begin_rollback FIRST, then drain, then complete_rollback
     // (PRI-1282 review P1-1 — ordering, not a new lock): flipping the marker
@@ -1079,6 +1335,23 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
     }
     record('worker_drain', 'workspace_run_mutex_free');
 
+    // Persist the rollback intent BEFORE the CAS (PRI-1282 r4 §8): a run
+    // killed between complete_rollback and the evidence write would
+    // otherwise leave the flip unattributable — --resume verifies against
+    // this intent and only rewrites the missing evidence.
+    const intentWritten = writeRollbackIntent({
+      schemaVersion: ROLLBACK_INTENT_SCHEMA,
+      kind: 'rollback',
+      operationId,
+      workspaceDir: context.workspaceDir,
+      pendingGeneration: rollbackGeneration,
+      committedGeneration: rollbackGeneration + 1,
+      writtenAt: nowIso(),
+    }, context.pdHome);
+    if (!intentWritten.ok) {
+      return { ok: false, outcome: 'failed', reason: `rollback_intent_write_failed:${intentWritten.reason ?? 'io'}`, nextAction: 'The rollback intent could not be persisted; the workspace stays rollback_pending — fix the write failure and rerun `pd service rollback --resume` with this operationId.', operationId };
+    }
+
     const finish = transitionWorkspaceBackgroundExecution({
       manifestPath: context.manifestPath, workspaceDir: context.workspaceDir, kind: 'complete_rollback', operationId, expectedGeneration: rollbackGeneration,
     });
@@ -1086,6 +1359,27 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
       return { ok: false, outcome: 'failed', reason: `complete_rollback_failed:${finish.reason}`, nextAction: 'The workspace is rollback_pending — rerun the rollback command to complete it (fail-closed, never auto-cleared).', operationId };
     }
     record('complete_rollback', 'legacy_owned', `generation=${finish.record.generation}`);
+
+    // ── 6b. Final ownership re-verification (PRI-1282 r4 §7): 'completed'
+    // requires the authoritative marker to prove THIS rollback's commit —
+    // legacy_owned at exactly the intent's committed generation.
+    const verifyOwnership = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
+    const verificationDefect: string | null =
+      verifyOwnership.status !== 'legacy_owned'
+        ? `final_ownership_status:${verifyOwnership.status}`
+        : verifyOwnership.generation !== rollbackGeneration + 1
+          ? `final_ownership_generation:${verifyOwnership.generation}!=${rollbackGeneration + 1}`
+          : null;
+    if (verificationDefect !== null) {
+      return {
+        ok: false,
+        outcome: 'failed',
+        reason: `final_ownership_verification_failed:${verificationDefect}`,
+        nextAction: 'The rollback CAS committed but the final ownership state cannot be proven to be THIS operation\'s commit; rerun `pd service rollback --resume` with this operationId to re-verify.',
+        operationId,
+      };
+    }
+    record('final_ownership_verification', 'verified', `generation=${rollbackGeneration + 1}`);
 
     // ── 7-9. Observe the Gateway's resumption (bounded; honest NOT_VERIFIED
     // when the Gateway is not running — the start gate guarantees resumption
@@ -1125,7 +1419,6 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
     }
     record('gateway_resumption', gatewayResumption);
 
-    const finalOwnership = readWorkspaceBackgroundOwnership({ manifestPath: context.manifestPath, workspaceDir: context.workspaceDir });
     const evidence: HandoverEvidence = {
       schemaVersion: HANDOVER_EVIDENCE_SCHEMA,
       kind: 'rollback',
@@ -1135,7 +1428,7 @@ export async function runWorkspaceRollback(workspaceDir: string, options: Handov
       completedAt: nowIso(),
       outcome: 'completed',
       steps,
-      finalOwnership,
+      finalOwnership: verifyOwnership,
     };
     const written = writeHandoverEvidence(evidence, context.pdHome);
     // PRI-1282 review P2-3: the rollback did not complete if its audit

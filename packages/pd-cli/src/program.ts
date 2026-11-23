@@ -1034,6 +1034,7 @@ serviceCmd
   .description('Roll ONE workspace back to the legacy consumer (stop Service Host cycles → CAS back to legacy → observe Gateway resumption)')
   .requiredOption('-w, --workspace <path>', 'Canonical workspace directory (required)')
   .option('--pd-home <dir>', 'Trusted PD home injection')
+  .option('--resume <operationId>', 'Resume a specific in-flight or committed-but-unevidenced rollback')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     const { handleServiceRollback } = await import('./commands/service-handover.js');
@@ -1041,6 +1042,7 @@ serviceCmd
       workspace: opts.workspace,
       json: opts.json === true,
       ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}),
+      ...(typeof opts.resume === 'string' ? { resumeOperationId: opts.resume } : {}),
     });
   });
 
