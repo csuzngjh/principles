@@ -37,6 +37,7 @@ import { SqliteContextAssembler } from '../store/context/sqlite-context-assemble
 import type { TrajectoryTurnReader, TrajectoryUserTurn } from '../store/context/trajectory-turn-reader.js';
 import { validatePainSubmitReceipt, recoverTaskIdentityFromReceipt } from '../pain-receipt-recovery.js';
 import { parsePainIngressV1Payload, checkIngressTopLevelConsistency } from '../pain-ingress-payload.js';
+import type { SourceAuthorizationState, SourceMaterialAuthorizationPort } from '../source-material-authorization.js';
 
 let tmpDir: string;
 let stateManager: RuntimeStateManager;
@@ -933,5 +934,126 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect(report.errors.some((line) => line.includes('target_evidence_reconcile_unconfigured') && line.includes(taskId))).toBe(true);
     const task = await stateManager.getTask(taskId);
     expect(task?.status).toBe('pending');
+  });
+
+  describe('devin SEC_0001 (SPEC TD §2.2 ruling 4) — the LAST authorization check sits right before the evidence write', () => {
+    const portReturning = (state: SourceAuthorizationState): SourceMaterialAuthorizationPort => ({
+      isHostSourceMaterialAuthorized: () => state,
+    });
+    const creationTimeClass = { status: 'unavailable', reason: 'not_applicable_unbound' };
+
+    it('consent revoked BETWEEN the read and the write → nothing from the revoked source is persisted; the task is reclassified blocked', async () => {
+      const painId = 'mcp_1700000001273_a0000013';
+      const taskId = createDiagnosticianTaskId(painId);
+      await submitTargetingTurn10(painId);
+      const report = await reconcileWaitingTargetEvidenceTasks({
+        stateManager,
+        // The reader saw a GRANTED ledger (the revocation lands after this read)…
+        readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+        // …and the pre-write check sees the revocation.
+        sourceMaterialAuthorization: portReturning({ authorized: false, reason: 'consent_revoked' }),
+        nowIso: new Date().toISOString(),
+      });
+      expect(report).toMatchObject({ checked: 1, flipped: 0, backfilled: 0, blocked: 1 });
+      const diagnostic = await readDiagnostic(taskId);
+      const recovery = diagnostic.recovery as Record<string, unknown>;
+      expect(recovery.state).toBe('blocked_by_source_material_consent');
+      expect(recovery.reasonCode).toBe('target_turn_source_material_consent_revoked');
+      // No excerpt of the revoked source reached the task…
+      expect(diagnostic.evidence).toEqual([]);
+      expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual(creationTimeClass);
+      // …while the already-verified submission identity is untouched, and the
+      // blocked task stays out of the diagnosis queue.
+      expect(diagnostic.sessionIdHint).toBe('rollout-target');
+      expect(await pickDiagnosticianCandidate(stateManager, 5, new Date().toISOString())).toBeNull();
+    });
+
+    it('positive control: a GRANTED ledger at the pre-write check still backfills — the gate never over-blocks', async () => {
+      const painId = 'mcp_1700000001273_a0000014';
+      const taskId = createDiagnosticianTaskId(painId);
+      await submitTargetingTurn10(painId);
+      const report = await reconcileWaitingTargetEvidenceTasks({
+        stateManager,
+        readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+        sourceMaterialAuthorization: portReturning({ authorized: true }),
+        nowIso: new Date().toISOString(),
+      });
+      expect(report).toMatchObject({ flipped: 1, backfilled: 1, blocked: 0 });
+      expect((await readDiagnostic(taskId)).evidence).toEqual(TURN10_ENTRIES);
+    });
+
+    it('the check is a LIVE read PER TASK, never hoisted once per pass: a revocation landing mid-pass blocks only the later task', async () => {
+      const first = 'mcp_1700000001273_a0000015';
+      const second = 'mcp_1700000001273_a0000016';
+      await submitTargetingTurn10(first);
+      await submitTargetingTurn10(second);
+      let calls = 0;
+      const report = await reconcileWaitingTargetEvidenceTasks({
+        stateManager,
+        readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+        sourceMaterialAuthorization: {
+          isHostSourceMaterialAuthorized: (): SourceAuthorizationState => {
+            calls += 1;
+            return calls === 1 ? { authorized: true } : { authorized: false, reason: 'consent_revoked' };
+          },
+        },
+        nowIso: new Date().toISOString(),
+      });
+      expect(report).toMatchObject({ checked: 2, flipped: 1, backfilled: 1, blocked: 1 });
+      expect(calls).toBe(2);
+      // Exactly one task carries the target evidence; the other carries none.
+      const states = await Promise.all([first, second].map(async (painId) => {
+        const diagnostic = await readDiagnostic(createDiagnosticianTaskId(painId));
+        return {
+          evidence: (diagnostic.evidence as unknown[]).length,
+          state: (diagnostic.recovery as Record<string, unknown>).state,
+        };
+      }));
+      expect(states).toEqual(expect.arrayContaining([
+        { evidence: 2, state: 'ready_for_diagnosis' },
+        { evidence: 0, state: 'blocked_by_source_material_consent' },
+      ]));
+    });
+
+    it('a persisted hostKind that is missing or foreign cannot be authorization-checked → fail closed: no write, a loud error, still waiting', async () => {
+      // rc-5: inherited-property names are keys of Object.prototype, not hosts —
+      // the guard must go through Object.hasOwn, never a truthy lookup.
+      const absent = Symbol('absent');
+      const invalidHostKinds: readonly unknown[] = ['constructor', '__proto__', 'toString', 'not-a-host', '', 42, null, absent];
+      const stripOrSetHostKind = async (taskId: string, hostKind: unknown): Promise<void> => {
+        const diagnostic = await readDiagnostic(taskId);
+        const next: Record<string, unknown> = { ...diagnostic };
+        if (hostKind === absent) delete next.hostKind;
+        else next.hostKind = hostKind;
+        const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+          taskId,
+          JSON.stringify(diagnostic),
+          { diagnosticJson: JSON.stringify(next) },
+        );
+        expect(updated).not.toBeNull();
+      };
+
+      for (const [index, hostKind] of invalidHostKinds.entries()) {
+        const painId = `mcp_1700000001273_c000000${index}`;
+        const taskId = createDiagnosticianTaskId(painId);
+        await submitTargetingTurn10(painId);
+        await stripOrSetHostKind(taskId, hostKind);
+        const report = await reconcileWaitingTargetEvidenceTasks({
+          stateManager,
+          readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+          // Even a permissive port must never authorize a host it was not asked about.
+          sourceMaterialAuthorization: portReturning({ authorized: true }),
+          nowIso: new Date().toISOString(),
+          // Every waiting task (earlier iterations stay waiting too) is examined.
+          limit: 25,
+        });
+        expect(report.flipped + report.blocked).toBe(0);
+        expect(report.backfilled).toBe(0);
+        expect(report.errors.some((line) => line.includes('target_evidence_reconcile_host_kind_invalid') && line.includes(taskId))).toBe(true);
+        const diagnostic = await readDiagnostic(taskId);
+        expect((diagnostic.recovery as Record<string, unknown>).state).toBe('waiting_for_target_evidence');
+        expect(diagnostic.evidence).toEqual([]);
+      }
+    });
   });
 });

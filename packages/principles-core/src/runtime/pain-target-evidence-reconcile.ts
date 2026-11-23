@@ -22,6 +22,15 @@
  * (the picker already excludes that state; only a newly authorized target
  * turn may unblock it).
  *
+ * SPEC TD §2.2 ruling 4: the evidence write is preceded by ONE more live
+ * authorization read through the existing PRI-1283 R2 port (wired by the
+ * host adapter). A consent revocation that lands between the reader's
+ * read-time gate and the write therefore persists nothing — the task is
+ * reclassified instead. The ledger is a file and the task a SQLite row, so
+ * no single transaction spans both: the remaining window is the statement
+ * sequence between that last read and the CAS, and the downstream R2
+ * assembly/model-boundary filters plus the R3 sweep remain the backstop.
+ *
  * Bounded by design: at most `limit` (default 5) waiting tasks per cycle, no
  * new Task, no queue, no scheduler, no transcript scanning — the only input
  * beyond the task rows is the caller-injected `readTargetTurnEvidence`
@@ -30,7 +39,11 @@
 import type { RuntimeStateManager } from './store/runtime-state-manager.js';
 import type { TaskRecord } from './task-status.js';
 import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, type PainRecoveryDisposition } from './pain-admission-disposition.js';
-import type { SourceMaterialDenialReason } from './source-material-authorization.js';
+import type {
+  SourceMaterialAuthorizationPort,
+  SourceMaterialDenialReason,
+  SourceMaterialHostKind,
+} from './source-material-authorization.js';
 import type { PainEvidenceEntry } from './pain-signal-bridge.js';
 
 /** Bounded per-cycle work: waiting tasks examined per reconcile run. */
@@ -99,6 +112,16 @@ export interface ReconcileWaitingTargetEvidenceInput {
    * through a boolean and stay waiting under this mode, exactly as before.
    */
   readonly targetTurnTextAvailable?: (sessionId: string, targetTurnId: string) => boolean;
+  /**
+   * SPEC-PD-FEEDBACK-RESILIENCE-001 TD §2.2 ruling 4 (devin SEC_0001): the
+   * LAST source-material authorization check, taken immediately before the
+   * evidence CAS. The reader gated on the ledger when it READ; a revocation
+   * landing between that read and this write means NO write — the `available`
+   * read is turned into a denial and the task is reclassified instead. This
+   * is the existing PRI-1283 R2 port (a live ledger read per call), not a new
+   * mechanism. Unwired ⇒ the reader's read-time gate is the only check.
+   */
+  readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
   readonly nowIso: string;
   readonly limit?: number;
 }
@@ -108,7 +131,41 @@ interface WaitingTaskFacts {
   readonly diagnosticText: string;
   readonly sessionId: string;
   readonly targetTurnId: string;
+  /** The task's own persisted `hostKind` (untrusted diagnostic_json) — the
+   * host whose consent governs the evidence this task may receive. */
+  readonly hostKind: unknown;
   readonly existingDisposition: PainRecoveryDisposition;
+}
+
+/** Every consent-governed host, exhaustively (a `Record` over the union, so
+ * adding a host without listing it here fails the typecheck). Keyed lookup
+ * goes through `Object.hasOwn` — `'constructor'` / `'__proto__'` are not
+ * hosts (rc-5). */
+const SOURCE_MATERIAL_HOST_KINDS: Readonly<Record<SourceMaterialHostKind, true>> = {
+  codex: true, workbuddy: true, openclaw: true,
+};
+
+function isSourceMaterialHostKind(value: unknown): value is SourceMaterialHostKind {
+  return typeof value === 'string' && Object.hasOwn(SOURCE_MATERIAL_HOST_KINDS, value);
+}
+
+type PreWriteAuthorizationGate =
+  | { readonly outcome: 'authorized' }
+  | { readonly outcome: 'denied'; readonly reason: SourceMaterialDenialReason }
+  | { readonly outcome: 'host_invalid' };
+
+/**
+ * Ruling 4: one live authorization read for the task's governing host, taken
+ * right before the evidence write. A persisted `hostKind` that is missing or
+ * foreign cannot be authorization-checked — such a write fails closed
+ * (`host_invalid`), it never skips the check.
+ */
+function preWriteAuthorizationGate(hostKind: unknown, port: SourceMaterialAuthorizationPort): PreWriteAuthorizationGate {
+  if (!isSourceMaterialHostKind(hostKind)) return { outcome: 'host_invalid' };
+  const decision = port.isHostSourceMaterialAuthorized(hostKind);
+  return decision.authorized
+    ? { outcome: 'authorized' }
+    : { outcome: 'denied', reason: decision.reason };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -181,6 +238,7 @@ function parseWaitingTaskFacts(task: TaskRecord): WaitingTaskFacts | null {
     diagnosticText: task.diagnosticJson,
     sessionId,
     targetTurnId,
+    hostKind: parsed.hostKind,
     existingDisposition: {
       schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
       state: 'waiting_for_target_evidence',
@@ -300,7 +358,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
       errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
       continue;
     }
-    const read = resolveRead(facts.sessionId, facts.targetTurnId);
+    let read = resolveRead(facts.sessionId, facts.targetTurnId);
     if (read.status === 'not_found') {
       stillWaiting += 1;
       continue;
@@ -316,6 +374,23 @@ export async function reconcileWaitingTargetEvidenceTasks(
       errors.push(`target_evidence_read_failed:taskId=${task.taskId}:${read.reason.slice(0, 80)}`);
       stillWaiting += 1;
       continue;
+    }
+    // TD §2.2 ruling 4 (devin SEC_0001): the LAST authorization check before
+    // any evidence is written. Only `available` reaches a write of source
+    // material — the legacy flip-only mode persists nothing from the source,
+    // so it is not gated here. A denial found at this point reclassifies the
+    // task exactly like a read-time denial: nothing from the revoked source
+    // is persisted.
+    if (read.status === 'available' && input.sourceMaterialAuthorization !== undefined) {
+      const gate = preWriteAuthorizationGate(facts.hostKind, input.sourceMaterialAuthorization);
+      if (gate.outcome === 'host_invalid') {
+        // Fail closed: a write whose governing host cannot be determined
+        // cannot be authorization-checked, so it does not happen (rc-9).
+        errors.push(`target_evidence_reconcile_host_kind_invalid:taskId=${task.taskId}`);
+        stillWaiting += 1;
+        continue;
+      }
+      if (gate.outcome === 'denied') read = { status: 'blocked_by_consent', reason: gate.reason };
     }
     let parsedRecord: Record<string, unknown>;
     try {

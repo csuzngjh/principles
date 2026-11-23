@@ -417,9 +417,13 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
         // the flip CAS backfills the arrived evidence + evidenceClass onto
         // the SAME task, and a source-material denial reclassifies the task
         // to blocked_by_source_material_consent instead of waiting.
+        // SPEC TD §2.2 ruling 4: the SAME consent ledger is read once more
+        // right before the evidence write (the existing PRI-1283 R2 port), so
+        // a revocation landing between the read and the write persists nothing.
         targetEvidenceReconcile = await reconcileWaitingTargetEvidenceTasks({
           stateManager: handle.stateManager,
           readTargetTurnEvidence: (sessionId, turnId) => readCodexTargetTurnEvidence(path.resolve(workspaceDir), sessionId, turnId),
+          sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(path.resolve(workspaceDir)),
           nowIso: new Date().toISOString(),
         });
         if (targetEvidenceReconcile.flipped > 0 || targetEvidenceReconcile.blocked > 0 || targetEvidenceReconcile.errors.length > 0) {

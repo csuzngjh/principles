@@ -645,13 +645,23 @@ describe('PRI-1273 (A2) — target body late: submit → catch-up → auto-backf
       // writes the whole file back rather than stat-then-append.
       const heldContent = fs.readFileSync(ws.transcriptPath, 'utf8');
       const heldSize = Buffer.byteLength(heldContent, 'utf8');
+      const tailStart = heldSize - Buffer.byteLength(truncatedTail, 'utf8');
       const heldCheckpoint = checkpointOf();
-      expect(heldCheckpoint).not.toBeNull();
-      expect(heldCheckpoint ?? 0).toBeLessThan(heldSize);
+      // The checkpoint is EXACTLY at the start of the partial tail — the
+      // decoder read everything before it and is holding the tail itself
+      // (a bare `< fileSize` would also pass if it had stopped earlier, e.g.
+      // on a batch bound; and reaching EOF after completion cannot by itself
+      // prove the tail had been reached before).
+      expect(heldCheckpoint).toBe(tailStart);
       const rowBefore = diagnosticRow(ws.root, taskId);
       const diagnosticBefore = JSON.parse(rowBefore?.diagnostic_json ?? '{}') as Record<string, unknown>;
       const evidenceBefore = diagnosticBefore.evidence;
       const entryCountBefore = (diagnosticBefore.painIngress as Record<string, unknown>).evidenceClass;
+      // The baseline being compared against is pinned first: exactly the two
+      // target-turn rows (user + assistant) with a matching class — otherwise
+      // an empty or pre-duplicated array would satisfy the comparison below.
+      expect(evidenceBefore).toHaveLength(2);
+      expect(entryCountBefore).toEqual({ status: 'available', entryCount: 2 });
 
       fs.writeFileSync(ws.transcriptPath, heldContent + tailRemainder + '\n');
       const runsBefore = runCount(ws.root, taskId);
