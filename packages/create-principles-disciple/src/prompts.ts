@@ -167,32 +167,32 @@ export async function promptRuntimeProfile(): Promise<RuntimeProfileInput | unde
  */
 async function promptHost(defaultHost: HostSelection = 'none'): Promise<HostSelection> {
   return await select({
-    message: 'Select host adapter / 选择宿主适配器 (independent of the PD background Service Host)',
+    message: t('service_host_host_select_message'),
     choices: [
       {
-        name: 'Service Host only — no host adapter (recommended default)',
+        name: t('service_host_host_none_name'),
         value: 'none' as const,
-        description: 'Installs PD core, CLI, Console and the PD-owned background Service Host. No host adapter is installed; the workspace waits for a host binding.',
+        description: t('service_host_host_none_desc'),
       },
       {
         name: 'OpenClaw',
         value: 'openclaw' as const,
-        description: 'Adds the OpenClaw plugin (hooks / host events / evidence). The PD Service Host still owns the background cycle.',
+        description: t('service_host_host_openclaw_desc'),
       },
       {
         name: 'Codex CLI',
         value: 'codex' as const,
-        description: 'Adds the Codex hook adapter. The PD Service Host owns the background cycle.',
+        description: t('service_host_host_codex_desc'),
       },
       {
         name: 'WorkBuddy',
         value: 'workbuddy' as const,
-        description: 'Registers the PD plugin into WorkBuddy\'s marketplace. Automatic Pain detection is NOT available in WorkBuddy — record pain with the explicit "PD记录痛苦：" prefix.',
+        description: t('service_host_host_workbuddy_desc'),
       },
       {
         name: 'All hosts (OpenClaw + Codex)',
         value: 'all' as const,
-        description: 'Installs both OpenClaw and Codex adapters. The PD Service Host still owns the background cycle.',
+        description: t('service_host_host_all_desc'),
       },
     ],
     default: defaultHost,
@@ -205,14 +205,14 @@ async function promptHost(defaultHost: HostSelection = 'none'): Promise<HostSele
  * consent — no hidden persistent trigger.
  */
 async function promptServiceHost(): Promise<boolean> {
-  console.log('\nPD Service Host / PD 后台服务');
-  console.log('  The PD Service Host is PD-owned: it owns the automatic background cycle.');
-  console.log('  - It registers a task in YOUR operating system scheduler (current user, no admin rights).');
-  console.log('  - It runs one bounded cycle every 120 seconds while you are logged in.');
-  console.log('  - It works without Companion, Console, or any host gateway running.');
-  console.log('  - You can stop it at any time with: pd service disable (data and pending tasks are kept).');
+  console.log(`\n${t('service_host_prompt_title')}`);
+  console.log(`  ${t('service_host_prompt_intro')}`);
+  console.log(`  ${t('service_host_prompt_os')}`);
+  console.log(`  ${t('service_host_prompt_interval')}`);
+  console.log(`  ${t('service_host_prompt_independent')}`);
+  console.log(`  ${t('service_host_prompt_disable')}`);
   return await confirm({
-    message: 'Enable the PD Service Host background scheduler now? (recommended)',
+    message: t('service_host_prompt_confirm'),
     default: true,
   });
 }
@@ -300,7 +300,7 @@ function showMvpCoreChannels(): void {
 async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean> {
   console.log(`\n${t('install_config')}`);
   console.log(`  ${t('language')}: ${options.language}`);
-  console.log(`  Host adapter: ${options.host === 'none' ? 'none (PD Service Host only)' : options.host ?? 'none (PD Service Host only)'}`);
+  console.log(`  ${t('install_host_adapter')}: ${options.host === 'none' ? t('install_host_none') : options.host ?? t('install_host_none')}`);
   console.log(`  ${t('mode')}: ${options.mode === 'force' ? t('force_overwrite') : t('smart_merge')}`);
   console.log(`  ${t('workspace')}: ${options.workspaceDir}`);
   console.log(`  ${t('mvp_channels_enabled')}: ${MVP_CHANNELS.join(', ')}`);
@@ -308,16 +308,16 @@ async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean>
   // confirmation — the operator must see the persistent OS trigger before
   // accepting the install.
   if (options.enableServiceHost === true) {
-    console.log('  Background execution: PD Service Host scheduler ENABLED');
-    console.log('    - registers with YOUR OS scheduler (current user, no admin rights)');
-    console.log('    - one bounded cycle every 120 seconds while you are logged in');
-    console.log('    - stop anytime with: pd service disable (data and pending tasks are kept)');
+    console.log(`  ${t('background_scheduler_enabled_summary')}`);
+    console.log(`    ${t('background_os_registration')}`);
+    console.log(`    ${t('background_os_cycle')}`);
+    console.log(`    ${t('background_os_disable')}`);
   } else if (options.registerServiceHost === true) {
-    console.log('  Background execution: PD Service Host scheduler REGISTERED but DISABLED');
-    console.log('    - arm it later with: pd service enable');
+    console.log(`  ${t('background_scheduler_registered_summary')}`);
+    console.log(`    ${t('background_scheduler_enable_hint')}`);
   } else {
-    console.log('  Background execution: PD Service Host scheduler NOT enabled');
-    console.log('    - arm it later with: pd service install && pd service enable');
+    console.log(`  ${t('background_scheduler_disabled_summary')}`);
+    console.log(`    ${t('background_scheduler_install_hint')}`);
   }
   // WorkBuddy has its OWN write scope beyond the generic workspace (SPEC
   // workbuddy-host-adapter §6): show exactly what will be written and when it

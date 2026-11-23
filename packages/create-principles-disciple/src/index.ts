@@ -112,24 +112,29 @@ export function toInstallJsonOutput(
  */
 function printServiceHostSummary(serviceHost: NonNullable<Awaited<ReturnType<typeof install>>['serviceHost']>, host: string): void {
   console.log();
-  console.log('Background execution (PD Service Host):');
-  console.log(`  Scheduler ...................... ${serviceHost.scheduler.state}${serviceHost.scheduler.registered === true ? ' (registered)' : ''}${serviceHost.scheduler.enabled === true ? ', enabled' : ''}`);
-  console.log(`  Trigger interval ............... ${serviceHost.scheduler.triggerIntervalMs ?? 'unknown'} ms`);
+  console.log(t('background_execution_title'));
+  console.log(`  ${t('background_scheduler')} ...................... ${serviceHost.scheduler.state}${serviceHost.scheduler.registered === true ? ' (registered)' : ''}${serviceHost.scheduler.enabled === true ? ', enabled' : ''}`);
+  console.log(`  ${t('background_trigger_interval')} ............... ${serviceHost.scheduler.triggerIntervalMs ?? 'unknown'} ms`);
   if (serviceHost.provisioning !== null) {
     const p = serviceHost.provisioning;
-    console.log(`  Workspace owner ................ ${p.ownershipAfter}${p.generation !== null ? ` (generation ${p.generation})` : ''}`);
-    console.log(`  Worker adapter ................. ${host === 'none' ? 'none — waiting_for_host_binding' : host}`);
-    console.log(`  Worker readiness ............... ${p.readiness}${p.readinessDetail !== undefined ? ` (${p.readinessDetail})` : ''}`);
-    console.log(`  First real cycle ............... ${p.firstCycle.attempted ? (p.firstCycle.ok ? `completed (executed=${p.firstCycle.executed}, progressed=${p.firstCycle.progressed})` : `not completed (${p.firstCycle.reason ?? p.firstCycle.outcome ?? 'unknown'})`) : 'not attempted'}`);
-    if (p.evidencePath !== undefined) console.log(`  Evidence ....................... ${p.evidencePath}`);
+    console.log(`  ${t('background_workspace_owner')} ................ ${p.ownershipAfter}${p.generation !== null ? ` (generation ${p.generation})` : ''}`);
+    console.log(`  ${t('background_worker_adapter')} ................. ${host === 'none' ? 'none — waiting_for_host_binding' : host}`);
+    console.log(`  ${t('background_worker_readiness')} ............... ${p.readiness}${p.readinessDetail !== undefined ? ` (${p.readinessDetail})` : ''}`);
+    const cycle = p.firstCycle.attempted
+      ? (p.firstCycle.ok
+          ? `completed (executed=${p.firstCycle.executed}, progressed=${p.firstCycle.progressed})`
+          : `not completed (${p.firstCycle.reason ?? p.firstCycle.outcome ?? 'unknown'})`)
+      : t('background_not_attempted');
+    console.log(`  ${t('background_first_cycle')} ............... ${cycle}`);
+    if (p.evidencePath !== undefined) console.log(`  ${t('background_evidence')} ....................... ${p.evidencePath}`);
   } else {
-    console.log(`  Workspace owner ................ ${serviceHost.freshInstall ? 'not provisioned' : 'unchanged (existing install)'}`);
+    console.log(`  ${t('background_workspace_owner')} ................ ${serviceHost.freshInstall ? t('background_not_provisioned') : t('background_unchanged')}`);
   }
   for (const warning of serviceHost.scheduler.warnings) console.log(`  ! ${warning}`);
   if (serviceHost.provisioning !== null) {
     for (const warning of serviceHost.provisioning.warnings) console.log(`  ! ${warning}`);
   }
-  console.log(`  next ........................... ${serviceHost.nextAction}`);
+  console.log(`  ${t('background_next')} ........................... ${serviceHost.nextAction}`);
 }
 
 async function runInstall(options: Record<string, unknown>): Promise<void> {
@@ -240,7 +245,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     logger.info(`Host: Codex CLI (OpenClaw not required)`);
   }
   if (!jsonMode && host === 'none') {
-    logger.info('Host: none — PD Service Host only (no host adapter will be installed)');
+    logger.info(`${t('install_host_adapter')}: ${t('install_host_none')}`);
   }
 
   // PRI-1278 Phase 5: --json alone means "non-interactive", NOT "accept the
@@ -504,7 +509,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       console.log(t('principles_disciple_setup'));
       console.log();
       console.log(t('detecting_environment'));
-      console.log(`  Host adapter ................... ${installOptions.host === 'none' ? 'none (PD Service Host only)' : installOptions.host}`);
+      console.log(`  ${t('install_host_adapter')} ................... ${installOptions.host === 'none' ? t('install_host_none') : installOptions.host}`);
       console.log(`  Node.js ........................ ${t('node_found')} (${env.nodeVersion})`);
       console.log();
       console.log(t('installing_mvp_components'));
