@@ -351,6 +351,8 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 
 **升级隔离**：同一 installer 只有在 manifest 于本次运行前**不存在**时才走上述路径。升级只做 refresh-if-registered，并输出 `pd service handover` 迁移入口；`--enable-service-host` 是升级时唯一允许启用调度器的来源。
 
+**延后初始化（Phase 5 review）**：全新安装若未获同意、调度器未启用或 readiness 失败，会写 `<pdHome>/service/install-provisioning.json` 的 `pendingProvisioning: true`（绑定 canonical workspace）。之后显式 `--enable-service-host` 的安装可在同一 run 内恢复初始化——条件是：该 pending 记录匹配、manifest 该 Workspace **仍无** ownership record、调度器复核 enabled。历史安装从未写过该记录，因此不会被隐式恢复。只启用调度器（`pd service enable`）不会改变所有权。
+
 **Service-Host-only**（`--host none`）：manifest `hosts: []` + `workspaces:[…]` 是合法形态；readiness 记为 `waiting_for_host_binding`，首次周期会记录 `no_adapter_supports_workspace`；状态契约新增 `hostBindingState`，绝不伪造宿主 Worker。
 
 ## 10. 测试矩阵

@@ -256,23 +256,29 @@ function managedNextAction(executions: readonly ManagedExecutionRecord[], empty:
   if (empty) {
     return 'No workspace is currently owned by the Service Host (effectiveOwner=service_host). This is a legal empty managed run — no Worker started and nothing was consumed. Ownership handover happens per-workspace in Phase 4/5 (SPEC §8.4); legacy consumers remain the unique automatic lifecycle owners.';
   }
+  // Compose EVERY outcome class: a waiting workspace must never hide another
+  // workspace's failure (the exit code still reflects it, but the summary is
+  // what the operator reads).
+  const parts: string[] = [];
   const waiting = executions.filter((e) => e.workspaceState === 'waiting_for_host_binding');
   if (waiting.length > 0) {
-    return `Managed run completed: ${waiting.length} workspace(s) are waiting for a host binding (Service-Host-only install). The Service Host owns their background lifecycle; no adapter exists yet, so nothing was consumed. Install a host adapter and bind the workspace — no ownership change is needed again.`;
+    parts.push(`${waiting.length} workspace(s) are waiting for a host binding (Service-Host-only install) — the Service Host owns their background lifecycle, no adapter exists yet, and nothing was consumed. Install a host adapter and bind the workspace; no ownership change is needed again.`);
   }
   const forbidden = executions.filter((e) => e.skipReason === 'handover_preparing_forbidden' || e.skipReason === 'rollback_pending_forbidden');
-  const notAuthorized = executions.filter((e) => e.skipReason !== undefined && e.skipReason.startsWith('workspace_not_authorized'));
-  const unhealthy = executions.filter((e) => e.admission === 'executed' && (e.workspaceState === 'failed' || e.workspaceState === 'degraded' || e.workspaceState === 'unavailable'));
   if (forbidden.length > 0) {
-    return `Managed run skipped ${forbidden.length} workspace(s) in an ownership transition state (handover_preparing / rollback_pending — never consumed by the scheduler). Let the §8.4 transition finish or roll back; the Service Host executes only stable service_host_owned workspaces.`;
+    parts.push(`Skipped ${forbidden.length} workspace(s) in an ownership transition state (handover_preparing / rollback_pending — never consumed by the scheduler). Let the §8.4 transition finish or roll back; the Service Host executes only stable service_host_owned workspaces.`);
   }
+  const notAuthorized = executions.filter((e) => e.skipReason !== undefined && e.skipReason.startsWith('workspace_not_authorized'));
   if (notAuthorized.length > 0) {
-    return `Managed run refused ${notAuthorized.length} service_host_owned workspace(s) whose discovery verdict is not authorized (${notAuthorized.map((e) => e.skipReason).join('; ')}). Fix the workspace registration/on-disk state before the next cycle; other workspaces were unaffected.`;
+    parts.push(`Refused ${notAuthorized.length} service_host_owned workspace(s) whose discovery verdict is not authorized (${notAuthorized.map((e) => e.skipReason).join('; ')}). Fix the workspace registration/on-disk state before the next cycle; other workspaces were unaffected.`);
   }
+  const unhealthy = executions.filter((e) => e.admission === 'executed' && (e.workspaceState === 'failed' || e.workspaceState === 'degraded' || e.workspaceState === 'unavailable'));
   if (unhealthy.length > 0) {
-    return `Managed run completed with ${unhealthy.length} unhealthy workspace execution(s); inspect each execution's reason and nextAction. Pending tasks are not lost — the next trigger retries from persisted task/lease state.`;
+    parts.push(`${unhealthy.length} unhealthy workspace execution(s); inspect each execution's reason and nextAction. Pending tasks are not lost — the next trigger retries from persisted task/lease state.`);
   }
-  return 'Managed run complete. Only service_host_owned workspaces were consumed; legacy workspaces keep their legacy owner.';
+  return parts.length > 0
+    ? `Managed run completed. ${parts.join(' ')}`
+    : 'Managed run complete. Only service_host_owned workspaces were consumed; legacy workspaces keep their legacy owner.';
 }
 
 async function completeManagedRun(identity: InstallIdentity, context: {

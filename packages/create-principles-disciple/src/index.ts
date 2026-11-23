@@ -106,33 +106,55 @@ export function toInstallJsonOutput(
 }
 
 /**
+ * PRI-1278 Phase 5 review: in INTERACTIVE mode the install mode must be chosen
+ * AFTER the final host and workspace are known. Pre-filling it from the
+ * pre-prompt (host-neutral) workspace made a user-selected Codex / WorkBuddy
+ * workspace inherit `force` and overwrite existing files. Explicit flags still
+ * win; non-interactive still needs a resolved default here.
+ */
+export function resolvePrePromptInstallMode(input: {
+  force: boolean;
+  smart: boolean;
+  nonInteractive: boolean;
+  workspaceInfo: { isFirstInstall: boolean };
+}): 'smart' | 'force' | undefined {
+  if (input.force) return 'force';
+  if (input.smart) return 'smart';
+  if (!input.nonInteractive) return undefined;
+  return input.workspaceInfo.isFirstInstall ? 'force' : 'smart';
+}
+
+/**
  * PRI-1278 Phase 5: the background-execution fact block. A new user must see
  * the scheduler, the workspace owner and the first real cycle — "Install
  * complete!" alone is not evidence of a working background.
  */
-function printServiceHostSummary(serviceHost: NonNullable<Awaited<ReturnType<typeof install>>['serviceHost']>, host: string): void {
+function printServiceHostSummary(serviceHost: NonNullable<Awaited<ReturnType<typeof install>>['serviceHost']>): void {
   console.log();
   console.log(t('background_execution_title'));
   console.log(`  ${t('background_scheduler')} ...................... ${serviceHost.scheduler.state}${serviceHost.scheduler.registered === true ? ' (registered)' : ''}${serviceHost.scheduler.enabled === true ? ', enabled' : ''}`);
   console.log(`  ${t('background_trigger_interval')} ............... ${serviceHost.scheduler.triggerIntervalMs ?? 'unknown'} ms`);
   if (serviceHost.provisioning !== null) {
-    const p = serviceHost.provisioning;
-    console.log(`  ${t('background_workspace_owner')} ................ ${p.ownershipAfter}${p.generation !== null ? ` (generation ${p.generation})` : ''}`);
-    console.log(`  ${t('background_worker_adapter')} ................. ${host === 'none' ? 'none — waiting_for_host_binding' : host}`);
-    console.log(`  ${t('background_worker_readiness')} ............... ${p.readiness}${p.readinessDetail !== undefined ? ` (${p.readinessDetail})` : ''}`);
-    const cycle = p.firstCycle.attempted
-      ? (p.firstCycle.ok
-          ? `completed (executed=${p.firstCycle.executed}, progressed=${p.firstCycle.progressed})`
-          : `not completed (${p.firstCycle.reason ?? p.firstCycle.outcome ?? 'unknown'})`)
-      : t('background_not_attempted');
-    console.log(`  ${t('background_first_cycle')} ............... ${cycle}`);
-    if (p.evidencePath !== undefined) console.log(`  ${t('background_evidence')} ....................... ${p.evidencePath}`);
+    for (const target of serviceHost.provisioning.targets) {
+      const p = target.outcome;
+      console.log(`  ${t('background_workspace_owner')} ................ ${target.workspaceDir}`);
+      console.log(`    owner=${p.ownershipAfter}${p.generation !== null ? ` (generation ${p.generation})` : ''}; adapter=${target.host === 'none' ? 'none — waiting_for_host_binding' : target.host}; readiness=${p.readiness}`);
+      const cycle = p.firstCycle.attempted
+        ? (p.firstCycle.ok
+            ? `completed (executed=${p.firstCycle.executed}, progressed=${p.firstCycle.progressed})`
+            : `not completed (${p.firstCycle.reason ?? p.firstCycle.outcome ?? 'unknown'})`)
+        : t('background_not_attempted');
+      console.log(`    first cycle: ${cycle}${p.pendingProvisioning === true ? ' (PENDING provisioning)' : ''}`);
+      if (p.evidencePath !== undefined) console.log(`    evidence: ${p.evidencePath}`);
+    }
   } else {
     console.log(`  ${t('background_workspace_owner')} ................ ${serviceHost.freshInstall ? t('background_not_provisioned') : t('background_unchanged')}`);
   }
   for (const warning of serviceHost.scheduler.warnings) console.log(`  ! ${warning}`);
   if (serviceHost.provisioning !== null) {
-    for (const warning of serviceHost.provisioning.warnings) console.log(`  ! ${warning}`);
+    for (const target of serviceHost.provisioning.targets) {
+      for (const warning of target.outcome.warnings) console.log(`  ! ${warning}`);
+    }
   }
   console.log(`  ${t('background_next')} ........................... ${serviceHost.nextAction}`);
 }
@@ -270,13 +292,15 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     disableServiceHost: options.serviceHost === false,
   };
 
-  if (options.force) {
-    cliOptions.mode = 'force';
-  } else if (options.smart) {
-    cliOptions.mode = 'smart';
-  } else {
-    cliOptions.mode = workspaceInfo.isFirstInstall ? 'force' : 'smart';
-  }
+  const nonInteractive = options.nonInteractive === true || options.yes === true || jsonMode;
+
+  const prePromptMode = resolvePrePromptInstallMode({
+    force: options.force === true,
+    smart: options.smart === true,
+    nonInteractive,
+    workspaceInfo,
+  });
+  if (prePromptMode !== undefined) cliOptions.mode = prePromptMode;
 
   if (!jsonMode && !options.nonInteractive && !options.yes) {
     if (workspaceInfo.isFirstInstall) {
@@ -289,8 +313,6 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     }
     console.log();
   }
-
-  const nonInteractive = options.nonInteractive || options.yes || jsonMode;
 
   // Fix-4 (P0-BUG-4): In non-interactive mode, collect runtime profile from
   // CLI flags (--provider/--api-key-env/--model) or env vars
@@ -552,7 +574,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       for (const line of formatHostStateSummary(result.hostResults, result.success)) console.log(line);
       // PRI-1278 Phase 5: the background-execution fact block.
       if (result.serviceHost !== undefined) {
-        printServiceHostSummary(result.serviceHost, installOptions.host);
+        printServiceHostSummary(result.serviceHost);
       }
       if (postInstallGuidance !== null) {
         for (const line of formatPostInstallGuidanceLines(postInstallGuidance, t('post_install_checklist'))) console.log(line);
@@ -603,7 +625,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
           for (const line of formatPostInstallGuidanceLines(postInstallGuidance, t('post_install_checklist'))) console.log(line);
         }
         if (result.serviceHost !== undefined) {
-          printServiceHostSummary(result.serviceHost, installOptions.host);
+          printServiceHostSummary(result.serviceHost);
         }
       }
       process.exit(1);

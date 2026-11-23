@@ -70,10 +70,18 @@ const BRIDGE_TIMEOUT_MS = 120_000;
 const MAX_STDOUT_BYTES = 64 * 1024;
 const MAX_STDERR_BYTES = 16 * 1024;
 
-function cleanedEnv(): Record<string, string | undefined> {
+function cleanedEnv(homeDir?: string): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env };
   for (const key of STRIPPED_ENV_KEYS) {
     delete env[key];
+  }
+  // Worker commands do NOT accept --pd-home (only `pd service` does), so the
+  // trusted install identity is supplied the way those commands resolve it:
+  // through the user home. Setting BOTH names keeps Node's os.homedir()
+  // consistent across platforms.
+  if (homeDir !== undefined) {
+    env.HOME = homeDir;
+    env.USERPROFILE = homeDir;
   }
   return env;
 }
@@ -89,6 +97,8 @@ interface SpawnOutcome {
 interface SpawnCliOptions {
   readonly spawnFn?: typeof spawn;
   readonly timeoutMs?: number;
+  /** Trusted home for commands that resolve identity from HOME (worker probes). */
+  readonly homeDir?: string;
 }
 
 function spawnCli(entry: string, args: readonly string[], options: SpawnCliOptions = {}): Promise<SpawnOutcome> {
@@ -118,7 +128,7 @@ function spawnCli(entry: string, args: readonly string[], options: SpawnCliOptio
     };
     try {
       child = spawnFn(process.execPath, [entry, ...args], {
-        env: cleanedEnv(),
+        env: cleanedEnv(options.homeDir),
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
@@ -173,6 +183,14 @@ export interface InstalledCliCallOptions {
   readonly probes?: ServiceHostBridgeProbes;
   /** Bounded call budget (the first managed cycle needs more than 120s). */
   readonly timeoutMs?: number;
+  /**
+   * `pd service …` accepts --pd-home; host WORKER commands do not. Worker
+   * probes must set this false and pass `homeDir` instead — Commander rejects
+   * an unregistered option, which used to make every readiness probe fail.
+   */
+  readonly includePdHome?: boolean;
+  /** Trusted home for worker probes (identity via HOME/USERPROFILE). */
+  readonly homeDir?: string;
 }
 
 export async function runInstalledCliJson(
@@ -184,9 +202,12 @@ export async function runInstalledCliJson(
   if (!fs.existsSync(entry)) {
     return { ok: false, code: null, detail: `service_host_cli_entry_missing:${entry}` };
   }
-  const outcome = await spawnCli(entry, [...args, '--pd-home', path.dirname(pdHome)], {
+  const includePdHome = options.includePdHome !== false;
+  const fullArgs = includePdHome ? [...args, '--pd-home', path.dirname(pdHome)] : [...args];
+  const outcome = await spawnCli(entry, fullArgs, {
     ...(options.probes?.spawnFn !== undefined ? { spawnFn: options.probes.spawnFn } : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    ...(options.homeDir !== undefined ? { homeDir: options.homeDir } : {}),
   });
   if (outcome.timedOut === true) {
     return { ok: false, code: outcome.code, detail: `service_host_cli_timeout:${args.join(' ')}` };
@@ -412,7 +433,7 @@ export async function reconcileServiceHostScheduler(input: SchedulerReconcileInp
       state: 'opted_out',
       registered: null,
       enabled: null,
-      nextAction: 'Service Host scheduler was explicitly disabled for this install. Arm it later with `pd service install` then `pd service enable`; workspace data and pending tasks are kept.',
+      nextAction: 'Service Host scheduler was explicitly disabled for this install. To adopt the PD-owned background lifecycle later, re-run the installer with --enable-service-host (workspace ownership is initialized in that same run); workspace data and pending tasks are kept.',
       warnings,
     };
   }
@@ -421,7 +442,7 @@ export async function reconcileServiceHostScheduler(input: SchedulerReconcileInp
       state: 'consent_required',
       registered: null,
       enabled: null,
-      nextAction: 'No OS scheduler trigger was registered: this non-interactive run did not include consent. Re-run with --enable-service-host (or --yes to accept the recommended defaults), or run `pd service install` then `pd service enable` afterwards.',
+      nextAction: 'No OS scheduler trigger was registered: this non-interactive run did not include consent. Re-run with --enable-service-host (or --yes to accept the recommended defaults) so the installer registers, enables AND initializes workspace ownership; workspace data and pending tasks are kept.',
       warnings,
     };
   }
@@ -513,7 +534,7 @@ export async function reconcileServiceHostScheduler(input: SchedulerReconcileInp
       state: 'registered_disabled',
       registered: true,
       enabled: false,
-      nextAction: 'The scheduler is registered but DISABLED. Run `pd service enable` to arm automatic managed runs.',
+      nextAction: 'The scheduler is registered but DISABLED. Re-run the installer with --enable-service-host after arming it so the new workspace is also initialized into Service Host ownership; enabling alone does not change ownership.',
       warnings,
     };
   }

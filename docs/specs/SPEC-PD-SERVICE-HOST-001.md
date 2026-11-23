@@ -2,7 +2,7 @@
 
 - **版本**：v0.4
 - **日期**：2026-11-23
-- **状态**：Architecture Approved（ADR-0020 §11.6 dated amendment，Owner 2026-11-19）/ Phase 1–4 implemented；Phase 5（新安装默认 Service Host）implemented，awaiting Owner review
+- **状态**：Architecture Approved（ADR-0020 §11.6 dated amendment，Owner 2026-11-19）/ Phase 1–5 implementation delivered；**Production Cutover not accepted**（真实平台验收未完成，PR 待 Owner review）
 - **v0.4 Phase 5 修订**：新安装默认启用 Service Host 并原子初始化 Workspace 所有权；宿主 Adapter 选择与后台生命周期彻底解耦（`--host` 无默认）；升级路径严格保留 refresh-if-registered 与既有 Owner；新增 §11 Phase 5 实施边界与 AC-14。
 - **v0.3 整改修订**：统一授权状态（§11.6 已批准架构，§11 治理 Gate 改写）、补齐 Workspace 发现与 Host Binding 契约（§7 FR-05、§9）、新增 Workspace 级所有权状态机（§8.4）、实施阶段改为 Phase 1–5 契约化描述（§11）。
 - **v0.2 源码审计修订**：按 2026-11-19 最新源码事实审计修正；§3 表格维持「当前事实」，§3.1 记录两个 Adapter 的真实差异与被推翻的隐式假设。
@@ -37,7 +37,7 @@
 |---|---|---|
 | Architecture Approved | 架构方案经 Owner 批准 | **已达成**：ADR-0020 §11.6（2026-11-19），范围限 PD-owned 用户级 OS scheduler + 有界 `pd service run-once` + 复用现有 Worker Cycle |
 | Implementation | 在批准范围内正常开发、评审、测试 | 允许按本 SPEC 推进；架构批准不等于代码已实现，也不免除正常实现评审 |
-| Production Cutover | 生产环境生命周期所有权交接 | **新安装已达成（Phase 5）**：全新安装默认注册并启用 Service Host，且新 Workspace 原子初始化为 `service_host_owned`。**既有安装未达成**：历史 Workspace 必须逐 Workspace 完成 §8.4 原子交接并通过 §11 Phase 5 验收 Gate，不得静默迁移 |
+| Production Cutover | 生产环境生命周期所有权交接 | **未达成**。实现状态：Phase 5 已交付“新安装默认 Service Host”的代码、测试与隔离环境验证；验收状态：真实 OS Scheduler（Windows/macOS/Linux）与完整发布包生产验收尚未完成，既有安装也尚未执行逐 Workspace 交接。两者不得混写——实现完成 ≠ 生产 cutover |
 
 其他文档引用 Service Host 状态时只能引用本表，不得另造一套授权表述。ADR-0020 §11.1 未被 §11.6 收窄的部分（系统级服务、通用常驻 Daemon、第二套任务系统等 Hold）**仍然有效**，本 SPEC 不删除这些限制。
 

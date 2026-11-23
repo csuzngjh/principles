@@ -51,7 +51,7 @@ import * as installLayoutModule from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { reconcileServiceHostScheduler, type ServiceHostSchedulerOutcome } from './service-host-bridge.js';
-import { provisionFreshInstallWorkspace, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
+import { provisionFreshInstallWorkspace, readPendingProvisioningEvidence, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -241,6 +241,79 @@ function installsWorkbuddy(host: HostSelection): boolean {
 }
 
 /**
+ * PRI-1278 Phase 5 review: when may THIS run (re)initialize ownership?
+ *
+ *  - a fresh install always records the attempt (a pending marker on failure);
+ *  - an existing install resumes ONLY with explicit enable consent AND a
+ *    matching pending marker from a previous fresh install. Historical
+ *    workspaces never wrote that marker → they can never be flipped here.
+ */
+export function shouldProvisionOnInstall(input: {
+  freshInstall: boolean;
+  consentIntent: string;
+  consentSource: string;
+  schedulerState: string;
+  hasPendingMarker: boolean;
+}): boolean {
+  if (input.freshInstall) return true;
+  return input.consentIntent === 'enable'
+    && input.consentSource === 'explicit_flag'
+    && input.schedulerState === 'enabled'
+    && input.hasPendingMarker;
+}
+
+/** PRI-1278 Phase 5: one REAL host binding this install verified. */
+export interface ProvisioningTarget {
+  readonly host: 'none' | 'openclaw' | 'codex' | 'workbuddy';
+  readonly workspaceDir: string;
+}
+
+export interface ServiceHostProvisioningReport {
+  readonly targets: readonly {
+    host: ProvisioningTarget['host'];
+    workspaceDir: string;
+    outcome: ServiceHostProvisioningOutcome;
+  }[];
+  readonly pending: boolean;
+  readonly nextAction: string;
+}
+
+/**
+ * The ACTUAL workspaces this install bound — not the requested host list.
+ * WorkBuddy binds its own governance directory, and Codex may be redirected
+ * by materialization. Provisioning the requested project dir alone left the
+ * real host workspace in legacy ownership.
+ */
+export function resolveProvisioningTargets(options: {
+  host: HostSelection;
+  workspaceDir: string;
+  codexWorkspaceDir?: string;
+}): ProvisioningTarget[] {
+  const targets: ProvisioningTarget[] = [];
+  if (options.host === 'none' || options.host === 'openclaw' || options.host === 'all') {
+    targets.push({ host: options.host === 'none' ? 'none' : 'openclaw', workspaceDir: options.workspaceDir });
+  }
+  if (options.host === 'codex' || options.host === 'all') {
+    targets.push({ host: 'codex', workspaceDir: options.codexWorkspaceDir ?? options.workspaceDir });
+  }
+  if (options.host === 'workbuddy') {
+    targets.push({
+      host: 'workbuddy',
+      workspaceDir: getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
+    });
+  }
+  const seen = new Set<string>();
+  return targets.filter((target) => {
+    const key = process.platform === 'win32'
+      ? path.resolve(target.workspaceDir).toLowerCase()
+      : path.resolve(target.workspaceDir);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
  * Whether this run actually serves Codex — as the requested install target or
  * as a persisted sibling host being refreshed. The Codex workspace is
  * materialized ONLY then (review 2026-11-18): an OpenClaw-only run must not
@@ -320,6 +393,12 @@ export function resolveHostRefreshTargets(persistedHosts: readonly string[], hos
     targets.push(persisted);
   }
   return targets;
+}
+
+export interface HostRefreshWorkspaceResolution {
+  readonly ok: true;
+  readonly workspaceDir: string;
+  readonly source: 'codex_mcp_binding' | 'openclaw_declaration' | 'workbuddy_governance_dir';
 }
 
 /** Union the detected (already-installed) hosts into the manifest host list. */
@@ -5070,9 +5149,104 @@ function readSecondaryOpenClawDeclaration(homeDir: string): { ok: true; workspac
   return { ok: true, workspace: declaredRaw.trim() };
 }
 
+/**
+ * PRI-1278 Phase 5 review: a host that is REFRESHED (not explicitly selected)
+ * must keep the workspace it is already bound to. Passing this run's target
+ * workspace to a Codex plugin rebuild / OpenClaw declaration rewrite silently
+ * moved the host to `~/pd-workspace` after a plain `npx create-principles-disciple
+ * --yes` upgrade. The recorded binding is the authority; when it cannot be
+ * read/validated the refresh is SKIPPED with an actionable warning instead of
+ * guessing.
+ */
+export function resolveExistingHostWorkspaceForRefresh(
+  host: 'codex' | 'openclaw' | 'workbuddy',
+): { ok: true; workspaceDir: string; source: HostRefreshWorkspaceResolution['source'] } | { ok: false; reason: string; nextAction: string } {
+  if (host === 'workbuddy') {
+    return {
+      ok: true,
+      workspaceDir: getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
+      source: 'workbuddy_governance_dir',
+    };
+  }
+  if (host === 'openclaw') {
+    const configPath = path.join(getOpenClawDir(), OPENCLAW_PD_CONFIG_FILENAME);
+    let raw: string;
+    try {
+      raw = readFileSync(configPath, 'utf-8');
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `openclaw declaration unreadable at ${configPath} (${describeError(error)})`,
+        nextAction: 'Re-run the installer explicitly for OpenClaw so it can restore the declaration: npx create-principles-disciple install --host openclaw --workspace "<existing workspace>"',
+      };
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `openclaw declaration is not valid JSON (${describeError(error)})`,
+        nextAction: `Repair or remove ${configPath}, then re-run: npx create-principles-disciple install --host openclaw --workspace "<existing workspace>"`,
+      };
+    }
+    const declared = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && Object.hasOwn(parsed, 'workspace')
+      ? Reflect.get(parsed, 'workspace')
+      : undefined;
+    if (typeof declared !== 'string' || !isUsableWorkspacePointer(declared.trim())) {
+      return {
+        ok: false,
+        reason: `openclaw declaration at ${configPath} has no usable absolute "workspace"`,
+        nextAction: 'Re-run the installer explicitly for OpenClaw with the real workspace: npx create-principles-disciple install --host openclaw --workspace "<existing workspace>"',
+      };
+    }
+    return { ok: true, workspaceDir: path.resolve(declared.trim()), source: 'openclaw_declaration' };
+  }
+
+  // Codex: the binding lives beside the installed payload. Scan the plugin
+  // data runtime for a readable binding whose workspace still exists; a
+  // missing/foreign binding is a skip, never a rebind to this run's target.
+  const pluginDataRoot = resolvePluginDataRoot(getCodexHomeDir(), 'principles');
+  const runtimeRoot = pluginDataRoot === undefined ? undefined : path.join(pluginDataRoot, 'runtime');
+  if (runtimeRoot !== undefined && existsSync(runtimeRoot)) {
+    let candidates: string[];
+    try {
+      candidates = readdirSync(runtimeRoot).sort().reverse();
+    } catch {
+      candidates = [];
+    }
+    for (const version of candidates) {
+      const bindingPath = path.join(runtimeRoot, version, 'mcp-binding.json');
+      let raw: string;
+      try {
+        raw = readFileSync(bindingPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) continue;
+      if (Reflect.get(parsed, 'host') !== 'codex') continue;
+      const workspace = Reflect.get(parsed, 'workspaceDir');
+      if (typeof workspace !== 'string' || !isUsableWorkspacePointer(workspace.trim())) continue;
+      if (!existsSync(workspace.trim())) continue;
+      return { ok: true, workspaceDir: path.resolve(workspace.trim()), source: 'codex_mcp_binding' };
+    }
+  }
+  return {
+    ok: false,
+    reason: 'no readable Codex mcp-binding.json records an existing workspace',
+    nextAction: 'Re-run the installer explicitly for Codex with its real workspace: npx create-principles-disciple install --host codex --workspace "<existing workspace>"',
+  };
+}
+
 export function resolveUpdateWorkspaceDir(
   workspaceDir: string,
-  host: HostTarget,
+  host: HostSelection,
   options: ResolveUpdateWorkspaceOptions = {},
 ): UpdateWorkspaceResolution {
   if (!installsOpenClaw(host)) return { kind: 'resolved', workspaceDir, source: 'caller' };
@@ -5309,7 +5483,7 @@ export interface InstallResult {
 export interface ServiceHostInstallOutcome {
   readonly freshInstall: boolean;
   readonly scheduler: ServiceHostSchedulerOutcome;
-  readonly provisioning: ServiceHostProvisioningOutcome | null;
+  readonly provisioning: ServiceHostProvisioningReport | null;
   readonly nextAction: string;
 }
 
@@ -6455,7 +6629,13 @@ export async function install(
     // isolation intact.
     let codexWorkspaceDir: string | undefined;
     let codexWorkspaceError: string | undefined;
-    if (installRunServesCodex(options.host, hostPlan.refreshTargets)) {
+    // PRI-1278 Phase 5 review: materialize a Codex workspace ONLY when Codex
+    // is the REQUESTED target. A refresh-only Codex (a plain `--yes` upgrade
+    // with no --host) must reuse its recorded binding via
+    // resolveExistingHostWorkspaceForRefresh — never create/rebind to this
+    // run's neutral workspace.
+    const requestsCodex = options.host === 'codex' || options.host === 'all';
+    if (requestsCodex) {
       try {
         const materialized = await materializeCodexWorkspace(options, {
           resolve: (target, notes) => resolveCodexHostWorkspace(options, notes),
@@ -6516,6 +6696,35 @@ export async function install(
     const refreshedResults: HostInstallResult[] = [];
     for (const refreshTarget of refreshTargets) {
       if (spinner) updateProgress(spinner, stepIndex, `Refreshing ${refreshTarget} host binding...`);
+      // PRI-1278 Phase 5 review: a refresh must re-use the host's RECORDED
+      // workspace. Passing this run's target (a neutral `~/pd-workspace` when
+      // --host was omitted) silently moved Codex/OpenClaw to a new directory.
+      if (refreshTarget === 'codex' || refreshTarget === 'openclaw' || refreshTarget === 'workbuddy') {
+        const existing = resolveExistingHostWorkspaceForRefresh(refreshTarget);
+        if (!existing.ok) {
+          logger.warn(`Host "${refreshTarget}" refresh skipped: ${existing.reason}. The existing host binding was KEPT unchanged. Next: ${existing.nextAction}`);
+          refreshedResults.push({
+            success: false,
+            hostId: refreshTarget,
+            configAction: 'skipped',
+            reason: `existing binding could not be read: ${existing.reason}`,
+            nextAction: existing.nextAction,
+          });
+          continue;
+        }
+        const refreshCtx: HostInstallContext = { ...hostInstallCtx, workspaceDir: existing.workspaceDir };
+        const refreshResults = await runHostInstallers(refreshTarget, refreshCtx, { codexWorkspaceDir: existing.workspaceDir, codexWorkspaceError });
+        refreshedResults.push(...refreshResults);
+        for (const hr of refreshResults) {
+          if (hr.success) {
+            logger.info(`Host "${hr.hostId}" refresh: ${hr.configAction === 'updated' ? 'updated' : 'no change needed'}${hr.reason ? ` — ${hr.reason}` : ''} (workspace ${existing.workspaceDir} from ${existing.source}).`);
+            for (const warning of hr.warnings ?? []) logger.warn(`Host "${hr.hostId}": ${warning}`);
+          } else {
+            logger.warn(`Host "${hr.hostId}" refresh failed: ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction ?? `npx create-principles-disciple install --host ${hr.hostId}`}`);
+          }
+        }
+        continue;
+      }
       const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx, { codexWorkspaceDir, codexWorkspaceError });
       refreshedResults.push(...refreshResults);
       for (const hr of refreshResults) {
@@ -6691,15 +6900,49 @@ export async function install(
         warn: (message) => logger.warn(message),
         info: (message) => logger.info(message),
       });
-      const provisioning = freshInstall && scheduler.state === 'enabled'
-        ? await provisionFreshInstallWorkspace({
-            pdHome: getPdDir(),
-            workspaceDir: options.workspaceDir,
-            host: options.host,
-            scheduler,
-            warn: (message) => logger.warn(message),
-            info: (message) => logger.info(message),
-          })
+      // Fresh installs ALWAYS run the provisioning step: even when ownership
+      // cannot be handed over yet it records a durable PENDING marker, which
+      // is what a later explicit `--enable-service-host` install resumes.
+      //
+      // An existing installation is resumed ONLY with explicit consent AND a
+      // matching pending marker from a previous fresh install. Historical
+      // workspaces never wrote that marker, so they can never be flipped
+      // implicitly — they still require the quiescing handover.
+      const targets = resolveProvisioningTargets({
+        host: options.host,
+        workspaceDir: options.workspaceDir,
+        ...(codexWorkspaceDir !== undefined ? { codexWorkspaceDir } : {}),
+      });
+      const pendingMarkers = new Map(targets.map((target) => [
+        target.workspaceDir,
+        freshInstall ? null : readPendingProvisioningEvidence(getPdDir(), target.workspaceDir),
+      ]));
+      const perTarget = [] as NonNullable<ServiceHostProvisioningReport['targets']>[number][];
+      for (const target of targets) {
+        const resume = shouldProvisionOnInstall({
+          freshInstall,
+          consentIntent: consent.intent,
+          consentSource: consent.source,
+          schedulerState: scheduler.state,
+          hasPendingMarker: pendingMarkers.get(target.workspaceDir) !== null,
+        });
+        if (!resume) continue;
+        const outcome = await provisionFreshInstallWorkspace({
+          pdHome: getPdDir(),
+          workspaceDir: target.workspaceDir,
+          host: target.host,
+          scheduler,
+          warn: (message) => logger.warn(message),
+          info: (message) => logger.info(message),
+        });
+        perTarget.push({ host: target.host, workspaceDir: target.workspaceDir, outcome });
+      }
+      const provisioning: ServiceHostProvisioningReport | null = perTarget.length > 0
+        ? {
+            targets: perTarget,
+            pending: perTarget.some((entry) => entry.outcome.pendingProvisioning === true),
+            nextAction: perTarget.map((entry) => entry.outcome.nextAction).join(' | '),
+          }
         : null;
       serviceHostOutcome = {
         freshInstall,

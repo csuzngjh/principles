@@ -249,6 +249,23 @@ test('Download pages state what/which version/platform and guide first install',
 // SPEC-PD-UIUX-001 R7: the install page asks for the host FIRST; the download
 // page states the PD prerequisite next to its CTA; Node requirements follow
 // the installer manifest (>= 22), not the stale >= 18 copy.
+// PRI-1278 Phase 5: the installer no longer defaults to a host, so every
+// OpenClaw-specific install guide must scope its copy-paste command. An
+// unscoped `--yes` now installs the PD Service Host only and the Gateway
+// loads no PD plugin.
+test('OpenClaw install guides scope the command with --host openclaw', async () => {
+  const sources = [
+    path.join(websiteRoot, '.vitepress', 'theme', 'components', 'InstallGuide.vue'),
+    path.join(websiteRoot, '.vitepress', 'theme', 'components', 'InstallSection.vue'),
+    path.join(websiteRoot, 'docs', 'getting-started.md'),
+    path.join(websiteRoot, 'zh', 'docs', 'getting-started.md'),
+  ]
+  for (const file of sources) {
+    const text = await readFile(file, 'utf8')
+    assert.match(text, /create-principles-disciple[^\n`'"]*--yes[^\n`'"]*--host openclaw/, `${path.relative(websiteRoot, file)} must scope the OpenClaw install with --host openclaw`)
+  }
+})
+
 test('install and download pages route by host and state prerequisites honestly', async () => {
   const zhInstall = await page(path.join('zh', 'install.html'))
   const enInstall = await page('install.html')

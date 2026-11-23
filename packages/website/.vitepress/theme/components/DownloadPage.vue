@@ -60,7 +60,7 @@ const labels = zh
       reqs: [
         { k: '操作系统', v: 'Windows 10 / 11（64 位）' },
         { k: 'Node.js', v: '≥ 22 且在 PATH 中（node -v 可用）——Companion 用系统 Node 运行控制台服务' },
-        { k: 'PD', v: '已安装：OpenClaw 宿主（npx create-principles-disciple）、Codex 插件市场安装，或 WorkBuddy 宿主（随下个发布版本可用）' },
+        { k: 'PD', v: '已安装：OpenClaw 宿主（npx create-principles-disciple --host openclaw）、Codex 插件市场安装，或 WorkBuddy 宿主（随下个发布版本可用）' },
       ],
       reqNote: 'Companion 是已装 PD 的增强入口——控制台未安装时会显示明确的修复指引，而不是白屏。',
       notifyTitle: '它会通知什么',
@@ -100,7 +100,7 @@ const labels = zh
       reqs: [
         { k: 'OS', v: 'Windows 10 / 11 (64-bit)' },
         { k: 'Node.js', v: '≥ 22 on PATH (node -v) — Companion runs the console server with your system Node' },
-        { k: 'PD', v: 'Installed via the OpenClaw host (npx create-principles-disciple), the Codex plugin marketplace, or the WorkBuddy host (available with the next release)' },
+        { k: 'PD', v: 'Installed via the OpenClaw host (npx create-principles-disciple --host openclaw), the Codex plugin marketplace, or the WorkBuddy host (available with the next release)' },
       ],
       reqNote: 'Companion is an add-on to an existing PD install — if the console is missing it shows the exact fix, not a blank window.',
       notifyTitle: 'What it notifies about',

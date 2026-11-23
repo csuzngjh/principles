@@ -65,7 +65,7 @@ pd service rollback   --workspace <dir> [--json]   # SERVICE_HOST → LEGACY
 6. 立即执行一次真实 managed cycle（`pd service run-once --trigger installer`），并写入 `<pdHome>/service/install-provisioning.json` 证据。
 7. 安装摘要显示：scheduler 状态、Workspace owner、Adapter 类型、readiness、首次周期结果与限制。
 
-任何一步失败：**不翻转 Owner**，安装仍以“运行时可用 + 明确 nextAction”的报告结束（ERR-197 提交后失败=告警，不是安装失败）。
+任何一步失败：**不翻转 Owner**，安装仍以“运行时可用 + 明确 nextAction”的报告结束（ERR-197 提交后失败=告警，不是安装失败）。全新 Workspace 会写入 `<pdHome>/service/install-provisioning.json` 的 **pendingProvisioning** 记录；之后执行 `npx create-principles-disciple install --enable-service-host --workspace <dir>` 会在同一 run 内完成注册+启用+所有权初始化（仅限该 pending 记录匹配且 manifest 仍无 ownership record）。
 
 ### 4.3 升级（manifest 已存在）
 
@@ -115,7 +115,7 @@ pd service rollback   --workspace <dir> [--json]   # SERVICE_HOST → LEGACY
 | `scheduler_query_failed:AccessDenied` | OS 拒绝读取/注册（非"未安装"） | 确认当前用户与任务存储权限；加固主机上非提升注册会被策略拒绝，需在允许的用户上下文操作 |
 | `scheduler_task_name_conflict_foreign_task` | 同名任务非本安装所有 | 手工检查（`Export-ScheduledTask`）；PD 不覆盖外部任务 |
 | `no_service_host_owned_workspaces` | 合法空执行 | 无需处置；尚未交接的 Workspace 保持 legacy（`pd service handover` 显式迁移） |
-| 安装摘要 `Workspace owner: not provisioned` + `consent_required` | 非交互安装未携带启用同意 | 运行 `pd service install && pd service enable`，或重跑安装并加 `--enable-service-host` |
+| 安装摘要 `Workspace owner: not provisioned` + `consent_required` | 非交互安装未携带启用同意 | 重跑安装并加 `--enable-service-host`（同一 run 会初始化 pending 的新 Workspace；仅启用调度器不会改变所有权） |
 | `readiness: waiting_for_host_binding` | Service-Host-only / 该 Workspace 无宿主 claim | 正常状态；安装宿主 Adapter 并绑定 Workspace 后才会出现可执行 Worker |
 | `provision_fresh_install` 被拒（`unexpected_state`） | Workspace 已有 ownership 历史（升级用户） | 不静默迁移：使用 `pd service handover --workspace <dir>`（含旧消费者停止验证） |
 | `install_manifest_*` / `active_release_*` 拒绝 | 可信前缀 fail-closed | 修复安装（`npx create-principles-disciple`）后再触发 |

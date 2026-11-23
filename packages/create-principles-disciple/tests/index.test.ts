@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { isLanguage } from '../src/i18n.js';
-import { program } from '../src/index.js';
+import { program, resolvePrePromptInstallMode } from '../src/index.js';
+import { shouldProvisionOnInstall } from '../src/installer.js';
 
 describe('isLanguage type guard', () => {
   it('returns true for valid languages', () => {
@@ -69,6 +70,57 @@ describe('--stop-gateway flag registration (cli-7, real program)', () => {
     // flags has no <value>/[value] suffix => Commander sets opts.stopGateway
     // (camelCase) to true when present, defaultValue when absent.
     expect(opt?.flags).toBe('--stop-gateway');
+  });
+});
+
+describe('resolvePrePromptInstallMode — interactive mode is resolved AFTER host/workspace', () => {
+  it('interactive without flags never pre-fills force (a chosen workspace with files must stay smart)', () => {
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: false, nonInteractive: false, workspaceInfo: { isFirstInstall: true },
+    })).toBeUndefined();
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: false, nonInteractive: false, workspaceInfo: { isFirstInstall: false },
+    })).toBeUndefined();
+  });
+
+  it('explicit flags win in every mode', () => {
+    expect(resolvePrePromptInstallMode({
+      force: true, smart: false, nonInteractive: false, workspaceInfo: { isFirstInstall: false },
+    })).toBe('force');
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: true, nonInteractive: true, workspaceInfo: { isFirstInstall: true },
+    })).toBe('smart');
+  });
+
+  it('non-interactive still resolves a default', () => {
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: false, nonInteractive: true, workspaceInfo: { isFirstInstall: true },
+    })).toBe('force');
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: false, nonInteractive: true, workspaceInfo: { isFirstInstall: false },
+    })).toBe('smart');
+  });
+});
+
+describe('shouldProvisionOnInstall — deferred provisioning never weakens upgrades', () => {
+  const base = {
+    freshInstall: false,
+    consentIntent: 'enable',
+    consentSource: 'explicit_flag',
+    schedulerState: 'enabled',
+    hasPendingMarker: true,
+  };
+
+  it('a fresh install always records the attempt', () => {
+    expect(shouldProvisionOnInstall({ ...base, freshInstall: true, hasPendingMarker: false })).toBe(true);
+  });
+
+  it('an existing install resumes ONLY with explicit enable + a matching pending marker', () => {
+    expect(shouldProvisionOnInstall(base)).toBe(true);
+    expect(shouldProvisionOnInstall({ ...base, hasPendingMarker: false })).toBe(false);
+    expect(shouldProvisionOnInstall({ ...base, consentSource: 'recommended_default' })).toBe(false);
+    expect(shouldProvisionOnInstall({ ...base, consentIntent: 'refresh_if_registered' })).toBe(false);
+    expect(shouldProvisionOnInstall({ ...base, schedulerState: 'registered_disabled' })).toBe(false);
   });
 });
 

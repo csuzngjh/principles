@@ -50,8 +50,12 @@ export interface ProvisioningFirstCycle {
   readonly ok: boolean;
   readonly outcome?: string;
   readonly runId?: string;
+  /** Adapter cycles that actually produced a Worker result. */
   readonly executed: number;
+  /** Executions with THIS run's task/cycle progress evidence (not carried). */
   readonly progressed: number;
+  /** Service-Host-owned workspaces with no adapter binding (truthful wait). */
+  readonly waitingForBinding: number;
   readonly reason?: string;
 }
 
@@ -64,6 +68,13 @@ export interface ServiceHostProvisioningOutcome {
   readonly readinessDetail?: string;
   readonly firstCycle: ProvisioningFirstCycle;
   readonly evidencePath?: string;
+  /**
+   * TRUE when this fresh workspace is still legacy/no-record and the install
+   * committed without ownership (no consent, scheduler not enabled, readiness
+   * failed). The durable evidence record lets a LATER explicit install resume
+   * initialization without weakening the upgrade protection.
+   */
+  readonly pendingProvisioning?: boolean;
   readonly nextAction: string;
   readonly warnings: readonly string[];
 }
@@ -118,7 +129,13 @@ async function probeReadiness(input: ProvisioningInput): Promise<{
     const probe = await runInstalledCliJson(
       input.pdHome,
       readinessProbeArgs(host, input.workspaceDir),
-      { probes: input.probes ?? {} },
+      {
+        probes: input.probes ?? {},
+        // Worker commands do NOT register --pd-home; Commander would reject
+        // the whole probe. Identity comes from the trusted home env instead.
+        includePdHome: false,
+        homeDir: path.dirname(input.pdHome),
+      },
     );
     if (!probe.ok) {
       return { readiness: 'failed', detail: `${host}:${probe.detail}` };
@@ -134,17 +151,36 @@ async function probeReadiness(input: ProvisioningInput): Promise<{
   return { readiness: 'ready', detail: hosts.join('+') };
 }
 
-function countExecutions(doc: Record<string, unknown>): { executed: number; progressed: number } {
+function notAttempted(reason: string): ProvisioningFirstCycle {
+  return { attempted: false, ok: false, executed: 0, progressed: 0, waitingForBinding: 0, reason };
+}
+
+function countExecutions(doc: Record<string, unknown>): { executed: number; progressed: number; waitingForBinding: number } {
   const managed = isRecord(doc.managed) ? doc.managed : {};
   const executions = Array.isArray(managed.executions) ? managed.executions : [];
   let executed = 0;
   let progressed = 0;
+  let waitingForBinding = 0;
   for (const entry of executions) {
     if (!isRecord(entry)) continue;
-    if (entry.admission === 'executed') executed += 1;
-    if (typeof entry.lastProgressAt === 'string' && entry.lastProgressAt.length > 0) progressed += 1;
+    if (entry.workspaceState === 'waiting_for_host_binding') {
+      waitingForBinding += 1;
+      continue;
+    }
+    // Only a REAL adapter cycle counts as execution: the no-adapter record has
+    // no `execution` payload and must not be reported as work performed.
+    const ranWorker = entry.admission === 'executed'
+      && typeof entry.hostKind === 'string'
+      && isRecord(entry.execution);
+    if (!ranWorker) continue;
+    executed += 1;
+    // Progress must come from THIS run's evidence; a timestamp carried from a
+    // previous run is not progress made by the first cycle.
+    if (entry.lastProgressSource === 'task_state_change' || entry.lastProgressSource === 'cycle_evidence') {
+      progressed += 1;
+    }
   }
-  return { executed, progressed };
+  return { executed, progressed, waitingForBinding };
 }
 
 async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirstCycle> {
@@ -157,16 +193,16 @@ async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirs
     },
   );
   if (!result.ok || !isRecord(result.doc)) {
-    return { attempted: true, ok: false, executed: 0, progressed: 0, reason: result.detail };
+    return { ...notAttempted(result.detail), attempted: true };
   }
   const { doc } = result;
   const outcome = typeof doc.outcome === 'string' ? doc.outcome : 'unknown';
   if (outcome === 'already_running') {
     // Overlapping OS trigger won the install-level lock: honest deferral, not
     // a failed install, and not a fabricated success either.
-    return { attempted: true, ok: false, outcome, executed: 0, progressed: 0, reason: 'service_run_lock_held' };
+    return { ...notAttempted('service_run_lock_held'), attempted: true, outcome };
   }
-  const { executed, progressed } = countExecutions(doc);
+  const { executed, progressed, waitingForBinding } = countExecutions(doc);
   return {
     attempted: true,
     ok: result.code === 0 && (doc.ok === true || outcome === 'completed'),
@@ -174,6 +210,7 @@ async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirs
     ...(typeof doc.runId === 'string' ? { runId: doc.runId } : {}),
     executed,
     progressed,
+    waitingForBinding,
     ...(typeof doc.reason === 'string' ? { reason: doc.reason } : {}),
   };
 }
@@ -197,6 +234,8 @@ interface ProvisioningEvidence {
   };
   readonly readiness: { status: ProvisioningReadiness; detail?: string };
   readonly firstCycle: ProvisioningFirstCycle;
+  readonly pendingProvisioning: boolean;
+  readonly pendingReason?: string;
   readonly limitations: readonly string[];
 }
 
@@ -233,22 +272,6 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
   };
   const manifestPath = path.join(input.pdHome, 'install.json');
 
-  // Guard: ownership is only handed over when the scheduler is VERIFIED
-  // enabled. A registration that failed or stayed disabled must never flip
-  // the marker (no silent legacy retirement).
-  if (input.scheduler.state !== 'enabled' || input.scheduler.enabled !== true) {
-    return {
-      ownership: 'not_provisioned',
-      ownershipBefore: 'unknown',
-      ownershipAfter: 'unknown',
-      generation: null,
-      readiness: 'skipped',
-      firstCycle: { attempted: false, ok: false, executed: 0, progressed: 0, reason: `scheduler_${input.scheduler.state}` },
-      nextAction: `${input.scheduler.nextAction} Workspace ownership was NOT handed over because the scheduler is not verified enabled.`,
-      warnings,
-    };
-  }
-
   const before = readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir: input.workspaceDir });
   if (before.status === 'manifest_unreadable') {
     return {
@@ -257,7 +280,7 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
       ownershipAfter: 'manifest_unreadable',
       generation: null,
       readiness: 'skipped',
-      firstCycle: { attempted: false, ok: false, executed: 0, progressed: 0, reason: before.reason },
+      firstCycle: notAttempted(before.reason),
       nextAction: before.nextAction,
       warnings,
     };
@@ -269,7 +292,7 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
       ownershipAfter: before.status,
       generation: before.generation,
       readiness: 'skipped',
-      firstCycle: { attempted: false, ok: false, executed: 0, progressed: 0, reason: 'already_service_host_owned' },
+      firstCycle: notAttempted('already_service_host_owned'),
       nextAction: 'This workspace is already owned by the Service Host; the installer left the ownership record untouched.',
       warnings,
     };
@@ -283,25 +306,81 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
       ownershipAfter: before.status,
       generation: before.generation,
       readiness: 'skipped',
-      firstCycle: { attempted: false, ok: false, executed: 0, progressed: 0, reason: 'ownership_history_present' },
+      firstCycle: notAttempted('ownership_history_present'),
+      pendingProvisioning: false,
       nextAction: 'This workspace already has an ownership record, so the installer did not change it. Move it explicitly with `pd service handover --workspace <dir>` (legacy consumer quiesce + readiness) or keep the legacy lifecycle.',
       warnings,
     };
   }
 
-  const readiness = await probeReadiness(input);
-  if (readiness.readiness === 'failed') {
+  const recordPending = (
+    reason: string,
+    args: {
+      readiness: ProvisioningReadiness;
+      readinessDetail?: string;
+      firstCycle: ProvisioningFirstCycle;
+      ownership?: 'failed';
+      nextAction: string;
+    },
+  ): ServiceHostProvisioningOutcome => {
+    let evidencePath: string | undefined;
+    try {
+      evidencePath = writeEvidence(input.pdHome, {
+        schemaVersion: EVIDENCE_SCHEMA,
+        recordedAt: (input.now?.() ?? new Date()).toISOString(),
+        workspaceDir: input.workspaceDir,
+        host: input.host,
+        scheduler: {
+          state: input.scheduler.state,
+          registered: input.scheduler.registered,
+          enabled: input.scheduler.enabled,
+          ...(input.scheduler.triggerIntervalMs !== undefined ? { triggerIntervalMs: input.scheduler.triggerIntervalMs } : {}),
+        },
+        ownership: { before: before.status, after: before.status, generation: before.generation },
+        readiness: { status: args.readiness, ...(args.readinessDetail !== undefined ? { detail: args.readinessDetail } : {}) },
+        firstCycle: args.firstCycle,
+        pendingProvisioning: true,
+        pendingReason: reason,
+        limitations: limitationsFor(input.host, args.readiness),
+      });
+    } catch (error) {
+      warn(`Service Host provisioning evidence could not be written (${error instanceof Error ? error.message : String(error)}).`);
+    }
     return {
-      ownership: 'not_provisioned',
+      ownership: args.ownership ?? 'not_provisioned',
       ownershipBefore: before.status,
       ownershipAfter: before.status,
       generation: before.generation,
-      readiness: readiness.readiness,
-      ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
-      firstCycle: { attempted: false, ok: false, executed: 0, progressed: 0, reason: 'readiness_failed' },
-      nextAction: `The active-release Worker readiness probe failed (${readiness.detail ?? 'unknown'}), so workspace ownership was NOT handed over. Fix the host adapter/workspace readiness, then run \`pd service handover --workspace "${input.workspaceDir}"\`.`,
+      readiness: args.readiness,
+      ...(args.readinessDetail !== undefined ? { readinessDetail: args.readinessDetail } : {}),
+      firstCycle: args.firstCycle,
+      ...(evidencePath !== undefined ? { evidencePath } : {}),
+      pendingProvisioning: true,
+      nextAction: args.nextAction,
       warnings,
     };
+  };
+
+  // Guard: ownership is only handed over when the scheduler is VERIFIED
+  // enabled. A registration that failed or stayed disabled must never flip
+  // the marker (no silent legacy retirement) — it records a PENDING
+  // provisioning fact instead so a later explicit install can resume.
+  if (input.scheduler.state !== 'enabled' || input.scheduler.enabled !== true) {
+    return recordPending(`scheduler_${input.scheduler.state}`, {
+      readiness: 'skipped',
+      firstCycle: notAttempted(`scheduler_${input.scheduler.state}`),
+      nextAction: `${input.scheduler.nextAction} Workspace ownership was NOT handed over because the scheduler is not verified enabled. This new workspace is recorded as pending; after arming the scheduler, re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+    });
+  }
+
+  const readiness = await probeReadiness(input);
+  if (readiness.readiness === 'failed') {
+    return recordPending('readiness_failed', {
+      readiness: readiness.readiness,
+      ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+      firstCycle: notAttempted('readiness_failed'),
+      nextAction: `The active-release Worker readiness probe failed (${readiness.detail ?? 'unknown'}), so workspace ownership was NOT handed over. Fix the host adapter/workspace readiness, then re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+    });
   }
 
   const operationId = `install-provision-${input.now?.().getTime() ?? Date.now()}-${process.pid}`;
@@ -316,17 +395,13 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
   });
   if (!provisioned.ok) {
     warn(`Service Host ownership provisioning failed (${provisioned.reason}: ${provisioned.message}). ${provisioned.nextAction ?? ''}`.trim());
-    return {
+    return recordPending(`cas_${provisioned.reason}`, {
       ownership: 'failed',
-      ownershipBefore: before.status,
-      ownershipAfter: before.status,
-      generation: before.generation,
       readiness: readiness.readiness,
       ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
-      firstCycle: { attempted: false, ok: false, executed: 0, progressed: 0, reason: `cas_${provisioned.reason}` },
+      firstCycle: notAttempted(`cas_${provisioned.reason}`),
       nextAction: provisioned.nextAction ?? 'Repair the install manifest and retry; no ownership change was written.',
-      warnings,
-    };
+    });
   }
 
   // Verify the persisted fact, not the in-memory result.
@@ -336,17 +411,13 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     && after.generation >= 1;
   if (!owned) {
     warn(`Service Host ownership provisioning reported success but the persisted projection is ${after.status}.`);
-    return {
+    return recordPending('post_write_projection_mismatch', {
       ownership: 'failed',
-      ownershipBefore: before.status,
-      ownershipAfter: after.status,
-      generation: after.status === 'manifest_unreadable' ? null : after.generation,
       readiness: readiness.readiness,
       ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
-      firstCycle: { attempted: false, ok: false, executed: 0, progressed: 0, reason: 'post_write_projection_mismatch' },
+      firstCycle: notAttempted('post_write_projection_mismatch'),
       nextAction: 'Inspect ~/.pd/install.json (backgroundExecutions) before relying on automatic runs; the persisted ownership could not be verified.',
-      warnings,
-    };
+    });
   }
 
   const firstCycle = await runFirstCycle(input);
@@ -380,6 +451,7 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
         ...(readiness.detail !== undefined ? { detail: readiness.detail } : {}),
       },
       firstCycle,
+      pendingProvisioning: false,
       limitations,
     });
     input.info?.(`Provisioning evidence: ${evidencePath}`);
@@ -400,11 +472,66 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
     firstCycle,
     evidencePath,
+    pendingProvisioning: false,
     nextAction: readiness.readiness === 'waiting_for_host_binding'
       ? 'The Service Host scheduler is enabled and owns this workspace, but no host adapter is bound — install a host adapter and bind the workspace before tasks can be consumed.'
       : firstCycle.ok
         ? 'The Service Host owns this workspace and completed its first managed cycle.'
         : 'The Service Host owns this workspace; the first cycle did not complete, and the next scheduler trigger retries from persisted task/lease state.',
     warnings,
+  };
+}
+
+/** Durable hint that a NEW workspace was committed without Service Host ownership. */
+export interface PendingProvisioningMarker {
+  readonly workspaceDir: string;
+  readonly recordedAt: string;
+  readonly reason?: string;
+}
+
+function canonicalIdentity(value: string): string {
+  const resolved = path.resolve(value);
+  let real: string | undefined;
+  try {
+    real = fs.realpathSync.native(resolved);
+  } catch {
+    real = undefined;
+  }
+  const form = real ?? resolved;
+  return process.platform === 'win32' ? form.toLowerCase() : form;
+}
+
+/**
+ * Read the pending marker written by a fresh install that could not hand the
+ * workspace over yet (no consent / scheduler disabled / readiness failed).
+ *
+ * This is a HINT, not an ownership authority: a later install still requires
+ * an explicit enable and a manifest with NO ownership record. Historical
+ * installs never wrote this record, so they can never be resumed implicitly.
+ * Any unreadable/foreign record is `null` (fail-closed, never a guess).
+ */
+export function readPendingProvisioningEvidence(pdHome: string, workspaceDir: string): PendingProvisioningMarker | null {
+  const file = path.join(pdHome, 'service', 'install-provisioning.json');
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) return null;
+  if (parsed.schemaVersion !== EVIDENCE_SCHEMA) return null;
+  if (parsed.pendingProvisioning !== true) return null;
+  if (typeof parsed.workspaceDir !== 'string' || parsed.workspaceDir.length === 0) return null;
+  if (canonicalIdentity(parsed.workspaceDir) !== canonicalIdentity(workspaceDir)) return null;
+  return {
+    workspaceDir: parsed.workspaceDir,
+    recordedAt: typeof parsed.recordedAt === 'string' ? parsed.recordedAt : '',
+    ...(typeof parsed.pendingReason === 'string' ? { reason: parsed.pendingReason } : {}),
   };
 }

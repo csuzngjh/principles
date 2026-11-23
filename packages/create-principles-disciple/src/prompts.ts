@@ -418,13 +418,15 @@ export async function runPrompts(
     enableServiceHost,
     registerServiceHost: cliOptions.registerServiceHost === true && !enableServiceHost,
     disableServiceHost: !enableServiceHost && cliOptions.disableServiceHost === true,
-    serviceHost: enableServiceHost
-      ? { intent: 'enable', source: explicitServiceHostChoice ? 'explicit_flag' : 'interactive_consent' }
-      : cliOptions.registerServiceHost === true
-        ? { intent: 'register_only', source: 'explicit_flag' }
-        : !freshInstall
-          ? { intent: 'refresh_if_registered', source: 'policy' }
-          : { intent: 'opt_out', source: 'interactive_consent' },
+    serviceHost: cliOptions.disableServiceHost === true
+      ? { intent: 'opt_out', source: 'policy' }
+      : enableServiceHost
+        ? { intent: 'enable', source: explicitServiceHostChoice ? 'explicit_flag' : 'interactive_consent' }
+        : cliOptions.registerServiceHost === true
+          ? { intent: 'register_only', source: 'explicit_flag' }
+          : !freshInstall
+            ? { intent: 'refresh_if_registered', source: 'policy' }
+            : { intent: 'opt_out', source: 'interactive_consent' },
   };
 
   const confirmed = await promptConfirm(options);

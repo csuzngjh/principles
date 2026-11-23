@@ -111,3 +111,19 @@
 新用户安装不再依赖 OpenClaw：`--host` 无默认、Service Host 默认启用、全新 Workspace 原子获得 `service_host_owned`、首次真实周期可观测。升级用户保持原 Owner 与既有注册状态，迁移只能显式发起。
 
 **Phase 5 生产验收仍未完成**：真实 OS 注册链路（Windows/macOS/Linux）与完整发布包安装链路需要在无策略限制的环境重跑；在此之前不宣布生产 cutover。
+
+## 11. Review round 2 整改（2026-11-23）
+
+| 评审问题 | 修复 |
+|---|---|
+| readiness 探针给 worker 传了未注册的 `--pd-home` | `runInstalledCliJson` 区分 `pd service` 与 worker：worker 探针不传 `--pd-home`，改由 `includePdHome:false` + 受控 `HOME/USERPROFILE` 提供可信身份；测试用真实 Commander 注册证明三个 worker 都未注册该参数 |
+| 交互安装预填 `force`，覆盖用户已有文件 | 交互模式不再预填 mode；新增 `resolvePrePromptInstallMode`（显式旗标优先，非交互才推导），`runPrompts` 在最终 host/workspace 解析后决定 |
+| 控制台更新把空 `hosts` 当 OpenClaw | `resolveDeploymentHost` 对合法空 hosts 返回 `none`；历史无 manifest 记录仍保留旧回退。新增 apply 测试断言 `host=none` |
+| 延后启用调度器不会初始化所有权 | 全新安装即使未启用也写 `pendingProvisioning` 证据；之后显式 `--enable-service-host` 的安装可恢复初始化（仅限 pending 匹配 + manifest 仍无 ownership record + 调度器 verified enabled），历史安装永不隐式恢复 |
+| 默认升级把 Codex 绑定改到中性工作区 | 刷新已安装但未显式选择的宿主时，从其现有 `mcp-binding.json` / OpenClaw declaration 读取绑定工作区；不可读则跳过并告警，绝不用本轮目录重绑 |
+| 只初始化请求目录，未初始化真实宿主工作区 | 新增 `resolveProvisioningTargets`：按实际绑定产出 Codex 重定向目录 / WorkBuddy 治理目录 / OpenClaw 项目目录，逐个执行 readiness + 所有权初始化 |
+| 官网 OpenClaw 命令缺少 `--host openclaw` | InstallGuide / InstallSection / 中英文 getting-started / DownloadPage 全部加上；新增源级测试防止回退，并说明 `--host none` 的 Service-Host-only 模式 |
+| 交互升级 `--no-service-host` 仍 refresh | 交互路径优先识别 opt-out；升级不再触碰调度器 |
+| 首次周期把准入当执行、沿用旧进展 | 只统计真实 adapter execution（有 `execution` + hostKind），进展只认本轮 `task_state_change`/`cycle_evidence`；新增 `waitingForBinding` |
+| 规范提前宣告生产切换 | Production Cutover 行改为“未达成”，明确实现状态与验收状态分离 |
+| 等待绑定摘要盖过其他失败 | `managedNextAction` 组合所有结果类别（waiting + transition + unauthorized + unhealthy），不再提前返回 |
