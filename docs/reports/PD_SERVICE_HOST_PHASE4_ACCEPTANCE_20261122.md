@@ -87,3 +87,49 @@ Windows（本机）：上述全部。macOS/Linux：未接触真机（Phase 3 同
 ## 10. 最终结论
 
 **PASS_WITH_LIMITATIONS**——Phase 4 退出条件在隔离环境与代码/测试层面全部满足：OpenClaw workspace 可由 Service Host 独占驱动（A/C/D），可回滚（E），无双消费者（各门禁+测试），Codex/WorkBuddy 路径回归绿（469 通过套件）。生产 cutover 待平台门禁（Phase 5 范畴）。
+
+---
+
+## 11. 第四轮整改（2026-11-23，评审指令：跨进程锁 / Gateway 消费者互斥 / Evidence 恢复）
+
+**最终 HEAD：`37aa69cf2`**（PR #2749 `ai/PRI-1282-openclaw-worker`）。
+
+### 11.1 提交序列
+
+| SHA | 内容 |
+|---|---|
+| 911fcf164 | §2/§4：CAS 锁原子互斥——SQLite 仲裁门（`BEGIN IMMEDIATE`+busy_timeout）串行化获取/过期回收/释放；service-run-lock stat 失败 fail-closed |
+| d05abba75 | §3：Gateway consumer lease 生命周期——lease 需 instanceId，start/stop/quiesce 绑定进程实例，杜绝重启假 ACK |
+| c3654d19f | §5–§9：--resume `no_resumable_operation`/`operation_id_mismatch`、abort 校验 opId+generation、completed 操作不可重入；evidence/intent EEXIST 全身份比对；CAS 后最终 ownership 验证；rollback intent 先持久化 + --resume 仅证据续跑；调度 enable/disable 与交接共享 run lock 串行化 + CAS 前锁内复查 |
+| 37aa69cf2 | §9–§12 收尾：生命周期操作 nextAction；readiness 全进程字段+逐 kind 凭证+workspaceDir 绑定；ACK canonical realpath + 别名 fail-closed；workbuddy manifest 合并/裁剪全部锁内 + tmp+rename，缺锁导出 fail-closed |
+
+### 11.2 测试
+
+| 套件 | 结果 |
+|---|---|
+| pd-cli workspace-handover | 31/31（含 r4 新增 5 例：resume 身份、intent 恢复、最终验证、调度复查、证据身份） |
+| pd-cli service-host / plugin service / install-layout transition | 91/91（三套） |
+| create-principles-disciple 全量 | 1491 通过；本地 3 例环境性失败（gateway-notice mock、registry 探测）——改动前同样失败，与本轮无关，CI 同名 lane 全绿 |
+| 多进程确定性测试 | install-layout 双进程 CAS 竞争（恰一胜者）+ CAS SQLite 门并发用例；无随机 sleep |
+
+### 11.3 CI（最终 HEAD 37aa69cf2）
+
+26 checks 全绿（含 Verify Merge Gate、CodeQL、pd-cli/Windows、packaged-install smoke、e2e）；CodeRabbit skip。PR mergeable 无冲突。
+
+### 11.4 Review Threads
+
+PR #2749 共 14 条 Devin Review 线程全部 ✅ resolved（本轮新增关闭 3 条：阶段任务误拒交接→§10；路径别名交接超时→§11；清单锁覆盖→§2）。
+
+### 11.5 真实宿主验收
+
+| 场景 | 状态 |
+|---|---|
+| 场景 A/C/D/E（Stage 9 sandbox 真实安装态） | 既有结论不变（PASS），本轮改动为编排/锁层加固，不重跑 |
+| **真实 Gateway 进程 quiesce/消费互斥验收** | **NOT_VERIFIED** — 本机无真实 OpenClaw Gateway 进程可运行；互斥保证由 lease 语义 + 双进程 CAS 测试 + 插件门禁用例覆盖，无模拟 ACK 代替 |
+| npm-pack→installer 发布管线 + macOS/Linux 真机 | NOT_VERIFIED（沿 §8/§9 既有声明） |
+
+### 11.6 剩余风险
+
+1. CAS SQLite 门依赖 `node:sqlite`（Node≥22.5 内置）；旧运行时尚未移除，如宿主 Node 过旧锁获取将 fail-closed 报错而非静默放行——按设计。
+2. Gateway 真实进程下的 lease/ack 联调未验（上表 NOT_VERIFIED）——属 Phase 5 cutover 前置项。
+3. `no_resumable_operation` 对"操作已完成但操作者误用 --resume"返回结构化的不可续跑而非静默成功——行为语义变化，已在证据字段披露。
