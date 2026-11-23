@@ -1,5 +1,13 @@
 # create-principles-disciple
 
+## 1.155.3
+
+### Patch Changes
+
+- 35ceb54: Bump tuf-js from 6.0.2 to 6.0.3 in the installer runtime dependencies (dependabot PR #2767).
+- ac9a4f6: Bump @inquirer/prompts from 8.7.x to 8.8.x in the installer runtime dependencies (dependabot PR #2768).
+- ad018fe: Bump commander from 14.0.3 to 15.1.0 in the installer runtime dependencies (dependabot PR #2769). CLI usage stays on the stable Command/option/action API surface; Node engine floor >=22.12.0 is below the existing project floor.
+
 ## 1.155.2
 
 ### Patch Changes
