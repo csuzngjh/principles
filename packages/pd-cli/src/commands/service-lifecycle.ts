@@ -15,6 +15,8 @@ import {
   type SchedulerLifecycleResult,
 } from '../services/service-host/index.js';
 import { SERVICE_HOST_STATUS_SCHEMA_VERSION, type ServiceHostStatusDocument } from '../services/service-host/index.js';
+import { resolveCoordinatorInstallIdentity } from '../services/service-host/install-identity.js';
+import { acquireServiceRunLock, releaseServiceRunLock } from '../services/service-host/locking/service-run-lock.js';
 
 export interface ServiceLifecycleArgs {
   readonly json: boolean;
@@ -109,10 +111,43 @@ export async function handleServiceLifecycle(operation: SchedulerLifecycleOperat
     ({ intervalMs } = parsed);
   }
 
-  const result = await runSchedulerLifecycle(operation, {
-    ...(args.pdHome !== undefined ? { trustedHomeDir: args.pdHome } : {}),
-    ...(intervalMs !== undefined ? { intervalMs } : {}),
-  });
+  // PRI-1282 r4 §9: mutating lifecycle operations serialize with handover,
+  // rollback and managed run-once through the SHARED install-level run
+  // lock — a `pd service disable` landing mid-handover would otherwise flip
+  // the trigger under an in-flight ownership transition. `status` stays
+  // lock-free (read-only).
+  const identity = resolveCoordinatorInstallIdentity(process.env, args.pdHome !== undefined ? { trustedHomeDir: args.pdHome } : {});
+  if (!identity.ok) {
+    const output: OpJsonRefused = { schemaVersion: OP_SCHEMA, operation, ok: false, reason: `install_identity_unresolved:${identity.reason}`, nextAction: identity.nextAction };
+    if (args.json) console.log(JSON.stringify(output));
+    else printHumanOp({ ok: false, operation, reason: output.reason, nextAction: output.nextAction }, output.nextAction);
+    process.exitCode = 1;
+    return;
+  }
+  const runLock = acquireServiceRunLock(identity.identity.pdHome);
+  if (!runLock.ok) {
+    const output: OpJsonRefused = {
+      schemaVersion: OP_SCHEMA,
+      operation,
+      ok: false,
+      reason: `service_run_in_progress:${runLock.kind}`,
+      nextAction: 'A managed run-once, handover or rollback is currently executing on this install; wait for it to finish and retry the lifecycle operation.',
+    };
+    if (args.json) console.log(JSON.stringify(output));
+    else printHumanOp({ ok: false, operation, reason: output.reason, nextAction: output.nextAction }, output.nextAction);
+    process.exitCode = 1;
+    return;
+  }
+
+  let result: SchedulerLifecycleResult;
+  try {
+    result = await runSchedulerLifecycle(operation, {
+      ...(args.pdHome !== undefined ? { trustedHomeDir: args.pdHome } : {}),
+      ...(intervalMs !== undefined ? { intervalMs } : {}),
+    });
+  } finally {
+    releaseServiceRunLock(runLock.handle);
+  }
   const nextAction = opNextAction(result);
 
   if (args.json) {

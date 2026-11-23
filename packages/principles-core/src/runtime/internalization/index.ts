@@ -385,5 +385,6 @@ export {
   buildDreamerSeedFromCandidate,
   dreamerTaskIdsForCandidate,
   findExistingDreamerTask,
+  piTaskBelongsToCandidates,
   seedIntakeTask,
 } from './intake-to-internalization-bridge.js';

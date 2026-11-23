@@ -1,5 +1,288 @@
 # create-principles-disciple
 
+## 1.155.1
+
+### Patch Changes
+
+- e0fc5d6: 为产品版本 2.8.11 重铸安装器 payload 身份戳：#2742 cohort（5f1ace226）在产品版本 bump 落地前已进入发布火车，其 stamp 固定为 2.8.10，已装 2.8.10 的运行时按"不高于已装版本则禁止升级"规则收不到更新；需要一个新的 patch cohort 让签名频道能以 `product_version=auto` 发出 2.8.11。
+
+## 1.155.0
+
+### Minor Changes
+
+- 0102002: PD Service Host Phase 3 (PRI-1281, SPEC-PD-SERVICE-HOST-001 §11 Phase 3 /
+  §8.1 / §10, ADR-0020 §11.6): user-level OS Scheduler + the full Service
+  Host lifecycle command surface.
+  
+  pd-cli (minor) — three layers, all inside the existing
+  `src/services/service-host/scheduler/` boundary (no new package; TD §11
+  independence-plan superseded, ERR-196):
+  
+  - Scheduler Adapter Contract: ONE five-operation interface
+    (install/enable/disable/status/uninstall) with three REAL platform
+    implementations behind it — Windows current-user Task Scheduler task
+    (PowerShell ScheduledTasks module, JSON protocol, FullyQualifiedErrorId
+    classification so an access denial NEVER reads as "not installed"),
+    macOS user LaunchAgent (plist + launchctl bootstrap/bootout/enable/
+    disable in the caller's own `gui/<uid>` domain), Linux systemd --user
+    service+timer (atomic unit writes, honest daemon-reload/bus failures,
+    `is-enabled` unreadable ≠ disabled). All user-level: no elevation, no
+    Windows Service / LaunchDaemon / root unit, no credentials in any
+    registration; install defaults to installed_disabled; every operation
+    is idempotent; a same-named registration that does not reference THIS
+    install's CLI entry is FOREIGN and fail-closed (never overwritten or
+    deleted). Registration identity is derived from the canonical pdHome
+    (sha256 prefix) so two installs of one user cannot collide; the
+    registered command pins ABSOLUTE node + active-release CLI entry paths
+    (`service run-once --json --trigger scheduler --pd-home <dir>`) — no
+    PATH, no cwd, no env-derived identity. Interval default 120s (existing
+    worker cadence), floor 60s (the real Windows PT1M repetition minimum,
+    verified live), adjustable via `--interval-ms`.
+  - Managed execution — `pd service run-once --json` (bare) is now the OS
+    scheduler entry: the same trusted prefix (identity → install lock →
+    active release → manifest → validated claims → discovery) then an
+    ownership-based admission matrix (§8.4): ONLY
+    `effectiveOwner=service_host` + `service_host_owned` + authorized
+    verdict workspaces execute (one bounded real worker cycle per bound
+    adapter via the SAME dispatch core as shadow — monotonic per-workspace
+    budget, abort-before-every-dispatch, failure isolation); legacy_owned
+    workspaces are skipped (legacy owner stays unique);
+    handover_preparing / rollback_pending are NEVER consumed; conflicting
+    owner projections and unauthorized verdicts are refused per-workspace;
+    an unreadable manifest/marker refuses the whole run (never "zero
+    workspaces"). Zero service_host_owned workspaces is a LEGAL empty
+    completed run (`no_service_host_owned_workspaces`). `--trigger
+    manual|scheduler` records the truthful trigger source (login vs
+    periodic is deliberately not distinguishable — never fabricated).
+    Status stays `pd.service-run-status.v1`, extended additively with a
+    `managed` section. `--dry-run` and `--shadow` contracts unchanged.
+  - Lifecycle commands — `pd service install|enable|disable|status
+    --json|uninstall` (+ `--pd-home` trusted injection on every service
+    subcommand): `status` composes the unified read-only contract
+    (`pd.service-status.v1`) where every clause comes from its OWN witness
+    (OS registration/enabled/interval/OS last-run ← the OS; last run
+    outcome/mode/triggerSource ← run-once-status.json; lastProgressAt ←
+    the cross-run progress store; workspace owner states ← fresh
+    read-only discovery) — registered ≠ enabled ≠ running ≠ completed ≠
+    business_progress, proven in disagreeing combinations. Status reads
+    start no Worker and write no business data. disable keeps the
+    registration and ALL data; uninstall removes ONLY this install's
+    registration (Workspace data / .pd/state.db / Ledger / Trajectory /
+    evidence untouched).
+  
+  create-principles-disciple (minor): installer integration through a
+  scheduler BRIDGE — the installer never re-implements lifecycle logic; it
+  spawns the just-installed CLI (`service … --json --pd-home <trusted>`),
+  with a cleaned child env (PD_EXPERIMENT_ROOT / PD_WORKSPACE_DIR
+  stripped). Post-commit reconciliation (failures are warnings, never a
+  reported install failure — ERR-197): with EXPLICIT consent only
+  (`--register-service-host` = register disabled; `--enable-service-host`
+  = register + enable; no flag registers NOTHING silently), register or
+  register+enable; without consent, upgrades REFRESH-IF-REGISTERED only
+  (idempotent re-install preserving the enabled state — never creates a
+  registration). Uninstall revokes the scheduler registration BEFORE the
+  shared runtime is removed and ONLY when the shared runtime is being
+  removed (a host-scoped uninstall keeps it while other hosts still use
+  the runtime); a failed revocation is a warning with manual removal
+  instructions.
+  
+  pd-console (rides the create-principles-disciple release above — pd-console
+  is a private, never-versioned package): NEW read-only `GET
+  /api/service-host/status` — spawns `pd service status --json` (the same
+  single implementation); non-GET methods are refused by construction and no
+  lifecycle surface exists in the Console (SPEC §7: UI never owns the
+  scheduler lifecycle).
+  
+  Real-platform verification (Windows): full lifecycle against the REAL
+  Task Scheduler with an isolated install identity — install→disabled,
+  idempotent re-install preserving state, enable, a REAL OS start of the
+  registered command (LastRunTime/LastTaskResult observed), disable,
+  uninstall, idempotent re-uninstall, zero leftover tasks. This host's
+  hardened policy denies unelevated registration; that path is asserted
+  live as the honesty contract (structured access-denied, never "not
+  installed") and the lifecycle runs through an elevated PowerShell bridge
+  documented in the test. macOS LaunchAgent and Linux systemd --user
+  adapters are unit-tested against faked command boundaries; real-platform
+  acceptance on those platforms is recorded NOT_VERIFIED until run on real
+  hosts (task §9.F).
+- 3a3b142: PD Service Host Phase 4 (PRI-1282, SPEC-PD-SERVICE-HOST-001 §11 Phase 4 /
+  §8.4 / §4): OpenClaw decoupling — the standalone OpenClaw worker, the
+  Gateway ownership gate + quiesce protocol, and the §8.4 CAS transition
+  primitive (phase attribution corrected: Phase 4 lands the minimal
+  reusable primitive, Phase 5 reuses it for Codex/WorkBuddy).
+  
+  @principles/install-layout (minor) — the §8.4 state-machine WRITE half the
+  schema deferred: `transitionWorkspaceBackgroundExecution` (six legal
+  transitions: begin/abort/complete_handover, begin/complete/abort_rollback)
+  under a cross-process directory lock (O_EXCL + owner metadata + TTL
+  quarantine reclaim) with in-lock monotonic-generation fencing,
+  operationId idempotency (same-op replay no-op, foreign-op
+  `operation_in_progress`), atomic rename landing, unknown top-level field
+  preservation, and legacy single-key migration in the same write;
+  `readWorkspaceBackgroundOwnership` — the single fail-closed read
+  projection shared by the Gateway gate, the openclaw worker gate and the
+  handover/rollback commands; `withInstallManifestWriteLock` for whole-file
+  writers (ERR-168).
+  
+  principles-disciple (minor) — new `./openclaw-worker` subpath export: the
+  bounded OpenClaw workspace worker cycle reusing the SHARED consumer cycle
+  + diagnostician with the SAME OpenClaw host facts the Gateway injects
+  (catalog/semantics/hostKinds pinned by a runtime parity test; the only
+  intentional difference is attribution `service-host-worker`), worker
+  liveness evidence (`.state/openclaw-worker-liveness.json`, codex pattern),
+  PD_INVOCATION_SOURCE/PD_INVOCATION_ID attribution, declaration
+  refresh+validation, the §8.4 ownership gate (only `service_host_owned` is
+  consumable; unreadable marker fails closed — manual invocation can never
+  double-consume a Gateway-owned workspace) and the no-consume readiness
+  self-check. Gateway InternalizationAutoConsumerService: §8.4 marker gate
+  at service-start, per-tick AND post-cycle (a handover opened mid-cycle is
+  observed the moment the cycle ends); quiesce protocol with the persisted
+  `pd.gateway-quiesce.v1` acknowledgment (bound to operationId+generation,
+  bounded in-flight wait, honest `in_flight_timeout`); the parked timer slot
+  degrades into a slow ownership watch that re-arms consumption when the
+  marker returns to legacy_owned — rollback needs no Gateway restart.
+  
+  @principles/host-runtime (minor) — `collectWorkspaceCredentialEnvNames`:
+  one collector for the credential env NAMES a workspace's runtime profiles
+  reference (Service Host allowlist since Phase 2; OpenClaw worker readiness
+  now) — names only, values never pass through.
+  
+  @principles/pd-cli (minor) — `pd openclaw worker --once|--readiness
+  --json --workspace <dir>` (lazy plugin-subpath import; NO continuous mode
+  — the OS scheduler owns triggering); `pd service handover|rollback` §8.4
+  orchestration (openclaw binding verification → atomic begin_handover with
+  workspace registration → active-release readiness probe → gateway
+  quiesce-ack wait bound to operationId+generation → single CAS flip →
+  first real worker cycle → write-once operationId-keyed evidence; verify-
+  only crash continuation; `--abort`/`--resume`); managed dispatch host set
+  adds openclaw (`MANAGED_WORKER_HOST_KINDS`) while Phase 2 shadow stays
+  codex|workbuddy (`--shadow --host openclaw` still refused); managed
+  status record `hostKind` widens additively (still `pd.service-run-status.v1`).
+  
+  create-principles-disciple (minor) — install.json writers join the
+  ownership CAS lock discipline (ERR-168): the installer's
+  `writeInstallManifest` and the update side's `writeInstallConfig` /
+  `mergeIntoInstallJson` run their read-modify-save under the same physical
+  lock as the §8.4 transition primitive, failing loud instead of silently
+  clobbering `backgroundExecutions` records. Against an older registry-
+  resolved @principles/install-layout (the pre-cohort release window) the
+  lock export is feature-detected and the pre-PR unlocked write behavior is
+  kept for that window only.
+  
+  Adaptive timer decision: V1 fixed 120s OS period (no persisted Gateway
+  counters, no timer service) — quantified comparison and disclosed
+  semantic changes in
+  `docs/reports/PD_SERVICE_HOST_PHASE4_SCHEDULING_COMPARISON.md` (normal and
+  sparse loads comparable; burst drain ~2x slower, bounded; zero lost
+  tasks; failure-backoff ladder semantics disclosed). manifest
+  `workspaceBindings` is NOT implemented — host-binding authority stays
+  with the existing dual sources (manifest + validated claims); handover
+  registers the workspace through the existing atomic merge path.
+
+### Patch Changes
+
+- 652409b: PRI-1283 R2/R3 (SPEC-PD-FEEDBACK-RESILIENCE-001 TECH §2.2): sourceRef
+  revocation safety gate and persisted excerpt cleanup.
+  
+  R2 — unified latest-consent read gate over the conversation-ingestion consent
+  ledger v3 (the single authority): a new `SourceMaterialAuthorizationPort`
+  (core) with the ledger-backed implementation
+  `createConsentLedgerSourceMaterialAuthorization` (host-runtime), consulted
+  PER CALL (no cache) at every consumption entry point — diagnosis context
+  assembly (evidence entries, correction evidence, promoted evidence window,
+  governance turn reader, payload sourceRefs), all three split-pipeline model
+  invocation boundaries (`source_authorization_revoked` blocks the run), the
+  shared admission re-verification (`evaluateAndPersistAdmissionForWrite` /
+  internalization orchestrator / consumer cycle), `pd pain recall`, the Console
+  evidence-chain read model, and the MCP submit assembly (target-turn evidence
+  and session-verification probes refuse on blocked consent). Unwired ports
+  fail CLOSED for governance-sourced material; `owner_reported:` / `candidate:`
+  / openclaw inline evidence is not consent-governed and unaffected.
+  `ensureGovernanceContinuation` / `reconcileGovernanceContinuation` now AND the
+  caller flag with a live ledger read instead of trusting the flag alone.
+  
+  R3 — `runSourceRevocationSweep` (host-runtime): idempotent, visible,
+  retryable purge of persisted excerpts for every host whose recorded consent
+  decision is not granted — governance_observations text/tool facts NULLed and
+  retention-class expired (the store's no-regain guard makes re-granting NOT
+  resurrect old excerpts), admission marker payloads redacted (including the
+  independent `reason` column and pending-review termination), pain_events
+  text/reason NULLed for automatic pains (the Pain row and its identity
+  survive), task diagnostic_json evidence entries removed with a truthful
+  `painIngress.evidenceClass` (`source_revoked` added to the v1 reason enum)
+  and a non-sensitive `sourceRevocation` audit block, pain_diagnoses,
+  diagnostician artifacts, runs.output_payload and pi_artifacts evidence
+  filtered via row CAS. Wired into `pd codex setup --decline` / `pd workbuddy
+  setup --decline` (immediate sweep) and exposed as `pd consent sweep-revoked
+  [--apply] [--json]` (default dry run — truly read-only connections, no schema
+  init, no WAL/journal writes); audit trail at
+  `.state/source-revocation-sweep.jsonl` carries metadata only. Ledger-missing
+  workspaces are not swept (not a revocation) while R2 gates keep blocking; an
+  unreadable ledger fails the sweep loudly.
+  
+  Review round 2 hardening (directives A–F): pending Stage-2 reviews of a
+  revoked host are terminated `abandoned('source_revoked')` by both the sweep
+  and the claim path (claim-time consent re-validation; pre-classifier claim
+  verification blocks new model requests after a revocation; in-flight results
+  are fenced by the decision+claimToken CAS); explicit Owner statements
+  (`PD记录痛苦：` / `pd pain explicit` / WorkBuddy explicit intake) are
+  classified by their own provenance and survive the revocation on every read
+  path (sweep / recall / context assembler / console) and in the intake
+  re-verification (a historical `admitted` verdict is re-verified against the
+  latest source authorization before internalization may reuse it); dry runs
+  are read-only per table with counted-from-write purges and reported audit
+  failures; the core barrel surface carries only cross-package production
+  consumers (9 admitted symbols).
+  
+  Review round 3 (owner_manual classification ruling): an explicit Owner
+  statement is owner_manual only when its text is credibly Owner-authored —
+  a direct Owner channel (`codex_explicit_prefix` / `workbuddy_explicit_prefix`
+  / `cli_owner_statement` / `openclaw_manual_pain`), or an agent-assisted
+  `codex_explicit_agent` submission carrying a bound Owner confirmation record
+  (`ownerConfirmation.kind = owner_verbatim_turn_match` written by the
+  registration path after verifying the statement VERBATIM against the current
+  turn's host transcript, fingerprint-bound to the persisted text). A
+  self-declared `owner_statement` classification or a forged/mismatched
+  confirmation never exempts: unverified agent submissions persist as
+  Agent-derived and are governed by the consent ledger on every entry point
+  (sweep / recall / context assembler / console / admission), consistent under
+  one shared `isOwnerManualCorrectionEvidence` judgment.
+  
+  Round 4 hardening (review threads #14/#19/#20/#21): the console evidence-chain redaction now judges STRUCTURED correction evidence via `isOwnerManualCorrectionEvidence` instead of the spoofable summary reason marker; verbatim confirmation additionally requires an authorized source-material ledger for that host; the admission validator accepts legacy unconfirmed `codex_explicit_agent` payloads (empty evidence array tolerated) as Agent-derived so task reconciliation cannot starve on them; and the sweep task probe also matches rows carrying `correctionEvidence` so statement-only governed tasks are evaluated, with the evidenceClass rewrite made rerun-idempotent.
+  Diagnostician PHASE 1.5 now labels an unverified `codex_explicit_agent` correction as agent-relayed/unverified instead of claiming verbatim Owner words (review thread on the prompt builder).
+- f1bb2fe: WorkBuddy installs are usable out of the box (Owner-requested, 2026-11-22).
+  
+  `@principles/workbuddy-adapter`: the shipped plugin manifest now declares
+  `defaultEnabled: true` instead of `false`. The installer's existing rule is
+  unchanged — an explicit boolean already in `settings.json` always wins — so an
+  Owner who disabled PD stays disabled, while a fresh install no longer needs a
+  manual trip to the plugin manager. Enabling the plugin also loads its bundled
+  `.mcp.json`, which is the only path that makes the pd-recall MCP server
+  available without a separate trust decision (verified against the engine: the
+  `mcp-approvals.json` trust store is consulted only for USER-level
+  `~/.workbuddy/mcp.json` entries, never for plugin-declared servers).
+  
+  `create-principles-disciple`: after a successful install/update commit, a
+  LEGACY user-level `pd-recall` entry in `<config>/mcp.json` is removed when —
+  and only when — the read-only classifier proves PD ownership from the launcher
+  bytes AND the plugin-side replacement is usable (the plugin ended enabled,
+  its installed payload declares `pd-recall`, and the launcher binding was
+  written). Such an entry is a different MCP origin: it would demand a manual
+  trust gesture AND duplicate the plugin's own server in the MCP list, so an
+  upgraded machine would still look broken. The cleanup runs post-commit so a
+  rolled-back install leaves `mcp.json` byte-identical; a permission-preserving
+  byte backup (`mcp.json.pd-legacy-<ts>.bak`) is written first, and the
+  replacement is guarded by the snapshot bytes so a concurrent host save is
+  refused rather than overwritten. Every other key and server entry is kept —
+  the file is rewritten in canonical JSON form. When the substitute is not
+  proven (e.g. the Owner's explicit disable was preserved), the legacy entry
+  stays and the install reports why instead of enabling the plugin behind the
+  Owner's back. A cleanup failure is a warning, never an install failure, and an
+  unprovable or foreign same-name entry is still left untouched (Gate 4
+  conflict semantics unchanged).
+- Updated dependencies [3a3b142]
+  - @principles/install-layout@0.10.0
+
 ## 1.154.5
 
 ### Patch Changes

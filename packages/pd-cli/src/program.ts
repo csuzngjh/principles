@@ -855,6 +855,28 @@ workbuddyCmd
     });
   });
 
+// ── pd openclaw — OpenClaw host commands (PRI-1282 Phase 4) ──
+const openclawCmd = program
+  .command('openclaw')
+  .description('OpenClaw host worker commands (bounded Service Host execution)');
+
+openclawCmd
+  .command('worker')
+  .description('Run the bounded OpenClaw workspace worker (one cycle per invocation — no continuous mode; the PD Service Host owns triggering)')
+  .requiredOption('-w, --workspace <path>', 'Canonical workspace directory (required — never inferred)')
+  .option('--once', 'Run exactly one bounded consumer cycle and exit')
+  .option('--readiness', 'Run the no-consume readiness self-check (handover prerequisite) and exit')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleOpenClawWorker } = await import('./commands/openclaw-worker.js');
+    await handleOpenClawWorker({
+      workspace: opts.workspace,
+      json: opts.json === true,
+      once: opts.once === true,
+      readiness: opts.readiness === true,
+    });
+  });
+
 // ── pd consent — conversation-ingestion consent operations (PRI-1283) ───────
 const consentCmd = program
   .command('consent')
@@ -984,6 +1006,46 @@ serviceCmd
     await handleServiceStatus({ json: opts.json === true, ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}) });
   });
 
+// ── Phase 4 (PRI-1282): per-Workspace §8.4 atomic ownership transitions. ──
+serviceCmd
+  .command('handover')
+  .description('Hand ONE workspace over to the PD Service Host (§8.4 atomic sequence: preparing → readiness → gateway quiesce ack → CAS → first worker cycle)')
+  .requiredOption('-w, --workspace <path>', 'Canonical workspace directory (required)')
+  .option('--pd-home <dir>', 'Trusted PD home injection')
+  .option('--ack-wait-ms <ms>', 'Quiesce-ack wait budget in ms (default 900000)')
+  .option('--abort', 'Abort an in-flight handover_preparing back to legacy ownership')
+  .option('--resume <operationId>', 'Resume a specific in-flight operation (default: the persisted operationId)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleServiceHandover } = await import('./commands/service-handover.js');
+    const ackWaitMs = typeof opts.ackWaitMs === 'string' ? Number.parseInt(opts.ackWaitMs, 10) : undefined;
+    await handleServiceHandover({
+      workspace: opts.workspace,
+      json: opts.json === true,
+      ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}),
+      ...(ackWaitMs !== undefined && Number.isInteger(ackWaitMs) && ackWaitMs > 0 ? { ackWaitMs } : {}),
+      ...(opts.abort === true ? { abort: true } : {}),
+      ...(typeof opts.resume === 'string' ? { resumeOperationId: opts.resume } : {}),
+    });
+  });
+
+serviceCmd
+  .command('rollback')
+  .description('Roll ONE workspace back to the legacy consumer (stop Service Host cycles → CAS back to legacy → observe Gateway resumption)')
+  .requiredOption('-w, --workspace <path>', 'Canonical workspace directory (required)')
+  .option('--pd-home <dir>', 'Trusted PD home injection')
+  .option('--resume <operationId>', 'Resume a specific in-flight or committed-but-unevidenced rollback')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleServiceRollback } = await import('./commands/service-handover.js');
+    await handleServiceRollback({
+      workspace: opts.workspace,
+      json: opts.json === true,
+      ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}),
+      ...(typeof opts.resume === 'string' ? { resumeOperationId: opts.resume } : {}),
+    });
+  });
+
 const internalizationCmd = runtimeCmd
   .command('internalization')
   .description('Internalization Engine operator visibility');
@@ -1027,9 +1089,10 @@ internalizationCmd
   .option('--allow-test-double', 'Acknowledge that test-double runtime will mutate real queue state')
   .option('--no-enqueue-next', 'Skip successor enqueue after successful runner (default: auto-enqueue)')
   .option('--timeout-ms <ms>', 'Runner timeout in milliseconds (default: 300000, overrides workflows.yaml)', parseInt)
+  .option('--only-candidates <ids>', 'Comma-separated candidate ids: only lease tasks belonging to these candidate chains (experiment shard isolation)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext, timeoutMs: opts.timeoutMs });
+    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext, timeoutMs: opts.timeoutMs, onlyCandidates: opts.onlyCandidates });
   });
 
 registerRunRuleHostCommand(internalizationCmd);

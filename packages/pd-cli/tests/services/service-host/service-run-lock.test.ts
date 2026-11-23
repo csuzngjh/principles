@@ -14,6 +14,7 @@ import {
   SERVICE_RUN_LOCK_STALE_MS,
   acquireServiceRunLock,
   holdsServiceRunLock,
+  probeServiceRunLockState,
   readLockBodyStatus,
   releaseServiceRunLock,
   serviceRunLockPath,
@@ -624,19 +625,66 @@ describe('round-6 release read classification (P0)', () => {
     expect(readFileSync(lockPath, 'utf8')).toBe(foreignBody);
   });
 
-  it('the classifier itself maps ENOENT and ENOTDIR to absent, EACCES-shaped errors to unreadable', () => {
+  it('the classifier itself maps ONLY ENOENT to absent; ENOTDIR/EACCES-shaped errors are unreadable (fail-closed, PRI-1282 r4)', () => {
     const home = tempHome();
     // ENOENT: path missing entirely.
     expect(readLockBodyStatus(path.join(home, 'no-such.lock')).kind).toBe('absent');
-    // ENOTDIR: a regular file where the parent directory belongs.
-    const blocker = path.join(home, 'service');
-    writeFileSync(blocker, 'not a directory', 'utf8');
-    expect(readLockBodyStatus(path.join(blocker, 'service-run.lock')).kind).toBe('absent');
+    // ENOTDIR: a regular file where the parent directory belongs — a
+    // path-structure anomaly, NOT proof of absence. On Windows Node reports
+    // ENOENT for a sub-path under a regular file (no ENOTDIR plumbing), so
+    // the real-fs shape is POSIX-only; injected codes still cover the
+    // classifier on Windows (see the it.each below).
+    if (process.platform !== 'win32') {
+      const blocker = path.join(home, 'service');
+      writeFileSync(blocker, 'not a directory', 'utf8');
+      expect(readLockBodyStatus(path.join(blocker, 'service-run.lock')).kind).toBe('unreadable');
+    }
     // EISDIR: the lock path is a directory — a real, non-absence read failure.
     const dirLock = path.join(home, 'a-dir.lock');
     mkdirSync(dirLock, { recursive: true });
     const unreadable = readLockBodyStatus(dirLock);
     expect(unreadable.kind).toBe('unreadable');
-    if (unreadable.kind === 'unreadable') expect(unreadable.detail).toContain('EISDIR');
+    if (unreadable.kind === 'unreadable' && process.platform !== 'win32') {
+      expect(unreadable.detail).toContain('EISDIR');
+    }
   });
+
+  it('stat errors other than ENOENT fail closed — a lock that cannot be stat-ed is never treated as free (PRI-1282 r4)', () => {
+    const home = tempHome();
+    // ENOTDIR at stat: a file blocks the lock's parent dir → 'corrupt',
+    // never 'absent'-driven acquire. POSIX-only real-fs shape — Windows
+    // reports ENOENT here; the classifier mapping is covered cross-platform
+    // by the injected-code it.each below.
+    if (process.platform === 'win32') return;
+    const blocker = path.join(home, 'service');
+    writeFileSync(blocker, 'not a directory', 'utf8');
+    const lockPath = path.join(blocker, 'service-run.lock');
+    expect(probeServiceRunLockState(lockPath).state).toBe('corrupt');
+  });
+
+  it.each(['EACCES', 'EIO', 'ENOTDIR', 'EPERM'])(
+    'a %s stat failure inside acquire produces a fail-closed corrupt verdict, never an acquire (PRI-1282 r4)',
+    (code) => {
+      const home = tempHome();
+      const statLock = () => {
+        throw Object.assign(new Error(`stat failed (${code})`), { code });
+      };
+      const acquired = acquireServiceRunLock(home, { probes: { statLock } });
+      expect(acquired.ok).toBe(false);
+      if (!acquired.ok) expect(acquired.kind).toBe('corrupt');
+      expect(existsSync(serviceRunLockPath(home))).toBe(false);
+    },
+  );
+
+  it.each(['EACCES', 'EIO'])(
+    'a %s stat failure inside probe reports corrupt, never free (PRI-1282 r4)',
+    (code) => {
+      const home = tempHome();
+      const statLock = () => {
+        throw Object.assign(new Error(`stat failed (${code})`), { code });
+      };
+      const probed = probeServiceRunLockState(serviceRunLockPath(home), { probes: { statLock } });
+      expect(probed.state).toBe('corrupt');
+    },
+  );
 });

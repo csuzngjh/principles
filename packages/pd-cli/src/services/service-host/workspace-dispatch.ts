@@ -40,7 +40,13 @@ export interface DispatchWorkspaceAdaptersArgs {
   readonly hostKinds: readonly WorkerHostKind[];
   /** Whole-workspace budget in ms (serial adapters share it). */
   readonly timeoutMs: number;
-  readonly adapters: Readonly<Record<WorkerHostKind, WorkerAdapter>>;
+  /**
+   * Adapters by host kind. PARTIAL on purpose (PRI-1282 Phase 4): the shadow
+   * coordinator supplies only the codex|workbuddy pair while managed mode
+   * supplies all three — a dispatched kind without a registered adapter is a
+   * truthful `unsupported` entry, never a crash.
+   */
+  readonly adapters: Readonly<Partial<Record<WorkerHostKind, WorkerAdapter>>>;
   readonly activeRelease: ActiveReleaseFacts;
   readonly identity: InstallIdentity;
   readonly inheritedEnv: Readonly<Record<string, string | undefined>>;
@@ -66,6 +72,10 @@ export async function dispatchWorkspaceAdapters(args: DispatchWorkspaceAdaptersA
   for (const hostKind of args.hostKinds) {
     if (args.isAborted()) break;
     const adapter = args.adapters[hostKind];
+    if (adapter === undefined) {
+      entries.push({ hostKind, outcome: { kind: 'unsupported' } });
+      continue;
+    }
     const support = adapter.supports(args.descriptor);
     if (!support.supported) {
       entries.push({ hostKind, outcome: { kind: 'unsupported' } });

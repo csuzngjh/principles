@@ -22,7 +22,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getInstallLayoutPaths, getPdCliEntry } from '@principles/install-layout';
-import { loadPdConfigForPlugin } from '@principles/host-runtime';
+import { collectWorkspaceCredentialEnvNames, loadPdConfigForPlugin } from '@principles/host-runtime';
 import type { InstallIdentity } from './install-identity.js';
 import type { ActiveReleaseFacts } from './status/service-run-status.js';
 import type { WorkspaceDiscoveryVerdict } from './workspace-discovery.js';
@@ -36,8 +36,23 @@ import {
 
 export const WORKER_ADAPTER_CONTRACT_VERSION = 'pd.worker-adapter.v1';
 
-export type WorkerHostKind = 'codex' | 'workbuddy';
+export type WorkerHostKind = 'codex' | 'workbuddy' | 'openclaw';
+/**
+ * The Phase 2 SHADOW host set — deliberately WITHOUT openclaw (instruction
+ * §8.5): shadow-run drives real cycles, and OpenClaw workspaces must only be
+ * driven by the managed path after their §8.4 handover. Extending shadow to
+ * OpenClaw would let `--shadow --host openclaw` consume a legacy-owned
+ * workspace next to the Gateway AutoConsumer.
+ */
 export const WORKER_HOST_KINDS: readonly WorkerHostKind[] = ['codex', 'workbuddy'];
+/** Shadow-mode surfaces (host filter, execution records) use this narrow set. */
+export type ShadowHostKind = (typeof WORKER_HOST_KINDS)[number];
+/**
+ * The MANAGED host set (PRI-1282 Phase 4): every host whose worker the
+ * coordinator may drive for a `service_host_owned` workspace — OpenClaw
+ * joins here, where the ownership admission gate is the only entry.
+ */
+export const MANAGED_WORKER_HOST_KINDS: readonly WorkerHostKind[] = ['codex', 'workbuddy', 'openclaw'];
 
 export interface WorkspaceDescriptor {
   /** Canonical (realpath-preferred) absolute workspace dir. */
@@ -300,32 +315,16 @@ const POINTER_ENV_NAMES = new Set([
 ]);
 
 /**
- * Read the credential names out of an effective config value (the loader
- * wraps the merged PdConfig under `config`, verified against the
- * host-runtime loader; a future shape change degrades to an empty allowlist
- * — the worker reports config problems itself — never a guess).
+ * Read the credential names out of an effective config value: the shared
+ * host-runtime collector (PRI-1282 Phase 4 — one source for the Service
+ * Host allowlist and the OpenClaw worker readiness check) minus the
+ * pointer/launch deny-list, which is this package's environment-isolation
+ * domain. A future shape change degrades to an empty allowlist — the
+ * worker reports config problems itself — never a guess.
  */
 function collectCredentialEnvNames(effective: unknown): readonly string[] {
-  if (!isPlainRecord(effective)) return [];
-  const candidates: unknown[] = [
-    effective.config,
-    effective.runtimeProfiles !== undefined ? { runtimeProfiles: effective.runtimeProfiles } : undefined,
-  ];
-  const names = new Set<string>();
-  for (const candidate of candidates) {
-    if (!isPlainRecord(candidate)) continue;
-    const profiles: unknown = candidate.runtimeProfiles;
-    if (!isPlainRecord(profiles)) continue;
-    for (const profile of Object.values(profiles)) {
-      if (!isPlainRecord(profile)) continue;
-      const apiKeyEnv: unknown = profile.apiKeyEnv;
-      if (typeof apiKeyEnv !== 'string' || apiKeyEnv.length === 0 || apiKeyEnv.length > 64) continue;
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(apiKeyEnv)) continue;
-      if (POINTER_ENV_NAMES.has(apiKeyEnv.toUpperCase())) continue;
-      names.add(apiKeyEnv);
-    }
-  }
-  return [...names];
+  return collectWorkspaceCredentialEnvNames(effective)
+    .filter((name) => !POINTER_ENV_NAMES.has(name.toUpperCase()));
 }
 
 /**

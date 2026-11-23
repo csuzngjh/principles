@@ -39,8 +39,12 @@ describe('plugin manifest (probe P01 manifest facts)', () => {
     expect(String(MANIFEST['version'])).toMatch(/^\d+\.\d+\.\d+/);
   });
 
-  it('ships defaultEnabled=false (install does not equal enable, OD-03)', () => {
-    expect(MANIFEST['defaultEnabled']).toBe(false);
+  it('ships defaultEnabled=true so a fresh install is usable without a manual enable step', () => {
+    // Replaces the former OD-03 contract (install != enable). A fresh WorkBuddy
+    // install must inject the bundled pd-recall MCP server without the Owner
+    // having to open the plugin manager first; an explicit Owner choice in
+    // settings.json still wins over this default.
+    expect(MANIFEST['defaultEnabled']).toBe(true);
   });
 });
 

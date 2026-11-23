@@ -21,8 +21,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { atomicReplaceTextFile } from '../utils/config-file-io.js';
 import { parseProductVersion, ProductIdentityError, isReleaseChannelName, type ReleaseChannelName } from './product-identity.js';
 import { normalizeReleaseMetadataUrl } from './release-metadata-source.js';
+import * as installLayoutModule from '@principles/install-layout';
 
 export interface PdHomePaths {
   readonly home: string;
@@ -256,18 +258,42 @@ export function readInstallJsonRecord(filePath: string): Record<string, unknown>
  * disk; only an explicit value overwrites it. There is no programmatic way to
  * clear the field — clearing is an installer-level decision.
  */
-export function writeInstallConfig(paths: PdHomePaths, config: InstallConfig): void {
-  const existing = readInstallJsonRecord(paths.installConfigPath);
-  const payload: Record<string, unknown> = {
-    ...(existing ?? {}),
-    channel: config.channel,
-    autoCheck: config.autoCheck,
-  };
-  if (config.releaseMetadataUrl !== undefined) {
-    payload.releaseMetadataUrl = config.releaseMetadataUrl;
+/**
+ * Shared lock discipline for install.json writers: LOUD failure, never a
+ * silent unlocked fallback — an unlocked write is exactly the ERR-168
+ * clobber the lock exists to prevent.
+ *
+ * A missing lock export is an incompatible runtime cohort and fails closed;
+ * no caller may downgrade to an unlocked write of the shared ownership manifest.
+ */
+function runUnderManifestWriteLock(options: { manifestPath: string; operation: string; context: string }, fn: () => void): void {
+  const lock = installLayoutModule.withInstallManifestWriteLock;
+  if (typeof lock !== 'function') {
+    throw new InstallLayoutError('install.json', `install_manifest_lock_unavailable (${options.operation}): the installed @principles/install-layout does not expose the shared manifest lock; no write was performed. Update the installer/runtime cohort and retry.`);
   }
-  fs.mkdirSync(paths.home, { recursive: true });
-  fs.writeFileSync(paths.installConfigPath, `${JSON.stringify(payload, null, 2)}\n`);
+  const result = lock(options, fn);
+  if (!result.ok) {
+    throw new InstallLayoutError('install.json', `could not acquire the install manifest write lock (${options.operation}): ${result.message}`);
+  }
+}
+
+export function writeInstallConfig(paths: PdHomePaths, config: InstallConfig): void {
+  // ERR-168 / PRI-1282: this file also carries the per-Workspace ownership
+  // records written under the §8.4 CAS lock — take the same physical lock so
+  // a config write can never interleave with (and clobber) a transition.
+  runUnderManifestWriteLock({ manifestPath: paths.installConfigPath, operation: 'update.writeInstallConfig', context: paths.home }, () => {
+    const existing = readInstallJsonRecord(paths.installConfigPath);
+    const payload: Record<string, unknown> = {
+      ...(existing ?? {}),
+      channel: config.channel,
+      autoCheck: config.autoCheck,
+    };
+    if (config.releaseMetadataUrl !== undefined) {
+      payload.releaseMetadataUrl = config.releaseMetadataUrl;
+    }
+    fs.mkdirSync(paths.home, { recursive: true });
+    atomicReplaceTextFile(paths.installConfigPath, `${JSON.stringify(payload, null, 2)}\n`);
+  });
 }
 
 /** Field-level merge for writers that do not own the whole record. */
@@ -275,8 +301,10 @@ export function mergeIntoInstallJson(
   filePath: string,
   patch: Record<string, unknown>,
 ): void {
-  const existing = readInstallJsonRecord(filePath);
-  const payload: Record<string, unknown> = { ...(existing ?? {}), ...patch };
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+  runUnderManifestWriteLock({ manifestPath: filePath, operation: 'update.mergeIntoInstallJson', context: path.dirname(filePath) }, () => {
+    const existing = readInstallJsonRecord(filePath);
+    const payload: Record<string, unknown> = { ...(existing ?? {}), ...patch };
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    atomicReplaceTextFile(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+  });
 }

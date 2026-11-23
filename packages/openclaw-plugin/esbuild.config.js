@@ -40,6 +40,11 @@ async function bundlePlugin() {
         // a clean production-only build must emit it (ERR-090: export targets
         // have to exist in ALL build paths, not just tsc's).
         'rulehost-evidence': 'src/rulehost-evidence.ts',
+        // package.json exports ./openclaw-worker -> dist/openclaw-worker.js;
+        // the Service Host adapter invokes `pd openclaw worker` which
+        // resolves this subpath — it is a real worker entry (NOT a
+        // read-side satellite, so the purity guard exempts it by roster).
+        'openclaw-worker': 'src/openclaw-worker.ts',
       },
       outdir: 'dist',
       bundle: true,

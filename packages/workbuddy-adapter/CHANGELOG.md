@@ -1,5 +1,192 @@
 # @principles/workbuddy-adapter
 
+## 0.8.0
+
+### Minor Changes
+
+- 9eaa8a3: PD Service Host Phase 2 (PRI-1280, SPEC-PD-SERVICE-HOST-001 §11 Phase 2 +
+  Gate 0 准入边界 / ADR-0020 §11.6): `pd service run-once --shadow --workspace
+  <dir> [--host codex|workbuddy] [--timeout-ms <n>] [--json]` — an explicit,
+  manual, bounded REAL Worker Cycle per explicitly-selected legacy-owned
+  workspace, default-off and never scheduled. The unified Worker Adapter
+  contract (TD §2.3: `pd.worker-adapter.v1` — hostKind / adapterVersion /
+  supports(binding evidence only: validated claim or host-tool declaration,
+  never feature flags / cwd / env) / executeOnce / cycleOutcome / reason /
+  nextAction / lastProgressAt / health) wraps the EXISTING
+  `pd codex|workbuddy worker --once --json --workspace` entries of the
+  active-release install as bounded subprocesses (SIGTERM→grace→SIGKILL
+  ladder, per-workspace isolation, AbortSignal cancellation; task recovery
+  stays with the existing Lease TTL / Recovery Sweep). Worker child env is
+  BUILT from an allowlist (TD §5.2): identity/host-root pointers
+  (PD_EXPERIMENT_ROOT, PD_WORKSPACE_DIR, OPENCLAW_*, PD_COMPANION_WORKER_IPC,
+  HOME/USERPROFILE, CODEX_HOME/WORKBUDDY_CONFIG_DIR) are dropped or pinned
+  from the trusted install identity, `PD_INVOCATION_SOURCE=service_host` is
+  set, credentials ride the existing getEnvVar chain via a name-pattern
+  allowlist (values never logged). `lastProgressAt` reflects real persisted
+  progress only (task status transitions diffed read-only pre/post cycle;
+  empty cycles keep the previous value — never a completion timestamp);
+  unreadable evidence degrades (rc-9). Status stays
+  `pd.service-run-status.v1`, extended additively with a `shadow` section
+  (per-workspace admission + execution records; `dryRun:false`). Shadow
+  refuses non-legacy `backgroundExecutions` owners, never modifies the owner
+  marker, registers no OS scheduler, and keeps Companion supervision /
+  OpenClaw AutoConsumer untouched. Phase 1 `--dry-run` is unchanged; the two
+  modes are mutually exclusive (default-off refused without either).
+  
+  codex-adapter (minor): `lastCycleDriver` gains the `service_host` identity
+  (three-way companion/service_host/manual, TD §5.2) so `pd codex worker
+  --status` stall attribution names the shadow driver instead of misreporting
+  `manual`.
+  
+  workbuddy-adapter (minor): NEW cycle-level liveness record
+  (`.state/workbuddy-worker-liveness.json`, same shape and atomic-write
+  discipline as Codex): cycle start/stage deadlines/completion/duration/mode/
+  degradation reason plus the same three-way `lastCycleDriver` — FR-10 health
+  was previously undecidable for WorkBuddy. Known parity gap recorded (NOT
+  fixed here): the local pending-first candidate pick can starve retry_wait
+  under sustained pressure; Codex/WorkBuddy parity stays partial until the
+  core fair-share selector is adopted (follow-up on PRI-1280).
+  
+  Package extraction decision (task §11): the Service Host stays INSIDE
+  pd-cli (`src/services/service-host/`) — extraction into a separate
+  workspace package would re-enter the ERR-196 release-asset risk class
+  (bundle staging, staged manifest rewrite, REQUIRED_COMPONENTS, packaged
+  smoke, release-locks regeneration) that cannot be fully exercised outside
+  the release pipeline, and Phase 2 adds no consumer that needs the split.
+  
+  Review round (2026-11-21, 13 findings, all verified real and fixed):
+  shadow host roots resolve from the trusted home ONLY
+  (`canonicalHostRootsOnly` — forged OPENCLAW_*/CODEX_HOME/
+  WORKBUDDY_CONFIG_DIR overrides can no longer steer discovery nor the
+  child env pins; ignored inputs recorded rc-9); host-tool declarations
+  are VALIDATED via the existing `loadHostToolDeclarations` authority
+  before they count as binding evidence; worker stderr/reason strings are
+  sanitized (path redaction → `<path>`, control chars stripped) before
+  persistence; credential NAMES from the workspace's effective `apiKeyEnv`
+  join the child env allowlist so custom-named env credentials keep
+  working; Codex catch-up progress counts only ACTUAL persisted rows
+  (`inserted>0`, not re-checked sessions) and downstream evidence requires
+  `runStatus==='succeeded'`; a cross-run progress projection
+  (`service/shadow-progress.json`) keeps `lastProgressAt` across A→B→A and
+  dry-run interleaving; degraded cycles with confirmed task-state changes
+  now record the evidenced progress timestamp; `--timeout-ms` is validated
+  as a full integer BEFORE any real cycle (no more `5m`→1s clamps or
+  `five`→silent default); both workers settle the liveness record on early
+  returns (no stale mid-stage `runningStage` after a pause/degradation);
+  the coordinator passes its invocation id to the Worker
+  (`PD_INVOCATION_ID`, TD §5.2) and both workers record it in liveness for
+  correlation; the concurrency acceptance proves executability first and
+  asserts at-most-once claims exactly.
+
+### Patch Changes
+
+- 652409b: PRI-1283 R2/R3 (SPEC-PD-FEEDBACK-RESILIENCE-001 TECH §2.2): sourceRef
+  revocation safety gate and persisted excerpt cleanup.
+  
+  R2 — unified latest-consent read gate over the conversation-ingestion consent
+  ledger v3 (the single authority): a new `SourceMaterialAuthorizationPort`
+  (core) with the ledger-backed implementation
+  `createConsentLedgerSourceMaterialAuthorization` (host-runtime), consulted
+  PER CALL (no cache) at every consumption entry point — diagnosis context
+  assembly (evidence entries, correction evidence, promoted evidence window,
+  governance turn reader, payload sourceRefs), all three split-pipeline model
+  invocation boundaries (`source_authorization_revoked` blocks the run), the
+  shared admission re-verification (`evaluateAndPersistAdmissionForWrite` /
+  internalization orchestrator / consumer cycle), `pd pain recall`, the Console
+  evidence-chain read model, and the MCP submit assembly (target-turn evidence
+  and session-verification probes refuse on blocked consent). Unwired ports
+  fail CLOSED for governance-sourced material; `owner_reported:` / `candidate:`
+  / openclaw inline evidence is not consent-governed and unaffected.
+  `ensureGovernanceContinuation` / `reconcileGovernanceContinuation` now AND the
+  caller flag with a live ledger read instead of trusting the flag alone.
+  
+  R3 — `runSourceRevocationSweep` (host-runtime): idempotent, visible,
+  retryable purge of persisted excerpts for every host whose recorded consent
+  decision is not granted — governance_observations text/tool facts NULLed and
+  retention-class expired (the store's no-regain guard makes re-granting NOT
+  resurrect old excerpts), admission marker payloads redacted (including the
+  independent `reason` column and pending-review termination), pain_events
+  text/reason NULLed for automatic pains (the Pain row and its identity
+  survive), task diagnostic_json evidence entries removed with a truthful
+  `painIngress.evidenceClass` (`source_revoked` added to the v1 reason enum)
+  and a non-sensitive `sourceRevocation` audit block, pain_diagnoses,
+  diagnostician artifacts, runs.output_payload and pi_artifacts evidence
+  filtered via row CAS. Wired into `pd codex setup --decline` / `pd workbuddy
+  setup --decline` (immediate sweep) and exposed as `pd consent sweep-revoked
+  [--apply] [--json]` (default dry run — truly read-only connections, no schema
+  init, no WAL/journal writes); audit trail at
+  `.state/source-revocation-sweep.jsonl` carries metadata only. Ledger-missing
+  workspaces are not swept (not a revocation) while R2 gates keep blocking; an
+  unreadable ledger fails the sweep loudly.
+  
+  Review round 2 hardening (directives A–F): pending Stage-2 reviews of a
+  revoked host are terminated `abandoned('source_revoked')` by both the sweep
+  and the claim path (claim-time consent re-validation; pre-classifier claim
+  verification blocks new model requests after a revocation; in-flight results
+  are fenced by the decision+claimToken CAS); explicit Owner statements
+  (`PD记录痛苦：` / `pd pain explicit` / WorkBuddy explicit intake) are
+  classified by their own provenance and survive the revocation on every read
+  path (sweep / recall / context assembler / console) and in the intake
+  re-verification (a historical `admitted` verdict is re-verified against the
+  latest source authorization before internalization may reuse it); dry runs
+  are read-only per table with counted-from-write purges and reported audit
+  failures; the core barrel surface carries only cross-package production
+  consumers (9 admitted symbols).
+  
+  Review round 3 (owner_manual classification ruling): an explicit Owner
+  statement is owner_manual only when its text is credibly Owner-authored —
+  a direct Owner channel (`codex_explicit_prefix` / `workbuddy_explicit_prefix`
+  / `cli_owner_statement` / `openclaw_manual_pain`), or an agent-assisted
+  `codex_explicit_agent` submission carrying a bound Owner confirmation record
+  (`ownerConfirmation.kind = owner_verbatim_turn_match` written by the
+  registration path after verifying the statement VERBATIM against the current
+  turn's host transcript, fingerprint-bound to the persisted text). A
+  self-declared `owner_statement` classification or a forged/mismatched
+  confirmation never exempts: unverified agent submissions persist as
+  Agent-derived and are governed by the consent ledger on every entry point
+  (sweep / recall / context assembler / console / admission), consistent under
+  one shared `isOwnerManualCorrectionEvidence` judgment.
+  
+  Round 4 hardening (review threads #14/#19/#20/#21): the console evidence-chain redaction now judges STRUCTURED correction evidence via `isOwnerManualCorrectionEvidence` instead of the spoofable summary reason marker; verbatim confirmation additionally requires an authorized source-material ledger for that host; the admission validator accepts legacy unconfirmed `codex_explicit_agent` payloads (empty evidence array tolerated) as Agent-derived so task reconciliation cannot starve on them; and the sweep task probe also matches rows carrying `correctionEvidence` so statement-only governed tasks are evaluated, with the evidenceClass rewrite made rerun-idempotent.
+  Diagnostician PHASE 1.5 now labels an unverified `codex_explicit_agent` correction as agent-relayed/unverified instead of claiming verbatim Owner words (review thread on the prompt builder).
+- f1bb2fe: WorkBuddy installs are usable out of the box (Owner-requested, 2026-11-22).
+  
+  `@principles/workbuddy-adapter`: the shipped plugin manifest now declares
+  `defaultEnabled: true` instead of `false`. The installer's existing rule is
+  unchanged — an explicit boolean already in `settings.json` always wins — so an
+  Owner who disabled PD stays disabled, while a fresh install no longer needs a
+  manual trip to the plugin manager. Enabling the plugin also loads its bundled
+  `.mcp.json`, which is the only path that makes the pd-recall MCP server
+  available without a separate trust decision (verified against the engine: the
+  `mcp-approvals.json` trust store is consulted only for USER-level
+  `~/.workbuddy/mcp.json` entries, never for plugin-declared servers).
+  
+  `create-principles-disciple`: after a successful install/update commit, a
+  LEGACY user-level `pd-recall` entry in `<config>/mcp.json` is removed when —
+  and only when — the read-only classifier proves PD ownership from the launcher
+  bytes AND the plugin-side replacement is usable (the plugin ended enabled,
+  its installed payload declares `pd-recall`, and the launcher binding was
+  written). Such an entry is a different MCP origin: it would demand a manual
+  trust gesture AND duplicate the plugin's own server in the MCP list, so an
+  upgraded machine would still look broken. The cleanup runs post-commit so a
+  rolled-back install leaves `mcp.json` byte-identical; a permission-preserving
+  byte backup (`mcp.json.pd-legacy-<ts>.bak`) is written first, and the
+  replacement is guarded by the snapshot bytes so a concurrent host save is
+  refused rather than overwritten. Every other key and server entry is kept —
+  the file is rewritten in canonical JSON form. When the substitute is not
+  proven (e.g. the Owner's explicit disable was preserved), the legacy entry
+  stays and the install reports why instead of enabling the plugin behind the
+  Owner's back. A cleanup failure is a warning, never an install failure, and an
+  unprovable or foreign same-name entry is still left untouched (Gate 4
+  conflict semantics unchanged).
+- Updated dependencies [00ec958]
+- Updated dependencies [d2799f4]
+- Updated dependencies [652409b]
+- Updated dependencies [3a3b142]
+  - @principles/core@8.1.0
+  - @principles/host-runtime@4.6.0
+  - @principles/install-layout@0.10.0
+
 ## 0.7.1
 
 ### Patch Changes

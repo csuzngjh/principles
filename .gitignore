@@ -273,3 +273,8 @@ packages/website/.wrangler/
 # the tree stays tracked; session-throwaway material still goes to `.tmp/` (git-15).
 /artifacts/
 
+
+# Vitest JSON reporter output directory (session throwaway, git-15):
+# `vitest run --reporter=json` (no --outputFile) writes .vitest/json/output.json
+# beside the config; one accidentally landed in a commit (PRI-1282 round 1).
+.vitest/
