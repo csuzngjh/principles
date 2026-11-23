@@ -18,6 +18,7 @@ import {
   DefaultRolloutReviewerValidator,
   TestDoubleRuntimeAdapter,
   PrincipleTreeLedgerAdapter,
+  piTaskBelongsToCandidates,
 } from '@principles/core/runtime';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext, PITaskRecord } from '@principles/core/runtime';
 import { resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, isRuntimeConfigError, buildArtificerHostSemanticContext } from '@principles/core/runtime';
@@ -51,6 +52,7 @@ interface RunOnceOptions {
   allowTestDouble?: boolean;
   enqueueNext?: boolean;
   timeoutMs?: number;
+  onlyCandidates?: string;
 }
 
 const OWNER = 'pd-cli-internalization-run-once';
@@ -513,6 +515,26 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     ? (piTask: PITaskRecord): boolean => piTask.taskKind === 'artificer' && piTask.channel !== 'prompt'
     : undefined;
 
+  // PRI-1284 (PR #2750 review P1-2): --only-candidates bounds the SELECTION
+  // to the allowlisted candidate chains. wakeOnce iterates the whole
+  // workspace queue and skips non-ready candidates (retry_wait pending,
+  // blocked, admission-refused), so a caller-side "oldest task is ours"
+  // pre-check does NOT bound what actually gets leased — the exclusion must
+  // ride inside selection via skipCandidate. Experiment shards pass their
+  // own chain's candidate ids so a foreign sample's task can never be
+  // leased (isolation + budget).
+  const onlyCandidates = (opts.onlyCandidates ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id !== '');
+  const onlyCandidatesSkipCandidate = onlyCandidates.length > 0
+    ? (piTask: PITaskRecord): boolean => !piTaskBelongsToCandidates(piTask, onlyCandidates)
+    : undefined;
+  const skipCandidate = autoDiscoverySkipCandidate !== undefined || onlyCandidatesSkipCandidate !== undefined
+    ? (piTask: PITaskRecord): boolean =>
+        Boolean(autoDiscoverySkipCandidate?.(piTask)) || Boolean(onlyCandidatesSkipCandidate?.(piTask))
+    : undefined;
+
   if (opts.runner === undefined) {
     const probeStateManager = new RuntimeStateManager({ workspaceDir, readonly: true, bootstrapIfMissing: false });
     try {
@@ -524,7 +546,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       for (const kind of SUPPORTED_RUNNERS) {
         const probe = await probeOrchestrator.wakeOnce(
           kind as PeerRunnerKind,
-          autoDiscoverySkipCandidate ? { skipCandidate: autoDiscoverySkipCandidate } : undefined,
+          skipCandidate ? { skipCandidate } : undefined,
         );
         if (probe.decision === 'would_lease') {
           runnerKind = kind;
@@ -532,8 +554,10 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         }
         if (probe.decision === 'no_ready_tasks' && probe.reason === 'all_skipped_by_caller') {
           // rc-9: the kind HAS candidates but none this CLI can execute — say
-          // so instead of reporting a bare idle chain.
-          console.error(`[PD:run-once] auto-discovery: ${kind} has candidates but none executable by run-once (Code Rule tasks run on the shared auto-consumer) — continuing discovery`);
+          // so instead of reporting a bare idle chain. An --only-candidates
+          // allowlist produces the same signal when every remaining task is
+          // foreign-owned (PRI-1284).
+          console.error(`[PD:run-once] auto-discovery: ${kind} has candidates but none executable by run-once (Code Rule tasks run on the shared auto-consumer, or all excluded by --only-candidates) — continuing discovery`);
         }
       }
     } catch (probeErr) {
@@ -629,10 +653,13 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     try {
       // PRI-1221 review round 2: the dispatch wake re-confirmation MUST use the
       // same candidate filter as the discovery probe, or it would re-select an
-      // excluded Code Rule candidate the probe already skipped.
+      // excluded Code Rule candidate the probe already skipped. The
+      // --only-candidates allowlist rides here too: the leased taskId is the
+      // one the runner executes, so the allowlist is what actually bounds
+      // execution to this caller's candidate chains (PRI-1284).
       wakeResult = await orchestrator.wakeOnce(
         runnerKind as PeerRunnerKind,
-        autoDiscoverySkipCandidate ? { skipCandidate: autoDiscoverySkipCandidate } : undefined,
+        skipCandidate ? { skipCandidate } : undefined,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

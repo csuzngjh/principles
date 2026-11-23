@@ -31,6 +31,32 @@ export async function findExistingDreamerTask<T extends { taskId: string }>(
   return null;
 }
 
+/**
+ * PRI-1284 (PR #2750 review P1-2): whether a hydrated PI task belongs to one
+ * of the given candidate chains. Formation taskIds embed the candidateId —
+ * `dreamer-<candidateId>-<channel>` seeded here, `<kind>-<correlationId>-<channel>`
+ * for orchestrator successors whose root is the same candidateId — and the
+ * hydrated record's correlationId carries that root when present. Matching
+ * on EITHER keeps the predicate correct for seeds that left correlationId
+ * unset.
+ *
+ * This is the allowlist primitive for bounded run-once callers (e.g. an
+ * experiment shard's formation loop): wakeOnce iterates the whole workspace
+ * queue and skips non-ready candidates, so a pre-check that "the workspace-
+ * oldest task is ours" does NOT bound what actually gets leased — the skip
+ * must happen INSIDE selection, via skipCandidate built on this predicate.
+ */
+export function piTaskBelongsToCandidates(
+  piTask: { taskId: string; correlationId?: string },
+  candidateIds: readonly string[],
+): boolean {
+  for (const candidateId of candidateIds) {
+    if (candidateId === '') continue;
+    if (piTask.correlationId === candidateId || piTask.taskId.includes(candidateId)) return true;
+  }
+  return false;
+}
+
 export interface IntakeToInternalizationBridgeInput {
   candidateId: string;
   recommendationKind: string;
