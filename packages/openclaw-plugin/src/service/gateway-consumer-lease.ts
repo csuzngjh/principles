@@ -177,7 +177,7 @@ export function readGatewayConsumerLease(workspaceDir: string): GatewayConsumerL
  * record be clobbered back to 'consuming' (lost update) — afterwards the
  * revived 'consuming' record blinds every resume check forever.
  */
-export function writeGatewayConsumerLease(input: {
+function writeGatewayConsumerLeaseLocked(input: {
   workspaceDir: string;
   token: string;
   instanceId: string;
@@ -264,38 +264,33 @@ function writeGatewayConsumerLeaseUngated(input: {
 }
 
 /**
- * Remove OUR lease on consumer stop. Token-gated: a lease file that no
- * longer carries our token belongs to a successor instance — never delete
- * another consumer's liveness record.
+ * Remove OUR lease on consumer stop. The read/modify/write is serialized with
+ * registration, renewal and every other release through the same SQLite gate.
  */
-export function clearGatewayConsumerLease(workspaceDir: string, token: string, instanceId?: string): void {
-  // r7: release is also a read→filter→replace — same lost-update class as a
-  // write, so it runs inside the arbitration gate.
-  void withConsumerLeaseGate(workspaceDir, () => { clearGatewayConsumerLeaseUngated(workspaceDir, token, instanceId); });
-}
-
-function clearGatewayConsumerLeaseUngated(workspaceDir: string, token: string, instanceId?: string): void {
+function clearGatewayConsumerLeaseLocked(
+  workspaceDir: string,
+  token: string,
+  instanceId?: string,
+): { ok: true } | { ok: false; reason: string } {
   const current = readGatewayConsumerLease(workspaceDir);
-  if (current === null) return;
+  if (current === null) return { ok: true };
   const writers = leaseWriters(current);
-  // Release is gated on BOTH token and instance identity (PRI-1282 r4/r5):
-  // a successor instance's writer entry is never deleted by a retiring
-  // instance, and other consumers' liveness records survive our release.
-  const remaining = writers.filter((w) => {
-    if (instanceId !== undefined) return w.instanceId !== instanceId;
-    return w.token !== token;
-  });
-  if (remaining.length === writers.length) return; // nothing of ours recorded
+  // A lifecycle is identified by BOTH values. Never let a retiring instance
+  // clear a successor that reused either the token or the process ID.
+  const remaining = writers.filter((w) => instanceId !== undefined
+    ? w.instanceId !== instanceId || w.token !== token
+    : w.token !== token);
+  if (remaining.length === writers.length) return { ok: true };
   if (remaining.length === 0) {
     try {
       fs.unlinkSync(leasePath(workspaceDir));
-    } catch {
-      // Missing already or removal failed — a dead-holder lease is a stale
-      // record the next reader detects via PID liveness; harmless either way.
+      return { ok: true };
+    } catch (error) {
+      if (errnoOf(error) === 'ENOENT') return { ok: true };
+      return { ok: false, reason: `cannot remove consumer lease: ${errnoOf(error) || 'io error'}` };
     }
-    return;
   }
-  const latest = remaining[remaining.length - 1]!; // remaining.length > 0 here
+  const latest = remaining[remaining.length - 1]!;
   const next: GatewayConsumerLease = {
     ...current,
     token: latest.token,
@@ -311,9 +306,20 @@ function clearGatewayConsumerLeaseUngated(workspaceDir: string, token: string, i
   try {
     fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });
     fs.renameSync(tmpPath, leasePath(workspaceDir));
-  } catch {
-    try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+    return { ok: true };
+  } catch (error) {
+    try { fs.unlinkSync(tmpPath); } catch { /* best effort cleanup of our own temp file */ }
+    return { ok: false, reason: `cannot replace consumer lease while releasing: ${errnoOf(error) || 'io error'}` };
   }
+}
+
+export function clearGatewayConsumerLease(
+  workspaceDir: string,
+  token: string,
+  instanceId?: string,
+): { ok: true } | { ok: false; reason: string } {
+  const gated = withConsumerLeaseGate(workspaceDir, () => clearGatewayConsumerLeaseLocked(workspaceDir, token, instanceId));
+  return gated.ok ? gated.value : gated;
 }
 
 /**
@@ -356,24 +362,41 @@ export function withConsumerLeaseGate<T>(
   }
   try {
     db.exec('BEGIN IMMEDIATE');
-    let value: T | undefined;
-    let completed = false;
+    let value: T;
     try {
       value = fn();
-      completed = true;
-    } finally {
-      try {
-        db.exec(completed ? 'COMMIT' : 'ROLLBACK');
-      } catch {
-        // best effort — a failed COMMIT surfaces below as a gate error path
-      }
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch { /* preserve the original mutation error */ }
+      throw error;
     }
-    return { ok: true, value: value as T };
+    try {
+      db.exec('COMMIT');
+    } catch (error) {
+      throw new Error(`consumer lease gate commit failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return { ok: true, value };
   } catch (error) {
     return { ok: false, reason: `consumer lease gate transaction failed: ${error instanceof Error ? error.message : String(error)}` };
   } finally {
     try { db.close(); } catch { /* already closed */ }
   }
+}
+
+/** Every public lease mutation takes the workspace's cross-process gate. */
+export function writeGatewayConsumerLease(input: {
+  workspaceDir: string;
+  token: string;
+  instanceId: string;
+  state: 'consuming' | 'quiesced';
+  now?: () => Date;
+  openGate?: (path: string) => ConsumerLeaseGateLike;
+}): { ok: true } | { ok: false; reason: string } {
+  const gated = withConsumerLeaseGate(
+    input.workspaceDir,
+    () => writeGatewayConsumerLeaseLocked(input),
+    input.openGate,
+  );
+  return gated.ok ? gated.value : gated;
 }
 
 export type ConsumerLeaseRegistration =
@@ -405,9 +428,7 @@ export function registerGatewayConsumerLease(input: {
       if (foreign !== 'none') {
         return { refused: foreign } as const;
       }
-      // Already inside the arbitration gate — call the ungated write
-      // directly (better-sqlite3 rejects nested BEGIN IMMEDIATE).
-      return writeGatewayConsumerLeaseUngated({
+      return writeGatewayConsumerLeaseLocked({
         workspaceDir: input.workspaceDir,
         token: input.token,
         instanceId: input.instanceId,
@@ -424,40 +445,6 @@ export function registerGatewayConsumerLease(input: {
   return result.ok ? { ok: true, status: 'registered' } : { ok: false, reason: result.reason };
 }
 
-/**
- * Remove every writer entry belonging to a given PID (this process). Used
- * when a workspace has no live consumer state — retired instances whose
- * async release is still pending, or leftovers of a crashed drain (r5).
- */
-export function clearGatewayConsumerLeaseByPid(workspaceDir: string, pid: number): void {
-  void withConsumerLeaseGate(workspaceDir, () => { clearGatewayConsumerLeaseByPidUngated(workspaceDir, pid); });
-}
-
-function clearGatewayConsumerLeaseByPidUngated(workspaceDir: string, pid: number): void {
-  const current = readGatewayConsumerLease(workspaceDir);
-  if (current === null) return;
-  const writers = leaseWriters(current);
-  const remaining = writers.filter((w) => w.pid !== pid);
-  if (remaining.length === writers.length) return;
-  if (remaining.length === 0) {
-    try { fs.unlinkSync(leasePath(workspaceDir)); } catch { /* best effort */ }
-    return;
-  }
-  const latest = remaining[remaining.length - 1]!;
-  const next: GatewayConsumerLease = {
-    ...current,
-    token: latest.token, instanceId: latest.instanceId, pid: latest.pid, host: latest.host,
-    state: latest.state, startedAt: latest.startedAt, updatedAt: latest.updatedAt,
-    writers: remaining,
-  };
-  const tmpPath = `${leasePath(workspaceDir)}.tmp-${process.pid}-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
-  try {
-    fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });
-    fs.renameSync(tmpPath, leasePath(workspaceDir));
-  } catch {
-    try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
-  }
-}
 
 export type ForeignConsumerLeaseStatus = 'alive' | 'none' | 'unknown';
 

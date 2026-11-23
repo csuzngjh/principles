@@ -49,7 +49,6 @@ import {
   readGatewayConsumerLease,
   writeGatewayConsumerLease,
   clearGatewayConsumerLease,
-  clearGatewayConsumerLeaseByPid,
   foreignConsumerLeaseStatus,
   leaseWriters,
   registerGatewayConsumerLease,
@@ -149,6 +148,29 @@ interface WorkspaceConsumerState {
 
 const workspaceStates = new Map<string, WorkspaceConsumerState>();
 
+interface RetiredWorkspaceConsumerState {
+  readonly identity: ConsumerIdentity;
+  settled: boolean;
+}
+
+// A stopped state remains here until its in-flight cycle has settled AND its
+// exact instance lease has been released. Repeated stop() calls must never
+// infer process-wide release from the absence of an active timer state.
+const drainingWorkspaceStates = new Map<string, RetiredWorkspaceConsumerState>();
+
+function releaseRetiredWorkspaceLease(dir: string, retired: RetiredWorkspaceConsumerState): void {
+  if (!retired.settled) return;
+  const result = clearGatewayConsumerLease(dir, retired.identity.token, retired.identity.instanceId);
+  if (!result.ok) {
+    SystemLogger.log(dir, 'INTERNALIZATION_CONSUMER_LEASE_RELEASE_FAILED', JSON.stringify({
+      reason: result.reason,
+      nextAction: 'The protective lease remains. Retry stop after the lease gate is available; never clear it by PID while a cycle may still be running.',
+    }));
+    return;
+  }
+  if (drainingWorkspaceStates.get(dir) === retired) drainingWorkspaceStates.delete(dir);
+}
+
 /**
  * Deterministic test seams (PRI-1282 r4 §3.4): let lifecycle tests inject an
  * in-flight cycle, shorten the drain bound, and read the live identity
@@ -156,6 +178,7 @@ const workspaceStates = new Map<string, WorkspaceConsumerState>();
  */
 export const __autoConsumerTestSeams = {
   workspaceStates,
+  drainingWorkspaceStates,
   identity: (workspaceDir: string): ConsumerIdentity => getWorkspaceState(workspaceDir).identity,
   getWorkspaceState,
   injectInFlight(workspaceDir: string, inFlight: Promise<void> | null): void {
@@ -617,57 +640,62 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
   stop(ctx: OpenClawPluginServiceContext): void {
     const workspaceDir = ctx?.workspaceDir;
     const drainWorkspace = (dir: string, state: WorkspaceConsumerState): void => {
-      // §3.1 order: (1) forbid new cycles, (2) clear the next timer, (3)
-      // keep our lease while (4) in-flight cycles settle, (5) only then
-      // release OUR lease — token + instanceId gated. On the bounded wait
-      // timing out the protective lease STAYS: stop() returning is not
-      // proof the consumer exited (observable timeout event); the lease is
-      // released the moment the cycle's tracked promise actually settles.
+      const existingDrain = drainingWorkspaceStates.get(dir);
+      if (existingDrain) {
+        // Idempotent stop: only retry release after the original cycle settled.
+        releaseRetiredWorkspaceLease(dir, existingDrain);
+        return;
+      }
+      // Forbid new cycles and remove the active timer state first. The retired
+      // identity remains tracked until the in-flight promise settles and its
+      // exact lease entry is successfully released.
       state.stopped = true;
       if (state.timeoutId) clearTimeout(state.timeoutId);
       state.timeoutId = null;
-      // Capture the RETIRED instance's identity — the async release must
-      // clear exactly the lease writer this state published, never a
-      // successor instance's entry (r5).
-      const identity = state.identity;
-      const release = (): void => {
-        clearGatewayConsumerLease(dir, identity.token, identity.instanceId);
-      };
+      workspaceStates.delete(dir);
       const tracked = state.inFlight;
+      const retired: RetiredWorkspaceConsumerState = {
+        identity: state.identity,
+        settled: tracked === null,
+      };
+      drainingWorkspaceStates.set(dir, retired);
       if (tracked === null) {
-        release();
-        workspaceStates.delete(dir);
+        releaseRetiredWorkspaceLease(dir, retired);
         return;
       }
-      workspaceStates.delete(dir); // the retired entry must not be re-armed
-      let completed = false;
-      tracked.then(() => { completed = true; }).catch(() => { completed = true; });
-      void Promise.race([tracked.catch(() => undefined), delayMs(stopDrainWaitMs)]).then(() => {
-        if (completed) {
-          release();
-        } else {
+
+      // Natural completion, not the bounded timeout, is the only proof that
+      // permits lease release. Keep the retired record after timeout so a
+      // repeated stop cannot clear it by PID while the old cycle is alive.
+      const settled = tracked.then(
+        () => { retired.settled = true; releaseRetiredWorkspaceLease(dir, retired); },
+        () => { retired.settled = true; releaseRetiredWorkspaceLease(dir, retired); },
+      );
+      void Promise.race([settled.then(() => true), delayMs(stopDrainWaitMs)]).then((completedWithinWait) => {
+        if (!completedWithinWait) {
           SystemLogger.log(dir, 'INTERNALIZATION_CONSUMER_STOP_DRAIN_TIMEOUT', JSON.stringify({
             reason: 'in_flight_cycle_still_running',
             waitMs: stopDrainWaitMs,
-            nextAction: 'The protective lease is retained; it is released when the in-flight cycle actually settles.',
+            nextAction: 'The protective lease remains until the original in-flight cycle actually settles; repeated stop calls are safe.',
           }));
-          void tracked.then(() => release()).catch(() => release());
         }
       });
     };
     if (workspaceDir) {
       const state = workspaceStates.get(workspaceDir);
-      if (state) {
-        drainWorkspace(workspaceDir, state);
-      } else {
-        // No live state for this workspace — drop any writer entries this
-        // PROCESS still records there (retired instances whose release is
-        // pending, or leftovers from a crashed drain).
-        clearGatewayConsumerLeaseByPid(workspaceDir, process.pid);
+      if (state) drainWorkspace(workspaceDir, state);
+      else {
+        // No active state is not proof that a retired cycle exited. Preserve
+        // any pending lease; if its cycle settled but release previously
+        // failed, this stop retries the identity-gated release.
+        const retired = drainingWorkspaceStates.get(workspaceDir);
+        if (retired) releaseRetiredWorkspaceLease(workspaceDir, retired);
       }
     } else {
       for (const [dir, state] of [...workspaceStates.entries()]) drainWorkspace(dir, state);
-      workspaceStates.clear();
+      for (const [dir, retired] of [...drainingWorkspaceStates.entries()]) {
+        releaseRetiredWorkspaceLease(dir, retired);
+      }
     }
   },
 };

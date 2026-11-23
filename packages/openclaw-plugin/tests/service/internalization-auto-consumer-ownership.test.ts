@@ -380,6 +380,10 @@ describe('consumer instance lifecycle (PRI-1282 r4 §3)', () => {
     __autoConsumerTestSeams.setStopDrainWaitMs(5_000);
     InternalizationAutoConsumerService.stop({ workspaceDir } as never);
     await vi.advanceTimersByTimeAsync(0);
+    // A duplicate stop must not mistake the retired state for an exited consumer.
+    InternalizationAutoConsumerService.stop({ workspaceDir } as never);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(foreignConsumerLeaseStatus(workspaceDir, { selfInstanceId: 'successor-instance' })).toBe('alive');
     // Lease retained while the in-flight cycle may still be running.
     expect(fs.existsSync(LEASE_FILE())).toBe(true);
     settle();
@@ -612,11 +616,17 @@ describe('dual-Gateway quiesce progress (PRI-1282 r6)', () => {
 describe('cross-process lease registration (PRI-1282 r6)', () => {
   it('two real processes serialize check+register: the second is refused while the first consumes, and takes over after the first drains', async () => {
     vi.useRealTimers();
-    const { spawn, execFileSync } = await import('node:child_process');
+    const { spawn } = await import('node:child_process');
+    const { build } = await import('esbuild');
     const bundlePath = path.join(process.cwd(), 'tests', '.tmp-lease-bundle-r6.cjs');
-    execFileSync('npx', ['esbuild', 'src/service/gateway-consumer-lease.ts',
-      '--bundle', '--format=cjs', '--platform=node', '--external:better-sqlite3',
-      `--outfile=${bundlePath}`], { stdio: 'pipe' });
+    await build({
+      entryPoints: ['src/service/gateway-consumer-lease.ts'],
+      bundle: true,
+      format: 'cjs',
+      platform: 'node',
+      external: ['better-sqlite3'],
+      outfile: bundlePath,
+    });
     const marker = (name: string) => path.join(workspaceDir, '.pd', `child-${name}`);
     const childScript = `
       const fs = require('node:fs');
@@ -689,26 +699,114 @@ describe('cross-process lease registration (PRI-1282 r6)', () => {
   }, 40_000);
 });
 
-describe('gated lease mutations (PRI-1282 r7)', () => {
-  it('write and clear serialize on the arbitration gate — a parked transaction refuses them instead of silently overwriting', async () => {
+describe('cross-process lease mutation serialization (PRI-1282 r7)', () => {
+  const runMutationRace = async (mode: 'write' | 'clear'): Promise<void> => {
     vi.useRealTimers();
-    const { default: Database } = await import('better-sqlite3');
-    const gatePath = path.join(workspaceDir, '.pd', 'gateway-consumer-lease.json.gate.db');
-    const holder = new Database(gatePath);
-    holder.exec('PRAGMA busy_timeout = 250');
-    holder.exec('BEGIN IMMEDIATE');
+    const { spawn } = await import('node:child_process');
+    const { build } = await import('esbuild');
+    const bundlePath = path.join(process.cwd(), 'tests', `.tmp-lease-mutation-${mode}.cjs`);
+    await build({
+      entryPoints: ['src/service/gateway-consumer-lease.ts'],
+      bundle: true,
+      format: 'cjs',
+      platform: 'node',
+      external: ['better-sqlite3'],
+      outfile: bundlePath,
+    });
+    const pdDir = path.join(workspaceDir, '.pd');
+    const leasePath = path.join(pdDir, 'gateway-consumer-lease.json');
+    const marker = (name: string): string => path.join(pdDir, `mutation-${mode}-${name}`);
+    const childScript = `
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const lease = require(${JSON.stringify(bundlePath)});
+      const ws = ${JSON.stringify(workspaceDir)};
+      const leasePath = ${JSON.stringify(leasePath)};
+      const role = process.env.ROLE;
+      const mode = process.env.MODE;
+      if (role === 'a') {
+        const originalRead = fs.readFileSync.bind(fs);
+        let paused = false;
+        fs.readFileSync = (file, ...args) => {
+          const value = originalRead(file, ...args);
+          if (!paused && path.resolve(String(file)) === path.resolve(leasePath)) {
+            paused = true;
+            fs.writeFileSync(${JSON.stringify(marker('a-read'))}, 'read');
+            const deadline = Date.now() + 10000;
+            while (!fs.existsSync(${JSON.stringify(marker('release'))}) && Date.now() < deadline) {
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+            }
+            if (!fs.existsSync(${JSON.stringify(marker('release'))})) throw new Error('lease mutation barrier timed out');
+          }
+          return value;
+        };
+      }
+      fs.writeFileSync(${JSON.stringify(marker('attempt-') )} + role, 'attempt');
+      let result;
+      if (role === 'a' && mode === 'clear') {
+        result = lease.clearGatewayConsumerLease(ws, 'tok-a', 'inst-a');
+      } else {
+        result = lease.writeGatewayConsumerLease({
+          workspaceDir: ws,
+          token: role === 'a' ? 'tok-a' : 'tok-b',
+          instanceId: role === 'a' ? 'inst-a' : 'inst-b',
+          state: 'quiesced',
+        });
+      }
+      fs.writeFileSync(${JSON.stringify(marker('done-'))} + role, JSON.stringify(result ?? { ok: true }));
+      if (result && result.ok === false) process.exitCode = 1;
+    `;
+    const spawnChild = (role: 'a' | 'b') => spawn(process.execPath, ['-e', childScript], {
+      stdio: 'ignore', env: { ...process.env, ROLE: role, MODE: mode },
+    });
+    const waitForFile = async (file: string, timeoutMs = 10_000): Promise<boolean> => {
+      const deadline = Date.now() + timeoutMs;
+      while (!fs.existsSync(file) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+      return fs.existsSync(file);
+    };
+    const waitForExit = (child: ReturnType<typeof spawn>): Promise<number> => child.exitCode !== null
+      ? Promise.resolve(child.exitCode)
+      : new Promise((resolve) => child.once('exit', (code) => resolve(code ?? -1)));
+
+    writeGatewayConsumerLease({ workspaceDir, token: 'tok-a', instanceId: 'inst-a', state: 'consuming' });
+    writeGatewayConsumerLease({ workspaceDir, token: 'tok-b', instanceId: 'inst-b', state: 'consuming' });
+    let a: ReturnType<typeof spawn> | undefined;
+    let b: ReturnType<typeof spawn> | undefined;
     try {
-      const write = writeGatewayConsumerLease({ workspaceDir, token: 'tok', instanceId: 'inst', state: 'consuming' });
-      expect(write).toMatchObject({ ok: false });
-      if (!write.ok) expect(write.reason).toContain('consumer lease gate');
-      // clear is a read→filter→replace of the same file — same gate class.
-      expect(() => clearGatewayConsumerLease(workspaceDir, 'tok', 'inst')).not.toThrow();
+      a = spawnChild('a');
+      expect(await waitForFile(marker('a-read'))).toBe(true);
+      b = spawnChild('b');
+      expect(await waitForFile(marker('attempt-b'))).toBe(true);
+      // A is paused after reading the old lease while holding the SQLite gate.
+      // Give B time to reach the same mutation boundary before releasing A.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      fs.writeFileSync(marker('release'), 'go');
+      expect(await waitForFile(marker('done-a'))).toBe(true);
+      expect(await waitForFile(marker('done-b'))).toBe(true);
+      expect(await waitForExit(a)).toBe(0);
+      expect(await waitForExit(b)).toBe(0);
+      const lease = readGatewayConsumerLease(workspaceDir);
+      if (mode === 'clear') {
+        expect(lease?.writers).toHaveLength(1);
+        expect(lease?.writers?.[0]).toMatchObject({ instanceId: 'inst-b', state: 'quiesced' });
+      } else {
+        expect(lease?.writers).toHaveLength(2);
+        expect(lease?.writers?.find((writer) => writer.instanceId === 'inst-a')?.state).toBe('quiesced');
+        expect(lease?.writers?.find((writer) => writer.instanceId === 'inst-b')?.state).toBe('quiesced');
+      }
     } finally {
-      holder.exec('ROLLBACK');
-      holder.close();
+      if (a && a.exitCode === null) a.kill('SIGKILL');
+      if (b && b.exitCode === null) b.kill('SIGKILL');
+      try { fs.unlinkSync(bundlePath); } catch { /* best effort */ }
+      vi.useFakeTimers();
     }
-    // Gate released → the write goes through.
-    expect(writeGatewayConsumerLease({ workspaceDir, token: 'tok', instanceId: 'inst', state: 'consuming' })).toEqual({ ok: true });
-    vi.useFakeTimers();
-  });
+  };
+
+  it('preserves both quiesce transitions when two processes update the same lease', async () => {
+    await runMutationRace('write');
+  }, 40_000);
+
+  it('preserves a concurrent successor update while another process clears its own writer', async () => {
+    await runMutationRace('clear');
+  }, 40_000);
 });

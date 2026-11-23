@@ -21,6 +21,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { atomicReplaceTextFile } from '../utils/config-file-io.js';
 import { parseProductVersion, ProductIdentityError, isReleaseChannelName, type ReleaseChannelName } from './product-identity.js';
 import { normalizeReleaseMetadataUrl } from './release-metadata-source.js';
 import * as installLayoutModule from '@principles/install-layout';
@@ -262,18 +263,13 @@ export function readInstallJsonRecord(filePath: string): Record<string, unknown>
  * silent unlocked fallback — an unlocked write is exactly the ERR-168
  * clobber the lock exists to prevent.
  *
- * Release-window compat: `withInstallManifestWriteLock` ships in the
- * PRI-1282 install-layout cohort. Until that cohort publishes, a registry-
- * resolved @principles/install-layout (the packaged smoke gate installs
- * exactly that) does not export it yet — feature-detect and keep the
- * pre-PR unlocked write behavior for that window ONLY. The ERR-168 guard
- * engages as soon as the cohort dependency is present.
+ * A missing lock export is an incompatible runtime cohort and fails closed;
+ * no caller may downgrade to an unlocked write of the shared ownership manifest.
  */
 function runUnderManifestWriteLock(options: { manifestPath: string; operation: string; context: string }, fn: () => void): void {
   const lock = installLayoutModule.withInstallManifestWriteLock;
   if (typeof lock !== 'function') {
-    fn();
-    return;
+    throw new InstallLayoutError('install.json', `install_manifest_lock_unavailable (${options.operation}): the installed @principles/install-layout does not expose the shared manifest lock; no write was performed. Update the installer/runtime cohort and retry.`);
   }
   const result = lock(options, fn);
   if (!result.ok) {
@@ -296,7 +292,7 @@ export function writeInstallConfig(paths: PdHomePaths, config: InstallConfig): v
       payload.releaseMetadataUrl = config.releaseMetadataUrl;
     }
     fs.mkdirSync(paths.home, { recursive: true });
-    fs.writeFileSync(paths.installConfigPath, `${JSON.stringify(payload, null, 2)}\n`);
+    atomicReplaceTextFile(paths.installConfigPath, `${JSON.stringify(payload, null, 2)}\n`);
   });
 }
 
@@ -309,6 +305,6 @@ export function mergeIntoInstallJson(
     const existing = readInstallJsonRecord(filePath);
     const payload: Record<string, unknown> = { ...(existing ?? {}), ...patch };
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+    atomicReplaceTextFile(filePath, `${JSON.stringify(payload, null, 2)}\n`);
   });
 }

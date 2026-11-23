@@ -38,16 +38,15 @@ import {
   type RuntimeProfileInput,
 } from './mvp-config.js';
 import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostTarget } from './installers/index.js';
-import { errnoCode } from './utils/config-file-io.js';
+import { atomicReplaceTextFile, errnoCode } from './utils/config-file-io.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import { findForeignWorkspaceOwner } from './utils/host-workspace-ownership.js';
 import type { HostWorkspaceOwnershipOptions } from './utils/host-workspace-ownership.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, resolvePdHome } from '@principles/install-layout';
-// Namespace import for the release-window feature detection below (the
-// withInstallManifestWriteLock export ships with the PRI-1282 install-layout
-// cohort; a registry-resolved older dep must still load this module).
+// Namespace import keeps the shared lock capability check explicit at the
+// write boundary; an incompatible older dependency cohort fails closed.
 import * as installLayoutModule from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
@@ -394,20 +393,17 @@ function writeInstallManifest(write: {
   readonly hosts: readonly string[] | ((current: ReturnType<typeof parseInstallManifest>['manifest']) => readonly string[]);
   readonly workspaces: (current: ReturnType<typeof parseInstallManifest>['manifest']) => readonly string[];
 }): void {
+  const manifestPath = getInstallManifestPath();
   mkdirSync(getPdDir(), { recursive: true });
-  // PRI-709 P0-1: merge into the existing record. This file has more than one
-  // writer (the update side owns `channel` / `autoCheck` / `releaseMetadataUrl`);
-  // a wholesale replace silently deleted those fields.
-  // PRI-1282 (ERR-168): also take the §8.4 CAS lock — the same file carries
-  // per-Workspace ownership records whose locked single-writer mutator must
-  // not be clobbered by an interleaved installer read-modify-write.
-  // Release-window compat: the lock export ships with the PRI-1282
-  // install-layout cohort; against an older registry-resolved dep this
-  // module must still load, so detect the export and keep the pre-PR
-  // unlocked write for that window only.
+  // install.json is shared with the update executor and the ownership CAS
+  // writer. A missing lock export is an incompatible runtime cohort, never
+  // permission to fall back to an unlocked read-modify-write.
   const lock = installLayoutModule.withInstallManifestWriteLock;
+  if (typeof lock !== 'function') {
+    throw new Error('install_manifest_lock_unavailable: the installed @principles/install-layout does not expose the shared manifest lock; no write was performed. Update the installer/runtime cohort and retry.');
+  }
   const writeRecord = (): void => {
-    const existing = readInstallJsonRecord(getInstallManifestPath());
+    const existing = readInstallJsonRecord(manifestPath);
     const parsedCurrent = parseInstallManifest(existing);
     if (existing !== undefined && !parsedCurrent.manifest) {
       throw new Error(parsedCurrent.error ?? 'install_manifest_malformed');
@@ -419,20 +415,16 @@ function writeInstallManifest(write: {
       hosts: [...(typeof write.hosts === 'function' ? write.hosts(parsedCurrent.manifest) : write.hosts)],
       workspaces: [...write.workspaces(parsedCurrent.manifest)],
     };
-    // Fail loud instead of committing a document the read side would refuse
-    // (e.g. an ownership record keyed outside workspaces[]).
     const revalidated = parseInstallManifest(payload);
     if (!revalidated.manifest) {
       throw new Error(`install_manifest_write_refused: ${revalidated.error ?? 'post-merge validation failed'}`);
     }
-    writeFileSync(getInstallManifestPath(), JSON.stringify(payload, null, 2) + '\n', 'utf8');
+    // Same-directory flushed temp + atomic replace: readers see old or new JSON,
+    // never a truncated manifest if the installer is interrupted.
+    atomicReplaceTextFile(manifestPath, JSON.stringify(payload, null, 2) + '\n');
   };
-  if (typeof lock !== 'function') {
-    writeRecord();
-    return;
-  }
   const locked = lock(
-    { manifestPath: getInstallManifestPath(), operation: 'installer.writeInstallManifest', context: getPdDir() },
+    { manifestPath, operation: 'installer.writeInstallManifest', context: getPdDir() },
     writeRecord,
   );
   if (!locked.ok) {
