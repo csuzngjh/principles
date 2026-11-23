@@ -68,7 +68,7 @@
     "@principles/install-layout": "^0.10.0",
     "@sinclair/typebox": "^0.34.52",
     "@tufjs/models": "3.0.1",
-    "@inquirer/prompts": "^8.7.2",
+    "@inquirer/prompts": "^8.8.0",
     "better-sqlite3": "^13.0.3",
     "commander": "^15.1.0",
     "fs-extra": "^11.4.0",
