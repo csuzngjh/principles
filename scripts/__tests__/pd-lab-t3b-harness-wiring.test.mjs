@@ -1014,7 +1014,7 @@ describe('PRI-1284 — malformed budget flags are rejected at the real CLI bound
   // refuse non-positive-integers BEFORE any record write.
   const expectBudgetRejected = (entry, flag, res) => {
     expect(res.status, `${entry} ${flag} must exit non-zero (got ${res.status})\nstdout=${res.stdout.slice(0, 200)}`).not.toBe(0);
-    expect(res.stderr).toMatch(new RegExp(`${flag.replace(/-/g, '\\-')} must be a positive integer`));
+    expect(res.stderr).toContain(`${flag} must be a positive integer`);
   };
 
   const fx = buildFixture('budget');
