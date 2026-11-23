@@ -12,9 +12,13 @@ updates:
     # 单独升 models 会与锁定的 tuf-js 3.1.0 peer 分裂，npm 无法解析
     # （PR #1559 实证：root npm ci 直接 EUSAGE）。须与 tuf-js 6 作为一次
     # 专门迁移一起走（见 /packages/create-principles-disciple 目录下同款规则）。
+    # @principles/* 是 monorepo workspace 内部包：dependabot 按 registry 版本
+    # 改写 workspace manifest 的 spec，会让 npm 绕过 workspace link 装已发布
+    # tarball，破坏 parity（PR #1541 实证；与 openclaw-plugin 目录同款规则）。
     ignore:
       - dependency-name: '@tufjs/models'
         update-types: ['version-update:semver-major']
+      - dependency-name: '@principles/*'
     commit-message:
       prefix: 'chore'
       include: 'scope'
@@ -38,11 +42,16 @@ updates:
     # @tufjs/models 同理且配对锁死（3.x ↔ 3.0.1）：单独升 models 与锁定的
     # tuf-js 3.1.0 peer 分裂，npm 无法解析（PR #1558 实证）。两条规则
     # 必须一起进退。
+    # @principles/* 内部包版本由 changesets 发布列车统一推进：dependabot
+    # 从该目录的陈旧 package-lock.json 读取"当前版本"并按 registry 目标
+    # 无条件重写 manifest spec，已造成真实降级回退（PR #2758：^0.10.0 被
+    # 覆盖为 ^0.9.0，根 npm ci EUSAGE）。与 openclaw-plugin 目录同款规则。
     ignore:
       - dependency-name: 'tuf-js'
         update-types: ['version-update:semver-major']
       - dependency-name: '@tufjs/models'
         update-types: ['version-update:semver-major']
+      - dependency-name: '@principles/*'
     commit-message:
       prefix: 'chore'
       include: 'scope'
