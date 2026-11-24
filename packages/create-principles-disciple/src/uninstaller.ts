@@ -392,7 +392,7 @@ function findRunningConsoleProcesses(): { pid: number }[] {
       'Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation',
     ].join('; ');
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 10_000 });
+    const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
     return parseConsoleProcessCsv(output, consoleEntry);
   } catch {
     // PowerShell unavailable/failed — degrade to no-stop; removeWithRetry
