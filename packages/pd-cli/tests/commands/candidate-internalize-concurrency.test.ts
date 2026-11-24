@@ -283,7 +283,7 @@ describe('P1-3 — pd candidate internalize under concurrency (real lock, real S
       let signalPhaseBAttempted: () => void = () => undefined;
       const phaseBAttempted = new Promise<void>((resolve) => { signalPhaseBAttempted = resolve; });
       const originalCoordination = ledgerAdapter.withCandidateCoordination.bind(ledgerAdapter);
-      ledgerAdapter.withCandidateCoordination = async (id, operation) => {
+      ledgerAdapter.withCandidateCoordination = async <T>(id: string, operation: () => Promise<T>): Promise<T> => {
         if (id === candidateId) signalPhaseBAttempted();
         return originalCoordination(id, operation);
       };
