@@ -1089,6 +1089,9 @@ describe('recent window', () => {
       ownerDecisionRecordsByStatus: { pending: 1, applied: 1, superseded: 1 },
     });
     expect(model.window.candidateBreakdown.byRawKind).toEqual({ implementation: 1, principle: 2, prompt: 3, wizardry: 1 });
+    expect(model.state.candidates.admission.candidatesAwaitingOwner).toBe(2);
+    expect(model.state.candidates.admission.candidatesAwaitingOwnerDecision).toBe(1);
+    expect(model.state.candidates.admission.candidatesWithPendingOwnerDecision).toBe(1);
 
     const report = fs.readFileSync(path.join(reportsDir, `PD_PIPELINE_FUNNEL_BASELINE_${model.meta.runDate}.md`), 'utf-8');
     expect(report).toContain(`## 6. 近 30 天漏斗（共同窗口 [${model.window.cutoffIso}, ${model.window.windowT1Iso})）`);

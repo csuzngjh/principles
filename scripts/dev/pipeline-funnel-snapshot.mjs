@@ -924,8 +924,8 @@ export function classifyConsumedWithoutDreamer({
         && admissionProcessingBlockedReason === 'reuse_pending_owner'
         && admissionOwnerDecisionCount === 0));
   if (awaitingOwner) {
-    // A saved Owner park without a typed decision is still actionable unless
-    // it is a known raw-kind data blocker; typed history counts only while pending.
+    // The pre-decision park is only reuse_pending_owner; typed history counts
+    // only while pending. Other awaiting_owner blockers are not Owner decisions.
     return NO_DREAMER_CLASSIFICATION.AWAITING_OWNER;
   }
   return NO_DREAMER_CLASSIFICATION.UNEXPLAINED;
@@ -955,9 +955,9 @@ function summarizeCandidateRows(rows) {
     if (admission.kind === 'present') {
       const state = admission.processingState ?? '(none)';
       processingStates[state] = (processingStates[state] ?? 0) + 1;
-      // awaiting_owner is also used for non-decision blockers (for example,
-      // invalid raw kind). Only an explicit, still-executable Owner intent
-      // counts as waiting for an Owner decision.
+      // Only reuse_pending_owner (before a typed decision) or an explicit
+      // executionStatus=pending decision is an Owner backlog item. Other
+      // awaiting_owner blockers, including invalid raw kind, are excluded.
       if (isAwaitingOwnerDecision(admission)) awaitingOwnerDecision += 1;
       if (isAwaitingOwnerAction(admission)) awaitingOwner += 1;
       if (admission.pendingOwnerDecisions > 0) pendingOwnerDecisionCandidates += 1;
