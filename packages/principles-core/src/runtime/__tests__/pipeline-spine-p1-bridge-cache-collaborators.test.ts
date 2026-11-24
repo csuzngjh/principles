@@ -306,8 +306,12 @@ describe('P1-1 — bridge cache identity follows the captured collaborators (obj
       const variantC = makeVariant();
       const bridgeA = await call(workspaceDir, variantA);
       const bridgeB = await call(workspaceDir, variantB);
+      // Consume each factory-return borrow before testing idle eviction. A
+      // factory return that has not started an operation remains protected.
+      await bridgeB.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-before-eviction-1' });
       // touch B, then A: the slot's recency order is now [B (older), A (newer)]
       expect(await call(workspaceDir, variantB)).toBe(bridgeB);
+      await bridgeB.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-before-eviction-2' });
       expect(await call(workspaceDir, variantA)).toBe(bridgeA);
 
       const disposeBSpy = vi.spyOn(bridgeB, 'dispose');
@@ -320,9 +324,30 @@ describe('P1-1 — bridge cache identity follows the captured collaborators (obj
       // now-oldest variant C: the bound holds after every insertion
       expect(await call(workspaceDir, variantA)).toBe(bridgeA);
       const disposeCSpy = vi.spyOn(bridgeC, 'dispose');
+      await bridgeC.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-before-eviction-3' });
       const bridgeB2 = await call(workspaceDir, variantB);
       expect(bridgeB2).not.toBe(bridgeB);
       await vi.waitFor(() => expect(disposeCSpy).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  it('factory borrow protects a returned bridge until its first operation starts', async () => {
+    await withWorkspace(async (workspaceDir) => {
+      const variantA = makeVariant();
+      const bridgeA = await call(workspaceDir, variantA);
+      const disposeASpy = vi.spyOn(bridgeA, 'dispose');
+
+      // Two other variants evict A before its caller starts using it.
+      await call(workspaceDir, makeVariant());
+      await call(workspaceDir, makeVariant());
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      expect(disposeASpy).not.toHaveBeenCalled();
+
+      // Starting the first operation consumes the borrow. The deferred
+      // retirement then runs after that operation releases its active count.
+      const result = await bridgeA.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-after-eviction' });
+      expect(result.status).toBe('not_applicable');
+      await vi.waitFor(() => expect(disposeASpy).toHaveBeenCalledTimes(1));
     });
   });
 
