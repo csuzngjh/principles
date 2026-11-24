@@ -685,18 +685,29 @@ describe('installed-host detection (upgrade coverage)', () => {
     fs.rmSync(path.join(codexHome, 'plugins'), { recursive: true, force: true });
     // WorkBuddy app dir without a PD registration is NOT a PD install (OD-03).
     fs.mkdirSync(path.join(home, '.workbuddy'), { recursive: true });
-    expect(detectInstalledHosts(home, codexHome)).toEqual([]);
 
-    fs.mkdirSync(path.join(home, '.openclaw', 'extensions', 'principles-disciple'), { recursive: true });
-    writeJson(path.join(home, '.workbuddy', 'plugins', 'installed_plugins.json'), {
-      schemaVersion: 2,
-      plugins: { [WORKBUDDY_PLUGIN_KEY]: { version: '0.2.2' } },
-    });
-    // Re-seed the Codex marketplace cache (removed above).
-    writePin(cacheRoot('0.3.19'), OLD_COHORT, '0.3.19');
+    // Detection resolves the workbuddy registry through ambient
+    // WORKBUDDY_CONFIG_DIR — pin it to the sandbox so the planted footprint
+    // is what gets judged, never a host-provided override.
+    const previousConfigDir = process.env.WORKBUDDY_CONFIG_DIR;
+    process.env.WORKBUDDY_CONFIG_DIR = path.join(home, '.workbuddy');
+    try {
+      expect(detectInstalledHosts(home, codexHome)).toEqual([]);
 
-    const detected = detectInstalledHosts(home, codexHome).map((entry) => entry.hostId).sort();
-    expect(detected).toEqual(['codex', 'openclaw', 'workbuddy']);
+      fs.mkdirSync(path.join(home, '.openclaw', 'extensions', 'principles-disciple'), { recursive: true });
+      writeJson(path.join(home, '.workbuddy', 'plugins', 'installed_plugins.json'), {
+        schemaVersion: 2,
+        plugins: { [WORKBUDDY_PLUGIN_KEY]: { version: '0.2.2' } },
+      });
+      // Re-seed the Codex marketplace cache (removed above).
+      writePin(cacheRoot('0.3.19'), OLD_COHORT, '0.3.19');
+
+      const detected = detectInstalledHosts(home, codexHome).map((entry) => entry.hostId).sort();
+      expect(detected).toEqual(['codex', 'openclaw', 'workbuddy']);
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.WORKBUDDY_CONFIG_DIR;
+      else process.env.WORKBUDDY_CONFIG_DIR = previousConfigDir;
+    }
   });
 
   it('detects an OpenClaw install registered in a custom OPENCLAW_STATE_DIR (Devin review #2699-0004)', () => {

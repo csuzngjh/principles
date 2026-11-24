@@ -1367,8 +1367,19 @@ async function fetchUpdateRecovery(): Promise<ApiResponse<UpdateRecoveryData>> {
   return request<UpdateRecoveryData>('/api/update/recovery', undefined, validateUpdateRecovery);
 }
 
-async function fetchUpdateTransaction(transactionId: string): Promise<ApiResponse<UpdateTransactionData>> {
-  return request<UpdateTransactionData>(`/api/update/transaction/${encodeURIComponent(transactionId)}`, undefined, validateUpdateTransaction);
+/**
+ * `timeoutMs` bounds how long one poll may wait for an answer. A poll that is
+ * not answered inside the budget fails — the caller simply polls again —
+ * instead of holding a connection open for as long as the server stays silent.
+ */
+async function fetchUpdateTransaction(transactionId: string, timeoutMs?: number): Promise<ApiResponse<UpdateTransactionData>> {
+  // AbortSignal.timeout accepts only a positive safe integer and throws on
+  // anything else; a value outside its domain means "no bound", never a
+  // request that cannot be made.
+  const options: RequestInit | undefined = timeoutMs !== undefined && Number.isSafeInteger(timeoutMs) && timeoutMs > 0
+    ? { signal: AbortSignal.timeout(timeoutMs) }
+    : undefined;
+  return request<UpdateTransactionData>(`/api/update/transaction/${encodeURIComponent(transactionId)}`, options, validateUpdateTransaction);
 }
 
 // ── Evidence Chain (PRI-331) ──────────────────────────────────────────────────
@@ -1815,6 +1826,7 @@ export type {
   UpdateHistoryPruneResultData,
   ApplyUpdateResultData,
   UpdateRecoveryData,
+  UpdateTransactionProgress,
   ApprovalRecordData,
   PrinciplesListData,
   CorePrinciplesData,

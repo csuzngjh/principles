@@ -29,6 +29,9 @@ describe('update-console public seam', () => {
     const seam = await import('../src/update/console-surface.js');
     // ReleaseManager authority (update.ts routes)
     expect(typeof seam.createReleaseManagerAuthority).toBe('function');
+    // The factory the request-serving Console route prefers (it must not hold
+    // the event loop while the executor tree is re-hashed).
+    expect(typeof seam.createReleaseManagerAuthorityAsync).toBe('function');
     expect(typeof seam.mapReleaseManagerError).toBe('function');
     // Transaction journal / recovery surfaces (update-transaction.ts routes)
     expect(typeof seam.readTransactionJournalForRecovery).toBe('function');
@@ -50,6 +53,7 @@ describe('update-console public seam', () => {
       import('../src/update/release-manager.js'),
     ]);
     expect(seam.createReleaseManagerAuthority).toBe(authority.createReleaseManagerAuthority);
+    expect(seam.createReleaseManagerAuthorityAsync).toBe(authority.createReleaseManagerAuthorityAsync);
     expect(seam.mapReleaseManagerError).toBe(authority.mapReleaseManagerError);
     expect(seam.readTransactionJournalForRecovery).toBe(journal.readTransactionJournalForRecovery);
     expect(seam.recoverUnfinishedTransaction).toBe(journal.recoverUnfinishedTransaction);

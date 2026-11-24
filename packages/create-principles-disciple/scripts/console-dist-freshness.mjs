@@ -22,7 +22,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { isTestArtifact } from '../../../scripts/build/test-artifacts.mjs';
 
-const REQUIRED_ARTIFACTS = ['dist/server.js', 'dist/server/index.js', 'dist/web/index.html'];
+const REQUIRED_ARTIFACTS = ['dist/server.js', 'dist/server/index.js', 'dist/server/successor.js', 'dist/web/index.html'];
 const PRODUCTION_APP_JS = join('dist', 'web', 'assets', 'app.js');
 
 function newestMtime(dir, filter) {

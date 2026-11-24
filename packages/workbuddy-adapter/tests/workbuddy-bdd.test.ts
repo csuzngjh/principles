@@ -143,6 +143,7 @@ interface BddState {
   diagnosticianTaskId?: string;
   chain?: LearningChain;
   approvalOutcomes?: ApprovalOutcome[];
+  sharedProjects?: string[];
 }
 
 const state: Partial<BddState> = {};
@@ -325,16 +326,17 @@ registry.then(/^its rule no longer denies matching tools$/, () => {
 });
 registry.when(/^two different WorkBuddy projects run hooks against the same governance workspace$/, () => {
   const projectB = makeProjectDir(state.home!, 'bdd-b');
-  const results = [state.project!, projectB].map((project) => runEntry(state.home!, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: project, session_id: `bdd-ab-${path.basename(project)}` })), 'UserPromptSubmit'));
+  state.sharedProjects = [state.project!, projectB];
+  const results = state.sharedProjects.map((project) => runEntry(state.home!, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: project, session_id: `bdd-ab-${path.basename(project)}` })), 'UserPromptSubmit'));
   state.result = results[1];
 });
 registry.then(/^both read the same approved activation state$/, () => {
   expect(JSON.parse(state.result!.stdout).hookSpecificOutput.additionalContext).toContain('WB_BDD_PROMPT_DIRECTIVE');
 });
 registry.then(/^neither project directory receives governance state files$/, () => {
-  for (const entry of fs.readdirSync(path.dirname(state.project!))) {
-    const projectDir = path.join(path.dirname(state.project!), entry);
-    if (!fs.statSync(projectDir).isDirectory()) continue;
+  // Only the scenario's own projects: sibling dirs under the shared TMPDIR
+  // legitimately hold .pd/.state fixtures from parallel test files.
+  for (const projectDir of state.sharedProjects ?? [state.project!]) {
     expect(fs.existsSync(path.join(projectDir, '.pd'))).toBe(false);
     expect(fs.existsSync(path.join(projectDir, '.state'))).toBe(false);
   }

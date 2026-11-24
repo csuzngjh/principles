@@ -343,7 +343,9 @@ describe('environment detection utilities', () => {
       const workbuddyWorkspace = path.join(FAKE_HOME, '.workbuddy', 'pd-workspace');
       mockExistsSync.mockImplementation((p: string | Buffer | URL) => p.toString() === workbuddyWorkspace);
 
-      const result = detectWorkspace({ host: 'workbuddy' });
+      // Isolated env: an ambient WORKBUDDY_CONFIG_DIR must not redirect the
+      // detection away from the mocked home's own workspace.
+      const result = detectWorkspace({ host: 'workbuddy', env: {} });
 
       expect(result.detectedPath).toBe(workbuddyWorkspace);
       expect(result.exists).toBe(true);
