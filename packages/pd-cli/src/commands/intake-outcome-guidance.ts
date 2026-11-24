@@ -63,6 +63,7 @@ export const INTAKE_OUTCOME_CLASSES: readonly IntakeOutcomeClass[] = [
 export interface IntakeOutcomeRecord {
   readonly candidateId: string;
   readonly status: string;
+  readonly reason?: string;
   readonly nextAction?: string;
   readonly admissionRefused?: boolean;
 }
@@ -220,12 +221,30 @@ export function buildIntakeOutcomeGuidance(args: {
     }
   }
   if (count('seed_refused') > 0) {
-    const refusedIds = ids('seed_refused');
-    const refusalActions = intakeResults
-      .filter((record) => record.status === 'refused' && refusedIds.includes(record.candidateId) && record.nextAction)
-      .map((record) => `${record.candidateId}: ${record.nextAction}`);
-    sections.push(`${count('seed_refused')} candidate(s) were REFUSED — no task was created; do NOT intake or internalize before resolving the saved blocker: ${refusedIds.join(', ')}. ${refusalActions.join('; ')}`);
-    notes.push(`${count('seed_refused')} candidate(s): DREAMER SEED REFUSED — do NOT intake or internalize: ${refusedIds.join(', ')}. ${refusalActions.join('; ')}`);
+    // Preserve the actual refusal reason in both output modes. A repaired
+    // RAW kind awaiting Owner authorization is not itself an invalid kind.
+    const byReason = new Map<string, string[]>();
+    for (const id of ids('seed_refused')) {
+      const candidate = candidates.find((item) => item.candidateId === id);
+      const refusal = intakeResults.find((record) => record.candidateId === id && record.status === 'refused');
+      const reason = refusal?.reason ?? (validateRecommendationKind(candidate?.rawRecommendationKind) === null
+        ? 'candidate_kind_invalid'
+        : 'candidate_seed_refused');
+      const group = byReason.get(reason) ?? [];
+      group.push(id);
+      byReason.set(reason, group);
+    }
+    for (const [reason, refusedIds] of byReason) {
+      const refusalActions = intakeResults
+        .filter((record) => record.status === 'refused' && refusedIds.includes(record.candidateId) && record.nextAction)
+        .map((record) => `${record.candidateId}: ${record.nextAction}`);
+      const details = refusalActions.length > 0 ? `\n  ${refusalActions.join('\n  ')}` : '';
+      const explanation = reason === 'candidate_kind_invalid'
+        ? ' — the persisted recommendation_kind is not a valid kind'
+        : '';
+      sections.push(`${refusedIds.length} candidate(s) were REFUSED (${reason}${explanation}): ${refusedIds.join(', ')}. No task was created; do NOT intake or internalize before resolving the blocker.${details}`);
+      notes.push(`${refusedIds.length} candidate(s): DREAMER SEED REFUSED (${reason}) — do NOT intake or internalize: ${refusedIds.join(', ')}.${details}`);
+    }
   }
   if (count('no_route') > 0) {
     sections.push(`${count('no_route')} candidate(s) have no internalization route in the current stage (implementation: the 'skill' channel is MVP-disabled; defer: deferred by design) — no action.`);

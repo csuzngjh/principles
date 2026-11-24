@@ -708,6 +708,35 @@ describe('P2-2 — diagnose guidance classifies every candidate and suggests onl
     expect(tty).toContain('dreamer seeded');
     expect(tty).not.toContain('has NOT started automatically');
   });
+  it('mixed seed refusals retain distinct reasons and recovery guidance in JSON and TTY', async () => {
+    const { buildIntakeOutcomeGuidance } = await import('../../src/commands/intake-outcome-guidance.js');
+    const recovery = 'pd candidate resume-post-processing --candidate-id c-repaired --workspace "/tmp/fake-workspace" --reason "verified repair" --confirm';
+    const result = buildIntakeOutcomeGuidance({
+      workspaceDir: '/tmp/fake-workspace',
+      intakeEnabled: true,
+      candidates: [
+        { candidateId: 'c-invalid', rawRecommendationKind: 'wizardry' },
+        { candidateId: 'c-repaired', rawRecommendationKind: 'principle' },
+        { candidateId: 'c-changed', rawRecommendationKind: 'rule' },
+      ],
+      intakeResults: [
+        { candidateId: 'c-invalid', status: 'refused', reason: 'candidate_kind_invalid' },
+        { candidateId: 'c-repaired', status: 'refused', reason: 'candidate_kind_recovery_required', nextAction: recovery },
+        { candidateId: 'c-changed', status: 'refused', reason: 'candidate_changed_during_intake', nextAction: 'Inspect the current candidate' },
+      ],
+    });
+    expect(result.byClass.seed_refused).toEqual(['c-invalid', 'c-repaired', 'c-changed']);
+    expect(result.manualSteps).toEqual([]);
+    for (const output of [result.nextAction, result.notes.join('\n')]) {
+      expect(output).toMatch(/candidate_kind_invalid[^)]*\).*c-invalid/);
+      expect(output).toMatch(/candidate_kind_recovery_required\).*c-repaired/);
+      expect(output).toMatch(/candidate_changed_during_intake\).*c-changed/);
+      expect(output).toContain(recovery);
+      expect(output).not.toContain('pd candidate internalize');
+      expect(output).not.toContain('pd candidate intake');
+    }
+  });
+
   it('invalid RAW kind outranks storage retry and never receives intake/internalize; retry command follows principle vs rule', async () => {
     const guidance = await import('../../src/commands/intake-outcome-guidance.js');
     const result = guidance.buildIntakeOutcomeGuidance({
