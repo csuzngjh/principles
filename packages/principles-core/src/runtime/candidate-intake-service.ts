@@ -861,9 +861,13 @@ export class CandidateIntakeService {
 
         const admission = await this.#stateManager.getAdmissionDocument(candidateId);
         if (!admission.ok) {
-          return automaticGateRefusal(candidateId, {
-            ok: false, park: false, invalidKindPark: false, pendingDecision: null,
-          })!;
+          return {
+            outcome: 'refused',
+            reason: 'admission_document_unreadable',
+            candidateId,
+            rawRecommendationKind: null,
+            message: `Candidate ${candidateId} has an unreadable admission document. Automatic intake fails closed: no ledger write or candidate consumption occurred. Inspect and repair the persisted admission_json before retrying.`,
+          };
         }
         const currentRaw = typeof current.rawRecommendationKind === 'string' ? current.rawRecommendationKind : null;
         const shown = currentRaw === null ? 'missing' : JSON.stringify(currentRaw).slice(1, -1).slice(0, 40);
