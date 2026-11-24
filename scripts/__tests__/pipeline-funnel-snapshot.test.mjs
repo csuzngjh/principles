@@ -70,6 +70,23 @@ function sha256File(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
+/** Open the report, read it and stat it through the SAME descriptor. */
+function inspectReport(filePath) {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    return {
+      content: fs.readFileSync(fd, 'utf-8'),
+      inode: fs.fstatSync(fd, { bigint: true }).ino,
+    };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function inodeOfReport(filePath) {
+  return inspectReport(filePath).inode;
+}
+
 function captureTreeState(rootDir) {
   const entries = [];
   const walk = (dir) => {
@@ -475,24 +492,19 @@ describe('report output path allowlist', () => {
   it('replaces an existing valid report by inode (atomic swap, no temp residue)', async () => {
     const { reportsDir, run, out } = fixture();
     const target = out(REPORT_NAME);
-    // All inspection goes through file DESCRIPTORS: the name is swapped by
-    // the run on purpose, so the test never re-checks the path between the
-    // run and the read — it reads whatever inode the name points to now.
-    const oldFd = fs.openSync(target, 'w');
-    fs.writeFileSync(oldFd, 'OLD REPORT\n');
-    const inodeBefore = fs.fstatSync(oldFd, { bigint: true }).ino;
-    fs.closeSync(oldFd);
+    // The existing report is produced by the script itself (first run); the
+    // second run replaces it. Both inspections open a DESCRIPTOR and read
+    // through it — the name is swapped on purpose between the two runs.
     await run(['--out', target]);
-    const newFd = fs.openSync(target, 'r');
-    try {
-      const after = fs.readFileSync(newFd, 'utf-8');
-      expect(after).toContain('# PD Pipeline Funnel Baseline');
-      expect(after).not.toContain('OLD REPORT');
-      // a NEW inode now carries the name — the old one was never truncated in place
-      expect(fs.fstatSync(newFd, { bigint: true }).ino).not.toBe(inodeBefore);
-    } finally {
-      fs.closeSync(newFd);
-    }
+    const inodeBefore = inodeOfReport(target);
+    expect(fs.readdirSync(reportsDir)).toEqual([REPORT_NAME]);
+
+    await run(['--out', target]);
+
+    const inspection = inspectReport(target);
+    expect(inspection.content).toContain('# PD Pipeline Funnel Baseline');
+    // a NEW inode now carries the name — the old one was never truncated in place
+    expect(inspection.inode).not.toBe(inodeBefore);
     expect(fs.readdirSync(reportsDir)).toEqual([REPORT_NAME]);
   });
 
