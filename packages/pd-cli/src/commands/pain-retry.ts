@@ -1103,7 +1103,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       // SPEC review round-3 P1: the FULL write gate (persisted disposition /
       // re-evaluation), not the confidence/kind-only partial check — a
       // corrupted or stale admission document can never be intaked here.
-      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization })) ?? checkAdmissionGate(candidate);
+      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization, coordination: ledgerAdapter })) ?? checkAdmissionGate(candidate);
       if (admissionBlock) {
         intakeFailed = true;
         intakeResults.push({
