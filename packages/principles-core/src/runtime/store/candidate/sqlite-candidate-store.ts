@@ -284,10 +284,6 @@ export class SqliteCandidateStore implements CandidateStore {
         outcome = result;
         return;
       }
-      if (result.status === 'refused') {
-        outcome = result;
-        return;
-      }
       const processing = parsed.document?.processing;
       const legacyConsumedInvalidKindPark = row.status === 'consumed'
         && processing?.state === 'awaiting_owner'
@@ -295,6 +291,10 @@ export class SqliteCandidateStore implements CandidateStore {
         && processing.blockedReason.startsWith('candidate_kind_invalid');
       if (row.status !== 'pending' && !legacyConsumedInvalidKindPark) {
         outcome = { status: 'refused', reason: 'candidate_not_pending' };
+        return;
+      }
+      if (result.status === 'refused') {
+        outcome = result;
         return;
       }
       const serialized = serializeAdmissionDocument(result.document);

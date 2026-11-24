@@ -83,7 +83,7 @@ export class MemoryCandidateStore implements CandidateStore {
     }
     const existing = this.admissions.get(candidateId) ?? null;
     const result = authorizeInvalidKindPostProcessingRecoveryInDocument(existing, { candidateId, rawRecommendationKind: rawKind, authorization: input });
-    if (result.status === 'already_authorized' || result.status === 'refused') return result;
+    if (result.status === 'already_authorized') return result;
     const processing = existing?.processing;
     const legacyConsumedInvalidKindPark = candidate.status === 'consumed'
       && processing?.state === 'awaiting_owner'
@@ -92,6 +92,7 @@ export class MemoryCandidateStore implements CandidateStore {
     if (candidate.status !== 'pending' && !legacyConsumedInvalidKindPark) {
       return { status: 'refused', reason: 'candidate_not_pending' };
     }
+    if (result.status === 'refused') return result;
     this.admissions.set(candidateId, result.document);
     return result;
   }
