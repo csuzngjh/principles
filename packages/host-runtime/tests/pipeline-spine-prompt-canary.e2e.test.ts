@@ -46,7 +46,7 @@ import {
   SqliteHistoryQuery,
   evaluatePainIngress,
   getDefaultPdConfig,
-  invalidatePainSignalBridge,
+  disposePainSignalBridgesForWorkspace,
   PainToPrincipleService,
   PrincipleTreeLedgerAdapter,
   type TrajectoryTurnReader,
@@ -392,8 +392,11 @@ beforeEach(() => {
   installRecordingAdapterSpy();
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
+  // recordPain caches a bridge with live SQLite handles. Dispose it before
+  // removing the workspace so Windows never has to delete an open database.
+  await disposePainSignalBridgesForWorkspace(workspaceDir);
   try {
     fs.rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   } catch {
