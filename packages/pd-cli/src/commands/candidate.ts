@@ -1493,10 +1493,13 @@ async function seedDreamerForConsumedCandidate(deps: {
       };
     }
     if (suppression.reason === 'owner_decision_pending') {
+      const pendingPrincipleArg = pending?.decision === 'reuse' && pending.selectedPrincipleId
+        ? ` --principle-id ${pending.selectedPrincipleId}`
+        : '';
       return {
         status: 'not_seeded',
         reason: `dreamer_seed_suppressed: an Owner ${suppression.decision} decision is recorded but its execution has not completed`,
-        nextAction: `pd candidate review --candidate-id ${deps.candidateId} --decide reuse|create --reason "..." (re-run the SAME verdict to resume the recorded decision)`,
+        nextAction: `pd candidate review --candidate-id ${deps.candidateId} --workspace "${deps.workspaceDir}" --decide ${pending?.decision ?? suppression.decision}${pendingPrincipleArg} --reason "..." (re-run the SAME verdict to resume the recorded decision)`,
       };
     }
     return {
