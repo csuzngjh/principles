@@ -16,7 +16,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChildProcess } from 'node:child_process';
 import { readWorkspaceBackgroundOwnership } from '@principles/install-layout';
-import { provisionFreshInstallWorkspace, readPendingProvisioningEvidence } from '../src/service-host-provisioning.js';
+import { provisionFreshInstallWorkspace, readAllPendingProvisioning, readPendingProvisioningEvidence } from '../src/service-host-provisioning.js';
 import type { ServiceHostSchedulerOutcome } from '../src/service-host-bridge.js';
 
 const dirs: string[] = [];
@@ -235,11 +235,13 @@ describe('provisionFreshInstallWorkspace', () => {
               managed: {
                 executions: [
                   // No adapter → waiting, never "executed".
-                  { admission: 'executed', hostKind: null, workspaceState: 'waiting_for_host_binding', lastProgressAt: '2026-01-01T00:00:00.000Z', lastProgressSource: 'previous_run' },
+                  { canonicalDir: workspaceDir, admission: 'executed', hostKind: null, workspaceState: 'waiting_for_host_binding', lastProgressAt: '2026-01-01T00:00:00.000Z', lastProgressSource: 'previous_run' },
                   // Real worker + this run's progress.
-                  { admission: 'executed', hostKind: 'openclaw', workspaceState: 'completed', execution: { mode: 'ready' }, lastProgressAt: '2026-11-23T00:00:00.000Z', lastProgressSource: 'cycle_evidence' },
+                  { canonicalDir: workspaceDir, admission: 'executed', hostKind: 'openclaw', workspaceState: 'completed', execution: { mode: 'ready' }, lastProgressAt: '2026-11-23T00:00:00.000Z', lastProgressSource: 'cycle_evidence' },
                   // Real worker but only a CARRIED timestamp.
-                  { admission: 'executed', hostKind: 'openclaw', workspaceState: 'completed', execution: { mode: 'ready' }, lastProgressAt: '2026-01-01T00:00:00.000Z', lastProgressSource: 'previous_run' },
+                  { canonicalDir: workspaceDir, admission: 'executed', hostKind: 'openclaw', workspaceState: 'completed', execution: { mode: 'ready' }, lastProgressAt: '2026-01-01T00:00:00.000Z', lastProgressSource: 'previous_run' },
+                  // A SIBLING workspace's work must not be attributed here.
+                  { canonicalDir: path.join(path.dirname(workspaceDir), 'sibling-ws'), admission: 'executed', hostKind: 'openclaw', workspaceState: 'completed', execution: { mode: 'ready' }, lastProgressAt: '2026-11-23T00:00:00.000Z', lastProgressSource: 'cycle_evidence' },
                 ],
               },
             }),
@@ -284,5 +286,129 @@ describe('provisionFreshInstallWorkspace', () => {
     // `pd service run-once` DOES accept --pd-home and still receives it.
     const runOnceIndex = calls.findIndex((args) => args.includes('run-once'));
     expect(calls[runOnceIndex]).toContain('--pd-home');
+  });
+
+  it('records EACH deferred workspace independently (multi-host pending registry)', async () => {
+    const { home, pdHome, workspaceDir } = tempPdHome();
+    const second = path.join(home, 'codex-ws');
+    mkdirSync(second, { recursive: true });
+    fakeInstalledCli(pdHome);
+    seedManifest(pdHome, workspaceDir);
+    const notEnabled: ServiceHostSchedulerOutcome = { ...ENABLED_SCHEDULER, state: 'consent_required', enabled: null };
+    for (const workspace of [workspaceDir, second]) {
+      const outcome = await provisionFreshInstallWorkspace({
+        pdHome,
+        workspaceDir: workspace,
+        host: 'none',
+        scheduler: notEnabled,
+        warn: () => undefined,
+        probes: { spawnFn: fakeSpawn({}, []) },
+      });
+      expect(outcome.pendingProvisioning).toBe(true);
+    }
+    expect(readAllPendingProvisioning(pdHome).entries.map((entry) => entry.workspaceDir).sort())
+      .toEqual([workspaceDir, second].sort());
+
+    // Resuming ONE workspace clears only its own hint.
+    const resumed = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'none',
+      scheduler: ENABLED_SCHEDULER,
+      warn: () => undefined,
+      probes: {
+        spawnFn: fakeSpawn({
+          'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'r', managed: { executions: [] } }) },
+        }, []),
+      },
+    });
+    expect(resumed.ownership).toBe('service_host_owned');
+    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toBeNull();
+    expect(readPendingProvisioningEvidence(pdHome, second)).toMatchObject({
+      reason: 'scheduler_consent_required',
+      host: 'none',
+    });
+  });
+
+  it('resume refuses to flip ownership when the host binding cannot be verified', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    const manifestPath = seedManifest(pdHome, workspaceDir);
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'openclaw',
+      scheduler: ENABLED_SCHEDULER,
+      resume: true,
+      bindingVerification: {
+        ok: false,
+        reason: 'openclaw declaration unreadable',
+        nextAction: 'Repair the declaration and re-run.',
+      },
+      warn: () => undefined,
+      probes: {
+        spawnFn: fakeSpawn({
+          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
+        }, []),
+      },
+    });
+    expect(outcome.ownership).toBe('not_provisioned');
+    expect(outcome.readiness).toBe('skipped');
+    expect(outcome.pendingProvisioning).toBe(true);
+    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
+      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
+    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'binding_unverifiable' });
+  });
+
+  it('resume refuses to flip while a legacy OpenClaw Gateway may still consume the workspace', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    const manifestPath = seedManifest(pdHome, workspaceDir);
+    const calls: string[][] = [];
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'openclaw',
+      scheduler: ENABLED_SCHEDULER,
+      resume: true,
+      warn: () => undefined,
+      probes: {
+        gatewayRunning: () => true,
+        spawnFn: fakeSpawn({
+          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
+        }, calls),
+      },
+    });
+    expect(outcome.ownership).toBe('not_provisioned');
+    expect(outcome.readiness).toBe('skipped');
+    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
+      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
+    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_consumer_running' });
+    // No readiness probe ran: proving the legacy consumer is gone comes first.
+    expect(calls.filter((args) => args.includes('worker'))).toHaveLength(0);
+  });
+
+  it('resume probes the VERIFIED host when no legacy Gateway is running', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    seedManifest(pdHome, workspaceDir);
+    const calls: string[][] = [];
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'openclaw',
+      scheduler: ENABLED_SCHEDULER,
+      resume: true,
+      warn: () => undefined,
+      probes: {
+        gatewayRunning: () => false,
+        spawnFn: fakeSpawn({
+          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
+          'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'r', managed: { executions: [] } }) },
+        }, calls),
+      },
+    });
+    expect(outcome.ownership).toBe('service_host_owned');
+    expect(calls.some((args) => args.includes('--readiness'))).toBe(true);
   });
 });

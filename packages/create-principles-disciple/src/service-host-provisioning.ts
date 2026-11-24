@@ -37,6 +37,7 @@ import {
   type ServiceHostBridgeProbes,
   type ServiceHostSchedulerOutcome,
 } from './service-host-bridge.js';
+import { checkOpenClawGateway } from './utils/env.js';
 import type { HostSelection } from './installers/index.js';
 
 export type ProvisioningReadiness =
@@ -91,13 +92,39 @@ export interface ProvisioningInput {
   readonly firstCycleTimeoutMs?: number;
   /** Test seam: real fs by default. */
   readonly now?: () => Date;
+  /**
+   * TRUE when this call RESUMES a previously recorded pending provisioning.
+   * A deferred hand-over must prove the legacy consumer is not still running
+   * before it flips ownership (the marker only proves what the FIRST install
+   * did, not what ran afterwards).
+   */
+  readonly resume?: boolean;
+  /**
+   * Resume-only: the caller could not verify the host binding that the pending
+   * marker named. Ownership must NOT flip from an unverified binding; the
+   * refusal is recorded durably with an actionable next action.
+   */
+  readonly bindingVerification?: { readonly ok: false; readonly reason: string; readonly nextAction: string };
 }
 
 const DEFAULT_FIRST_CYCLE_TIMEOUT_MS = 180_000;
 const EVIDENCE_SCHEMA = 'pd.service-install-provisioning.v1';
+const PENDING_SCHEMA = 'pd.service-pending-provisioning.v1';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function canonicalIdentity(value: string): string {
+  const resolved = path.resolve(value);
+  let real: string | undefined;
+  try {
+    real = fs.realpathSync.native(resolved);
+  } catch {
+    real = undefined;
+  }
+  const form = real ?? resolved;
+  return process.platform === 'win32' ? form.toLowerCase() : form;
 }
 
 function readinessProbeArgs(host: Exclude<HostSelection, 'all' | 'none'>, workspaceDir: string): string[] {
@@ -155,14 +182,23 @@ function notAttempted(reason: string): ProvisioningFirstCycle {
   return { attempted: false, ok: false, executed: 0, progressed: 0, waitingForBinding: 0, reason };
 }
 
-function countExecutions(doc: Record<string, unknown>): { executed: number; progressed: number; waitingForBinding: number } {
+function countExecutions(
+  doc: Record<string, unknown>,
+  workspaceDir: string,
+): { executed: number; progressed: number; waitingForBinding: number } {
   const managed = isRecord(doc.managed) ? doc.managed : {};
   const executions = Array.isArray(managed.executions) ? managed.executions : [];
+  const expected = canonicalIdentity(workspaceDir);
   let executed = 0;
   let progressed = 0;
   let waitingForBinding = 0;
   for (const entry of executions) {
     if (!isRecord(entry)) continue;
+    // `service run-once` is a GLOBAL cycle over every owned workspace. The
+    // evidence for THIS provisioning target must count only its own entry,
+    // otherwise a multi-host install reports the sibling's work as its own.
+    if (typeof entry.canonicalDir !== 'string') continue;
+    if (canonicalIdentity(entry.canonicalDir) !== expected) continue;
     if (entry.workspaceState === 'waiting_for_host_binding') {
       waitingForBinding += 1;
       continue;
@@ -202,7 +238,7 @@ async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirs
     // a failed install, and not a fabricated success either.
     return { ...notAttempted('service_run_lock_held'), attempted: true, outcome };
   }
-  const { executed, progressed, waitingForBinding } = countExecutions(doc);
+  const { executed, progressed, waitingForBinding } = countExecutions(doc, input.workspaceDir);
   return {
     attempted: true,
     ok: result.code === 0 && (doc.ok === true || outcome === 'completed'),
@@ -249,6 +285,120 @@ function writeEvidence(pdHome: string, evidence: ProvisioningEvidence): string {
   return target;
 }
 
+/** Host values a pending provisioning entry may carry. */
+const PENDING_HOSTS: readonly HostSelection[] = ['none', 'openclaw', 'codex', 'workbuddy', 'all'];
+
+interface PendingRegistryEntry {
+  readonly workspaceDir: string;
+  readonly host: HostSelection;
+  readonly recordedAt: string;
+  readonly reason?: string;
+}
+
+interface PendingRegistryRead {
+  readonly entries: readonly PendingRegistryEntry[];
+  readonly warning?: string;
+}
+
+function pendingRegistryPath(pdHome: string): string {
+  return path.join(pdHome, 'service', 'pending-provisioning.json');
+}
+
+function isPendingHost(value: unknown): value is HostSelection {
+  return typeof value === 'string' && (PENDING_HOSTS as readonly string[]).includes(value);
+}
+
+/**
+ * Read the PER-WORKSPACE pending provisioning registry.
+ *
+ * A single evidence document is last-write-wins, so `--host all` (OpenClaw +
+ * Codex bound to different directories) lost every record but the last one.
+ * The registry is keyed by canonical workspace and merged on write; each entry
+ * carries the host that was being provisioned so a later resume can verify the
+ * binding instead of trusting this run's (possibly `none`) host choice.
+ */
+function readPendingRegistry(pdHome: string): PendingRegistryRead {
+  const file = pendingRegistryPath(pdHome);
+  if (!fs.existsSync(file)) return { entries: [] };
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    return { entries: [], warning: `pending provisioning registry is unreadable (${error instanceof Error ? error.message : String(error)}).` };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { entries: [], warning: `pending provisioning registry is not valid JSON (${file}).` };
+  }
+  if (!isRecord(parsed) || parsed.schemaVersion !== PENDING_SCHEMA || !Array.isArray(parsed.entries)) {
+    return { entries: [], warning: `pending provisioning registry has an unsupported shape (${file}).` };
+  }
+  const entries: PendingRegistryEntry[] = [];
+  for (const entry of parsed.entries) {
+    if (!isRecord(entry)) continue;
+    if (typeof entry.workspaceDir !== 'string' || entry.workspaceDir.length === 0) continue;
+    if (!isPendingHost(entry.host)) continue;
+    if (typeof entry.recordedAt !== 'string') continue;
+    entries.push({
+      workspaceDir: entry.workspaceDir,
+      host: entry.host,
+      recordedAt: entry.recordedAt,
+      ...(typeof entry.reason === 'string' ? { reason: entry.reason } : {}),
+    });
+  }
+  return { entries };
+}
+
+function writePendingRegistry(pdHome: string, entries: readonly PendingRegistryEntry[]): void {
+  const dir = path.join(pdHome, 'service');
+  fs.mkdirSync(dir, { recursive: true });
+  const target = pendingRegistryPath(pdHome);
+  const temp = `${target}.tmp-${process.pid}`;
+  fs.writeFileSync(temp, JSON.stringify({ schemaVersion: PENDING_SCHEMA, entries }, null, 2) + '\n', 'utf8');
+  fs.renameSync(temp, target);
+}
+
+function upsertPending(
+  pdHome: string,
+  entry: PendingRegistryEntry,
+  warn: (message: string) => void,
+): void {
+  try {
+    const { entries, warning } = readPendingRegistry(pdHome);
+    if (warning !== undefined) warn(`${warning} Recording a fresh pending entry for ${entry.workspaceDir}.`);
+    const identity = canonicalIdentity(entry.workspaceDir);
+    const merged = entries.filter((candidate) => canonicalIdentity(candidate.workspaceDir) !== identity);
+    merged.push(entry);
+    writePendingRegistry(pdHome, merged);
+  } catch (error) {
+    warn(`Pending provisioning record could not be written (${error instanceof Error ? error.message : String(error)}).`);
+  }
+}
+
+function clearPending(
+  pdHome: string,
+  workspaceDir: string,
+  warn: (message: string) => void,
+): void {
+  try {
+    const { entries, warning } = readPendingRegistry(pdHome);
+    if (warning !== undefined) {
+      // Never rewrite a registry whose current content could not be read:
+      // overwriting it would silently discard the other workspaces' hints.
+      warn(warning);
+      return;
+    }
+    const identity = canonicalIdentity(workspaceDir);
+    const remaining = entries.filter((candidate) => canonicalIdentity(candidate.workspaceDir) !== identity);
+    if (remaining.length === entries.length) return;
+    writePendingRegistry(pdHome, remaining);
+  } catch (error) {
+    warn(`Pending provisioning record could not be updated (${error instanceof Error ? error.message : String(error)}).`);
+  }
+}
+
 function limitationsFor(host: HostSelection, readiness: ProvisioningReadiness): string[] {
   const limitations: string[] = [];
   if (host === 'none') {
@@ -286,6 +436,9 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     };
   }
   if (before.status === 'service_host_owned') {
+    // The workspace reached ownership another way (e.g. `pd service handover`);
+    // its pending hint is stale and must not be resumed again.
+    clearPending(input.pdHome, input.workspaceDir, warn);
     return {
       ownership: 'already_owned',
       ownershipBefore: before.status,
@@ -300,6 +453,7 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
   if (before.status !== 'legacy_owned' || before.source !== 'no_record') {
     // Any recorded history (including legacy_owned) is an UPGRADE: it must go
     // through the quiescing handover, never through fresh provisioning.
+    clearPending(input.pdHome, input.workspaceDir, warn);
     return {
       ownership: 'not_provisioned',
       ownershipBefore: before.status,
@@ -323,11 +477,21 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
       nextAction: string;
     },
   ): ServiceHostProvisioningOutcome => {
+    const recordedAt = (input.now?.() ?? new Date()).toISOString();
+    // Per-workspace hint: `--host all` produces multiple targets, and the
+    // single evidence document below is last-write-wins. The registry keeps
+    // every target independently resumable, including the host it was for.
+    upsertPending(input.pdHome, {
+      workspaceDir: input.workspaceDir,
+      host: input.host,
+      recordedAt,
+      reason,
+    }, warn);
     let evidencePath: string | undefined;
     try {
       evidencePath = writeEvidence(input.pdHome, {
         schemaVersion: EVIDENCE_SCHEMA,
-        recordedAt: (input.now?.() ?? new Date()).toISOString(),
+        recordedAt,
         workspaceDir: input.workspaceDir,
         host: input.host,
         scheduler: {
@@ -361,6 +525,17 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     };
   };
 
+  // Resume-only: a pending hint may name a host whose binding can no longer be
+  // read/validated. Flipping ownership from an unverified binding is exactly
+  // the "assume a host that may not be there" failure; refuse durably instead.
+  if (input.bindingVerification !== undefined && !input.bindingVerification.ok) {
+    return recordPending('binding_unverifiable', {
+      readiness: 'skipped',
+      firstCycle: notAttempted('binding_unverifiable'),
+      nextAction: `${input.bindingVerification.nextAction} Ownership was NOT handed over because the workspace's host binding could not be verified (${input.bindingVerification.reason}).`,
+    });
+  }
+
   // Guard: ownership is only handed over when the scheduler is VERIFIED
   // enabled. A registration that failed or stayed disabled must never flip
   // the marker (no silent legacy retirement) — it records a PENDING
@@ -371,6 +546,23 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
       firstCycle: notAttempted(`scheduler_${input.scheduler.state}`),
       nextAction: `${input.scheduler.nextAction} Workspace ownership was NOT handed over because the scheduler is not verified enabled. This new workspace is recorded as pending; after arming the scheduler, re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
     });
+  }
+
+  // A DEFERRED resume proves only that the first install did not hand over —
+  // not that no legacy consumer started afterwards. With a running OpenClaw
+  // Gateway, flipping ownership here would create a second consumer; the
+  // controlled handover (Gateway quiesce ack) is the only safe path.
+  if (input.resume === true && (input.host === 'openclaw' || input.host === 'all')) {
+    const gatewayRunning = input.probes?.gatewayRunning !== undefined
+      ? await input.probes.gatewayRunning()
+      : (await checkOpenClawGateway()).isRunning;
+    if (gatewayRunning) {
+      return recordPending('legacy_consumer_running', {
+        readiness: 'skipped',
+        firstCycle: notAttempted('legacy_consumer_running'),
+        nextAction: `A running OpenClaw Gateway may still consume this workspace, so ownership was NOT handed over. Quiesce it through the controlled handover: pd service handover --workspace "${input.workspaceDir}" — or stop the Gateway (openclaw gateway stop) and re-run this install.`,
+      });
+    }
   }
 
   const readiness = await probeReadiness(input);
@@ -419,6 +611,10 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
       nextAction: 'Inspect ~/.pd/install.json (backgroundExecutions) before relying on automatic runs; the persisted ownership could not be verified.',
     });
   }
+
+  // The durable pending hint has done its job: ownership is verified, so a
+  // later install must not treat this workspace as "uninitialized" again.
+  clearPending(input.pdHome, input.workspaceDir, warn);
 
   const firstCycle = await runFirstCycle(input);
   if (!firstCycle.ok) {
@@ -485,53 +681,53 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
 /** Durable hint that a NEW workspace was committed without Service Host ownership. */
 export interface PendingProvisioningMarker {
   readonly workspaceDir: string;
+  /** The host adapter that was being provisioned when the hand-over was deferred. */
+  readonly host: HostSelection;
   readonly recordedAt: string;
   readonly reason?: string;
 }
 
-function canonicalIdentity(value: string): string {
-  const resolved = path.resolve(value);
-  let real: string | undefined;
-  try {
-    real = fs.realpathSync.native(resolved);
-  } catch {
-    real = undefined;
-  }
-  const form = real ?? resolved;
-  return process.platform === 'win32' ? form.toLowerCase() : form;
+/**
+ * Every pending hint this PD home recorded.
+ *
+ * A multi-host install (`--host all`) records one entry per ACTUAL workspace
+ * instead of overwriting a single document, so a later explicit enable can
+ * resume all of them. This is a HINT, never an ownership authority: the caller
+ * still requires explicit enable consent and an ownership record with no
+ * history (`provision_fresh_install` enforces both).
+ */
+export function readAllPendingProvisioning(pdHome: string): {
+  entries: readonly PendingProvisioningMarker[];
+  warning?: string;
+} {
+  const { entries, warning } = readPendingRegistry(pdHome);
+  return {
+    entries: entries.map((entry) => ({
+      workspaceDir: entry.workspaceDir,
+      host: entry.host,
+      recordedAt: entry.recordedAt,
+      ...(entry.reason !== undefined ? { reason: entry.reason } : {}),
+    })),
+    ...(warning !== undefined ? { warning } : {}),
+  };
 }
 
 /**
- * Read the pending marker written by a fresh install that could not hand the
- * workspace over yet (no consent / scheduler disabled / readiness failed).
+ * Read the pending hint for ONE workspace.
  *
- * This is a HINT, not an ownership authority: a later install still requires
- * an explicit enable and a manifest with NO ownership record. Historical
- * installs never wrote this record, so they can never be resumed implicitly.
- * Any unreadable/foreign record is `null` (fail-closed, never a guess).
+ * Unreadable/foreign records are `null` (fail-closed, never a guess); the
+ * caller then leaves the workspace in legacy ownership.
  */
 export function readPendingProvisioningEvidence(pdHome: string, workspaceDir: string): PendingProvisioningMarker | null {
-  const file = path.join(pdHome, 'service', 'install-provisioning.json');
-  let raw: string;
-  try {
-    raw = fs.readFileSync(file, 'utf8');
-  } catch {
-    return null;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!isRecord(parsed)) return null;
-  if (parsed.schemaVersion !== EVIDENCE_SCHEMA) return null;
-  if (parsed.pendingProvisioning !== true) return null;
-  if (typeof parsed.workspaceDir !== 'string' || parsed.workspaceDir.length === 0) return null;
-  if (canonicalIdentity(parsed.workspaceDir) !== canonicalIdentity(workspaceDir)) return null;
-  return {
-    workspaceDir: parsed.workspaceDir,
-    recordedAt: typeof parsed.recordedAt === 'string' ? parsed.recordedAt : '',
-    ...(typeof parsed.pendingReason === 'string' ? { reason: parsed.pendingReason } : {}),
-  };
+  const { entries } = readPendingRegistry(pdHome);
+  const identity = canonicalIdentity(workspaceDir);
+  const found = entries.find((entry) => canonicalIdentity(entry.workspaceDir) === identity);
+  return found === undefined
+    ? null
+    : {
+        workspaceDir: found.workspaceDir,
+        host: found.host,
+        recordedAt: found.recordedAt,
+        ...(found.reason !== undefined ? { reason: found.reason } : {}),
+      };
 }

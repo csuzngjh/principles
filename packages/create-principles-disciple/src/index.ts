@@ -9,7 +9,7 @@ import { banner, logger, setQuietMode } from './utils/logger.js';
 import { runPrompts, type InstallOptions, type ServiceHostConsent } from './prompts.js';
 import { install, resolveConsoleWorkspaceDir } from './installer.js';
 import { uninstall, checkInstallStatus } from './uninstaller.js';
-import { checkEnvironment, detectWorkspace } from './utils/env.js';
+import { checkEnvironment, detectWorkspace, inspectWorkspaceDir } from './utils/env.js';
 import {
   MVP_CHANNELS,
   buildFailureOutput,
@@ -298,7 +298,12 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     force: options.force === true,
     smart: options.smart === true,
     nonInteractive,
-    workspaceInfo,
+    // PRI-1278 Phase 5 review: an explicit --workspace is the directory the
+    // installer will actually write to. Deriving mode from the host's DETECTED
+    // default let that other directory's emptiness pick `force` for this one.
+    workspaceInfo: typeof options.workspace === 'string' && options.workspace.trim().length > 0
+      ? inspectWorkspaceDir(options.workspace)
+      : workspaceInfo,
   });
   if (prePromptMode !== undefined) cliOptions.mode = prePromptMode;
 

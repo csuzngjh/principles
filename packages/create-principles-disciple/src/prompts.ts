@@ -1,6 +1,6 @@
 import { select, confirm, input } from '@inquirer/prompts';
 import * as path from 'path';
-import { detectWorkspace, type WorkspaceInfo } from './utils/env.js';
+import { detectWorkspace, inspectWorkspaceDir, type WorkspaceInfo } from './utils/env.js';
 import { MVP_CHANNELS, getHomeDir, type MvpChannel, type RuntimeProfileInput, resolveDefaultModelForProvider, isValidHttpBaseUrl } from './mvp-config.js';
 import { getInstallLayoutPaths, getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { setLanguage, getLanguage, t, type Language } from './i18n.js';
@@ -366,21 +366,26 @@ export async function runPrompts(
     ? (workspaceInfo || detectWorkspace({ host: 'openclaw' }))
     : detectWorkspace({ host: detectionHost });
 
+  // PRI-1278 Phase 5 review: choose the workspace FIRST, then recommend the
+  // install mode from THAT directory. The previous order derived `force` from
+  // the pre-prompt default; a custom/explicit path holding user files then
+  // inherited force and was overwritten.
+  const workspaceSelection = cliOptions.workspaceDir !== undefined
+    ? { workspaceDir: cliOptions.workspaceDir, explicit: true }
+    : await promptWorkspace(wsInfo);
+
   let { mode } = cliOptions;
   if (!mode) {
-    const defaultMode = wsInfo.isFirstInstall ? 'force' : 'smart';
+    const finalWorkspace = inspectWorkspaceDir(workspaceSelection.workspaceDir);
+    const defaultMode = finalWorkspace.isFirstInstall ? 'force' : 'smart';
 
-    if (!wsInfo.isFirstInstall && wsInfo.coreFiles && wsInfo.coreFiles.length > 0) {
-      console.log(`\n${t('existing_core_files')} ${wsInfo.coreFiles.join(', ')}`);
+    if (!finalWorkspace.isFirstInstall && finalWorkspace.coreFiles.length > 0) {
+      console.log(`\n${t('existing_core_files')} ${finalWorkspace.coreFiles.join(', ')}`);
       console.log(`  ${t('smart_mode_desc')}\n`);
     }
 
     mode = await promptInstallMode(defaultMode);
   }
-
-  const workspaceSelection = cliOptions.workspaceDir !== undefined
-    ? { workspaceDir: cliOptions.workspaceDir, explicit: true }
-    : await promptWorkspace(wsInfo);
 
   showMvpCoreChannels();
 

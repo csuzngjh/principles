@@ -36,6 +36,38 @@ export interface WorkspaceInfo {
   coreFiles: string[];      // 已存在的核心文件列表
 }
 
+/** Core files whose presence marks a workspace as already initialized. */
+const CORE_WORKSPACE_FILES = ['AGENTS.md', 'SOUL.md', 'USER.md'] as const;
+
+export interface WorkspaceInspection {
+  readonly exists: boolean;
+  readonly hasPrinciples: boolean;
+  readonly isFirstInstall: boolean;
+  readonly coreFiles: string[];
+}
+
+/**
+ * Inspect ONE workspace directory with the exact rule `detectWorkspace` uses.
+ *
+ * PRI-1278 Phase 5 review: the install MODE must be recommended from the
+ * workspace the operator actually selected. Deriving it from a different
+ * (pre-prompt / neutral) directory let `force` overwrite user files in the
+ * final target.
+ */
+export function inspectWorkspaceDir(dir: string): WorkspaceInspection {
+  if (!fs.existsSync(dir)) {
+    return { exists: false, hasPrinciples: false, isFirstInstall: true, coreFiles: [] };
+  }
+  const hasPrinciples = fs.existsSync(path.join(dir, '.principles', 'THINKING_OS.md'));
+  const coreFiles = CORE_WORKSPACE_FILES.filter((file) => fs.existsSync(path.join(dir, file)));
+  return {
+    exists: true,
+    hasPrinciples,
+    isFirstInstall: !hasPrinciples && coreFiles.length === 0,
+    coreFiles,
+  };
+}
+
 const IS_WIN32 = process.platform === 'win32';
 
 /** 探测超时：卡死的 .cmd shim / 挂起的二进制不应挂住安装器（rc-9 降级）。 */
@@ -260,39 +292,12 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
     candidates.push(path.join(hostRoots.openclawHome, 'workspace'));
   }
 
-  // 核心文件列表（用于检测是否已安装）
-  const CORE_FILES = [
-    'AGENTS.md',
-    'SOUL.md',
-    'USER.md',
-  ];
-
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      // Fix-8 (P1-BUG-2): detect via THINKING_OS.md — the file the installer
-      // actually creates under .principles/. The previous check for
-      // PRINCIPLES.md never matched because the installer doesn't create
-      // that file, so hasPrinciples was always false on reinstall.
-      const principlesPath = path.join(candidate, '.principles', 'THINKING_OS.md');
-      const hasPrinciples = fs.existsSync(principlesPath);
-
-      // 检测已存在的核心文件
-      const coreFiles: string[] = [];
-      for (const file of CORE_FILES) {
-        if (fs.existsSync(path.join(candidate, file))) {
-          coreFiles.push(file);
-        }
-      }
-
-      // 判断是否首次安装：没有 THINKING_OS.md 且没有核心文件
-      const isFirstInstall = !hasPrinciples && coreFiles.length === 0;
-
+    const inspection = inspectWorkspaceDir(candidate);
+    if (inspection.exists) {
       return {
         detectedPath: candidate,
-        exists: true,
-        hasPrinciples,
-        isFirstInstall,
-        coreFiles,
+        ...inspection,
       };
     }
   }

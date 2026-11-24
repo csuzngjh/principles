@@ -1,7 +1,11 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { isLanguage } from '../src/i18n.js';
 import { program, resolvePrePromptInstallMode } from '../src/index.js';
 import { shouldProvisionOnInstall } from '../src/installer.js';
+import { inspectWorkspaceDir } from '../src/utils/env.js';
 
 describe('isLanguage type guard', () => {
   it('returns true for valid languages', () => {
@@ -121,6 +125,35 @@ describe('shouldProvisionOnInstall — deferred provisioning never weakens upgra
     expect(shouldProvisionOnInstall({ ...base, consentSource: 'recommended_default' })).toBe(false);
     expect(shouldProvisionOnInstall({ ...base, consentIntent: 'refresh_if_registered' })).toBe(false);
     expect(shouldProvisionOnInstall({ ...base, schedulerState: 'registered_disabled' })).toBe(false);
+  });
+});
+
+describe('explicit --workspace: the mode follows the FINAL directory', () => {
+  it('a directory that already holds user files is never recommended `force`', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'pd-mode-final-'));
+    try {
+      writeFileSync(path.join(dir, 'AGENTS.md'), '# owner customizations\n', 'utf8');
+      const info = inspectWorkspaceDir(dir);
+      expect(info.isFirstInstall).toBe(false);
+      expect(info.coreFiles).toContain('AGENTS.md');
+      expect(resolvePrePromptInstallMode({
+        force: false, smart: false, nonInteractive: true, workspaceInfo: info,
+      })).toBe('smart');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('an empty directory (or one that does not exist yet) is a first install', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'pd-mode-empty-'));
+    try {
+      expect(inspectWorkspaceDir(dir).isFirstInstall).toBe(true);
+      expect(inspectWorkspaceDir(path.join(dir, 'missing')).isFirstInstall).toBe(true);
+      mkdirSync(path.join(dir, 'missing'), { recursive: true });
+      expect(inspectWorkspaceDir(path.join(dir, 'missing')).isFirstInstall).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

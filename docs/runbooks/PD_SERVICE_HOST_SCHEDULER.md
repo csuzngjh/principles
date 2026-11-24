@@ -102,6 +102,7 @@ pd service rollback   --workspace <dir> [--json]   # SERVICE_HOST → LEGACY
 | Workspace owner 状态 | 现场只读发现（manifest + 已验证 claims） |
 | `hostBindingState` | 该 Workspace 的已验证 claim（`bound`）或缺失（`waiting_for_host_binding`）。Service-Host-only 安装的正常状态，不是错误 |
 | 最近一次安装 provisioning | `<pdHome>/service/install-provisioning.json`（安装证据，非所有权权威；所有者仍以 manifest `backgroundExecutions` 为准） |
+| 待恢复的 Workspace | `<pdHome>/service/pending-provisioning.json`（按规范化 Workspace 分条记录，含原目标宿主；多宿主安装不再互相覆盖。仍是提示，不是所有权权威） |
 
 - registered ≠ enabled ≠ running ≠ completed ≠ business_progress；状态读取失败记 degraded（`degradedReasons`），权限拒绝**绝不**显示为未安装。
 - **Console**：`GET /api/service-host/status`（只读，转调同一 CLI 实现；无任何生命周期写面）。
@@ -115,7 +116,10 @@ pd service rollback   --workspace <dir> [--json]   # SERVICE_HOST → LEGACY
 | `scheduler_query_failed:AccessDenied` | OS 拒绝读取/注册（非"未安装"） | 确认当前用户与任务存储权限；加固主机上非提升注册会被策略拒绝，需在允许的用户上下文操作 |
 | `scheduler_task_name_conflict_foreign_task` | 同名任务非本安装所有 | 手工检查（`Export-ScheduledTask`）；PD 不覆盖外部任务 |
 | `no_service_host_owned_workspaces` | 合法空执行 | 无需处置；尚未交接的 Workspace 保持 legacy（`pd service handover` 显式迁移） |
-| 安装摘要 `Workspace owner: not provisioned` + `consent_required` | 非交互安装未携带启用同意 | 重跑安装并加 `--enable-service-host`（同一 run 会初始化 pending 的新 Workspace；仅启用调度器不会改变所有权） |
+| 安装摘要 `Workspace owner: not provisioned` + `consent_required` | 非交互安装未携带启用同意 | 重跑安装并加 `--enable-service-host`（同一 run 会恢复所有 pending 的新 Workspace；仅启用调度器不会改变所有权） |
+| `pendingReason: binding_unverifiable` | 恢复时无法可信读取原宿主绑定（文件损坏/不可读） | 修复对应宿主绑定文件后重跑；安装器**不会**在未验证绑定时翻转所有权 |
+| `pendingReason: legacy_consumer_running` | 原 OpenClaw Gateway 仍在运行，可能仍有在途消费 | 走受控交接：`pd service handover --workspace <dir>`（等待 quiesce ack）；或 `openclaw gateway stop` 后重跑安装 |
+| 恢复时未传 `--host` | 以 Workspace 当前真实绑定为准执行探针；无任何绑定时才进入 `waiting_for_host_binding` | 无需补 `--host`；若绑定已迁移到另一个宿主，会按新宿主探测 |
 | `readiness: waiting_for_host_binding` | Service-Host-only / 该 Workspace 无宿主 claim | 正常状态；安装宿主 Adapter 并绑定 Workspace 后才会出现可执行 Worker |
 | `provision_fresh_install` 被拒（`unexpected_state`） | Workspace 已有 ownership 历史（升级用户） | 不静默迁移：使用 `pd service handover --workspace <dir>`（含旧消费者停止验证） |
 | `install_manifest_*` / `active_release_*` 拒绝 | 可信前缀 fail-closed | 修复安装（`npx create-principles-disciple`）后再触发 |

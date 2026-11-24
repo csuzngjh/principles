@@ -347,11 +347,17 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 | 2. no-consume readiness | active-release CLI：OpenClaw `worker --readiness`；Codex/WorkBuddy `worker --status` | readiness 失败 → `not_provisioned` + nextAction |
 | 3. 所有权 CAS | `transitionWorkspaceBackgroundExecution({kind:'provision_fresh_install', freshInstall:true, registerWorkspace:true})` | 写入失败/投影不符 → `failed`，不重试猜测 |
 | 4. 首次真实周期 | `pd service run-once --trigger installer --json`（有界超时） | 未完成 → 保留所有权，下一 OS 触发从持久化 task/lease 恢复 |
-| 5. 安装证据 | `<pdHome>/service/install-provisioning.json`（原子写） | 证据写失败 → 告警，不影响既定所有权 |
+| 5. 安装证据 | `<pdHome>/service/install-provisioning.json`（原子写，最近一次尝试）+ `<pdHome>/service/pending-provisioning.json`（按 Workspace 的待恢复登记） | 证据写失败 → 告警，不影响既定所有权 |
 
 **升级隔离**：同一 installer 只有在 manifest 于本次运行前**不存在**时才走上述路径。升级只做 refresh-if-registered，并输出 `pd service handover` 迁移入口；`--enable-service-host` 是升级时唯一允许启用调度器的来源。
 
-**延后初始化（Phase 5 review）**：全新安装若未获同意、调度器未启用或 readiness 失败，会写 `<pdHome>/service/install-provisioning.json` 的 `pendingProvisioning: true`（绑定 canonical workspace）。之后显式 `--enable-service-host` 的安装可在同一 run 内恢复初始化——条件是：该 pending 记录匹配、manifest 该 Workspace **仍无** ownership record、调度器复核 enabled。历史安装从未写过该记录，因此不会被隐式恢复。只启用调度器（`pd service enable`）不会改变所有权。
+**延后初始化（Phase 5 review）**：全新安装若未获同意、调度器未启用或 readiness 失败，会写 `<pdHome>/service/install-provisioning.json` 的 `pendingProvisioning: true`，并把每个目标 Workspace 独立登记到 `<pdHome>/service/pending-provisioning.json`（按 canonical workspace 去重合并，记录原目标宿主）。多宿主安装（`--host all`）因此不会互相覆盖。之后显式 `--enable-service-host` 的安装可在同一 run 内恢复初始化——条件是：该 Workspace 的 pending 记录存在、manifest 该 Workspace **仍无** ownership record、调度器复核 enabled，并且：
+
+- **按当前真实绑定探测**：恢复时不信任本轮 `--host`（缺省为 `none`），而是读取 OpenClaw declaration / Codex durable binding（plugin data root，其次 payload 本地副本）/ WorkBuddy governance dir，以匹配该 Workspace 的宿主执行 readiness；只有确认**没有任何绑定**时才允许 `waiting_for_host_binding`；
+- **绑定不可验证 → 不翻转**：绑定文件存在但损坏/不可读时记录 `binding_unverifiable` 并保持 legacy；
+- **旧消费者未停稳 → 不翻转**：若该 Workspace 绑定 OpenClaw 且 Gateway 正在运行，记录 `legacy_consumer_running`，要求走 `pd service handover`（Gateway quiesce ack）后再迁移；仅在证明没有旧消费者（Gateway 未运行）时直接初始化。
+
+历史安装从未写过 pending registry，因此不会被隐式恢复。只启用调度器（`pd service enable`）不会改变所有权。
 
 **Service-Host-only**（`--host none`）：manifest `hosts: []` + `workspaces:[…]` 是合法形态；readiness 记为 `waiting_for_host_binding`，首次周期会记录 `no_adapter_supports_workspace`；状态契约新增 `hostBindingState`，绝不伪造宿主 Worker。
 

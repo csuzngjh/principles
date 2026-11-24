@@ -19,14 +19,20 @@ background lifecycle owner.
   enabling the user-level OS scheduler, then provision the ACTUAL bound host
   workspaces into Service Host ownership (active-release no-consume readiness →
   CAS → first real managed cycle → `<pdHome>/service/install-provisioning.json`
-  evidence). A failed/deferred attempt records `pendingProvisioning`, which a
-  later explicit `--enable-service-host` install resumes — historical installs
-  never wrote it and are never resumed implicitly. `--yes` accepts the
-  recommended default, `--json`/`--non-interactive` without consent reports
-  `consent_required` instead of creating a trigger, `--no-service-host` opts
-  out, and upgrades keep refresh-if-registered. Refreshing an installed host
-  reuses its recorded binding workspace instead of this run's target, and the
-  console update resolves a legal empty `hosts` record to `none`.
+  evidence). A failed/deferred attempt records a PER-WORKSPACE pending entry
+  (`<pdHome>/service/pending-provisioning.json`), so `--host all` keeps every
+  deferred workspace resumable; a later explicit `--enable-service-host`
+  install verifies each workspace's CURRENT host binding, probes that host, and
+  refuses to flip while a legacy OpenClaw Gateway may still consume it.
+  Historical installs never wrote a pending entry and are never resumed
+  implicitly. `--yes` accepts the recommended default, `--json`/
+  `--non-interactive` without consent reports `consent_required` instead of
+  creating a trigger, `--no-service-host` opts out, and upgrades keep
+  refresh-if-registered. Refreshing an installed host reads its real binding
+  (Codex plugin-data / payload copy) and reuses that workspace instead of this
+  run's target; the console update resolves a legal empty `hosts` record to
+  `none`; the interactive install mode is recommended from the FINAL workspace
+  directory, never from another default.
 - pd-cli: `pd service run-once --trigger installer` records the fresh-install
   first cycle; `pd service status` exposes `hostBindingState`
   (`bound` / `waiting_for_host_binding`) so a Service-Host-only workspace is

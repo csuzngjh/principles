@@ -51,7 +51,7 @@ import * as installLayoutModule from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { reconcileServiceHostScheduler, type ServiceHostSchedulerOutcome } from './service-host-bridge.js';
-import { provisionFreshInstallWorkspace, readPendingProvisioningEvidence, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
+import { provisionFreshInstallWorkspace, readAllPendingProvisioning, readPendingProvisioningEvidence, type PendingProvisioningMarker, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -270,12 +270,18 @@ export interface ProvisioningTarget {
 
 export interface ServiceHostProvisioningReport {
   readonly targets: readonly {
-    host: ProvisioningTarget['host'];
+    host: HostSelection;
     workspaceDir: string;
     outcome: ServiceHostProvisioningOutcome;
   }[];
   readonly pending: boolean;
   readonly nextAction: string;
+}
+
+/** Stable identity for a workspace directory (Windows is case-insensitive). */
+function workspaceKey(workspaceDir: string): string {
+  const resolved = path.resolve(workspaceDir);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
 /**
@@ -304,13 +310,31 @@ export function resolveProvisioningTargets(options: {
   }
   const seen = new Set<string>();
   return targets.filter((target) => {
-    const key = process.platform === 'win32'
-      ? path.resolve(target.workspaceDir).toLowerCase()
-      : path.resolve(target.workspaceDir);
+    const key = workspaceKey(target.workspaceDir);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * Merge THIS run's targets with the per-workspace pending records a previous
+ * fresh install left behind. A plain `install --enable-service-host` (no
+ * `--host`) must resume every deferred workspace, not only the neutral one.
+ */
+export function mergePendingProvisioningTargets(
+  targets: readonly ProvisioningTarget[],
+  pending: readonly PendingProvisioningMarker[],
+): ProvisioningTarget[] {
+  const merged = [...targets];
+  const seen = new Set(targets.map((target) => workspaceKey(target.workspaceDir)));
+  for (const entry of pending) {
+    const key = workspaceKey(entry.workspaceDir);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ host: entry.host === 'all' ? 'none' : entry.host, workspaceDir: entry.workspaceDir });
+  }
+  return merged;
 }
 
 /**
@@ -393,12 +417,6 @@ export function resolveHostRefreshTargets(persistedHosts: readonly string[], hos
     targets.push(persisted);
   }
   return targets;
-}
-
-export interface HostRefreshWorkspaceResolution {
-  readonly ok: true;
-  readonly workspaceDir: string;
-  readonly source: 'codex_mcp_binding' | 'openclaw_declaration' | 'workbuddy_governance_dir';
 }
 
 /** Union the detected (already-installed) hosts into the manifest host list. */
@@ -5163,6 +5181,158 @@ function readSecondaryOpenClawDeclaration(homeDir: string): { ok: true; workspac
   return { ok: true, workspace: declaredRaw.trim() };
 }
 
+export type HostWorkspaceBindingSource = 'openclaw_declaration' | 'codex_mcp_binding' | 'workbuddy_governance_dir';
+
+/**
+ * What the host itself records about the workspace it is bound to.
+ *
+ *  - bound         — a readable binding names an existing workspace;
+ *  - unbound       — the binding is verifiably ABSENT (safe waiting state);
+ *  - unverifiable  — a binding file exists but cannot be trusted (fail closed:
+ *                    never rebind on refresh, never flip ownership on resume).
+ */
+export type HostWorkspaceBinding =
+  | { readonly state: 'bound'; readonly workspaceDir: string; readonly source: HostWorkspaceBindingSource }
+  | { readonly state: 'unbound'; readonly reason: string }
+  | { readonly state: 'unverifiable'; readonly reason: string };
+
+type CodexBindingFileState =
+  | { readonly state: 'absent' }
+  | { readonly state: 'bound'; readonly workspaceDir: string }
+  | { readonly state: 'invalid'; readonly reason: string };
+
+/**
+ * Read ONE binding file in the layout the Codex launcher actually writes
+ * (PRI-1248): `mcp-binding.json` beside the plugin data root, and as a legacy
+ * mirror in the versioned payload. The old implementation scanned
+ * `PLUGIN_DATA/runtime/<version>/`, a directory that only holds the runtime
+ * dependencies — so a normally bound Codex was reported as "no binding" and a
+ * plain `--yes` upgrade skipped its refresh entirely.
+ */
+function readCodexBindingFile(bindingPath: string): CodexBindingFileState {
+  if (!existsSync(bindingPath)) return { state: 'absent' };
+  let raw: string;
+  try {
+    raw = readFileSync(bindingPath, 'utf-8');
+  } catch (error) {
+    return { state: 'invalid', reason: `binding unreadable at ${bindingPath} (${describeError(error)})` };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return { state: 'invalid', reason: `binding is not valid JSON at ${bindingPath} (${describeError(error)})` };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { state: 'invalid', reason: `binding at ${bindingPath} has no JSON-object root` };
+  }
+  if (Reflect.get(parsed, 'host') !== 'codex') {
+    return { state: 'invalid', reason: `binding at ${bindingPath} does not declare host=codex` };
+  }
+  const workspace = Reflect.get(parsed, 'workspaceDir');
+  if (typeof workspace !== 'string' || !isUsableWorkspacePointer(workspace.trim())) {
+    return { state: 'invalid', reason: `binding at ${bindingPath} has no usable absolute "workspaceDir"` };
+  }
+  const resolved = path.resolve(workspace.trim());
+  if (!existsSync(resolved)) {
+    return { state: 'invalid', reason: `binding at ${bindingPath} names a workspace that does not exist (${resolved})` };
+  }
+  return { state: 'bound', workspaceDir: resolved };
+}
+
+/** Legacy payload-local mirror: `<codexHome>/plugins/cache/<marketplace>/principles-disciple/<version>`. */
+function readCodexBindingFromPayloadCache(): CodexBindingFileState {
+  const cacheRoot = path.join(getCodexHomeDir(), 'plugins', 'cache');
+  let marketplaceDirs: string[];
+  try {
+    marketplaceDirs = readdirSync(cacheRoot);
+  } catch (error) {
+    if (errnoCode(error) === 'ENOENT') return { state: 'absent' };
+    return { state: 'invalid', reason: `Codex plugin cache is unreadable at ${cacheRoot} (${describeError(error)})` };
+  }
+  const candidates: { readonly versionDir: string; readonly parts: readonly [number, number, number] }[] = [];
+  for (const marketplace of marketplaceDirs) {
+    const pluginRoot = path.join(cacheRoot, marketplace, 'principles-disciple');
+    let versions: string[];
+    try {
+      versions = readdirSync(pluginRoot);
+    } catch {
+      continue;
+    }
+    for (const version of versions) {
+      const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+      if (match === null) continue;
+      const parts = [Number(match[1]), Number(match[2]), Number(match[3])] as const;
+      if (!parts.every((n) => Number.isFinite(n))) continue;
+      candidates.push({ versionDir: path.join(pluginRoot, version), parts });
+    }
+  }
+  candidates.sort((a, b) => (b.parts[0] - a.parts[0]) || (b.parts[1] - a.parts[1]) || (b.parts[2] - a.parts[2]));
+  let sawBinding = false;
+  let firstInvalid: string | undefined;
+  for (const candidate of candidates) {
+    const state = readCodexBindingFile(path.join(candidate.versionDir, 'mcp-binding.json'));
+    if (state.state === 'absent') continue;
+    sawBinding = true;
+    if (state.state === 'bound') return state;
+    firstInvalid ??= state.reason;
+  }
+  return sawBinding
+    ? { state: 'invalid', reason: firstInvalid ?? 'no readable Codex mcp-binding.json under the plugin cache' }
+    : { state: 'absent' };
+}
+
+/** The workspace a host is ACTUALLY bound to, read from that host's own record. */
+export function readHostWorkspaceBinding(host: 'codex' | 'openclaw' | 'workbuddy'): HostWorkspaceBinding {
+  if (host === 'workbuddy') {
+    return {
+      state: 'bound',
+      workspaceDir: getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
+      source: 'workbuddy_governance_dir',
+    };
+  }
+  if (host === 'openclaw') {
+    const configPath = path.join(getOpenClawDir(), OPENCLAW_PD_CONFIG_FILENAME);
+    if (!existsSync(configPath)) {
+      return { state: 'unbound', reason: `openclaw declaration absent at ${configPath}` };
+    }
+    let raw: string;
+    try {
+      raw = readFileSync(configPath, 'utf-8');
+    } catch (error) {
+      return { state: 'unverifiable', reason: `openclaw declaration unreadable at ${configPath} (${describeError(error)})` };
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      return { state: 'unverifiable', reason: `openclaw declaration is not valid JSON (${describeError(error)})` };
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return { state: 'unverifiable', reason: `openclaw declaration at ${configPath} has no JSON-object root` };
+    }
+    const declared = Object.hasOwn(parsed, 'workspace') ? Reflect.get(parsed, 'workspace') : undefined;
+    if (typeof declared !== 'string' || !isUsableWorkspacePointer(declared.trim())) {
+      return { state: 'unbound', reason: `openclaw declaration at ${configPath} has no usable absolute "workspace"` };
+    }
+    return { state: 'bound', workspaceDir: path.resolve(declared.trim()), source: 'openclaw_declaration' };
+  }
+
+  // Codex: durable binding first, payload-local legacy second — the same
+  // authority order the launcher and `pd health` use.
+  const pluginDataRoot = resolvePluginDataRoot(getCodexHomeDir(), 'principles');
+  const persistentPath = pluginDataRoot === undefined ? undefined : path.join(pluginDataRoot, 'mcp-binding.json');
+  const persistent = persistentPath === undefined ? { state: 'absent' as const } : readCodexBindingFile(persistentPath);
+  if (persistent.state === 'bound') {
+    return { state: 'bound', workspaceDir: persistent.workspaceDir, source: 'codex_mcp_binding' };
+  }
+  if (persistent.state === 'invalid') return { state: 'unverifiable', reason: persistent.reason };
+  const payload = readCodexBindingFromPayloadCache();
+  if (payload.state === 'bound') return { state: 'bound', workspaceDir: payload.workspaceDir, source: 'codex_mcp_binding' };
+  if (payload.state === 'invalid') return { state: 'unverifiable', reason: payload.reason };
+  return { state: 'unbound', reason: 'no Codex mcp-binding.json records an existing workspace' };
+}
+
 /**
  * PRI-1278 Phase 5 review: a host that is REFRESHED (not explicitly selected)
  * must keep the workspace it is already bound to. Passing this run's target
@@ -5174,88 +5344,63 @@ function readSecondaryOpenClawDeclaration(homeDir: string): { ok: true; workspac
  */
 export function resolveExistingHostWorkspaceForRefresh(
   host: 'codex' | 'openclaw' | 'workbuddy',
-): { ok: true; workspaceDir: string; source: HostRefreshWorkspaceResolution['source'] } | { ok: false; reason: string; nextAction: string } {
-  if (host === 'workbuddy') {
+): { ok: true; workspaceDir: string; source: HostWorkspaceBindingSource } | { ok: false; reason: string; nextAction: string } {
+  const binding = readHostWorkspaceBinding(host);
+  if (binding.state === 'bound') {
+    return { ok: true, workspaceDir: binding.workspaceDir, source: binding.source };
+  }
+  const nextAction = host === 'codex'
+    ? 'Re-run the installer explicitly for Codex with its real workspace: npx create-principles-disciple install --host codex --workspace "<existing workspace>"'
+    : host === 'openclaw'
+      ? 'Re-run the installer explicitly for OpenClaw with the real workspace: npx create-principles-disciple install --host openclaw --workspace "<existing workspace>"'
+      : 'Re-run the installer explicitly for WorkBuddy so it can restore its governance workspace.';
+  return { ok: false, reason: binding.reason, nextAction };
+}
+
+/**
+ * Verify a DEFERRED provisioning target against the host bindings that exist
+ * NOW (not the `--host` this resume run happened to omit).
+ *
+ * - no binding at all          → `none` (a truthful waiting state);
+ * - one/more verified bindings → probe the verified host(s) before the flip;
+ * - an unreadable binding with
+ *   nothing else verifiable    → refuse (never flip from an unverified state).
+ */
+export function resolveResumeProvisioningHost(
+  markerHost: HostSelection,
+  workspaceDir: string,
+): { ok: true; host: HostSelection } | { ok: false; reason: string; nextAction: string } {
+  const candidates = ['openclaw', 'codex', 'workbuddy'] as const;
+  const bound: (typeof candidates)[number][] = [];
+  const unverifiable: string[] = [];
+  for (const host of candidates) {
+    let binding: HostWorkspaceBinding;
+    try {
+      binding = readHostWorkspaceBinding(host);
+    } catch (error) {
+      // A host root that cannot even be resolved is unverifiable, not absent.
+      unverifiable.push(`${host}: ${describeError(error)}`);
+      continue;
+    }
+    if (binding.state === 'unverifiable') {
+      unverifiable.push(`${host}: ${binding.reason}`);
+    } else if (binding.state === 'bound' && sameWorkspaceTarget(binding.workspaceDir, workspaceDir)) {
+      bound.push(host);
+    }
+  }
+  if (bound.length === 0 && unverifiable.length > 0) {
     return {
-      ok: true,
-      workspaceDir: getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
-      source: 'workbuddy_governance_dir',
+      ok: false,
+      reason: unverifiable.join('; '),
+      nextAction: 'Repair the host binding file(s) so the workspace ownership can be verified, then re-run this install.',
     };
   }
-  if (host === 'openclaw') {
-    const configPath = path.join(getOpenClawDir(), OPENCLAW_PD_CONFIG_FILENAME);
-    let raw: string;
-    try {
-      raw = readFileSync(configPath, 'utf-8');
-    } catch (error) {
-      return {
-        ok: false,
-        reason: `openclaw declaration unreadable at ${configPath} (${describeError(error)})`,
-        nextAction: 'Re-run the installer explicitly for OpenClaw so it can restore the declaration: npx create-principles-disciple install --host openclaw --workspace "<existing workspace>"',
-      };
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      return {
-        ok: false,
-        reason: `openclaw declaration is not valid JSON (${describeError(error)})`,
-        nextAction: `Repair or remove ${configPath}, then re-run: npx create-principles-disciple install --host openclaw --workspace "<existing workspace>"`,
-      };
-    }
-    const declared = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && Object.hasOwn(parsed, 'workspace')
-      ? Reflect.get(parsed, 'workspace')
-      : undefined;
-    if (typeof declared !== 'string' || !isUsableWorkspacePointer(declared.trim())) {
-      return {
-        ok: false,
-        reason: `openclaw declaration at ${configPath} has no usable absolute "workspace"`,
-        nextAction: 'Re-run the installer explicitly for OpenClaw with the real workspace: npx create-principles-disciple install --host openclaw --workspace "<existing workspace>"',
-      };
-    }
-    return { ok: true, workspaceDir: path.resolve(declared.trim()), source: 'openclaw_declaration' };
+  if (bound.length === 0) return { ok: true, host: 'none' };
+  if (bound.includes('openclaw') && bound.includes('codex')) return { ok: true, host: 'all' };
+  if (markerHost !== 'none' && markerHost !== 'all' && bound.includes(markerHost)) {
+    return { ok: true, host: markerHost };
   }
-
-  // Codex: the binding lives beside the installed payload. Scan the plugin
-  // data runtime for a readable binding whose workspace still exists; a
-  // missing/foreign binding is a skip, never a rebind to this run's target.
-  const pluginDataRoot = resolvePluginDataRoot(getCodexHomeDir(), 'principles');
-  const runtimeRoot = pluginDataRoot === undefined ? undefined : path.join(pluginDataRoot, 'runtime');
-  if (runtimeRoot !== undefined && existsSync(runtimeRoot)) {
-    let candidates: string[];
-    try {
-      candidates = readdirSync(runtimeRoot).sort().reverse();
-    } catch {
-      candidates = [];
-    }
-    for (const version of candidates) {
-      const bindingPath = path.join(runtimeRoot, version, 'mcp-binding.json');
-      let raw: string;
-      try {
-        raw = readFileSync(bindingPath, 'utf-8');
-      } catch {
-        continue;
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        continue;
-      }
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) continue;
-      if (Reflect.get(parsed, 'host') !== 'codex') continue;
-      const workspace = Reflect.get(parsed, 'workspaceDir');
-      if (typeof workspace !== 'string' || !isUsableWorkspacePointer(workspace.trim())) continue;
-      if (!existsSync(workspace.trim())) continue;
-      return { ok: true, workspaceDir: path.resolve(workspace.trim()), source: 'codex_mcp_binding' };
-    }
-  }
-  return {
-    ok: false,
-    reason: 'no readable Codex mcp-binding.json records an existing workspace',
-    nextAction: 'Re-run the installer explicitly for Codex with its real workspace: npx create-principles-disciple install --host codex --workspace "<existing workspace>"',
-  };
+  return { ok: true, host: bound[0] ?? 'none' };
 }
 
 export function resolveUpdateWorkspaceDir(
@@ -6915,41 +7060,65 @@ export async function install(
         info: (message) => logger.info(message),
       });
       // Fresh installs ALWAYS run the provisioning step: even when ownership
-      // cannot be handed over yet it records a durable PENDING marker, which
-      // is what a later explicit `--enable-service-host` install resumes.
+      // cannot be handed over yet it records a durable PER-WORKSPACE pending
+      // entry, which is what a later explicit `--enable-service-host` install
+      // resumes. A multi-host install records every real target independently
+      // (`--host all` → OpenClaw + Codex), instead of the last one overwriting
+      // the others.
       //
       // An existing installation is resumed ONLY with explicit consent AND a
       // matching pending marker from a previous fresh install. Historical
       // workspaces never wrote that marker, so they can never be flipped
       // implicitly — they still require the quiescing handover.
-      const targets = resolveProvisioningTargets({
+      const runTargets = resolveProvisioningTargets({
         host: options.host,
         workspaceDir: options.workspaceDir,
         ...(codexWorkspaceDir !== undefined ? { codexWorkspaceDir } : {}),
       });
-      const pendingMarkers = new Map(targets.map((target) => [
-        target.workspaceDir,
-        freshInstall ? null : readPendingProvisioningEvidence(getPdDir(), target.workspaceDir),
-      ]));
+      const pending: { entries: readonly PendingProvisioningMarker[]; warning?: string } = freshInstall
+        ? { entries: [] }
+        : readAllPendingProvisioning(getPdDir());
+      if (pending.warning !== undefined) logger.warn(pending.warning);
+      const targets = mergePendingProvisioningTargets(runTargets, pending.entries);
       const perTarget = [] as NonNullable<ServiceHostProvisioningReport['targets']>[number][];
       for (const target of targets) {
+        if (!existsSync(target.workspaceDir)) {
+          logger.warn(`Service Host provisioning skipped for ${target.workspaceDir}: the directory does not exist.`);
+          continue;
+        }
+        const marker = freshInstall ? null : readPendingProvisioningEvidence(getPdDir(), target.workspaceDir);
         const resume = shouldProvisionOnInstall({
           freshInstall,
           consentIntent: consent.intent,
           consentSource: consent.source,
           schedulerState: scheduler.state,
-          hasPendingMarker: pendingMarkers.get(target.workspaceDir) !== null,
+          hasPendingMarker: marker !== null,
         });
         if (!resume) continue;
+        // A deferred resume must use the host binding that exists NOW: this
+        // run may have omitted --host, and the original pending record only
+        // named the host the first install intended.
+        let host: HostSelection = target.host;
+        let bindingVerification: { ok: false; reason: string; nextAction: string } | undefined;
+        if (marker !== null) {
+          const resolution = resolveResumeProvisioningHost(marker.host, target.workspaceDir);
+          if (resolution.ok) {
+            ({ host } = resolution);
+          } else {
+            bindingVerification = { ok: false, reason: resolution.reason, nextAction: resolution.nextAction };
+          }
+        }
         const outcome = await provisionFreshInstallWorkspace({
           pdHome: getPdDir(),
           workspaceDir: target.workspaceDir,
-          host: target.host,
+          host,
           scheduler,
+          resume: marker !== null,
+          ...(bindingVerification !== undefined ? { bindingVerification } : {}),
           warn: (message) => logger.warn(message),
           info: (message) => logger.info(message),
         });
-        perTarget.push({ host: target.host, workspaceDir: target.workspaceDir, outcome });
+        perTarget.push({ host, workspaceDir: target.workspaceDir, outcome });
       }
       const provisioning: ServiceHostProvisioningReport | null = perTarget.length > 0
         ? {
