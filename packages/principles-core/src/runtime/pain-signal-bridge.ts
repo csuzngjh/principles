@@ -180,8 +180,13 @@ export interface NotInternalizableCandidate {
  * (PRI-775), and nothing outside this module needs the refusal shape.
  */
 interface SeedRefusal {
-  readonly reason: 'candidate_kind_invalid';
-  readonly blockedReason: string;
+  readonly reason:
+    | 'candidate_kind_invalid'
+    | 'candidate_kind_recovery_required'
+    | 'admission_document_unreadable'
+    | 'candidate_seed_authority_unavailable'
+    | 'candidate_seed_coordination_failed';
+  readonly blockedReason?: string;
   readonly nextAction: string;
 }
 
@@ -1890,211 +1895,257 @@ export class PainSignalBridge {
           continue;
         }
 
-        // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.6): the seed gate validates the
-        // RAW persisted kind first. `recommendationKind` is the fail-open
-        // read view (an invalid persisted value folds to 'principle'), which
-        // is exactly how a candidate Intake already refused for
-        // `candidate_kind_invalid` could still be seeded here. Invalid or
-        // missing raw kind → ZERO seeding + a structured telemetry event.
-        const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
-        if (rawKind === null) {
-          // Saved FIRST and awaited — the persisted state is the authority;
-          // telemetry below is only an observer of it.
-          const refusal = seedRefusalFor(candidate, this.workspaceDir);
+        // An invalid-kind park remains authoritative after the raw row is
+        // repaired. Intake returns this refusal before ledger replay; never
+        // turn a valid-looking current kind into an implicit recovery.
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'candidate_kind_recovery_required') {
+          const refusal: SeedRefusal = {
+            reason: 'candidate_kind_recovery_required',
+            nextAction: `After repairing the persisted RAW kind, run pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${this.workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
+          };
           seedRefusedByCandidate.set(candidate.candidateId, refusal);
-          try {
-            await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
-              state: 'awaiting_owner',
-              attempts: 0,
-              lastFailure: { reason: refusal.reason, nextAction: refusal.nextAction, at: new Date().toISOString() },
-              blockedReason: refusal.blockedReason,
-            });
-          } catch {
-            // the saved state itself could not be persisted → the candidate
-            // stays scannable and the next round retries this bookkeeping
-          }
-          // the bridge's emitter already contains a failing sink; the state
-          // above was persisted first and stays authoritative
           this.eventEmitter?.emitTelemetry({
             eventType: 'candidate_seed_refused',
             traceId: candidate.candidateId,
             timestamp: new Date().toISOString(),
-            payload: {
-              candidateId: candidate.candidateId,
-              reason: refusal.reason,
-              nextAction: refusal.nextAction,
-              rawRecommendationKind: typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
-            },
+            payload: { candidateId: candidate.candidateId, reason: refusal.reason, nextAction: refusal.nextAction },
+          });
+          continue;
+        }
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'admission_document_unreadable') {
+          const refusal: SeedRefusal = {
+            reason: 'admission_document_unreadable',
+            nextAction: 'Inspect and repair the persisted admission_json. Automatic Dreamer seeding failed closed; no candidate consumption or processing completion occurred.',
+          };
+          seedRefusedByCandidate.set(candidate.candidateId, refusal);
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'candidate_seed_refused',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: { candidateId: candidate.candidateId, reason: refusal.reason, nextAction: refusal.nextAction },
           });
           continue;
         }
 
-        // Phase 7.2 B2.5 — Dreamer seed suppression. A candidate already
-        // resolved onto an existing principle (Owner reuse decision, INV-R07
-        // replay, or the B1 exact-duplicate guard — all durable via the
-        // ledger's reuseEvidence, i.e. identity basis 'principle_reuse') or
-        // still parked for the Owner (persisted admission processing) has no
-        // information gain from an independent exploration chain. The check
-        // reads PERSISTENT facts, so it holds across restarts, rescans and
-        // this very recovery loop (production anomaly 19aa989d: consumed AND
-        // parked AND seeded).
-        let seedSuppression: DreamerSeedSuppression = { suppress: false };
-        try {
-          const resolveIdentity = this.ledgerAdapter.resolveCandidatePrincipleIdentity;
-          if (typeof resolveIdentity === 'function') {
-            const admissionDoc = await this.stateManager.getAdmissionDocument(candidate.candidateId);
-            const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
-            seedSuppression = evaluateDreamerSeedSuppression({
-              identity: resolveIdentity.call(
-                this.ledgerAdapter,
-                candidate.candidateId,
-                // D4: the RAW persisted kind — the normalized view folds invalid
-                // values to 'principle' and bypasses candidate_kind_invalid.
-                candidate.rawRecommendationKind,
-              ),
-              processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
-              ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
+        // Final seed authorization, identity and task creation share the
+        // candidate coordination lock used by Owner reuse and CLI
+        // internalization. Only bounded SQLite/ledger work is performed here;
+        // no LLM or network call is permitted inside this critical section.
+        const seedUnderCandidateLock = async (): Promise<void> => {
+          const currentCandidate = await this.stateManager.getCandidate(candidate.candidateId);
+          if (currentCandidate === null) {
+            seedRefusedByCandidate.set(candidate.candidateId, {
+              reason: 'candidate_seed_authority_unavailable',
+              nextAction: 'Candidate disappeared before Dreamer seeding. Re-run diagnosis after verifying candidate lineage.',
             });
+            return;
           }
-        } catch (identityErr: unknown) {
-          // Fail-open with visible telemetry: the suppression is a
-          // chain-budget correctness guard, not a safety gate — an unexpected
-          // identity/processing read failure must not block learning (Rule 4
-          // posture), but it must be observable (rc-9). Distinct event type
-          // so it never masks a real seed failure.
-          this.eventEmitter?.emitTelemetry({
-            eventType: 'candidate_seed_suppression_check_failed',
-            traceId: candidate.candidateId,
-            timestamp: new Date().toISOString(),
-            payload: { error: `seed-suppression check failed: ${String(identityErr)}` },
-          });
-        }
-        if (seedSuppression.suppress) {
-          seedSuppressedByCandidate.set(candidate.candidateId, seedSuppression);
-        } else {
-        // Hoisted so the catch can adopt the deterministic seed id when a
-        // concurrent writer won the insert (CodeRabbit PR #2684 #9 follow-up).
-        let seedTaskIdForAdoption: string | null = null;
-        try {
-          // D4: route on the validated RAW kind — never the fail-open view.
-          const route = CANDIDATE_KIND_TO_ROUTE[rawKind];
-          if (route) {
-            // PRI-539: `ready` reflects only whether the route maps to a channel.
-            // Let computeBridgeDecision() itself decide MVP-disabled so the
-            // not_internalizable reason is accurate ("Channel ... MVP-disabled")
-            // instead of the misleading "not ready — missing required fields".
-            const channel = ROUTE_CHANNEL_MAP[route];
-            const ready = !!channel;
-            const seed = buildDreamerSeedFromCandidate(candidate, {
-              route,
-              ready,
-              sourcePainId: painId,
-              // PRI-720: explicit full-chain override when the Owner switched
-              // prompt_full_pipeline on. Seed-time application — in-flight
-              // chains keep their seeded topology.
-              pipelineMode: this.fullPipelinePromptSeeds ? 'full_chain' : undefined,
+
+          const admissionDoc = await this.stateManager.getAdmissionDocument(candidate.candidateId);
+          if (!admissionDoc.ok) {
+            seedRefusedByCandidate.set(candidate.candidateId, {
+              reason: 'admission_document_unreadable',
+              nextAction: 'Inspect and repair the persisted admission_json. No Dreamer task was created.',
             });
-            if ('decision' in seed) {
-              // Not internalizable — nothing to adopt on a race below.
-              seedTaskIdForAdoption = null;
-            } else {
-              seedTaskIdForAdoption = seed.taskId;
-            }
-            // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
-            if (!('decision' in seed)) {
-              // PRI-720 C6: dedup at candidate level — the demotion may have
-              // changed the derived channel suffix vs a pre-existing chain.
-              const existingTask = await findExistingDreamerTask(
-                (id) => this.stateManager.getTask(id),
-                candidate.candidateId,
-              );
-              if (!existingTask) {
-                await this.stateManager.createTask({
-                  taskId: seed.taskId,
-                  taskKind: seed.taskKind,
-                  inputRef: '',
-                  status: seed.status,
-                  attemptCount: seed.attemptCount,
-                  maxAttempts: seed.maxAttempts,
-                  diagnosticJson: seed.diagnosticJson,
-                });
-                seededTaskByCandidate.set(candidate.candidateId, seed.taskId);
-                this.eventEmitter?.emitTelemetry({
-                  eventType: 'candidate_dreamer_task_seeded',
-                  traceId: candidate.candidateId,
-                  timestamp: new Date().toISOString(),
-                  // rc-9: the full-chain override and the C6 channel demotion
-                  // must both be observable at seed time.
-                  payload: {
-                    taskId: seed.taskId,
-                    channel: seed.channel,
-                    ...(seed.pipelineMode ? { pipelineMode: seed.pipelineMode } : {}),
-                    ...(seed.demotedFromChannel ? { demotedFromChannel: seed.demotedFromChannel } : {}),
-                  },
-                });
-              }
-            } else if (seed.decision === 'not_internalizable') {
-              // PRI-539: surface MVP-disabled candidates instead of silently
-              // marking them consumed (rc-9-no-silent-fallback / ERR-002).
-              notInternalizable.push({ candidateId: candidate.candidateId, reason: seed.reason });
-              this.eventEmitter?.emitTelemetry({
-                eventType: 'candidate_not_internalizable',
-                traceId: candidate.candidateId,
-                timestamp: new Date().toISOString(),
-                payload: { reason: seed.reason, channel: channel ?? null, route },
+            return;
+          }
+          const processing = admissionDoc.document?.processing;
+          if (processing?.state === 'awaiting_owner'
+            && typeof processing.blockedReason === 'string'
+            && processing.blockedReason.startsWith('candidate_kind_invalid')) {
+            seedRefusedByCandidate.set(candidate.candidateId, {
+              reason: 'candidate_kind_recovery_required',
+              nextAction: `After repairing the persisted RAW kind, run pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${this.workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
+            });
+            return;
+          }
+          const pending = pendingOwnerDecision(admissionDoc.document ?? null);
+          if (pending !== null) {
+            ownerDecisionPendingByCandidate.add(candidate.candidateId);
+            return;
+          }
+
+          // Validate the latest persisted RAW kind, not the earlier task
+          // snapshot. The normalized recommendationKind folds invalid values
+          // to 'principle' and is never a write-boundary authority.
+          const rawKind = validateRecommendationKind(currentCandidate.rawRecommendationKind);
+          if (rawKind === null) {
+            const refusal = seedRefusalFor(currentCandidate, this.workspaceDir);
+            seedRefusedByCandidate.set(candidate.candidateId, refusal);
+            const persisted = await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+              state: 'awaiting_owner',
+              attempts: processing?.attempts ?? 0,
+              lastFailure: { reason: refusal.reason, nextAction: refusal.nextAction, at: new Date().toISOString() },
+              blockedReason: refusal.blockedReason ?? 'candidate_kind_invalid',
+            });
+            if (!persisted) {
+              seedRefusedByCandidate.set(candidate.candidateId, {
+                reason: 'candidate_seed_authority_unavailable',
+                nextAction: 'The invalid-kind refusal could not be persisted. Do not retry automatically; inspect admission_json and candidate storage.',
               });
             }
-          }
-        } catch (seedErr) {
-          // PR #2684 CodeRabbit #9 follow-up: the dreamer seed id is
-          // DETERMINISTIC (`dreamer-<candidateId>-<channel>`), and the
-          // check-then-insert above is not atomic across connections — a
-          // concurrent writer (e.g. the worker's post-processing resume on a
-          // second bridge instance) can insert the same task between
-          // findExistingDreamerTask and createTask. A UNIQUE violation on
-          // tasks.task_id is therefore the idempotency contract WINNING, not
-          // a seed failure — the same convergence the diagnostician task
-          // creation already applies (Case-B repair). Adopt the existing
-          // seed and continue; only genuine errors degrade.
-          const adoptedSeedTaskId = seedErr instanceof Error
-            && seedTaskIdForAdoption !== null
-            && seedErr.message.includes('UNIQUE constraint failed: tasks.task_id')
-            && (await this.stateManager.getTask(seedTaskIdForAdoption)) !== null
-            ? seedTaskIdForAdoption
-            : null;
-          if (adoptedSeedTaskId !== null) {
-            seededTaskByCandidate.set(candidate.candidateId, adoptedSeedTaskId);
             this.eventEmitter?.emitTelemetry({
-              eventType: 'candidate_dreamer_task_seed_failed',
+              eventType: 'candidate_seed_refused',
               traceId: candidate.candidateId,
               timestamp: new Date().toISOString(),
               payload: {
-                error: String(seedErr),
-                adopted: true,
-                adoptedTaskId: adoptedSeedTaskId,
-                note: 'a concurrent writer created the deterministic seed first; adopted instead of degrading (idempotency contract)',
+                candidateId: candidate.candidateId,
+                reason: refusal.reason,
+                nextAction: refusal.nextAction,
+                rawRecommendationKind: typeof currentCandidate.rawRecommendationKind === 'string'
+                  ? currentCandidate.rawRecommendationKind
+                  : null,
               },
             });
-            // CodeRabbit PR #2684 r2: adopted seeds fall through to the SHARED
-            // consume logic below (seedFailure NOT recorded — the candidate is
-            // healthy, just raced). The previous `continue` skipped the
-            // consumed-status update, stranding the candidate as
-            // processing=complete but NOT consumed.
-          } else {
-            seedFailureCandidateIds.push(candidate.candidateId);
-            this.eventEmitter?.emitTelemetry({
-              eventType: 'candidate_dreamer_task_seed_failed',
-              traceId: candidate.candidateId,
-              timestamp: new Date().toISOString(),
-              payload: { error: String(seedErr) },
-            });
-            // CR-05 (SPEC §9.1): seed failure is a post-processing orphan —
-            // consumed-but-unseeded must stay discoverable by the worker
-            // continuation (never hidden behind the consumed status).
-            void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
+            return;
           }
+
+          let seedSuppression: DreamerSeedSuppression = { suppress: false };
+          try {
+            const resolveIdentity = this.ledgerAdapter.resolveCandidatePrincipleIdentity;
+            if (typeof resolveIdentity === 'function') {
+              const identity = resolveIdentity.call(
+                this.ledgerAdapter,
+                candidate.candidateId,
+                currentCandidate.rawRecommendationKind,
+              );
+              const identityOptional = identity.status !== 'resolved'
+                && identity.reason === 'missing'
+                && rawKind !== 'principle';
+              if (identity.status !== 'resolved' && !identityOptional) {
+                seedRefusedByCandidate.set(candidate.candidateId, {
+                  reason: 'candidate_seed_authority_unavailable',
+                  nextAction: `Ledger identity is ${identity.reason}; repair the Principle Ledger or candidate binding before seeding. No Dreamer task was created.`,
+                });
+                return;
+              }
+              seedSuppression = evaluateDreamerSeedSuppression({ identity, processing });
+            } else {
+              // Test doubles may omit the optional identity capability. The
+              // production file-backed adapter implements it; pending Owner
+              // and invalid-kind parks were checked above from durable state.
+              seedSuppression = { suppress: false };
+            }
+          } catch {
+            seedRefusedByCandidate.set(candidate.candidateId, {
+              reason: 'candidate_seed_authority_unavailable',
+              nextAction: 'The ledger identity or admission state could not be read. Seeding failed closed; inspect the workspace before retrying.',
+            });
+            return;
+          }
+
+          if (seedSuppression.suppress) {
+            seedSuppressedByCandidate.set(candidate.candidateId, seedSuppression);
+          } else {
+            let seedTaskIdForAdoption: string | null = null;
+            try {
+              const route = CANDIDATE_KIND_TO_ROUTE[rawKind];
+              if (route) {
+                const channel = ROUTE_CHANNEL_MAP[route];
+                const ready = !!channel;
+                const seed = buildDreamerSeedFromCandidate(currentCandidate, {
+                  route,
+                  ready,
+                  sourcePainId: painId,
+                  pipelineMode: this.fullPipelinePromptSeeds ? 'full_chain' : undefined,
+                });
+                // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
+                if (!('decision' in seed)) {
+                  seedTaskIdForAdoption = seed.taskId;
+                  const existingTask = await findExistingDreamerTask(
+                    (id) => this.stateManager.getTask(id),
+                    candidate.candidateId,
+                  );
+                  if (!existingTask) {
+                    await this.stateManager.createTask({
+                      taskId: seed.taskId,
+                      taskKind: seed.taskKind,
+                      inputRef: '',
+                      status: seed.status,
+                      attemptCount: seed.attemptCount,
+                      maxAttempts: seed.maxAttempts,
+                      diagnosticJson: seed.diagnosticJson,
+                    });
+                    seededTaskByCandidate.set(candidate.candidateId, seed.taskId);
+                    this.eventEmitter?.emitTelemetry({
+                      eventType: 'candidate_dreamer_task_seeded',
+                      traceId: candidate.candidateId,
+                      timestamp: new Date().toISOString(),
+                      payload: {
+                        taskId: seed.taskId,
+                        channel: seed.channel,
+                        ...(seed.pipelineMode ? { pipelineMode: seed.pipelineMode } : {}),
+                        ...(seed.demotedFromChannel ? { demotedFromChannel: seed.demotedFromChannel } : {}),
+                      },
+                    });
+                  }
+                } else if (seed.decision === 'not_internalizable') {
+                  notInternalizable.push({ candidateId: candidate.candidateId, reason: seed.reason });
+                  this.eventEmitter?.emitTelemetry({
+                    eventType: 'candidate_not_internalizable',
+                    traceId: candidate.candidateId,
+                    timestamp: new Date().toISOString(),
+                    payload: { reason: seed.reason, channel: channel ?? null, route },
+                  });
+                }
+              }
+            } catch (seedErr) {
+              const adoptedSeedTaskId = seedErr instanceof Error
+                && seedTaskIdForAdoption !== null
+                && seedErr.message.includes('UNIQUE constraint failed: tasks.task_id')
+                && (await this.stateManager.getTask(seedTaskIdForAdoption)) !== null
+                ? seedTaskIdForAdoption
+                : null;
+              if (adoptedSeedTaskId !== null) {
+                seededTaskByCandidate.set(candidate.candidateId, adoptedSeedTaskId);
+                this.eventEmitter?.emitTelemetry({
+                  eventType: 'candidate_dreamer_task_seed_failed',
+                  traceId: candidate.candidateId,
+                  timestamp: new Date().toISOString(),
+                  payload: {
+                    error: String(seedErr),
+                    adopted: true,
+                    adoptedTaskId: adoptedSeedTaskId,
+                    note: 'a concurrent writer created the deterministic seed first; adopted instead of degrading',
+                  },
+                });
+              } else {
+                seedFailureCandidateIds.push(candidate.candidateId);
+                this.eventEmitter?.emitTelemetry({
+                  eventType: 'candidate_dreamer_task_seed_failed',
+                  traceId: candidate.candidateId,
+                  timestamp: new Date().toISOString(),
+                  payload: { error: String(seedErr) },
+                });
+                void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
+              }
+            }
+          }
+        };
+
+        try {
+          const coordinate = this.ledgerAdapter.withCandidateCoordination;
+          if (typeof coordinate === 'function') {
+            await coordinate.call(this.ledgerAdapter, candidate.candidateId, seedUnderCandidateLock);
+          } else {
+            // The LedgerAdapter contract permits this only for test doubles;
+            // production file-backed adapters implement the cross-process lock.
+            await seedUnderCandidateLock();
+          }
+        } catch {
+          seedRefusedByCandidate.set(candidate.candidateId, {
+            reason: 'candidate_seed_coordination_failed',
+            nextAction: 'Candidate coordination lock failed. No unlocked seed fallback was attempted; retry after the competing operation finishes.',
+          });
         }
-        } // end of the !seedSuppression.suppress guard (Phase 7.2 B2.5)
+
+        // Do not consume or complete any candidate whose durable seed
+        // authorization failed or which still awaits an Owner decision.
+        if (seedRefusedByCandidate.has(candidate.candidateId)
+          || ownerDecisionPendingByCandidate.has(candidate.candidateId)) {
+          continue;
+        }
+
 
         // Phase 7.2 B2.5 (CodeRabbit): a candidate suppressed because a
         // persisted reuse PARK is still awaiting the Owner must NOT be
