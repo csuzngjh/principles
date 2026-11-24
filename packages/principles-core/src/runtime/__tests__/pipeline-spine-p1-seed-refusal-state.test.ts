@@ -471,4 +471,57 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
   });
 
 
+  it('worker resume processes only authorized/in-progress candidates and never releases an awaiting_owner sibling in the same batch', async () => {
+    const world = await createWorld();
+    const { taskId, output, candidates } = await commitDiagnosis(world, 'pain-mixed-recovery', ['principle', 'principle']);
+    const [invalid, sibling] = candidates;
+    if (!invalid || !sibling) throw new Error('expected two candidates');
+
+    setPersistedKind(world, invalid.candidateId, 'wizardry');
+    await runPostProcessing(world, { taskId, output }, 'pain-mixed-recovery');
+    await expectSavedRefusal(world, invalid.candidateId, 'candidate_kind_invalid:wizardry');
+
+    // Make the second candidate a genuine reuse/Owner park. It shares the
+    // same succeeded diagnosis task but must not be swept into the recovery
+    // of the first candidate.
+    world.stateManager.connection.getDb()
+      .prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ?')
+      .run('pending', sibling.candidateId);
+    const siblingParked = await world.stateManager.updateAdmissionProcessing(sibling.candidateId, {
+      state: 'awaiting_owner',
+      attempts: 0,
+      blockedReason: 'reuse_pending_owner',
+    });
+    expect(siblingParked).toBe(true);
+
+    setPersistedKind(world, invalid.candidateId, 'principle');
+    const authorization = {
+      ownerId: 'owner-recovery-test',
+      identitySource: 'file',
+      reason: 'Restored the intended principle kind from the source recommendation',
+      authorizedAt: new Date().toISOString(),
+    };
+    const authorized = await world.stateManager.authorizeInvalidKindPostProcessingRecovery(invalid.candidateId, authorization);
+    expect(authorized.status).toBe('authorized');
+
+    await restartWorker(world);
+    const resumed = await world.bridge.resumeSucceededDiagnosisPostProcessing({ taskId });
+    expect(resumed.status).toBe('resumed');
+    expect(resumed.processedCandidateIds).toEqual([invalid.candidateId]);
+    expect(resumed.result?.candidateIds).toEqual([invalid.candidateId]);
+    expect(resumed.skipped).toContainEqual({ candidateId: sibling.candidateId, reason: 'processing_awaiting_owner' });
+
+    expect((await candidateOf(world, invalid.candidateId)).status).toBe('consumed');
+    expect((await processingOf(world, invalid.candidateId))?.state).toBe('complete');
+    expect(await dreamerTasksFor(world, invalid.candidateId)).toHaveLength(1);
+
+    expect((await candidateOf(world, sibling.candidateId)).status).toBe('pending');
+    expect(await processingOf(world, sibling.candidateId)).toMatchObject({
+      state: 'awaiting_owner',
+      blockedReason: 'reuse_pending_owner',
+    });
+    expect(await dreamerTasksFor(world, sibling.candidateId)).toEqual([]);
+  });
+
+
 });

@@ -1182,12 +1182,13 @@ export class PainSignalBridge {
       painId: typeof task.inputRef === 'string' && task.inputRef.length > 0 ? task.inputRef : `diagnosis-source:${input.taskId}`,
       provenance: reentry.provenance,
       inputEvidenceCount: reentry.evidenceCount,
+      candidateIds: eligible.map((candidate) => candidate.candidateId),
       ...(reentry.correctionEvidence !== undefined ? { correctionEvidence: reentry.correctionEvidence } : {}),
     });
     return {
       status: 'resumed',
       result,
-      processedCandidateIds: eligible.map((c) => c.candidateId),
+      processedCandidateIds: result.candidateIds,
       skipped,
       remainingCount: 0,
     };
@@ -1601,13 +1602,23 @@ export class PainSignalBridge {
     painId: string;
     provenance: PainProvenance;
     inputEvidenceCount?: number;
+    /** Restrict worker continuation to the candidate ids proven eligible by its durable backlog scan. */
+    candidateIds?: readonly string[];
     /** SPEC-CODEX-PAIN-CLOSURE-001 CR-02: the pain's correction evidence, when one was submitted. */
     correctionEvidence?: PainCorrectionEvidence;
   }): Promise<PainSignalBridgeResult> {
     const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0, correctionEvidence } = opts;
     const ownerStatementPresent = isOwnerStatementEvidence(correctionEvidence);
     const statementFingerprint = ownerStatementPresent && correctionEvidence ? fingerprintStatement(correctionEvidence.text) : undefined;
-    const candidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
+    const allCandidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
+    // The post-processing worker has already classified every row in the
+    // batch. Re-read the task's candidates but only admit the exact eligible
+    // ids; otherwise one authorized in_progress candidate could accidentally
+    // pull an awaiting_owner sibling through this batch-wide entry point.
+    const candidateFilter = opts.candidateIds === undefined ? null : new Set(opts.candidateIds);
+    const candidates: CandidateRecord[] = candidateFilter === null
+      ? allCandidates
+      : allCandidates.filter((candidate) => candidateFilter.has(candidate.candidateId));
     const ledgerEntryIds: string[] = [];
 
     if (this.diagnosisPersistenceEnabled && diagnosticianOutput) {
