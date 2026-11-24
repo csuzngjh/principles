@@ -401,9 +401,10 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
     // PRI-1267 review round: `--dry-run` previews must not mutate the persisted
     // admission document, so the preview path re-evaluates WITHOUT persisting
     // (same verdict, zero writes — cli-4).
+    const coordinationLedgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     let fullGate: Awaited<ReturnType<typeof enforceFullAdmissionForWrite>>;
     try {
-      fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId, { persistReevaluation: opts.dryRun !== true, sourceMaterialAuthorization });
+      fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId, { persistReevaluation: opts.dryRun !== true, sourceMaterialAuthorization, coordination: coordinationLedgerAdapter });
     } catch (err: unknown) {
       const result: CandidateInternalizeResult = {
         candidateId: opts.candidateId,
@@ -538,7 +539,6 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       | { kind: 'existing' | 'dry_run' | 'created'; result: CandidateInternalizeResult }
       | { kind: 'refused' | 'write_failed'; result: CandidateInternalizeResult; headline: string; reasonLine?: string };
 
-    const coordinationLedgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     let outcome: CriticalOutcome;
     try {
       outcome = await coordinationLedgerAdapter.withCandidateCoordination(opts.candidateId, async (): Promise<CriticalOutcome> => {
