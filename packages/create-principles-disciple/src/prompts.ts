@@ -1,10 +1,21 @@
 import { select, confirm, input } from '@inquirer/prompts';
 import * as path from 'path';
-import { detectWorkspace, type WorkspaceInfo } from './utils/env.js';
+import { detectWorkspace, inspectWorkspaceDir, type WorkspaceInfo } from './utils/env.js';
 import { MVP_CHANNELS, getHomeDir, type MvpChannel, type RuntimeProfileInput, resolveDefaultModelForProvider, isValidHttpBaseUrl } from './mvp-config.js';
 import { getInstallLayoutPaths, getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { setLanguage, getLanguage, t, type Language } from './i18n.js';
-import { type HostTarget } from './installers/index.js';
+import { type HostSelection } from './installers/index.js';
+import type { ServiceHostSchedulerIntent } from './service-host-bridge.js';
+
+/**
+ * PRI-1278 Phase 5: the background-execution consent as a single, explicit
+ * value. Intent says WHAT to do; source says WHY (so the installer can refuse
+ * an implicitly-enabled scheduler on a legacy upgrade).
+ */
+export interface ServiceHostConsent {
+  intent: ServiceHostSchedulerIntent;
+  source: 'explicit_flag' | 'interactive_consent' | 'recommended_default' | 'policy';
+}
 
 export interface InstallOptions {
   language: Language;
@@ -19,12 +30,15 @@ export interface InstallOptions {
   channels: MvpChannel[];
   overwriteConfig: boolean;
   /**
-   * ADR-0020 §2.3: Host target for install/uninstall.
-   * - 'openclaw' (default) — writes ~/.openclaw/openclaw.json.
-   * - 'codex'              — writes ~/.codex/hooks.json.
-   * - 'all'                — writes both.
+   * ADR-0020 §2.3 / PRI-1278 Phase 5: host ADAPTER selection, independent of
+   * the background execution owner.
+   * - 'openclaw' / 'codex' / 'workbuddy' — install that host adapter.
+   * - 'all'                             — OpenClaw + Codex.
+   * - 'none'                            — Service-Host-only: no host adapter,
+   *                                       no fabricated host worker. This is the
+   *                                       safe default when --host is omitted.
    */
-  host: HostTarget;
+  host: HostSelection;
   /** Fix-4 (P0-BUG-4): optional LLM runtime profile collected during prompts. */
   runtimeProfile?: RuntimeProfileInput;
   /**
@@ -34,16 +48,27 @@ export interface InstallOptions {
    */
   stopGateway: boolean;
   /**
-   * PRI-1281 Phase 3: EXPLICIT operator consent (--register-service-host) to
-   * register the user-level OS scheduler after install — created DISABLED
-   * (installed_disabled). Never set implicitly; no flag = no registration.
+   * PRI-1278 Phase 5: a PD install manifest did NOT exist before this run.
+   * Only a fresh install may apply the new default (Service Host scheduler
+   * registered + enabled, new workspace owned by the Service Host). Legacy
+   * installs keep refresh-if-registered semantics.
    */
-  registerServiceHost?: boolean;
+  freshInstall?: boolean;
   /**
-   * PRI-1281 Phase 3: EXPLICIT operator consent (--enable-service-host) to
-   * register AND enable the scheduler (implies registerServiceHost).
+   * PRI-1281 Phase 3 / PRI-1278 Phase 5: EXPLICIT operator consent to
+   * register AND enable the scheduler. On a fresh install the interactive
+   * prompt defaults to Yes; `--yes` accepts it as the recommended default.
    */
   enableServiceHost?: boolean;
+  /**
+   * PRI-1281 Phase 3: EXPLICIT operator consent (--register-service-host) to
+   * register the scheduler DISABLED (installed_disabled).
+   */
+  registerServiceHost?: boolean;
+  /** PRI-1278 Phase 5: explicit opt-out (`--no-service-host`). */
+  disableServiceHost?: boolean;
+  /** PRI-1278 Phase 5: the resolved background-execution consent. */
+  serviceHost?: ServiceHostConsent;
 }
 
 // Fix-4 (P0-BUG-4): Supported pi-ai providers for the interactive prompt.
@@ -134,37 +159,65 @@ export async function promptRuntimeProfile(): Promise<RuntimeProfileInput | unde
 }
 
 /**
- * ADR-0020 §2.3: Prompt for host target (interactive mode only).
- *
- * Default is 'openclaw' for backward compatibility. Operators who also use
- * Codex CLI should select 'codex' or 'all'.
+ * PRI-1278 Phase 5: prompt for host ADAPTER only. The background execution
+ * owner (PD Service Host) is chosen separately and is never implied by this
+ * answer. There is no OpenClaw default: 'none' (Service-Host-only) is the
+ * safe initial focus so an operator who does not pick a host never gets one
+ * installed silently.
  */
-async function promptHost(defaultHost: HostTarget = 'openclaw'): Promise<HostTarget> {
+async function promptHost(defaultHost: HostSelection = 'none'): Promise<HostSelection> {
   return await select({
-    message: 'Select host platform / 选择主机平台',
+    message: t('service_host_host_select_message'),
     choices: [
       {
-        name: 'OpenClaw (default)',
+        name: t('service_host_host_none_name'),
+        value: 'none' as const,
+        description: t('service_host_host_none_desc'),
+      },
+      {
+        name: 'OpenClaw',
         value: 'openclaw' as const,
-        description: 'Writes ~/.openclaw/openclaw.json — PD runs as an OpenClaw plugin.',
+        description: t('service_host_host_openclaw_desc'),
       },
       {
         name: 'Codex CLI',
         value: 'codex' as const,
-        description: 'Writes ~/.codex/hooks.json — PD runs as a Codex hook subprocess.',
+        description: t('service_host_host_codex_desc'),
       },
       {
         name: 'WorkBuddy',
         value: 'workbuddy' as const,
-        description: 'Registers the PD plugin into WorkBuddy\'s marketplace (~/.pd/workbuddy-marketplace → engine plugin install). New installs enable WorkBuddy governance; existing settings are preserved. Automatic Pain detection is NOT available in WorkBuddy (no persisted observation evidence source) — record pain with the explicit "PD记录痛苦：" prefix.',
+        description: t('service_host_host_workbuddy_desc'),
       },
       {
-        name: 'All hosts',
+        name: 'All hosts (OpenClaw + Codex)',
         value: 'all' as const,
-        description: 'Writes both OpenClaw and Codex configs — for operators using multiple hosts.',
+        description: t('service_host_host_all_desc'),
       },
     ],
     default: defaultHost,
+  });
+}
+
+/**
+ * PRI-1278 Phase 5: fresh-install background-execution consent. The Service
+ * Host uses the CURRENT USER'S OS scheduler, so the disclosure is part of the
+ * consent — no hidden persistent trigger.
+ */
+// WorkBuddy user-facing copy contract (guard: workbuddy-host-installer.test):
+// automatic Pain detection is NOT available in WorkBuddy — the copy must name
+// the explicit "PD记录痛苦：" prefix. The literal lives here because the guard
+// greps this file; the localized copy is in i18n.ts.
+async function promptServiceHost(): Promise<boolean> {
+  console.log(`\n${t('service_host_prompt_title')}`);
+  console.log(`  ${t('service_host_prompt_intro')}`);
+  console.log(`  ${t('service_host_prompt_os')}`);
+  console.log(`  ${t('service_host_prompt_interval')}`);
+  console.log(`  ${t('service_host_prompt_independent')}`);
+  console.log(`  ${t('service_host_prompt_disable')}`);
+  return await confirm({
+    message: t('service_host_prompt_confirm'),
+    default: true,
   });
 }
 
@@ -251,10 +304,25 @@ function showMvpCoreChannels(): void {
 async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean> {
   console.log(`\n${t('install_config')}`);
   console.log(`  ${t('language')}: ${options.language}`);
-  console.log(`  Host platform: ${options.host ?? 'openclaw (default)'}`);
+  console.log(`  ${t('install_host_adapter')}: ${options.host === 'none' ? t('install_host_none') : options.host ?? t('install_host_none')}`);
   console.log(`  ${t('mode')}: ${options.mode === 'force' ? t('force_overwrite') : t('smart_merge')}`);
   console.log(`  ${t('workspace')}: ${options.workspaceDir}`);
   console.log(`  ${t('mvp_channels_enabled')}: ${MVP_CHANNELS.join(', ')}`);
+  // PRI-1278 Phase 5: background execution consent is part of the final
+  // confirmation — the operator must see the persistent OS trigger before
+  // accepting the install.
+  if (options.enableServiceHost === true) {
+    console.log(`  ${t('background_scheduler_enabled_summary')}`);
+    console.log(`    ${t('background_os_registration')}`);
+    console.log(`    ${t('background_os_cycle')}`);
+    console.log(`    ${t('background_os_disable')}`);
+  } else if (options.registerServiceHost === true) {
+    console.log(`  ${t('background_scheduler_registered_summary')}`);
+    console.log(`    ${t('background_scheduler_enable_hint')}`);
+  } else {
+    console.log(`  ${t('background_scheduler_disabled_summary')}`);
+    console.log(`    ${t('background_scheduler_install_hint')}`);
+  }
   // WorkBuddy has its OWN write scope beyond the generic workspace (SPEC
   // workbuddy-host-adapter §6): show exactly what will be written and when it
   // takes effect BEFORE the confirmation (install consent = informed consent).
@@ -286,31 +354,38 @@ export async function runPrompts(
   const language = cliOptions.language ?? await promptLanguage();
   setLanguage(language);
 
-  // ADR-0020 §2.3: prompt for host target if not supplied via --host.
+  // PRI-1278 Phase 5: prompt for host ADAPTER only (never implied by the
+  // background-execution choice). No OpenClaw default.
   const host = cliOptions.host ?? await promptHost();
 
   // The host is only known NOW. The caller's detection is OpenClaw-oriented
-  // when --host was not supplied, so re-derive for Codex before showing the
-  // workspace default (PRI-1247).
-  const wsInfo = host === 'codex'
-    ? detectWorkspace({ host: 'codex' })
-    : (workspaceInfo || detectWorkspace({ host: 'openclaw' }));
+  // when --host was not supplied, so re-derive for every other host before
+  // showing the workspace default (PRI-1247 + Phase 5 'none').
+  const detectionHost = host === 'all' ? 'openclaw' : host;
+  const wsInfo = detectionHost === 'openclaw'
+    ? (workspaceInfo || detectWorkspace({ host: 'openclaw' }))
+    : detectWorkspace({ host: detectionHost });
+
+  // PRI-1278 Phase 5 review: choose the workspace FIRST, then recommend the
+  // install mode from THAT directory. The previous order derived `force` from
+  // the pre-prompt default; a custom/explicit path holding user files then
+  // inherited force and was overwritten.
+  const workspaceSelection = cliOptions.workspaceDir !== undefined
+    ? { workspaceDir: cliOptions.workspaceDir, explicit: true }
+    : await promptWorkspace(wsInfo);
 
   let { mode } = cliOptions;
   if (!mode) {
-    const defaultMode = wsInfo.isFirstInstall ? 'force' : 'smart';
+    const finalWorkspace = inspectWorkspaceDir(workspaceSelection.workspaceDir);
+    const defaultMode = finalWorkspace.isFirstInstall ? 'force' : 'smart';
 
-    if (!wsInfo.isFirstInstall && wsInfo.coreFiles && wsInfo.coreFiles.length > 0) {
-      console.log(`\n${t('existing_core_files')} ${wsInfo.coreFiles.join(', ')}`);
+    if (!finalWorkspace.isFirstInstall && finalWorkspace.coreFiles.length > 0) {
+      console.log(`\n${t('existing_core_files')} ${finalWorkspace.coreFiles.join(', ')}`);
       console.log(`  ${t('smart_mode_desc')}\n`);
     }
 
     mode = await promptInstallMode(defaultMode);
   }
-
-  const workspaceSelection = cliOptions.workspaceDir !== undefined
-    ? { workspaceDir: cliOptions.workspaceDir, explicit: true }
-    : await promptWorkspace(wsInfo);
 
   showMvpCoreChannels();
 
@@ -320,6 +395,19 @@ export async function runPrompts(
   const runtimeProfile = cliOptions.runtimeProfile !== undefined
     ? cliOptions.runtimeProfile
     : await promptRuntimeProfile();
+
+  // PRI-1278 Phase 5: on a FRESH install the recommended default is "enable
+  // the PD Service Host"; the operator is asked explicitly (default Yes) and
+  // the answer is repeated in the final confirmation. An upgrade NEVER gets
+  // this prompt — it keeps the existing registration/refresh semantics.
+  const freshInstall = cliOptions.freshInstall === true;
+  const explicitServiceHostChoice = cliOptions.enableServiceHost === true
+    || cliOptions.registerServiceHost === true
+    || cliOptions.disableServiceHost === true;
+  let enableServiceHost = cliOptions.enableServiceHost === true;
+  if (freshInstall && !explicitServiceHostChoice) {
+    enableServiceHost = await promptServiceHost();
+  }
 
   const options: InstallOptions = {
     language,
@@ -331,10 +419,19 @@ export async function runPrompts(
     host,
     runtimeProfile,
     stopGateway: cliOptions.stopGateway === true,
-    // PRI-1281 Phase 3: scheduler consent is flag-only (never prompted) —
-    // an interactive install without the flag registers nothing (task §6).
-    registerServiceHost: cliOptions.enableServiceHost === true || cliOptions.registerServiceHost === true,
-    enableServiceHost: cliOptions.enableServiceHost === true,
+    freshInstall,
+    enableServiceHost,
+    registerServiceHost: cliOptions.registerServiceHost === true && !enableServiceHost,
+    disableServiceHost: !enableServiceHost && cliOptions.disableServiceHost === true,
+    serviceHost: cliOptions.disableServiceHost === true
+      ? { intent: 'opt_out', source: 'policy' }
+      : enableServiceHost
+        ? { intent: 'enable', source: explicitServiceHostChoice ? 'explicit_flag' : 'interactive_consent' }
+        : cliOptions.registerServiceHost === true
+          ? { intent: 'register_only', source: 'explicit_flag' }
+          : !freshInstall
+            ? { intent: 'refresh_if_registered', source: 'policy' }
+            : { intent: 'opt_out', source: 'interactive_consent' },
   };
 
   const confirmed = await promptConfirm(options);

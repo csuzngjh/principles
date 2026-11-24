@@ -790,6 +790,7 @@ export function readWorkspaceBackgroundOwnership(options: ReadOwnershipOptions):
 // ─── Transitions ────────────────────────────────────────────────────────────
 
 export const BACKGROUND_EXECUTION_TRANSITIONS = [
+  'provision_fresh_install',
   'begin_handover',
   'abort_handover',
   'complete_handover',
@@ -813,6 +814,16 @@ export interface TransitionBackgroundExecutionInput {
   expectedGeneration?: number;
   /** begin_handover only: also merge the workspace into `workspaces[]`. */
   registerWorkspace?: boolean;
+  /**
+   * provision_fresh_install ONLY: the caller's proof that this Workspace has
+   * no historical background consumer (a brand-new PD install created it in
+   * this run). A legacy upgrade NEVER passes this — it must use
+   * begin_handover so the old consumer is stopped and verified first.
+   * The proof is enforced structurally below: the manifest must hold NO
+   * ownership record for the workspace (absence of history), not merely a
+   * `legacy_owned` record.
+   */
+  freshInstall?: boolean;
   platform?: string;
   now?: () => Date;
   staleMs?: number;
@@ -862,6 +873,11 @@ interface TransitionSpec {
 }
 
 const TRANSITION_SPECS: Record<BackgroundExecutionTransitionKind, TransitionSpec> = {
+  // Fresh-install provisioning: a brand-new Workspace is born Service-Host
+  // owned in ONE atomic write (generation 0 → 1). There is no old consumer
+  // to quiesce, so the handover_preparing staging is not used; the caller
+  // still has to prove absence of history through the manifest itself.
+  provision_fresh_install: { from: ['legacy_owned'], to: 'service_host_owned', needsOperationId: false },
   // legacy_owned -> handover_preparing; effectiveOwner stays legacy (SPEC §8.4-3:
   // PREPARING grants no new rights — the old consumer remains the only one).
   begin_handover: { from: ['legacy_owned', 'handover_preparing'], to: 'handover_preparing', needsOperationId: true },
@@ -881,6 +897,8 @@ function buildTargetRecord(context: {
   const generation = context.currentGeneration + 1;
   const { operationId, nowIso } = context;
   switch (context.kind) {
+    case 'provision_fresh_install':
+      return { state: 'service_host_owned', effectiveOwner: 'service_host', generation, operationId: null, previousOwner: null, targetOwner: null, updatedAt: nowIso };
     case 'begin_handover':
       return { state: 'handover_preparing', effectiveOwner: 'legacy', generation, operationId, previousOwner: 'legacy', targetOwner: 'service_host', updatedAt: nowIso };
     case 'abort_handover':
@@ -991,7 +1009,9 @@ export function transitionWorkspaceBackgroundExecution(
     // because a marker key outside `workspaces[]` cannot parse back. An alias
     // registration for the same real directory counts as registered.
     const registered = identity.registeredAliases.length > 0;
-    if (!registered && !(input.kind === 'begin_handover' && input.registerWorkspace === true)) {
+    const mayRegister = (input.kind === 'begin_handover' || input.kind === 'provision_fresh_install')
+      && input.registerWorkspace === true;
+    if (!registered && !mayRegister) {
       return {
         ok: false,
         reason: 'workspace_not_registered',
@@ -1006,6 +1026,41 @@ export function transitionWorkspaceBackgroundExecution(
     const currentRecord = identity.records[0]?.record;
     const currentState: BackgroundExecutionState = currentRecord?.state ?? 'legacy_owned';
     const currentGeneration = currentRecord?.generation ?? 0;
+
+    // Fresh-install provisioning is the ONE transition that skips the legacy
+    // handover staging, so its authorization must be proven here rather than
+    // trusted from the caller:
+    //  - `freshInstall` must be explicitly asserted (a legacy upgrade that
+    //    forgot it can never flip ownership silently);
+    //  - the manifest must hold NO ownership record at all for this
+    //    workspace (a `legacy_owned` RECORD is history — that workspace has
+    //    been managed before and must go through begin_handover);
+    //  - an already-provisioned workspace is an idempotent replay.
+    if (input.kind === 'provision_fresh_install') {
+      if (input.freshInstall !== true) {
+        return {
+          ok: false,
+          reason: 'invalid_input',
+          message: 'provision_fresh_install requires freshInstall=true; upgrades must use begin_handover so the legacy consumer is stopped and verified first',
+          nextAction: 'Use pd service handover for an existing workspace; fresh-install provisioning is install-time only.',
+        };
+      }
+      const alreadyOwned = currentRecord !== undefined
+        && currentState === 'service_host_owned'
+        && currentRecord.effectiveOwner === 'service_host';
+      if (alreadyOwned) {
+        return { ok: true, changed: false, record: currentRecord, previous: currentRecord };
+      }
+      if (currentRecord !== undefined) {
+        return {
+          ok: false,
+          reason: 'unexpected_state',
+          message: `workspace already carries a background-execution record (${currentState}, generation ${currentGeneration}); fresh-install provisioning refuses to overwrite history`,
+          nextAction: 'Use pd service handover (with legacy consumer quiesce) to move this workspace to the Service Host.',
+          current: projectOwnership(currentState, currentGeneration, currentRecord),
+        };
+      }
+    }
 
     if (input.expectedGeneration !== undefined && input.expectedGeneration !== currentGeneration) {
       return {
@@ -1093,7 +1148,6 @@ export function transitionWorkspaceBackgroundExecution(
       raw.workspaces = mergeInstallManifestWorkspaces(manifest, recordKey, platform);
       raw.hosts = installManifestHostsForPersist(manifest);
     }
-
     // Re-validate the exact bytes we are about to land.
     const revalidated = parseInstallManifest(raw, input.platform);
     if (!revalidated.manifest || revalidated.manifest.backgroundExecutions?.[recordKey] === undefined) {
