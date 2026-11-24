@@ -24,16 +24,19 @@ You're always in control. Nothing activates without your approval.
 ### 1. Install
 
 ```bash
-npx create-principles-disciple --yes
+npx create-principles-disciple --yes --host openclaw
 openclaw gateway --force
 ```
+
+`--host openclaw` is required: the installer no longer defaults to a host. Omitting it installs the PD
+Service Host only (`--host none`); add `--host codex` or `--host workbuddy` for those adapters.
 
 `--yes` installs PD **without** an LLM runtime profile, so its internal agents stay in `needs_setup`
 until you add one: pain signals are captured, but nothing is diagnosed. `apiKeyEnv` is the *name* of
 the environment variable holding your key, never the key itself. To configure it during install:
 
 ```bash
-npx create-principles-disciple --yes --provider anthropic --api-key-env ANTHROPIC_API_KEY
+npx create-principles-disciple --yes --host openclaw --provider anthropic --api-key-env ANTHROPIC_API_KEY
 ```
 
 ### 2. Verify

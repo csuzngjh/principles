@@ -199,7 +199,7 @@ function printHumanStatus(status: ServiceHostStatusDocument): void {
   if (status.workspaces.length > 0) {
     console.log(`  workspaces:`);
     for (const ws of status.workspaces) {
-      console.log(`    [${ws.discoveryVerdict}] ${ws.canonicalDir} — owner=${ws.ownerState} (effectiveOwner=${ws.effectiveOwner}); hosts: ${ws.hosts.join(', ') || 'none'}`);
+      console.log(`    [${ws.discoveryVerdict}] ${ws.canonicalDir} — owner=${ws.ownerState} (effectiveOwner=${ws.effectiveOwner}); hosts: ${ws.hosts.join(', ') || 'none'}; binding=${ws.hostBindingState}`);
     }
   } else {
     console.log(`  workspaces:    none discovered`);

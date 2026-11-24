@@ -35,6 +35,12 @@ export interface ServiceHostStatusWorkspace {
   readonly ownerState: string;
   readonly effectiveOwner: string;
   readonly hosts: readonly string[];
+  /**
+   * PRI-1278 Phase 5: a Service-Host-only install legitimately owns a
+   * workspace with NO host binding. That is not an error — it is the honest
+   * `waiting_for_host_binding` state, never a fabricated worker capability.
+   */
+  readonly hostBindingState: 'bound' | 'waiting_for_host_binding';
 }
 
 export interface ServiceHostStatusDocument {
@@ -97,6 +103,22 @@ export type ServiceHostStatusResult =
 
 export interface ServiceHostStatusOptions extends SchedulerLifecycleOptions {
   readonly claimReaders?: HostClaimReaders;
+}
+
+/**
+ * Project ONE discovery entry into the status contract. Exported so the
+ * `waiting_for_host_binding` rule (PRI-1278 Phase 5) is testable without
+ * touching the real OS scheduler.
+ */
+export function toServiceHostStatusWorkspace(entry: WorkspaceDiscoveryEntry): ServiceHostStatusWorkspace {
+  return {
+    canonicalDir: entry.canonicalDir,
+    discoveryVerdict: entry.verdict,
+    ownerState: entry.owner.state,
+    effectiveOwner: entry.owner.effectiveOwner,
+    hosts: [...entry.hosts],
+    hostBindingState: entry.hosts.length > 0 ? 'bound' : 'waiting_for_host_binding',
+  };
 }
 
 function lastRunModeOf(status: ServiceRunStatus): 'dry-run' | 'shadow' | 'managed' | 'unknown' {
@@ -214,13 +236,7 @@ export async function composeServiceHostStatus(options: ServiceHostStatusOptions
     const claimOptions = claimOptionsFor(identity, readDiagnostics, options.claimReaders);
     const claims = collectHostWorkspaceClaims(claimOptions);
     const discovery = discoverWorkspaces({ manifest: manifestRead.manifest, claims, claimOptions });
-    workspaces = discovery.workspaces.map((entry) => ({
-      canonicalDir: entry.canonicalDir,
-      discoveryVerdict: entry.verdict,
-      ownerState: entry.owner.state,
-      effectiveOwner: entry.owner.effectiveOwner,
-      hosts: [...entry.hosts],
-    }));
+    workspaces = discovery.workspaces.map(toServiceHostStatusWorkspace);
     if (discoveryIncompleteRoots(hostRootReports(identity, defaultListDir)).length > 0) {
       degradedReasons.push('discovery:host_roots_incomplete');
     }
