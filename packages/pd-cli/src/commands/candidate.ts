@@ -576,6 +576,19 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
           };
         }
         const rawKind = validateRecommendationKind(current.rawRecommendationKind);
+        if (rawKind !== null && rawKind !== current.recommendationKind) {
+          return {
+            kind: 'refused',
+            headline: `Refusing to internalize candidate ${opts.candidateId}: persisted RAW kind does not match the normalized route kind.`,
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              status: 'refused',
+              reason: 'candidate_kind_mismatch',
+              nextAction: 'Repair the persisted recommendation_kind so the RAW and normalized candidate kinds agree, then re-run internalize; no Dreamer task was created.',
+            },
+          };
+        }
 
         // (2) existing-task dedup runs BEFORE the identity gate — a candidate
         // whose ledger identity changed after its Dreamer task was created
@@ -675,8 +688,12 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
           const suppressionReason = suppression.reason === 'reuse_resolved_to_existing_principle'
             ? `dreamer_seed_suppressed: candidate is durably resolved onto existing principle ${suppression.principleId} (reuseEvidence)`
             : `dreamer_seed_suppressed: ${suppression.reason}`;
+          const pendingDecision = gatePending;
+          const pendingPrincipleArg = pendingDecision?.decision === 'reuse' && pendingDecision.selectedPrincipleId
+            ? ` --principle-id ${pendingDecision.selectedPrincipleId}`
+            : '';
           const suppressionNextAction = suppression.reason === 'owner_decision_pending'
-            ? `pd candidate review --candidate-id ${opts.candidateId} --decide reuse|create --reason "..." (re-run the SAME verdict if it was interrupted)`
+            ? `pd candidate review --candidate-id ${opts.candidateId} --workspace "${workspaceDir}" --decide ${pendingDecision?.decision ?? 'reuse'}${pendingPrincipleArg} --reason "..." (re-run the SAME verdict if it was interrupted)`
             : suppression.reason === 'reuse_resolved_to_existing_principle'
               ? 'No independent Dreamer chain by design; the candidate is durably resolved onto the existing principle.'
               : `pd candidate review --candidate-id ${opts.candidateId} --decide reuse|create --reason "..."`;
