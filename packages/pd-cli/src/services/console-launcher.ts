@@ -449,7 +449,7 @@ function runEncodedPowerShell(scriptBody: string): Promise<string | null> {
     childProcess.execFile(
       'powershell',
       ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-      { timeout: 5000, encoding: 'utf8' },
+      { timeout: 5000, encoding: 'utf8', windowsHide: true },
       (err, stdout) => resolve(err ? null : stdout),
     );
   });
@@ -529,7 +529,7 @@ async function getProcessIdentity(pid: number): Promise<ProcessIdentity | null> 
   // Other POSIX (macOS): `ps` joins argv into one string and can replace
   // non-ASCII bytes with '?' under LC_ALL=C — best effort, boundaries lost.
   return new Promise((resolve) => {
-    childProcess.execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout: 5000 }, (err, stdout) => {
+    childProcess.execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout: 5000, windowsHide: true }, (err, stdout) => {
       if (err) { resolve(null); return; }
       const out = stdout.trim();
       resolve(out.length > 0 ? { argv: tokenizeCommandLine(out), cwd: null } : null);
@@ -618,7 +618,7 @@ async function getListenPortOwnerPids(port: number, host: string): Promise<numbe
     return parseNetTcpOwners(out, host);
   }
   const runQuery = (cmd: string, args: string[]): Promise<string | null> => new Promise((resolve) => {
-    childProcess.execFile(cmd, args, { timeout: 5000 }, (err, stdout) => resolve(err ? null : stdout));
+    childProcess.execFile(cmd, args, { timeout: 5000, windowsHide: true }, (err, stdout) => resolve(err ? null : stdout));
   });
   const ssOut = await runQuery('ss', ['-ltnpH', `sport = :${port}`]);
   if (ssOut !== null) {

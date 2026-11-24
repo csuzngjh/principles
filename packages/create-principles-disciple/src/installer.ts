@@ -37,7 +37,7 @@ import {
   type VerificationResult,
   type RuntimeProfileInput,
 } from './mvp-config.js';
-import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostTarget } from './installers/index.js';
+import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostSelection, type HostTarget } from './installers/index.js';
 import { atomicReplaceTextFile, errnoCode } from './utils/config-file-io.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
@@ -50,7 +50,8 @@ import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir
 import * as installLayoutModule from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
-import { reconcileServiceHostScheduler } from './service-host-bridge.js';
+import { reconcileServiceHostScheduler, type ServiceHostSchedulerOutcome } from './service-host-bridge.js';
+import { provisionFreshInstallWorkspace, readAllPendingProvisioning, readPendingProvisioningEvidence, type PendingProvisioningMarker, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -226,13 +227,121 @@ const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
 // Shared components use ~/.pd/runtime. The plugin package is host-neutral for
 // Codex-only installs; OpenClaw/all still receive their adapter copy under
 // ~/.openclaw/extensions for host discovery.
-let activeHostTarget: HostTarget = 'openclaw';
-function installsOpenClaw(host: HostTarget): boolean {
+// Library-level legacy default for helpers called OUTSIDE an install run
+// (tests, diagnostics, backup helpers). install() overwrites it from the
+// operator's explicit host selection before any deployment step — the CLI
+// itself never defaults to OpenClaw anymore (PRI-1278 Phase 5).
+let activeHostTarget: HostSelection = 'openclaw';
+function installsOpenClaw(host: HostSelection): boolean {
   return host === 'openclaw' || host === 'all';
 }
 
-function installsWorkbuddy(host: HostTarget): boolean {
+function installsWorkbuddy(host: HostSelection): boolean {
   return host === 'workbuddy' || host === 'all';
+}
+
+/**
+ * PRI-1278 Phase 5 review: when may THIS run (re)initialize ownership?
+ *
+ *  - a fresh install always records the attempt (a pending marker on failure);
+ *  - an existing install resumes ONLY with explicit enable consent AND a
+ *    matching pending marker from a previous fresh install. Historical
+ *    workspaces never wrote that marker → they can never be flipped here.
+ */
+export function shouldProvisionOnInstall(input: {
+  freshInstall: boolean;
+  consentIntent: string;
+  consentSource: string;
+  schedulerState: string;
+  hasPendingMarker: boolean;
+}): boolean {
+  if (input.freshInstall) return true;
+  return input.consentIntent === 'enable'
+    && input.consentSource === 'explicit_flag'
+    && input.schedulerState === 'enabled'
+    && input.hasPendingMarker;
+}
+
+/** PRI-1278 Phase 5: one REAL host binding this install verified. */
+export interface ProvisioningTarget {
+  readonly host: 'none' | 'openclaw' | 'codex' | 'workbuddy';
+  readonly workspaceDir: string;
+}
+
+export interface ServiceHostProvisioningReport {
+  readonly targets: readonly {
+    host: HostSelection;
+    workspaceDir: string;
+    outcome: ServiceHostProvisioningOutcome;
+  }[];
+  readonly pending: boolean;
+  readonly nextAction: string;
+}
+
+/** Stable identity for a workspace directory (real path, case-insensitive on Windows). */
+function workspaceKey(workspaceDir: string): string {
+  const resolved = path.resolve(workspaceDir);
+  let real: string;
+  try {
+    const candidate = realpathSync.native(resolved);
+    real = typeof candidate === 'string' && candidate.length > 0 ? candidate : resolved;
+  } catch {
+    real = resolved;
+  }
+  return process.platform === 'win32' ? real.toLowerCase() : real;
+}
+
+/**
+ * The ACTUAL workspaces this install bound — not the requested host list.
+ * WorkBuddy binds its own governance directory, and Codex may be redirected
+ * by materialization. Provisioning the requested project dir alone left the
+ * real host workspace in legacy ownership.
+ */
+export function resolveProvisioningTargets(options: {
+  host: HostSelection;
+  workspaceDir: string;
+  codexWorkspaceDir?: string;
+}): ProvisioningTarget[] {
+  const targets: ProvisioningTarget[] = [];
+  if (options.host === 'none' || options.host === 'openclaw' || options.host === 'all') {
+    targets.push({ host: options.host === 'none' ? 'none' : 'openclaw', workspaceDir: options.workspaceDir });
+  }
+  if (options.host === 'codex' || options.host === 'all') {
+    targets.push({ host: 'codex', workspaceDir: options.codexWorkspaceDir ?? options.workspaceDir });
+  }
+  if (options.host === 'workbuddy') {
+    targets.push({
+      host: 'workbuddy',
+      workspaceDir: getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
+    });
+  }
+  const seen = new Set<string>();
+  return targets.filter((target) => {
+    const key = workspaceKey(target.workspaceDir);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Merge THIS run's targets with the per-workspace pending records a previous
+ * fresh install left behind. A plain `install --enable-service-host` (no
+ * `--host`) must resume every deferred workspace, not only the neutral one.
+ */
+export function mergePendingProvisioningTargets(
+  targets: readonly ProvisioningTarget[],
+  pending: readonly PendingProvisioningMarker[],
+): ProvisioningTarget[] {
+  const merged = [...targets];
+  const seen = new Set(targets.map((target) => workspaceKey(target.workspaceDir)));
+  for (const entry of pending) {
+    const key = workspaceKey(entry.workspaceDir);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ host: entry.host === 'all' ? 'none' : entry.host, workspaceDir: entry.workspaceDir });
+  }
+  return merged;
 }
 
 /**
@@ -241,7 +350,7 @@ function installsWorkbuddy(host: HostTarget): boolean {
  * materialized ONLY then (review 2026-11-18): an OpenClaw-only run must not
  * be rolled back by an unwritable CODEX_HOME it never asked to touch.
  */
-export function installRunServesCodex(host: HostTarget, refreshTargets: readonly HostTarget[]): boolean {
+export function installRunServesCodex(host: HostSelection, refreshTargets: readonly HostTarget[]): boolean {
   return host === 'codex' || host === 'all' || refreshTargets.includes('codex');
 }
 
@@ -251,7 +360,7 @@ function pluginInstallDirs(): string[] {
     : [getInstalledPluginDir()];
 }
 
-export function mergeInstallManifestHosts(current: unknown, host: HostTarget): string[] {
+export function mergeInstallManifestHosts(current: unknown, host: HostSelection): string[] {
   const hosts = new Set<string>();
   const parsed = parseInstallManifest(current);
   if (current !== undefined && !parsed.manifest) {
@@ -269,7 +378,7 @@ export function mergeInstallManifestHosts(current: unknown, host: HostTarget): s
   return [...hosts];
 }
 
-function resolveInstallManifestHosts(host: HostTarget): string[] {
+function resolveInstallManifestHosts(host: HostSelection): string[] {
   let current: unknown;
   try {
     current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
@@ -306,8 +415,8 @@ function readPersistedInstallHosts(): string[] {
  * WorkBuddy stays opt-in (OD-03): 'all' never attaches it here, but a manifest
  * that ALREADY records it must be refreshed like any other served host.
  */
-export function resolveHostRefreshTargets(persistedHosts: readonly string[], host: HostTarget): HostTarget[] {
-  const covered = new Set<string>(host === 'all' ? ['openclaw', 'codex'] : [host]);
+export function resolveHostRefreshTargets(persistedHosts: readonly string[], host: HostSelection): HostTarget[] {
+  const covered = new Set<string>(host === 'all' ? ['openclaw', 'codex'] : host === 'none' ? [] : [host]);
   const targets: HostTarget[] = [];
   for (const persisted of persistedHosts) {
     if (persisted !== 'openclaw' && persisted !== 'codex' && persisted !== 'workbuddy') continue;
@@ -338,7 +447,7 @@ export interface UpgradeHostPlan {
  * Pure so the coverage rule is testable without running a whole install.
  */
 export function planUpgradeHosts(
-  requested: HostTarget,
+  requested: HostSelection,
   persistedHosts: readonly string[],
   detected: readonly DetectedHost[],
 ): UpgradeHostPlan {
@@ -371,7 +480,7 @@ export function planUpgradeHosts(
 function mergeInstallManifestWorkspacesFor(
   current: ReturnType<typeof parseInstallManifest>['manifest'],
   workspaceDir: string,
-  host?: HostTarget,
+  host?: HostSelection,
 ): string[] {
   let workspaces = mergeInstallManifestWorkspaces(current, path.resolve(workspaceDir));
   if (host === 'workbuddy') {
@@ -1035,6 +1144,7 @@ function execNpm(args: string[], cwd?: string, timeoutOverride?: number): string
         encoding: 'utf-8',
         stdio: 'pipe',
         env: process.env,
+        windowsHide: true,
         timeout: timeoutOverride ?? INSTALL_TIMEOUT_MS,
       })
   ).trim();
@@ -1076,7 +1186,7 @@ export function verifyNativeModules(cwd: string, componentName: string): void {
     if (!existsSync(nativeModPath)) continue;
 
     try {
-      execFileSync(process.execPath, ['-e', `require('${nativeMod}')`], { cwd, stdio: 'pipe' });
+      execFileSync(process.execPath, ['-e', `require('${nativeMod}')`], { cwd, stdio: 'pipe', windowsHide: true });
     } catch {
       throw new Error(`${componentName} native module ${nativeMod} failed its require probe: the prebuilt binary for this Node.js ABI is missing or incompatible (no rebuild step exists by design). Install the platform release asset matching this OS, architecture, and ABI.`);
     }
@@ -1708,7 +1818,7 @@ function verifyCopiedTree(source: string, copy: string): number {
 /**
  * Exported for real-filesystem tests (tests/backup-location.test.ts).
  */
-export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResult {
+export function backupExistingInstall(host: HostSelection = 'openclaw'): BackupResult {
   const extDir = getPluginExtDir();
   const runtimeDir = getPdRuntimeDir();
   const hasExt = installsOpenClaw(host) && existsSync(extDir);
@@ -2463,7 +2573,7 @@ async function defaultLegacyRulePreflightRunner(pdCliEntry: string, workspaceDir
     const result = await execFileAsync(
       process.execPath,
       [pdCliEntry, 'runtime', 'compatibility-scan', '--json', '--workspace', workspaceDir],
-      { timeout: 60_000, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } },
+      { timeout: 60_000, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' }, windowsHide: true },
     );
     return parseCompatibilityScanStdout(result.stdout);
   } catch (err) {
@@ -3109,12 +3219,14 @@ export function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
           encoding: 'utf-8',
           timeout: 30_000,
           stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
         });
       } else {
         execFileSync('npm', packArgs, {
           encoding: 'utf-8',
           timeout: 30_000,
           stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
         });
       }
 
@@ -3131,6 +3243,7 @@ export function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
         encoding: 'utf-8',
         timeout: 15_000,
         stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
       });
 
       const packageDir = path.join(extractDir, 'package');
@@ -3237,7 +3350,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   let localError: string | undefined;
   try {
     const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
-    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
+    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, windowsHide: true, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
     localOk = true;
   } catch (e: unknown) {
     let detail = 'unknown error';
@@ -3275,7 +3388,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
         // constant argv array (no shell string, no interpolation).
         execFileSync('cmd.exe', ['/c', 'pd', '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, windowsHide: true, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
       } else {
-        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
+        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, windowsHide: true, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
       }
       return true;
     } catch {
@@ -4391,6 +4504,10 @@ export async function verifyConsole(
       stdio: 'pipe',
       env: { ...process.env },
       detached: false,
+      // The installer may run with no console at all (the detached update
+      // executor, the Companion); an unhidden probe console would pop a
+      // visible terminal window on every attempt.
+      windowsHide: true,
     });
 
     let childExited = false;
@@ -4553,7 +4670,7 @@ async function probeAutolaunchHealth(
  * the task project path. Other hosts keep the project workspace.
  */
 export function resolveConsoleWorkspaceDir(
-  host: HostTarget | undefined,
+  host: HostSelection | undefined,
   projectWorkspaceDir: string,
   homeDir: string,
 ): string {
@@ -4584,6 +4701,7 @@ async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: s
       detached: true,
       stdio: 'ignore',
       shell: false,
+      windowsHide: true,
       env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
     },
   );
@@ -4831,12 +4949,18 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Same-directory identity for a workspace pointer (Windows is case-insensitive). */
+/** Same-directory identity for a workspace pointer (real path; Windows is case-insensitive). */
 function sameWorkspaceTarget(left: string, right: string): boolean {
   const normalize = (value: string): string => {
     const resolved = path.resolve(value);
-    const trimmed = resolved.length > 1 ? resolved.replace(/[\\/]+$/, '') : resolved;
-    return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+    let real: string;
+    try {
+      const candidate = realpathSync.native(resolved);
+      real = typeof candidate === 'string' && candidate.length > 0 ? candidate : resolved;
+    } catch {
+      real = resolved;
+    }
+    return process.platform === 'win32' ? real.toLowerCase() : real;
   };
   return normalize(left) === normalize(right);
 }
@@ -5079,9 +5203,231 @@ function readSecondaryOpenClawDeclaration(homeDir: string): { ok: true; workspac
   return { ok: true, workspace: declaredRaw.trim() };
 }
 
+export type HostWorkspaceBindingSource = 'openclaw_declaration' | 'codex_mcp_binding' | 'workbuddy_governance_dir';
+
+/**
+ * What the host itself records about the workspace it is bound to.
+ *
+ *  - bound         — a readable binding names an existing workspace;
+ *  - unbound       — the binding is verifiably ABSENT (safe waiting state);
+ *  - unverifiable  — a binding file exists but cannot be trusted (fail closed:
+ *                    never rebind on refresh, never flip ownership on resume).
+ */
+export type HostWorkspaceBinding =
+  | { readonly state: 'bound'; readonly workspaceDir: string; readonly source: HostWorkspaceBindingSource }
+  | { readonly state: 'unbound'; readonly reason: string }
+  | { readonly state: 'unverifiable'; readonly reason: string };
+
+type CodexBindingFileState =
+  | { readonly state: 'absent' }
+  | { readonly state: 'bound'; readonly workspaceDir: string }
+  | { readonly state: 'invalid'; readonly reason: string };
+
+/**
+ * Read ONE binding file in the layout the Codex launcher actually writes
+ * (PRI-1248): `mcp-binding.json` beside the plugin data root, and as a legacy
+ * mirror in the versioned payload. The old implementation scanned
+ * `PLUGIN_DATA/runtime/<version>/`, a directory that only holds the runtime
+ * dependencies — so a normally bound Codex was reported as "no binding" and a
+ * plain `--yes` upgrade skipped its refresh entirely.
+ */
+function readCodexBindingFile(bindingPath: string): CodexBindingFileState {
+  if (!existsSync(bindingPath)) return { state: 'absent' };
+  let raw: string;
+  try {
+    raw = readFileSync(bindingPath, 'utf-8');
+  } catch (error) {
+    return { state: 'invalid', reason: `binding unreadable at ${bindingPath} (${describeError(error)})` };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return { state: 'invalid', reason: `binding is not valid JSON at ${bindingPath} (${describeError(error)})` };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { state: 'invalid', reason: `binding at ${bindingPath} has no JSON-object root` };
+  }
+  if (Reflect.get(parsed, 'host') !== 'codex') {
+    return { state: 'invalid', reason: `binding at ${bindingPath} does not declare host=codex` };
+  }
+  const workspace = Reflect.get(parsed, 'workspaceDir');
+  if (typeof workspace !== 'string' || !isUsableWorkspacePointer(workspace.trim())) {
+    return { state: 'invalid', reason: `binding at ${bindingPath} has no usable absolute "workspaceDir"` };
+  }
+  const resolved = path.resolve(workspace.trim());
+  if (!existsSync(resolved)) {
+    return { state: 'invalid', reason: `binding at ${bindingPath} names a workspace that does not exist (${resolved})` };
+  }
+  return { state: 'bound', workspaceDir: resolved };
+}
+
+/** Legacy payload-local mirror: `<codexHome>/plugins/cache/<marketplace>/principles-disciple/<version>`. */
+function readCodexBindingFromPayloadCache(): CodexBindingFileState {
+  const cacheRoot = path.join(getCodexHomeDir(), 'plugins', 'cache');
+  let marketplaceDirs: string[];
+  try {
+    marketplaceDirs = readdirSync(cacheRoot);
+  } catch (error) {
+    if (errnoCode(error) === 'ENOENT') return { state: 'absent' };
+    return { state: 'invalid', reason: `Codex plugin cache is unreadable at ${cacheRoot} (${describeError(error)})` };
+  }
+  const candidates: { readonly versionDir: string; readonly parts: readonly [number, number, number] }[] = [];
+  for (const marketplace of marketplaceDirs) {
+    const pluginRoot = path.join(cacheRoot, marketplace, 'principles-disciple');
+    let versions: string[];
+    try {
+      versions = readdirSync(pluginRoot);
+    } catch {
+      continue;
+    }
+    for (const version of versions) {
+      const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+      if (match === null) continue;
+      const parts = [Number(match[1]), Number(match[2]), Number(match[3])] as const;
+      if (!parts.every((n) => Number.isFinite(n))) continue;
+      candidates.push({ versionDir: path.join(pluginRoot, version), parts });
+    }
+  }
+  candidates.sort((a, b) => (b.parts[0] - a.parts[0]) || (b.parts[1] - a.parts[1]) || (b.parts[2] - a.parts[2]));
+  let sawBinding = false;
+  let firstInvalid: string | undefined;
+  for (const candidate of candidates) {
+    const state = readCodexBindingFile(path.join(candidate.versionDir, 'mcp-binding.json'));
+    if (state.state === 'absent') continue;
+    sawBinding = true;
+    if (state.state === 'bound') return state;
+    firstInvalid ??= state.reason;
+  }
+  return sawBinding
+    ? { state: 'invalid', reason: firstInvalid ?? 'no readable Codex mcp-binding.json under the plugin cache' }
+    : { state: 'absent' };
+}
+
+/** The workspace a host is ACTUALLY bound to, read from that host's own record. */
+export function readHostWorkspaceBinding(host: 'codex' | 'openclaw' | 'workbuddy'): HostWorkspaceBinding {
+  if (host === 'workbuddy') {
+    return {
+      state: 'bound',
+      workspaceDir: getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
+      source: 'workbuddy_governance_dir',
+    };
+  }
+  if (host === 'openclaw') {
+    const configPath = path.join(getOpenClawDir(), OPENCLAW_PD_CONFIG_FILENAME);
+    if (!existsSync(configPath)) {
+      return { state: 'unbound', reason: `openclaw declaration absent at ${configPath}` };
+    }
+    let raw: string;
+    try {
+      raw = readFileSync(configPath, 'utf-8');
+    } catch (error) {
+      return { state: 'unverifiable', reason: `openclaw declaration unreadable at ${configPath} (${describeError(error)})` };
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      return { state: 'unverifiable', reason: `openclaw declaration is not valid JSON (${describeError(error)})` };
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return { state: 'unverifiable', reason: `openclaw declaration at ${configPath} has no JSON-object root` };
+    }
+    const declared = Object.hasOwn(parsed, 'workspace') ? Reflect.get(parsed, 'workspace') : undefined;
+    if (typeof declared !== 'string' || !isUsableWorkspacePointer(declared.trim())) {
+      return { state: 'unbound', reason: `openclaw declaration at ${configPath} has no usable absolute "workspace"` };
+    }
+    return { state: 'bound', workspaceDir: path.resolve(declared.trim()), source: 'openclaw_declaration' };
+  }
+
+  // Codex: durable binding first, payload-local legacy second — the same
+  // authority order the launcher and `pd health` use.
+  const pluginDataRoot = resolvePluginDataRoot(getCodexHomeDir(), 'principles');
+  const persistentPath = pluginDataRoot === undefined ? undefined : path.join(pluginDataRoot, 'mcp-binding.json');
+  const persistent = persistentPath === undefined ? { state: 'absent' as const } : readCodexBindingFile(persistentPath);
+  if (persistent.state === 'bound') {
+    return { state: 'bound', workspaceDir: persistent.workspaceDir, source: 'codex_mcp_binding' };
+  }
+  if (persistent.state === 'invalid') return { state: 'unverifiable', reason: persistent.reason };
+  const payload = readCodexBindingFromPayloadCache();
+  if (payload.state === 'bound') return { state: 'bound', workspaceDir: payload.workspaceDir, source: 'codex_mcp_binding' };
+  if (payload.state === 'invalid') return { state: 'unverifiable', reason: payload.reason };
+  return { state: 'unbound', reason: 'no Codex mcp-binding.json records an existing workspace' };
+}
+
+/**
+ * PRI-1278 Phase 5 review: a host that is REFRESHED (not explicitly selected)
+ * must keep the workspace it is already bound to. Passing this run's target
+ * workspace to a Codex plugin rebuild / OpenClaw declaration rewrite silently
+ * moved the host to `~/pd-workspace` after a plain `npx create-principles-disciple
+ * --yes` upgrade. The recorded binding is the authority; when it cannot be
+ * read/validated the refresh is SKIPPED with an actionable warning instead of
+ * guessing.
+ */
+export function resolveExistingHostWorkspaceForRefresh(
+  host: 'codex' | 'openclaw' | 'workbuddy',
+): { ok: true; workspaceDir: string; source: HostWorkspaceBindingSource } | { ok: false; reason: string; nextAction: string } {
+  const binding = readHostWorkspaceBinding(host);
+  if (binding.state === 'bound') {
+    return { ok: true, workspaceDir: binding.workspaceDir, source: binding.source };
+  }
+  const nextAction = host === 'codex'
+    ? 'Re-run the installer explicitly for Codex with its real workspace: npx create-principles-disciple install --host codex --workspace "<existing workspace>"'
+    : host === 'openclaw'
+      ? 'Re-run the installer explicitly for OpenClaw with the real workspace: npx create-principles-disciple install --host openclaw --workspace "<existing workspace>"'
+      : 'Re-run the installer explicitly for WorkBuddy so it can restore its governance workspace.';
+  return { ok: false, reason: binding.reason, nextAction };
+}
+
+/**
+ * Verify a DEFERRED provisioning target against the host bindings that exist
+ * NOW (not the `--host` this resume run happened to omit).
+ *
+ * - no binding at all          → `none` (a truthful waiting state);
+ * - one/more verified bindings → probe the verified host(s) before the flip;
+ * - an unreadable binding with
+ *   nothing else verifiable    → refuse (never flip from an unverified state).
+ */
+export function resolveResumeProvisioningHost(
+  markerHost: HostSelection,
+  workspaceDir: string,
+): { ok: true; host: HostSelection } | { ok: false; reason: string; nextAction: string } {
+  const candidates = ['openclaw', 'codex', 'workbuddy'] as const;
+  const bound: (typeof candidates)[number][] = [];
+  const unverifiable: string[] = [];
+  for (const host of candidates) {
+    let binding: HostWorkspaceBinding;
+    try {
+      binding = readHostWorkspaceBinding(host);
+    } catch (error) {
+      // A host root that cannot even be resolved is unverifiable, not absent.
+      unverifiable.push(`${host}: ${describeError(error)}`);
+      continue;
+    }
+    if (binding.state === 'unverifiable') {
+      unverifiable.push(`${host}: ${binding.reason}`);
+    } else if (binding.state === 'bound' && sameWorkspaceTarget(binding.workspaceDir, workspaceDir)) {
+      bound.push(host);
+    }
+  }
+  if (bound.length === 0 && unverifiable.length > 0) {
+    return {
+      ok: false,
+      reason: unverifiable.join('; '),
+      nextAction: 'Repair the host binding file(s) so the workspace ownership can be verified, then re-run this install.',
+    };
+  }
+  if (bound.length === 0) return { ok: true, host: 'none' };
+  if (bound.includes('openclaw') && bound.includes('codex')) return { ok: true, host: 'all' };
+  if (markerHost !== 'none' && markerHost !== 'all' && bound.includes(markerHost)) {
+    return { ok: true, host: markerHost };
+  }
+  return { ok: true, host: bound[0] ?? 'none' };
+}
+
 export function resolveUpdateWorkspaceDir(
   workspaceDir: string,
-  host: HostTarget,
+  host: HostSelection,
   options: ResolveUpdateWorkspaceOptions = {},
 ): UpdateWorkspaceResolution {
   if (!installsOpenClaw(host)) return { kind: 'resolved', workspaceDir, source: 'caller' };
@@ -5303,6 +5649,23 @@ export interface InstallResult {
    * non-empty; `success` is NOT affected (migration is best-effort by design).
    */
   legacyBackupMigrationFailures?: LegacyBackupMigrationFailure[];
+  /**
+   * PRI-1278 Phase 5: the background-execution outcome of this install —
+   * scheduler registration/enablement and (fresh installs only) the workspace
+   * ownership handover with its first managed cycle. Present on committed
+   * installs; `--json` consumers rely on it because `logger.info` is silenced.
+   */
+  serviceHost?: ServiceHostInstallOutcome;
+  /** PRI-1278 Phase 5: the host ADAPTER this run installed ('none' = Service-Host-only). */
+  hostAdapter?: HostSelection;
+}
+
+/** PRI-1278 Phase 5: everything the installer knows about the background owner. */
+export interface ServiceHostInstallOutcome {
+  readonly freshInstall: boolean;
+  readonly scheduler: ServiceHostSchedulerOutcome;
+  readonly provisioning: ServiceHostProvisioningReport | null;
+  readonly nextAction: string;
 }
 
 /** One structured legacy-backup migration failure (§8.5 / InstallResult). */
@@ -5481,10 +5844,13 @@ export async function materializeCodexWorkspace(
 }
 
 export async function runHostInstallers(
-  host: HostTarget,
+  host: HostSelection,
   ctx: HostInstallContext,
   overrides: { readonly codexWorkspaceDir?: string; readonly codexWorkspaceError?: string } = {},
 ): Promise<HostInstallResult[]> {
+  // Service-Host-only install: no host adapter exists, so no host installer
+  // runs. This is a first-class mode, not an error — never fabricate one.
+  if (host === 'none') return [];
   const installers = getHostInstallers(host);
   const results: HostInstallResult[] = [];
   for (const installer of installers) {
@@ -5795,6 +6161,12 @@ export async function install(
   // files. Validated here, the failure costs nothing.
   assertUsableWorkspaceDir(options.workspaceDir);
 
+  // PRI-1278 Phase 5: a FIRST install is proven by the absence of the PD
+  // install manifest BEFORE this run mutates anything. Only a first install
+  // may adopt the new background default (scheduler enable + ownership
+  // provisioning); every existing installation keeps its recorded lifecycle.
+  const freshInstallRun = !existsSync(getInstallManifestPath());
+
   // Decide the payload shape once: self-contained (release asset) or
   // npm-distributed (registry-resolved dependencies). A present `_release`
   // asset keeps the hard preflight; the npm-distributed shape must pass
@@ -6102,8 +6474,18 @@ export async function install(
     // carries PD and include it in BOTH the manifest record and the refresh
     // set, so one upgrade brings all hosts forward without uninstall/reinstall.
     const detectedHostsBeforeRun = detectInstalledHosts();
-    const hostPlan = planUpgradeHosts(options.host, persistedHostsBeforeRun, detectedHostsBeforeRun);
-    installManifestHosts = withDetectedHosts(resolveInstallManifestHosts(options.host), detectedHostsBeforeRun);
+    // PRI-1278 Phase 5: a FIRST install never inherits a host from machine
+    // leftovers or a sibling detection — the operator chose the host adapter
+    // (or chose none). Only an EXISTING install widens its coverage.
+    const hostPlan = planUpgradeHosts(
+      options.host,
+      freshInstallRun ? [] : persistedHostsBeforeRun,
+      freshInstallRun ? [] : detectedHostsBeforeRun,
+    );
+    installManifestHosts = withDetectedHosts(
+      resolveInstallManifestHosts(options.host),
+      freshInstallRun ? [] : detectedHostsBeforeRun,
+    );
     for (const detectedHost of hostPlan.newlyCovered) {
       logger.info(`Detected installed host "${detectedHost.hostId}" (${detectedHost.evidence}) — included in this upgrade.`);
     }
@@ -6354,6 +6736,7 @@ export async function install(
       const pdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
       execFileSync(process.execPath, [pdCliEntry, 'runtime', 'init', '--confirm', '--workspace', options.workspaceDir], {
         stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: true,
         timeout: 30000,
         env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
       });
@@ -6387,6 +6770,7 @@ export async function install(
       const { promisify } = await import('node:util');
       const execFileAsync = promisify(execFile);
       await execFileAsync(process.execPath, [pdCliEntry, 'demo', 'story-a', '--json'], {
+        windowsHide: true,
         timeout: STORY_A_VERIFICATION_TIMEOUT_MS,
         env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
       });
@@ -6428,7 +6812,13 @@ export async function install(
     // isolation intact.
     let codexWorkspaceDir: string | undefined;
     let codexWorkspaceError: string | undefined;
-    if (installRunServesCodex(options.host, hostPlan.refreshTargets)) {
+    // PRI-1278 Phase 5 review: materialize a Codex workspace ONLY when Codex
+    // is the REQUESTED target. A refresh-only Codex (a plain `--yes` upgrade
+    // with no --host) must reuse its recorded binding via
+    // resolveExistingHostWorkspaceForRefresh — never create/rebind to this
+    // run's neutral workspace.
+    const requestsCodex = options.host === 'codex' || options.host === 'all';
+    if (requestsCodex) {
       try {
         const materialized = await materializeCodexWorkspace(options, {
           resolve: (target, notes) => resolveCodexHostWorkspace(options, notes),
@@ -6489,6 +6879,35 @@ export async function install(
     const refreshedResults: HostInstallResult[] = [];
     for (const refreshTarget of refreshTargets) {
       if (spinner) updateProgress(spinner, stepIndex, `Refreshing ${refreshTarget} host binding...`);
+      // PRI-1278 Phase 5 review: a refresh must re-use the host's RECORDED
+      // workspace. Passing this run's target (a neutral `~/pd-workspace` when
+      // --host was omitted) silently moved Codex/OpenClaw to a new directory.
+      if (refreshTarget === 'codex' || refreshTarget === 'openclaw' || refreshTarget === 'workbuddy') {
+        const existing = resolveExistingHostWorkspaceForRefresh(refreshTarget);
+        if (!existing.ok) {
+          logger.warn(`Host "${refreshTarget}" refresh skipped: ${existing.reason}. The existing host binding was KEPT unchanged. Next: ${existing.nextAction}`);
+          refreshedResults.push({
+            success: false,
+            hostId: refreshTarget,
+            configAction: 'skipped',
+            reason: `existing binding could not be read: ${existing.reason}`,
+            nextAction: existing.nextAction,
+          });
+          continue;
+        }
+        const refreshCtx: HostInstallContext = { ...hostInstallCtx, workspaceDir: existing.workspaceDir };
+        const refreshResults = await runHostInstallers(refreshTarget, refreshCtx, { codexWorkspaceDir: existing.workspaceDir, codexWorkspaceError });
+        refreshedResults.push(...refreshResults);
+        for (const hr of refreshResults) {
+          if (hr.success) {
+            logger.info(`Host "${hr.hostId}" refresh: ${hr.configAction === 'updated' ? 'updated' : 'no change needed'}${hr.reason ? ` — ${hr.reason}` : ''} (workspace ${existing.workspaceDir} from ${existing.source}).`);
+            for (const warning of hr.warnings ?? []) logger.warn(`Host "${hr.hostId}": ${warning}`);
+          } else {
+            logger.warn(`Host "${hr.hostId}" refresh failed: ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction ?? `npx create-principles-disciple install --host ${hr.hostId}`}`);
+          }
+        }
+        continue;
+      }
       const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx, { codexWorkspaceDir, codexWorkspaceError });
       refreshedResults.push(...refreshResults);
       for (const hr of refreshResults) {
@@ -6623,22 +7042,137 @@ export async function install(
       }
     }
 
-    // PRI-1281 Phase 3 (task §6): user-level OS scheduler reconciliation.
+    // PRI-1281 Phase 3 / PRI-1278 Phase 5: user-level OS scheduler
+    // reconciliation + fresh-install ownership provisioning.
     // POST-COMMIT by design — the runtime transaction is already confirmed,
     // so every bridge failure is a WARNING, never a reported install failure
-    // (ERR-197). Consent-gated registration; upgrades only refresh an
-    // EXISTING registration (enabled state preserved) and never create one
-    // silently. Identity comes from the installer's own authoritative pdHome.
+    // (ERR-197). The consent intent is resolved by the caller; the installer
+    // enforces the two hard rules itself:
+    //  1. an upgrade NEVER enables implicitly (only an explicit flag may);
+    //  2. ownership is handed over ONLY on a fresh install whose scheduler is
+    //     verified enabled.
+    let serviceHostOutcome: ServiceHostInstallOutcome;
     try {
-      await reconcileServiceHostScheduler({
+      const freshInstall = freshInstallRun;
+      const requestedConsent = options.serviceHost ?? {
+        // Defensive default for callers that predate the consent contract:
+        // explicit flags only, never an implicit fresh-install enable.
+        intent: options.enableServiceHost === true
+          ? 'enable'
+          : options.registerServiceHost === true
+            ? 'register_only'
+            : 'refresh_if_registered',
+        source: 'explicit_flag' as const,
+      };
+      const consent = requestedConsent.intent === 'enable'
+        && requestedConsent.source !== 'explicit_flag'
+        && !freshInstall
+        ? {
+            intent: 'refresh_if_registered' as const,
+            source: 'policy' as const,
+          }
+        : requestedConsent;
+      if (consent !== requestedConsent) {
+        logger.warn('Service Host scheduler enable was requested implicitly on an EXISTING installation — downgraded to refresh-if-registered. Run `pd service enable` explicitly to arm automatic runs.');
+      }
+      const scheduler = await reconcileServiceHostScheduler({
         pdHome: getPdDir(),
-        registerServiceHost: options.enableServiceHost === true || options.registerServiceHost === true,
-        enableServiceHost: options.enableServiceHost === true,
+        intent: consent.intent,
+        source: consent.source,
+        freshInstall,
         warn: (message) => logger.warn(message),
         info: (message) => logger.info(message),
       });
+      // Fresh installs ALWAYS run the provisioning step: even when ownership
+      // cannot be handed over yet it records a durable PER-WORKSPACE pending
+      // entry, which is what a later explicit `--enable-service-host` install
+      // resumes. A multi-host install records every real target independently
+      // (`--host all` → OpenClaw + Codex), instead of the last one overwriting
+      // the others.
+      //
+      // An existing installation is resumed ONLY with explicit consent AND a
+      // matching pending marker from a previous fresh install. Historical
+      // workspaces never wrote that marker, so they can never be flipped
+      // implicitly — they still require the quiescing handover.
+      const runTargets = resolveProvisioningTargets({
+        host: options.host,
+        workspaceDir: options.workspaceDir,
+        ...(codexWorkspaceDir !== undefined ? { codexWorkspaceDir } : {}),
+      });
+      const pending: { entries: readonly PendingProvisioningMarker[]; warning?: string } = freshInstall
+        ? { entries: [] }
+        : readAllPendingProvisioning(getPdDir());
+      if (pending.warning !== undefined) logger.warn(pending.warning);
+      const targets = mergePendingProvisioningTargets(runTargets, pending.entries);
+      const perTarget = [] as NonNullable<ServiceHostProvisioningReport['targets']>[number][];
+      for (const target of targets) {
+        if (!existsSync(target.workspaceDir)) {
+          logger.warn(`Service Host provisioning skipped for ${target.workspaceDir}: the directory does not exist.`);
+          continue;
+        }
+        const marker = freshInstall ? null : readPendingProvisioningEvidence(getPdDir(), target.workspaceDir);
+        const resume = shouldProvisionOnInstall({
+          freshInstall,
+          consentIntent: consent.intent,
+          consentSource: consent.source,
+          schedulerState: scheduler.state,
+          hasPendingMarker: marker !== null,
+        });
+        if (!resume) continue;
+        // A deferred resume must use the host binding that exists NOW: this
+        // run may have omitted --host, and the original pending record only
+        // named the host the first install intended.
+        let host: HostSelection = target.host;
+        let bindingVerification: { ok: false; reason: string; nextAction: string } | undefined;
+        if (marker !== null) {
+          const resolution = resolveResumeProvisioningHost(marker.host, target.workspaceDir);
+          if (resolution.ok) {
+            ({ host } = resolution);
+          } else {
+            bindingVerification = { ok: false, reason: resolution.reason, nextAction: resolution.nextAction };
+          }
+        }
+        const outcome = await provisionFreshInstallWorkspace({
+          pdHome: getPdDir(),
+          workspaceDir: target.workspaceDir,
+          host,
+          scheduler,
+          resume: marker !== null,
+          ...(bindingVerification !== undefined ? { bindingVerification } : {}),
+          warn: (message) => logger.warn(message),
+          info: (message) => logger.info(message),
+        });
+        perTarget.push({ host, workspaceDir: target.workspaceDir, outcome });
+      }
+      const provisioning: ServiceHostProvisioningReport | null = perTarget.length > 0
+        ? {
+            targets: perTarget,
+            pending: perTarget.some((entry) => entry.outcome.pendingProvisioning === true),
+            nextAction: perTarget.map((entry) => entry.outcome.nextAction).join(' | '),
+          }
+        : null;
+      serviceHostOutcome = {
+        freshInstall,
+        scheduler,
+        provisioning,
+        nextAction: provisioning?.nextAction ?? scheduler.nextAction,
+      };
     } catch (bridgeError) {
-      logger.warn(`Service Host scheduler reconciliation threw (${bridgeError instanceof Error ? bridgeError.message : String(bridgeError)}) — the install itself is unaffected; run pd service status manually.`);
+      const detail = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
+      logger.warn(`Service Host reconciliation threw (${detail}) — the install itself is unaffected; run pd service status manually.`);
+      serviceHostOutcome = {
+        freshInstall: freshInstallRun,
+        scheduler: {
+          state: 'failed',
+          registered: null,
+          enabled: null,
+          detail: `reconciliation_threw:${detail}`,
+          nextAction: 'Run `pd service status --json` and repair the Service Host manually; no ownership change was attempted.',
+          warnings: [detail],
+        },
+        provisioning: null,
+        nextAction: 'Run `pd service status --json` and repair the Service Host manually; no ownership change was attempted.',
+      };
     }
     if (spinner) {
       // rc-9: the runtime transaction IS committed here, but a pending host
@@ -6731,6 +7265,8 @@ export async function install(
       ...(legacyBackupMigrationFailures !== undefined ? { legacyBackupMigrationFailures } : {}),
       ...(manualActionReason !== undefined ? { reason: manualActionReason, manualActions: hostManualActions } : {}),
       journal: installerJournalRecord(journal),
+      serviceHost: serviceHostOutcome,
+      hostAdapter: options.host,
     };
     return pendingResult;
   } catch (error) {

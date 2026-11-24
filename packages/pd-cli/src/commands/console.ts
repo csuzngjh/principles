@@ -183,6 +183,11 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
   const child = spawn(process.execPath, args, {
     stdio: opts.json ? 'pipe' : 'inherit',
     env: { ...process.env },
+    // The server may be started by a console-less parent (the installer's
+    // auto-launch, the Companion): without this Windows gives it a visible
+    // terminal window. With an inherited terminal (interactive use) it is a
+    // no-op — the terminal window is not the child's to hide.
+    windowsHide: true,
   });
 
   let startupConfirmed = false;
@@ -588,6 +593,11 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   const child: ChildProcess = spawn(process.execPath, args, {
     stdio: opts.json ? 'pipe' : 'inherit',
     env: { ...process.env },
+    // The server may be started by a console-less parent (the installer's
+    // auto-launch, the Companion): without this Windows gives it a visible
+    // terminal window. With an inherited terminal (interactive use) it is a
+    // no-op — the terminal window is not the child's to hide.
+    windowsHide: true,
   });
 
   let resolved = false;

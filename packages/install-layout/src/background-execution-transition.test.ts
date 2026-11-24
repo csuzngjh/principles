@@ -604,3 +604,96 @@ function waitForExit(child: ChildProcess): Promise<void> {
     expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
   }, 30_000);
 });
+
+describe('provision_fresh_install (PRI-1278 Phase 5 first-install ownership)', () => {
+  it('flips a brand-new workspace to service_host_owned in ONE write (generation 1) and registers it', () => {
+    const file = seedManifest('provision-fresh', { workspaces: [] });
+    const result = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-prov-1',
+      freshInstall: true,
+      registerWorkspace: true,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      changed: true,
+      record: { state: 'service_host_owned', effectiveOwner: 'service_host', generation: 1, operationId: null, previousOwner: null, targetOwner: null },
+    });
+    const raw = readRaw(file);
+    expect(raw.workspaces).toContain(WS);
+    expect(raw.backgroundExecutions).toMatchObject({ [WS]: { state: 'service_host_owned', generation: 1 } });
+    expect(parseInstallManifest(raw).manifest).toBeDefined();
+    // The persisted projection is the authority, not the return value.
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
+      .toMatchObject({ status: 'service_host_owned', generation: 1 });
+  });
+
+  it('is idempotent on replay and never bumps the generation', () => {
+    const file = seedManifest('provision-replay', { workspaces: [] });
+    const first = transitionWorkspaceBackgroundExecution({
+      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-1', freshInstall: true, registerWorkspace: true,
+    });
+    expect(first).toMatchObject({ ok: true, changed: true });
+    const replay = transitionWorkspaceBackgroundExecution({
+      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-2', freshInstall: true, registerWorkspace: true,
+    });
+    expect(replay).toMatchObject({ ok: true, changed: false, record: { generation: 1 } });
+  });
+
+  it('refuses without the explicit fresh-install proof', () => {
+    const file = seedManifest('provision-no-proof', { workspaces: [WS] });
+    expect(transitionWorkspaceBackgroundExecution({
+      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-1',
+    })).toMatchObject({ ok: false, reason: 'invalid_input' });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
+      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
+  });
+
+  it('refuses a workspace that already carries ownership HISTORY (upgrade must use handover)', () => {
+    const file = seedManifest('provision-history', {
+      backgroundExecutions: {
+        [WS]: { state: 'legacy_owned', effectiveOwner: 'legacy', generation: 2, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-22T00:00:00.000Z' },
+      },
+    });
+    expect(transitionWorkspaceBackgroundExecution({
+      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-1', freshInstall: true,
+    })).toMatchObject({ ok: false, reason: 'unexpected_state' });
+    // Nothing was overwritten.
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
+      .toMatchObject({ status: 'legacy_owned', source: 'record', generation: 2 });
+  });
+
+  it('honors the generation fence and never touches another workspace record', () => {
+    const file = seedManifest('provision-multi', {
+      workspaces: [WS_B],
+      backgroundExecutions: {
+        [WS_B]: { state: 'legacy_owned', effectiveOwner: 'legacy', generation: 4, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-22T00:00:00.000Z' },
+      },
+    });
+    expect(transitionWorkspaceBackgroundExecution({
+      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-1', freshInstall: true, registerWorkspace: true, expectedGeneration: 1,
+    })).toMatchObject({ ok: false, reason: 'stale_generation' });
+    const ok = transitionWorkspaceBackgroundExecution({
+      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-2', freshInstall: true, registerWorkspace: true, expectedGeneration: 0,
+    });
+    expect(ok).toMatchObject({ ok: true, changed: true });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_B }))
+      .toMatchObject({ status: 'legacy_owned', generation: 4 });
+  });
+});
+
+describe('parseInstallManifest — Service-Host-only manifests', () => {
+  it('accepts empty hosts when at least one workspace is declared', () => {
+    const parsed = parseInstallManifest({ layoutVersion: 1, mode: 'canonical', hosts: [], workspaces: [WS] });
+    expect(parsed.manifest).toMatchObject({ hosts: [], workspaces: [WS] });
+    expect(parsed.error).toBeUndefined();
+  });
+
+  it('still refuses a manifest with neither hosts nor workspaces', () => {
+    const parsed = parseInstallManifest({ layoutVersion: 1, mode: 'canonical', hosts: [], workspaces: [] });
+    expect(parsed.manifest).toBeUndefined();
+    expect(parsed.error).toContain('hosts must contain at least one host');
+  });
+});

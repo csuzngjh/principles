@@ -1,6 +1,6 @@
-# PD Service Host Scheduler — 运维手册（Phase 3, PRI-1281）
+# PD Service Host Scheduler — 运维手册（Phase 3 起，Phase 5 更新）
 
-> 权威：SPEC-PD-SERVICE-HOST-001 v0.3 §8.1/§10/§11 Phase 3；ADR-0020 §11.6。
+> 权威：SPEC-PD-SERVICE-HOST-001 v0.4 §8.1/§10/§11 Phase 5；ADR-0020 §11.6。
 > 本文是操作面文档：命令、平台矩阵、生命周期与安全边界、状态读取。
 > 实施位置：`packages/pd-cli/src/services/service-host/scheduler/`（不抽独立包 — TD §11 修正）。
 
@@ -13,12 +13,15 @@ pd service disable    [--pd-home <dir>] [--json]
 pd service status     [--pd-home <dir>] [--json]
 pd service uninstall  [--pd-home <dir>] [--json]
 
-pd service run-once   [--json] [--trigger manual|scheduler] [--pd-home <dir>]   # managed（OS 调度器入口）
+pd service run-once   [--json] [--trigger manual|scheduler|installer] [--pd-home <dir>]   # managed（OS 调度器入口 / 安装器首次周期）
 pd service run-once   --dry-run [--json]                                        # Phase 1 只读发现
 pd service run-once   --shadow --workspace <dir> [--host …] [--timeout-ms <ms>] # Phase 2 人工 shadow
+
+pd service handover   --workspace <dir> [--json]   # 已有 Workspace 的正式交接（LEGACY → SERVICE_HOST）
+pd service rollback   --workspace <dir> [--json]   # SERVICE_HOST → LEGACY
 ```
 
-- 全部生命周期操作**幂等**；`install` 默认创建 **installed_disabled**（不自动启用）。
+- 全部生命周期操作**幂等**；`service install` 单独使用时默认创建 **installed_disabled**（不自动启用）。
 - `enable` 从不创建注册（未注册时 fail-closed）；`disable` 只停未来触发，保留注册与全部数据；`uninstall` 只撤销本安装的注册（Workspace 数据 / `.pd/state.db` / Ledger / Trajectory / 证据一律不动）。
 - `--pd-home` 是**可信注入**（调度器注册、安装器与自动化使用）；身份绝不由 `HOME`/`USERPROFILE`/`PD_EXPERIMENT_ROOT` 推断。
 - 间隔默认 **120,000 ms**（对齐现有 Codex/WorkBuddy worker 节奏），下限 **60,000 ms**（Windows Task Scheduler 重复间隔真实下限 PT1M，实测 HRESULT 0x80041318）。120s 是默认值，不是性能 SLA。
@@ -44,12 +47,48 @@ pd service run-once   --shadow --workspace <dir> [--host …] [--timeout-ms <ms>
 - Windows 任务策略 `MultipleInstancesPolicy=IgnoreNew`、`ExecutionTimeLimit=PT8H`（自身有界预算之外的兜底）。
 - managed 执行严格只消费 `effectiveOwner=service_host` 且 `service_host_owned` 且发现判定 authorized 的 Workspace；`legacy_owned` 跳过（保留旧所有者）；`handover_preparing`/`rollback_pending` 禁止消费；manifest/marker 不可读 → 整次运行 fail-closed（不是"零 Workspace"）。
 
-## 4. 安装器与升级
+## 4. 安装器与升级（Phase 5：新安装默认 Service Host）
 
-- 安装器**不自行实现**调度器逻辑：通过桥接调用刚安装的 CLI（`service … --json --pd-home <trusted>`；子进程环境剥离 `PD_EXPERIMENT_ROOT`/`PD_WORKSPACE_DIR`）。
-- 注册/启用需**显式同意**：`--register-service-host`（注册为 disabled）/ `--enable-service-host`（注册并启用）。无旗标时安装器绝不创建注册。
-- 升级（同一条 install 提交路径）只做 **refresh-if-registered**：已注册才幂等刷新（入口路径稳定于 `<pdHome>/runtime`）；**刷新保留现场调度配置**——从实时 `pd.service-status.v1` 读回 intervalMs 与 enabled（各平台适配器以 OS 见证解析，非“重装默认”）；状态文档不可读 → fail-closed（不猜默认值）；刷新失败保留最后有效注册并告警（ERR-197：提交后失败是告警，不是安装失败）。
-- 卸载：仅当共享 Runtime 将被移除时，先于 Runtime 移除撤销调度器注册；host-scoped 卸载（其他 Host 仍用共享 Runtime）**保留**注册。撤销失败 → 告警 + 手工移除指引（`schtasks /Delete` / `launchctl bootout` + 删 plist / `systemctl --user disable --now` + 删 unit）。
+### 4.1 宿主选择与后台生命周期是两个维度
+
+- `--host` 只选择**宿主 Adapter**：`openclaw | codex | workbuddy | all | none`。**没有默认值**；省略 `--host` 等同于 `none`（Service-Host-only），绝不会静默安装 OpenClaw。
+- 交互安装先选宿主 Adapter（默认 `none`），再单独询问是否启用 PD Service Host 后台调度（默认 **Yes**，并展示 OS 调度器、120s 周期、可随时 disable）。
+- Service-Host-only 安装写出 `hosts: []` + `workspaces:[…]` 的合法 manifest；不伪造宿主 Worker，状态显示 `waiting_for_host_binding`。
+
+### 4.2 全新安装（manifest 原本不存在）
+
+1. 安装组件与所选宿主 Adapter（`none` 则不运行任何宿主安装器）。
+2. 写 manifest（登记 Workspace）。
+3. 通过已安装 CLI 注册 **并启用** 用户级 OS 调度器，再用 `pd service status --json` 复核 `registered=true / enabled=true`。
+4. 通过 active-release 执行 **no-consume readiness**（OpenClaw `worker --readiness`；Codex/WorkBuddy `worker --status`）。
+5. 用 §8.4 CAS `provision_fresh_install` 原子写入 `service_host_owned`（generation 1）。只有“无任何历史 ownership record”的新 Workspace 允许此路径。
+6. 立即执行一次真实 managed cycle（`pd service run-once --trigger installer`），并写入 `<pdHome>/service/install-provisioning.json` 证据。
+7. 安装摘要显示：scheduler 状态、Workspace owner、Adapter 类型、readiness、首次周期结果与限制。
+
+任何一步失败：**不翻转 Owner**，安装仍以“运行时可用 + 明确 nextAction”的报告结束（ERR-197 提交后失败=告警，不是安装失败）。全新 Workspace 会写入 `<pdHome>/service/install-provisioning.json` 的 **pendingProvisioning** 记录；之后执行 `npx create-principles-disciple install --enable-service-host --workspace <dir>` 会在同一 run 内完成注册+启用+所有权初始化（仅限该 pending 记录匹配且 manifest 仍无 ownership record）。
+
+### 4.3 升级（manifest 已存在）
+
+- 保留既有 `backgroundExecutions`、既有注册与 enabled 状态；**绝不**把 `legacy_owned` 静默翻转，**绝不**静默创建/启用调度器。
+- 已有注册 → refresh-if-registered（从实时状态读回 intervalMs，保留 enabled；不可读则 fail-closed 保留原注册）。
+- 输出仍需迁移的 Workspace 列表与迁移入口：`pd service handover --workspace <dir>`。
+- 显式 `--enable-service-host` 是唯一允许在升级时启用调度器的来源。
+
+### 4.4 CLI 同意语义
+
+| 调用方式 | 全新安装行为 | 升级行为 |
+|---|---|---|
+| 交互 | 询问是否启用（默认 Yes） | 不询问；refresh-if-registered |
+| `--yes` | 接受推荐默认值：注册 + 启用 | refresh-if-registered（不创建、不启用） |
+| `--enable-service-host` | 注册 + 启用 | 注册 + 启用（显式同意） |
+| `--register-service-host` | 仅注册（disabled） | 仅注册（disabled） |
+| `--no-service-host` | 显式 opt-out | 显式 opt-out（保留既有注册状态） |
+| `--json` / `--non-interactive`（无上述旗标） | `consent_required`：不注册，结果文档明确说明 | refresh-if-registered |
+
+### 4.5 卸载
+
+- 仅当共享 Runtime 将被移除时，先于 Runtime 移除撤销调度器注册；host-scoped 卸载（其他 Host 仍用共享 Runtime）**保留**注册。
+- 撤销失败 → 告警 + 手工移除指引（`schtasks /Delete` / `launchctl bootout` + 删 plist / `systemctl --user disable --now` + 删 unit）。
 
 ## 5. 状态契约与读取（Companion / Console / CLI 同源）
 
@@ -61,6 +100,9 @@ pd service run-once   --shadow --workspace <dir> [--host …] [--timeout-ms <ms>
 | lastRun（outcome/mode/triggerSource/triggerSourceCredibility） | `<pdHome>/service/run-once-status.json`（版本化运行状态；`triggerSourceCredibility:"self-declared"`——triggerSource 是运行方自报字段，非 OS 见证，审计时降级采信；refusal 同样落盘 outcome:`refused`） |
 | lastProgressAt | 跨运行进展存储（`service/shadow-progress.json`）+ 最近 managed 执行 |
 | Workspace owner 状态 | 现场只读发现（manifest + 已验证 claims） |
+| `hostBindingState` | 该 Workspace 的已验证 claim（`bound`）或缺失（`waiting_for_host_binding`）。Service-Host-only 安装的正常状态，不是错误 |
+| 最近一次安装 provisioning | `<pdHome>/service/install-provisioning.json`（安装证据，非所有权权威；所有者仍以 manifest `backgroundExecutions` 为准） |
+| 待恢复的 Workspace | `<pdHome>/service/pending-provisioning.json`（按规范化 Workspace 分条记录，含原目标宿主；多宿主安装不再互相覆盖。仍是提示，不是所有权权威） |
 
 - registered ≠ enabled ≠ running ≠ completed ≠ business_progress；状态读取失败记 degraded（`degradedReasons`），权限拒绝**绝不**显示为未安装。
 - **Console**：`GET /api/service-host/status`（只读，转调同一 CLI 实现；无任何生命周期写面）。
@@ -73,7 +115,13 @@ pd service run-once   --shadow --workspace <dir> [--host …] [--timeout-ms <ms>
 |---|---|---|
 | `scheduler_query_failed:AccessDenied` | OS 拒绝读取/注册（非"未安装"） | 确认当前用户与任务存储权限；加固主机上非提升注册会被策略拒绝，需在允许的用户上下文操作 |
 | `scheduler_task_name_conflict_foreign_task` | 同名任务非本安装所有 | 手工检查（`Export-ScheduledTask`）；PD 不覆盖外部任务 |
-| `no_service_host_owned_workspaces` | 合法空执行 | 无需处置；所有权交接在 Phase 4/5（SPEC §8.4） |
+| `no_service_host_owned_workspaces` | 合法空执行 | 无需处置；尚未交接的 Workspace 保持 legacy（`pd service handover` 显式迁移） |
+| 安装摘要 `Workspace owner: not provisioned` + `consent_required` | 非交互安装未携带启用同意 | 重跑安装并加 `--enable-service-host`（同一 run 会恢复所有 pending 的新 Workspace；仅启用调度器不会改变所有权） |
+| `pendingReason: binding_unverifiable` | 恢复时无法可信读取原宿主绑定（文件损坏/不可读） | 修复对应宿主绑定文件后重跑；安装器**不会**在未验证绑定时翻转所有权 |
+| `pendingReason: legacy_consumer_running` | 原 OpenClaw Gateway 仍在运行，可能仍有在途消费 | 走受控交接：`pd service handover --workspace <dir>`（等待 quiesce ack）；或 `openclaw gateway stop` 后重跑安装 |
+| 恢复时未传 `--host` | 以 Workspace 当前真实绑定为准执行探针；无任何绑定时才进入 `waiting_for_host_binding` | 无需补 `--host`；若绑定已迁移到另一个宿主，会按新宿主探测 |
+| `readiness: waiting_for_host_binding` | Service-Host-only / 该 Workspace 无宿主 claim | 正常状态；安装宿主 Adapter 并绑定 Workspace 后才会出现可执行 Worker |
+| `provision_fresh_install` 被拒（`unexpected_state`） | Workspace 已有 ownership 历史（升级用户） | 不静默迁移：使用 `pd service handover --workspace <dir>`（含旧消费者停止验证） |
 | `install_manifest_*` / `active_release_*` 拒绝 | 可信前缀 fail-closed | 修复安装（`npx create-principles-disciple`）后再触发 |
 | `already_running`（退出码 0） | 重叠触发被单实例锁收敛 | 正常行为，无需处置 |
 | `service_host_cli_unparsable_json` / `service_host_cli_no_json:*` / `service_host_cli_schema_violation:*` | 桥接/Console 侧 stdout 契约失败：恰好一个 JSON 文档、post-parse schema 校验；多文档/混入日志/截断/空输出/非法字段各自分类 | 检查安装的 pd-cli dist 是否损坏或被替换；重新安装；**绝不**按“未注册”处理 |

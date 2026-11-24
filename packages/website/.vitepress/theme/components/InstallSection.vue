@@ -24,7 +24,7 @@ const isZh = useIsZh()
 // SPEC-PD-UIUX-001 R7: the homepage command is explicitly scoped to the
 // OpenClaw host (installer manifest: Node ≥ 22); Codex visitors are routed to
 // the host selection on the install page instead of a wrong default command.
-const command = 'npx create-principles-disciple --yes'
+const command = 'npx create-principles-disciple --yes --host openclaw'
 const installHref = computed(() => isZh.value ? '/zh/install' : '/install')
 const codexInstallHref = computed(() => isZh.value ? '/zh/install?host=codex' : '/install?host=codex')
 const workbuddyInstallHref = computed(() => isZh.value ? '/zh/install?host=workbuddy' : '/install?host=workbuddy')

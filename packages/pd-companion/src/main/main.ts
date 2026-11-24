@@ -470,6 +470,9 @@ function spawnWorkspaceWorkerFor(workerCommand: 'codex' | 'workbuddy'): (canonic
     ], {
       env: { ...process.env, PD_COMPANION_WORKER_IPC: '1', PD_INVOCATION_SOURCE: 'companion' },
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      // Companion is a GUI-subsystem process (no console). Every console
+      // program it starts without this gets a NEW, visible terminal window.
+      windowsHide: true,
     });
     child.stderr?.on('data', (chunk: Buffer) => {
       // Bounded stderr tail into the companion log — the worker's own
@@ -812,6 +815,9 @@ function spawnCli(): void {
     child = spawn('node', args, {
       env: { ...process.env, PD_INVOCATION_SOURCE: 'companion' },
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Same reason as the workers above: a console-less GUI parent must hide
+      // the console of every program it starts.
+      windowsHide: true,
     });
   } catch (err) {
     supervisor.onSpawnError(undefined, err instanceof Error ? err.message : String(err));
