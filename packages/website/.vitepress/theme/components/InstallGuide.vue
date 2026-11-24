@@ -107,8 +107,8 @@
         </ul>
         <p class="step-desc">
           {{ isZh
-            ? '--yes 跳过 npx 安装确认提示；Installer 自动检测 Node 与 OpenClaw，缺失时给出官方下载链接。'
-            : '--yes skips the npx install confirmation; Installer auto-detects Node and OpenClaw and provides official download links if missing.'
+            ? '--host openclaw 明确安装 OpenClaw 适配器（PD 不再默认绑定任何宿主）；--yes 跳过 npx 确认并接受推荐默认值（含 PD Service Host 后台调度）。Installer 自动检测 Node 与 OpenClaw，缺失时给出官方下载链接。只想运行 PD 后台服务、暂不接宿主时使用 --host none。'
+            : '--host openclaw explicitly installs the OpenClaw adapter (PD no longer defaults to any host); --yes skips the npx confirmation and accepts the recommended defaults (including the PD Service Host background scheduler). Installer auto-detects Node and OpenClaw and provides official download links if missing. Use --host none for a Service-Host-only install without a host adapter.'
           }}
         </p>
       </section>
@@ -489,7 +489,7 @@ onUnmounted(() => {
   window.removeEventListener('popstate', onPopState)
 })
 
-const installCommand = 'npx create-principles-disciple --yes'
+const installCommand = 'npx create-principles-disciple --yes --host openclaw'
 const gatewayCommand = 'openclaw gateway --force'
 // The copy-paste prompt for the "let your agent install PD" card. One line,
 // self-contained, points the agent at the canonical guide (which carries the

@@ -275,7 +275,7 @@ describe('ownership admission matrix (task §4)', () => {
     expect(result.executions[0]?.skipReason).toMatch(/^workspace_not_authorized:/);
   });
 
-  it('records a service_host_owned workspace with no adapter binding as executed-but-unavailable (never silently dropped)', async () => {
+  it('records a service_host_owned workspace with no adapter binding as waiting_for_host_binding (never silently dropped, never a failure)', async () => {
     const home = tempHome();
     const ws = `${home}${path.sep}unbound-ws`;
     mkdirSync(path.join(ws, '.pd'), { recursive: true }); // authorized, but no declaration/claim
@@ -288,10 +288,41 @@ describe('ownership admission matrix (task §4)', () => {
     expectCompleted(result);
     const record = result.executions[0];
     expect(record?.admission).toBe('executed');
-    expect(record?.workspaceState).toBe('unavailable');
+    // PRI-1278 Phase 5: Service-Host-only is a truthful WAITING state.
+    expect(record?.workspaceState).toBe('waiting_for_host_binding');
     expect(record?.skipReason).toMatch(/^no_adapter_supports_workspace:/);
     // NOT the legal-empty shape: a target existed.
     expect(result.status.managed?.emptyReason).toBeUndefined();
+    expect(result.status.nextAction).toContain('waiting for a host binding');
+  });
+
+  it('a waiting workspace never hides ANOTHER workspace\'s failure in the summary', async () => {
+    const home = tempHome();
+    const waiting = `${home}${path.sep}waiting-ws`;
+    mkdirSync(path.join(waiting, '.pd'), { recursive: true });
+    const failing = codexWorkspace(home, 'failing-ws');
+    installSandbox(home, [waiting, failing], {
+      [waiting]: { state: 'service_host_owned' },
+      [failing]: { state: 'service_host_owned' },
+    });
+    const result = await runServiceManagedOnce({
+      triggerSource: 'scheduler',
+      trustedHomeDir: home,
+      probes: {
+        adapters: {
+          codex: fakeAdapter('codex', { outcome: 'failed' }),
+          workbuddy: fakeAdapter('workbuddy'),
+        },
+      },
+    });
+    expectCompleted(result);
+    const states = result.executions.map((e) => e.workspaceState);
+    expect(states).toContain('waiting_for_host_binding');
+    expect(states).toContain('failed');
+    // The summary must name BOTH classes; a waiting workspace is not an excuse
+    // to stop reporting a real failure.
+    expect(result.status.nextAction).toContain('waiting for a host binding');
+    expect(result.status.nextAction).toContain('unhealthy workspace execution');
   });
 });
 
