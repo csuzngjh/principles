@@ -1,0 +1,30 @@
+{
+ "description": "REAL CodeBuddy Code 2.165.0 PostToolUse payload for an MCP tool (PRI-1275 real-engine probe, 2026-11-24T11:12:38.526Z). tool_response is the CallToolResult CONTENT BLOCK ARRAY ([{type:text,text:<json>}]) — the engine puts result.content directly into the payload; call_id/tool_use_id is the engine per-call uuid. Payload fields are exactly as captured.",
+ "probe": "PRI-1275 real-engine hook capture (isolated lab, installed CodeBuddy Code 2.165.0)",
+ "event": "PostToolUse",
+ "scenario": "engine 2.165.0 CLI, permission_mode=bypassPermissions, MCP tool mcp__pdprobe__echo_meta",
+ "payload": {
+  "session_id": "01a20d41-fc4f-71ec-ab89-7d83a970215a",
+  "transcript_path": "D:\\Code\\.pd-tmp\\principles\\20261124\\task-pri1275-probe-190446-e0e248\\lab\\fake-home\\.workbuddy\\projects\\d-Code-.pd-tmp-principles-20261124-task-pri1275-probe-190446-e0e248-lab-project\\01a20d41-fc4f-71ec-ab89-7d83a970215a.jsonl",
+  "cwd": "d:\\Code\\.pd-tmp\\principles\\20261124\\task-pri1275-probe-190446-e0e248\\lab\\project",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__pdprobe__echo_meta",
+  "tool_input": {
+   "hello": "world"
+  },
+  "tool_response": [
+   {
+    "type": "text",
+    "text": "{\"echo\":\"pd-probe-echo\",\"receivedMeta\":{\"modelId\":\"wb-probe-mock\",\"traceparent\":\"00-9e20b85b83d30b39ab39f7951ac95e0a-ff9a59749cfc6662-01\",\"baggage\":\"codebuddy.session_id=01a20d41-fc4f-71ec-ab89-7d83a970215a,codebuddy.conversation_request_id=01a20d41fbb377cfa975b1b725b6238e\",\"progressToken\":2},\"receivedArgKeys\":[\"hello\"]}"
+   }
+  ],
+  "call_id": "01a20d41-fdfd-758f-ab69-4df2fe1fe263",
+  "tool_use_id": "01a20d41-fdfd-758f-ab69-4df2fe1fe263",
+  "agent_type": "cli",
+  "permission_mode": "bypassPermissions",
+  "client": "CLI",
+  "version": "2.165.0",
+  "generation_id": "01a20d41fbb377cfa975b1b725b6238e",
+  "model": "wb-probe-mock"
+ }
+}

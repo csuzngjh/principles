@@ -193,3 +193,78 @@ describe('hostSessionClaimConflictsWithContext — fail-closed conflict rule (T3
     expect(hostSessionClaimConflictsWithContext({ sessionId: '  ' }, context)).toBe(false);
   });
 });
+
+describe('resolveHostSubmissionContext — WorkBuddy native engine baggage (PRI-1275)', () => {
+  // Probe evidence (2026-11-24, installed CodeBuddy Code 2.165.0): the real
+  // engine sends `_meta.baggage = "codebuddy.session_id=<uuid>,…"` alongside
+  // modelId/traceparent/progressToken; the value equals the hook payload's
+  // session_id. conversation_request_id is NOT mapped (unproven turn
+  // equivalence, SPEC field rules).
+
+  it('baggage session identity alone binds the session (real-engine shape)', () => {
+    const meta = {
+      modelId: 'wb-probe-mock',
+      traceparent: '00-9e20b85b83d30b39ab39f7951ac95e0a-ff9a59749cfc6662-01',
+      baggage: 'codebuddy.session_id=01a20d41-fc4f-71ec-ab89-7d83a970215a,codebuddy.conversation_request_id=01a20d41fbb377cfa975b1b725b6238e',
+      progressToken: 2,
+    };
+    const resolution = resolveHostSubmissionContext('workbuddy', meta);
+    expect(resolution.status).toBe('present');
+    if (resolution.status === 'present') {
+      expect(resolution.context.sessionId).toBe('01a20d41-fc4f-71ec-ab89-7d83a970215a');
+      expect(resolution.context.submissionTurnId).toBeUndefined();
+      expect(resolution.context.toolCallId).toBeUndefined();
+      expect(resolution.context.source).toBe('mcp_request_meta');
+    }
+  });
+
+  it('unrelated _meta without any recognized field stays missing (progress tokens etc.)', () => {
+    expect(resolveHostSubmissionContext('workbuddy', { progressToken: 2, modelId: 'm' }).status).toBe('missing');
+    // Baggage present but WITHOUT a session entry is not an identity attempt.
+    expect(resolveHostSubmissionContext('workbuddy', { baggage: 'codebuddy.other=x' }).status).toBe('missing');
+    expect(resolveHostSubmissionContext('workbuddy', { baggage: '' }).status).toBe('missing');
+    expect(resolveHostSubmissionContext('workbuddy', undefined).status).toBe('missing');
+  });
+
+  it('present-but-malformed identity fails closed, never silently degrades', () => {
+    expect(resolveHostSubmissionContext('workbuddy', { baggage: { fake: true } })).toEqual({
+      status: 'invalid', reasonCode: 'workbuddy_baggage_session_invalid',
+    });
+    // Sentinel spellings are rejected (same rule as every host id).
+    expect(resolveHostSubmissionContext('workbuddy', { baggage: 'codebuddy.session_id=cli' }).status).toBe('invalid');
+    // Oversized session value.
+    expect(resolveHostSubmissionContext('workbuddy', { baggage: `codebuddy.session_id=${'x'.repeat(201)}` })).toEqual({
+      status: 'invalid', reasonCode: 'workbuddy_baggage_session_invalid',
+    });
+  });
+
+  it('baggage entry properties after a semicolon are stripped, not treated as id bytes', () => {
+    const resolution = resolveHostSubmissionContext('workbuddy', { baggage: 'codebuddy.session_id=sess-1;tracestate=acme' });
+    expect(resolution.status).toBe('present');
+    if (resolution.status === 'present') expect(resolution.context.sessionId).toBe('sess-1');
+  });
+
+  it('namespaced producer contract still binds when it agrees with the engine baggage', () => {
+    const resolution = resolveHostSubmissionContext('workbuddy', {
+      'pd.host-context.v1': { sessionId: 'sess-ns', toolCallId: 'call-1' },
+      baggage: 'codebuddy.session_id=sess-ns',
+    });
+    expect(resolution.status).toBe('present');
+    if (resolution.status === 'present') {
+      expect(resolution.context.sessionId).toBe('sess-ns');
+      expect(resolution.context.toolCallId).toBe('call-1');
+    }
+  });
+
+  it('namespaced vs baggage disagreement fails closed (half-broken identity)', () => {
+    expect(resolveHostSubmissionContext('workbuddy', {
+      'pd.host-context.v1': { sessionId: 'sess-ns' },
+      baggage: 'codebuddy.session_id=sess-other',
+    })).toEqual({ status: 'invalid', reasonCode: 'workbuddy_context_conflict' });
+  });
+
+  it('baggage identity is a WorkBuddy field — Codex and OpenClaw never consume it', () => {
+    expect(resolveHostSubmissionContext('codex', { baggage: 'codebuddy.session_id=sess-1' }).status).toBe('missing');
+    expect(resolveHostSubmissionContext('openclaw', { baggage: 'codebuddy.session_id=sess-1' }).status).toBe('missing');
+  });
+});

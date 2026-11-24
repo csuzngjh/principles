@@ -194,8 +194,24 @@ export function normalizeWorkbuddyToolResponse(toolResponse: unknown, eventForDi
       ? { toolResponse }
       : toolResponse;
   }
+  if (Array.isArray(toolResponse)) {
+    // PRI-1275: MCP tool completions arrive as the CallToolResult CONTENT
+    // BLOCK ARRAY (`[{type:'text',text:…}, …]`) — probe-verified on the real
+    // installed engine (CodeBuddy Code 2.165.0, 2026-11-24): the engine puts
+    // `result.content` directly into the PostToolUse `tool_response`. The
+    // channel contract still holds (PostToolUseFailure is the separate
+    // failure registration), and the shared classifier already classifies an
+    // array envelope as success (normalizeOutcome). rc-4: validating "is
+    // array" is not enough — every content block must be a record; anything
+    // else is a malformed completion and fails loud. The array passes through
+    // UNCHANGED: the structured-receipt fallback reads the exact blocks.
+    if (toolResponse.length === 0 || !toolResponse.every((block) => typeof block === 'object' && block !== null)) {
+      throw new WorkBuddyDecoderError(`malformed required field "tool_response"`, `${eventForDiagnostics} MCP tool_response must be a non-empty array of content-block objects from ${HOST_CONTRACT_BASELINE}.`);
+    }
+    return toolResponse;
+  }
   if (!isRecord(toolResponse)) {
-    throw new WorkBuddyDecoderError(`malformed required field "tool_response"`, `${eventForDiagnostics} tool_response must be the rendered string or the engine result object from ${HOST_CONTRACT_BASELINE}.`);
+    throw new WorkBuddyDecoderError(`malformed required field "tool_response"`, `${eventForDiagnostics} tool_response must be the rendered string, the engine result object, or the MCP content-block array from ${HOST_CONTRACT_BASELINE}.`);
   }
   const isError = field(toolResponse, 'is_error') === true;
   const exitCodeValue = field(toolResponse, 'exitCode');
@@ -317,4 +333,40 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
   }
   const source = `workbuddy:${eventName.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()}`;
   return { kind, context, rawPayload, source };
+}
+
+// ─── PRI-1275 (B2): the MCP namespace gate for the receipt fallback ─────────
+// The real installed engine (CodeBuddy Code 2.165.0, probe 2026-11-24) names
+// MCP tools `mcp__<server>__<tool>` — the same convention the Codex adapter
+// froze in P1-1. Identical semantics here: exact parse of BOTH segments,
+// never a substring match.
+
+/** The MCP server ids whose `pd_submit_pain` the receipt fallback serves:
+ * the configured id (`pd-recall`) and its identifier-sanitized spelling. */
+export const PAIN_SUBMIT_MCP_SERVER_IDS: ReadonlySet<string> = new Set(['pd-recall', 'pd_recall']);
+
+export interface ParsedWorkbuddyMcpToolName {
+  readonly serverId: string;
+  readonly toolId: string;
+}
+
+/** Decompose a WorkBuddy MCP tool name into (serverId, toolId); null when
+ * the name is not a namespaced MCP tool name. No substring semantics. */
+export function parseWorkbuddyMcpToolName(toolName: string): ParsedWorkbuddyMcpToolName | null {
+  if (!toolName.startsWith('mcp__')) return null;
+  const rest = toolName.slice('mcp__'.length);
+  const separator = rest.indexOf('__');
+  if (separator <= 0 || separator + 2 >= rest.length) return null;
+  return { serverId: rest.slice(0, separator), toolId: rest.slice(separator + 2) };
+}
+
+/**
+ * Exact gate: the tool must be `pd_submit_pain` served by the PD MCP server
+ * (`pd-recall`). Every other tool — including an identically-named tool on a
+ * DIFFERENT MCP server — fails (equality on both parsed segments, never a
+ * substring match).
+ */
+export function isPainSubmitWorkbuddyToolName(toolName: string): boolean {
+  const parsed = parseWorkbuddyMcpToolName(toolName);
+  return parsed !== null && PAIN_SUBMIT_MCP_SERVER_IDS.has(parsed.serverId) && parsed.toolId === 'pd_submit_pain';
 }

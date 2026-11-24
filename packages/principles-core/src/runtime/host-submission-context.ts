@@ -16,14 +16,21 @@
  *  - Codex: native `threadId` (preferred) / `sessionId`;
  *    `x-codex-turn-metadata.turn_id` is the OPTIONAL submission turn.
  *    `windowId`/`itemId` are NOT turn ids and are never mapped.
- *  - OpenClaw / WorkBuddy: the namespaced `_meta["pd.host-context.v1"]`
- *    object (`sessionId` required; `submissionTurnId`/`toolCallId` optional).
- *    Producers arrive with PRI-1275/PRI-1276; the consumer contract lives
- *    here so all hosts normalize to one shape.
+ *  - OpenClaw: the namespaced `_meta["pd.host-context.v1"]` object
+ *    (`sessionId` required; `submissionTurnId`/`toolCallId` optional).
+ *    Producers arrive with PRI-1276; the consumer contract lives here so all
+ *    hosts normalize to one shape.
+ *  - WorkBuddy: the namespaced key AND (since PRI-1275) the probe-verified
+ *    native engine field `_meta.baggage` entry
+ *    `codebuddy.session_id=<uuid>` (installed CodeBuddy Code 2.165.0 injects
+ *    it on every `tools/call`; the value equals the hook payload's
+ *    `session_id`). When both sources are present they must agree — a
+ *    disagreement fails closed. `baggage` never maps a submission turn:
+ *    `codebuddy.conversation_request_id` equivalence is unproven.
  *
  * Identity fields that are NOT proven equivalent (`sessionKey`,
- * `generation_id`, `runId`, `turn_index`, recent-message ids) must never be
- * mapped by callers into this context.
+ * `generation_id`, `conversation_request_id`, `runId`, `turn_index`,
+ * recent-message ids) must never be mapped by callers into this context.
  */
 
 import { isSentinelSessionId } from './pain-ingress-payload.js';
@@ -168,6 +175,70 @@ function resolveNamespacedContext(meta: Readonly<Record<string, unknown>>): Host
   };
 }
 
+/** The W3C baggage entry key the REAL WorkBuddy engine (CodeBuddy Code
+ * 2.165.0, probe-verified 2026-11-24, scripts under `.pd-tmp/pri1275-probe`)
+ * injects into `tools/call` `_meta` alongside `modelId`/`traceparent`/
+ * `progressToken`: `baggage: "codebuddy.session_id=<uuid>,…"`. The value
+ * equals the hook payload's `session_id` (cross-verified on the same run) —
+ * a host-GENERATED identity field of the same trust tier as Codex's native
+ * `threadId`. `codebuddy.conversation_request_id` is NOT mapped: its
+ * equivalence to a PD submission turn is unproven (SPEC §G2 field rules). */
+const WORKBUDDY_BAGGAGE_SESSION_PREFIX = 'codebuddy.session_id=';
+
+/**
+ * Read the engine-injected session identity from `_meta.baggage`:
+ * `undefined` = the field is absent or carries no `codebuddy.session_id`
+ * entry (NOT an identity attempt — unrelated baggage never gates anything);
+ * `null` = the field is present as an identity attempt but malformed
+ * (non-string baggage, or a session value failing the bounded-id check) —
+ * fail closed like every other present-but-unusable identity.
+ */
+function readWorkbuddyBaggageSession(
+  meta: Readonly<Record<string, unknown>>,
+): string | undefined | null {
+  if (!Object.hasOwn(meta, 'baggage')) return undefined;
+  const raw = meta.baggage;
+  if (typeof raw !== 'string') return null;
+  for (const entry of raw.split(',')) {
+    const item = entry.trim();
+    if (!item.startsWith(WORKBUDDY_BAGGAGE_SESSION_PREFIX)) continue;
+    // Baggage entries may carry `;key=value` properties after the value —
+    // the session id itself ends at the first `;`.
+    const withoutProps = item.slice(WORKBUDDY_BAGGAGE_SESSION_PREFIX.length).split(';', 1)[0] ?? '';
+    const value = withoutProps.trim();
+    return readHostId(value) ?? null;
+  }
+  return undefined;
+}
+
+/**
+ * WorkBuddy normalization: the documented namespaced producer contract
+ * (`pd.host-context.v1`, PRI-1275 pi-mono producers) AND the probe-verified
+ * native engine field (`_meta.baggage` → `codebuddy.session_id`). The
+ * namespaced key wins as the explicit contract; when both identity sources
+ * are present they must AGREE — a disagreement between two host-generated
+ * identities on one request is a half-broken identity, not a pick-one.
+ */
+function resolveWorkbuddyContext(meta: Readonly<Record<string, unknown>>): HostSubmissionContextResolution {
+  const baggageSession = readWorkbuddyBaggageSession(meta);
+  if (baggageSession === null) {
+    return { status: 'invalid', reasonCode: 'workbuddy_baggage_session_invalid' };
+  }
+  if (!Object.hasOwn(meta, PD_HOST_CONTEXT_META_KEY)) {
+    if (baggageSession === undefined) return { status: 'missing' };
+    return {
+      status: 'present',
+      context: { sessionId: baggageSession, source: HOST_SUBMISSION_CONTEXT_SOURCE },
+    };
+  }
+  const named = resolveNamespacedContext(meta);
+  if (named.status !== 'present' || baggageSession === undefined) return named;
+  if (named.context.sessionId !== baggageSession) {
+    return { status: 'invalid', reasonCode: 'workbuddy_context_conflict' };
+  }
+  return named;
+}
+
 /**
  * Normalize host-injected `tools/call` `_meta` into a
  * {@link HostSubmissionContext}. `undefined` meta means the host attached no
@@ -192,8 +263,8 @@ export function resolveHostSubmissionContext(
     if (!hasCodexIdentity) return { status: 'missing' };
     return resolveCodexContext(meta);
   }
-  if (!hasNamespaced) return { status: 'missing' };
-  return resolveNamespacedContext(meta);
+  if (!hasNamespaced && host !== 'workbuddy') return { status: 'missing' };
+  return host === 'workbuddy' ? resolveWorkbuddyContext(meta) : resolveNamespacedContext(meta);
 }
 
 /**

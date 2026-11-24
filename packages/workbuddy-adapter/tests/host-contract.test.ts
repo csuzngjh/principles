@@ -38,6 +38,21 @@ function decodeError(raw: unknown): WorkBuddyDecoderError {
   throw new Error('expected decodeWorkbuddyInput to throw');
 }
 
+/** Minimal PostToolUse MCP-shaped payload for the PRI-1275 array-branch matrix. */
+function mcpPostBase(toolResponse: unknown): Record<string, unknown> {
+  return {
+    session_id: '01a20d41-fc4f-71ec-ab89-7d83a970215a',
+    transcript_path: null,
+    cwd: 'D:\\Code\\proj',
+    hook_event_name: 'PostToolUse',
+    tool_name: 'mcp__pdprobe__echo_meta',
+    tool_input: { hello: 'world' },
+    tool_response: toolResponse,
+    call_id: '01a20d41-fdfd-758f-ab69-4df2fe1fe263',
+    generation_id: '01a20d41fbb377cfa975b1b725b6238e',
+  };
+}
+
 describe('frozen fixture payloads decode with exact field mapping', () => {
   it('SessionStart (startup): no cwd, source mapped, generation_id → turnId', () => {
     const event = decodeWorkbuddyInput(payloadOf('session-start-startup.json'));
@@ -283,6 +298,46 @@ describe('Stop transcript-path union (two documented spellings, no on-device cap
 
   it('fails loud on a malformed agent_transcript_path', () => {
     expect(decodeError({ ...stopBase, agent_transcript_path: 42 }).reason).toContain('"agent_transcript_path"');
+  });
+});
+
+describe('PRI-1275 — MCP content-block ARRAY tool_response (real engine probe 2026-11-24, engine 2.165.0)', () => {
+  it('the REAL captured MCP echo payload decodes with the array envelope passed through UNCHANGED', () => {
+    const payload = payloadOf('post-tool-use-mcp-echo.json');
+    const event = decodeWorkbuddyInput(payload);
+    expect(event.kind).toBe('after_tool_call');
+    expect(event.source).toBe('workbuddy:post_tool_use');
+    expect(event.context.toolName).toBe('mcp__pdprobe__echo_meta');
+    expect(event.context.toolCallId).toBe('01a20d41-fdfd-758f-ab69-4df2fe1fe263');
+    expect(event.context.turnId).toBe('01a20d41fbb377cfa975b1b725b6238e');
+    // The array is the receipt fallback's exact input — identity (same
+    // reference) proves the decode added, dropped and reordered nothing.
+    expect(event.context.toolOutput).toBe(payload['tool_response']);
+    const blocks: unknown = event.context.toolOutput;
+    if (!Array.isArray(blocks) || blocks.length !== 1) throw new Error('expected the single content block of the real capture');
+    const block: unknown = blocks[0];
+    if (typeof block !== 'object' || block === null || Array.isArray(block)) throw new Error('expected a content-block record');
+    expect(Object.getOwnPropertyDescriptor(block, 'type')?.value).toBe('text');
+    const text: unknown = Object.getOwnPropertyDescriptor(block, 'text')?.value;
+    expect(typeof text).toBe('string');
+  });
+
+  it('an EMPTY content-block array fails loud (rc-4: "is array" alone is not enough)', () => {
+    expect(decodeError(mcpPostBase([])).reason).toContain('"tool_response"');
+  });
+
+  it('a NON-OBJECT content block fails loud (rc-4: element types are validated)', () => {
+    expect(decodeError(mcpPostBase([{ type: 'text', text: 'ok' }, 42])).reason).toContain('"tool_response"');
+    expect(decodeError(mcpPostBase([{ type: 'text', text: 'ok' }, null])).reason).toContain('"tool_response"');
+  });
+
+  it('STRING and RECORD tool_response shapes are unchanged by the array branch', () => {
+    const stringEvent = decodeWorkbuddyInput(mcpPostBase('rendered text'));
+    // PostToolUse channel contract: a string wraps into the completion envelope.
+    expect(stringEvent.context.toolOutput).toEqual({ toolResponse: 'rendered text' });
+    const record = { exitCode: 0, signal: null, interrupted: false };
+    const recordEvent = decodeWorkbuddyInput(mcpPostBase(record));
+    expect(recordEvent.context.toolOutput).toBe(record);
   });
 });
 
