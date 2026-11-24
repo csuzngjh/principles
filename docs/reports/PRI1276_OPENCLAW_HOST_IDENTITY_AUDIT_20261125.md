@@ -177,9 +177,14 @@ const n = {
 
 主路径生产者缺口的最小修复（属于 OpenClaw runtime，Owner fork `csuzngjh/openclaw`；本仓库不含该代码）：
 
+- **注入范围（CodeRabbit 评审轮修正）：仅限 PD 服务器 `pd-recall` 的 `pd_submit_pain` 调用**——
+  materializer 同时服务其他 MCP 服务器，无条件注入会把 `sessionId`/`toolCallId` 泄露给无关服务器并使其可关联同一会话的调用；
+  其他服务器/工具的调用保持原有参数不变。
 - 调用点：`src/agents/agent-bundle-mcp-materialize.ts` 的 `invoke = () => t.callTool(serverName, toolName, args)`
-  （安装态对应 `dist/agent-bundle-mcp-materialize-*.mjs:284`）→ 追加第四参数
-  `t.callTool(serverName, toolName, args, { _meta: { 'pd.host-context.v1': { sessionId: runtime.sessionId, toolCallId } } })`。
+  （安装态对应 `dist/agent-bundle-mcp-materialize-*.mjs:284`）→ 仅当 `(serverName, toolName)` 命中
+  `(pd-recall, pd_submit_pain)` 时追加第四参数
+  `t.callTool(serverName, toolName, args, { _meta: { 'pd.host-context.v1': { sessionId: runtime.sessionId, toolCallId } } })`，
+  其余调用保持三参数形态。
 - runtime `callTool` 已支持 `options._meta`（`dist/agents/agent-bundle-mcp-runtime.js:756`），无需改 runtime；
   `toolCallId` 仅在执行上下文真实可得时传入，否则省略；不得把 `sessionKey`/`runId` 写入 sessionId；
   不得覆盖请求已有的其他 `_meta` 字段（合并而非替换）。
