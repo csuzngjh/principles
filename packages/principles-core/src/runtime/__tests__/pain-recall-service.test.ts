@@ -343,6 +343,7 @@ describe('pain-recall read model: runtime export face', () => {
       'PAIN_RECALL_MIN_LIMIT',
       'PAIN_RECALL_SCHEMA_VERSION',
       'recallPains',
+      'stageWalSnapshot',
     ]);
     expect(Object.hasOwn(readModelModule, 'painRecallSnapshotTestHooks')).toBe(false);
   });

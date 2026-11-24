@@ -438,7 +438,44 @@ function removeStagingRoot(root: string): void {
   }
 }
 
-type StagedSnapshotOutcome = { ok: true; root: string } | { ok: false };
+/** Byte-level identity of what a staged snapshot froze (PRI-1290 Phase 0).
+ * `walState` is the T0 classification of the `-wal` sidecar: 'active' means a
+ * non-empty wal was copied together with the main file (the staged open
+ * replays it); 'quiet'/'absent' mean the main file alone is complete.
+ * Deliberately NOT exported: the only cross-package consumer (the Phase 0
+ * funnel script) is plain JS and consumes the shape structurally. */
+interface StagedWalSnapshotFingerprint {
+  readonly mainSha256: string;
+  readonly mainSize: number;
+  readonly walState: 'active' | 'quiet' | 'absent';
+  readonly walSha256?: string;
+  readonly walSize?: number;
+}
+
+/**
+ * Controlled outcome of {@link stageWalSnapshot}. The `ok` discriminant is
+ * preserved verbatim from the pre-PRI-1290 private shape — every caller must
+ * narrow on `ok` before touching any other field (SPEC Phase 0 v0.6).
+ *
+ * On success, `dispose()` removes ONLY this snapshot's private temp root; it
+ * is not a general directory-deletion capability and never touches the
+ * workspace source. Close every SQLite connection opened on the staged copy
+ * BEFORE calling `dispose()` (Windows holds temp files hostage through open
+ * handles). `dispose()` is idempotent and never throws.
+ */
+type StagedWalSnapshot =
+  | {
+      readonly ok: true;
+      /** Private temp root; the staged tree is laid out under `relSegments`. */
+      readonly root: string;
+      /** Absolute path of the staged main database file inside `root`. */
+      readonly stagedDbPath: string;
+      readonly fingerprint: StagedWalSnapshotFingerprint;
+      /** ISO timestamp taken at the T1 WAL-read linearization point. */
+      readonly capturedAt: string;
+      readonly dispose: () => void;
+    }
+  | { readonly ok: false; readonly reason: string };
 
 /**
  * Stage a fingerprint-verified point-in-time snapshot of a WAL-mode database
@@ -464,15 +501,15 @@ type StagedSnapshotOutcome = { ok: true; root: string } | { ok: false };
  * monotonic change counter). Writes completing before that instant are
  * always caught; writes after it are post-linearization (a correct
  * point-in-time read). An ABA sequence (commit → checkpoint → wal delete →
- * bytes back at T0) resolves safely: a surviving commit moved main and is
+ * bytes back to T0) resolves safely: a surviving commit moved main and is
  * rejected; bytes truly back at T0 make the copy the current state, so
  * returning it is correct. Failure modes — mkdtemp failure, copy failure,
- * fingerprint drift, undecidable file states — all return `{ ok: false }`;
- * the caller reports the source `unreadable`. No sleep, no timing
- * assumptions: tests inject deterministic races through
- * `painRecallSnapshotTestHooks`.
+ * fingerprint drift, undecidable file states — all return `{ ok: false }`
+ * with a machine-readable `reason`; the caller reports the source
+ * `unreadable`. No sleep, no timing assumptions: tests inject deterministic
+ * races through `painRecallSnapshotTestHooks`.
  */
-function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]): StagedSnapshotOutcome {
+export function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]): StagedWalSnapshot {
   let root: string | null = null;
   let verified = false;
   try {
@@ -480,8 +517,8 @@ function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]):
     const walPath = `${sourceDbPath}-wal`;
     const walFingerprint = fingerprintFile(walPath);
     const walState = classifyWalSidecar(walFingerprint);
-    if (mainFingerprint.state !== 'present') return { ok: false }; // missing/unreadable main
-    if (walState === 'unverifiable') return { ok: false }; // undecidable wal state (P2-1: fail closed)
+    if (mainFingerprint.state !== 'present') return { ok: false, reason: 'main_missing_or_unreadable' }; // missing/unreadable main
+    if (walState === 'unverifiable') return { ok: false, reason: 'wal_state_unverifiable' }; // undecidable wal state (P2-1: fail closed)
     const copyWal = walState === 'active'; // quiet/absent: main alone is complete
 
     const mkdtemp = painRecallSnapshotTestHooks.mkdtempSync ?? fs.mkdtempSync;
@@ -497,9 +534,9 @@ function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]):
 
     // The staged bytes must equal what we fingerprinted — a torn or tampered
     // copy is rejected before it can look like a successful read.
-    if (!fingerprintsMatch(fingerprintFile(stagedMain), mainFingerprint)) return { ok: false };
+    if (!fingerprintsMatch(fingerprintFile(stagedMain), mainFingerprint)) return { ok: false, reason: 'staged_main_copy_mismatch' };
     if (copyWal && !fingerprintsMatch(fingerprintFile(`${stagedMain}-wal`), walFingerprint)) {
-      return { ok: false };
+      return { ok: false, reason: 'staged_wal_copy_mismatch' };
     }
 
     // T1 re-check — ordered as main → wal → main so the pair sampling has a
@@ -514,15 +551,39 @@ function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]):
     // commit landing AFTER r2 is post-linearization — the accepted snapshot
     // is the real database state at r2, which is a correct point-in-time
     // read, not a stale one. (rc-7: no stale state reuse.)
-    if (!fingerprintsMatch(fingerprintFile(sourceDbPath), mainFingerprint)) return { ok: false };
+    if (!fingerprintsMatch(fingerprintFile(sourceDbPath), mainFingerprint)) return { ok: false, reason: 't1_main_drift' };
     painRecallSnapshotTestHooks.afterT1MainFingerprint?.(sourceDbPath);
-    if (!fingerprintsMatch(fingerprintFile(walPath), walFingerprint)) return { ok: false };
-    if (!fingerprintsMatch(fingerprintFile(sourceDbPath), mainFingerprint)) return { ok: false };
+    if (!fingerprintsMatch(fingerprintFile(walPath), walFingerprint)) return { ok: false, reason: 't1_wal_drift' };
+    // `capturedAt` marks the linearization point: the WAL read above. The
+    // trailing main re-read is a checkpoint detector only, so its completion
+    // time is deliberately NOT the snapshot time (SPEC Phase 0 v0.5).
+    const capturedAt = new Date().toISOString();
+    if (!fingerprintsMatch(fingerprintFile(sourceDbPath), mainFingerprint)) return { ok: false, reason: 't1_trailing_main_drift' };
 
     verified = true;
-    return { ok: true, root };
+    const stagedRoot = root;
+    let disposed = false;
+    return {
+      ok: true,
+      root: stagedRoot,
+      stagedDbPath: stagedMain,
+      fingerprint: {
+        mainSha256: mainFingerprint.hash,
+        mainSize: mainFingerprint.size,
+        walState: copyWal ? 'active' : (walState === 'quiet' ? 'quiet' : 'absent'),
+        ...(copyWal && walFingerprint.state === 'present'
+          ? { walSha256: walFingerprint.hash, walSize: walFingerprint.size }
+          : {}),
+      },
+      capturedAt,
+      dispose: () => {
+        if (disposed) return;
+        disposed = true;
+        removeStagingRoot(stagedRoot);
+      },
+    };
   } catch {
-    return { ok: false };
+    return { ok: false, reason: 'staging_error' };
   } finally {
     if (root !== null && !verified) removeStagingRoot(root);
   }
@@ -566,7 +627,7 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery, 
   //    WAL-mode databases are read through a fingerprint-verified staged
   //    snapshot so nothing in the workspace is opened, created, or modified
   //    (see WAL safety note atop this module).
-  const stagedRoots: string[] = [];
+  const stagedDisposers: (() => void)[] = [];
   const stateDbPath = resolveStateDbPath(workspaceDir);
   let stateDb: SourceAvailability = 'ok';
   let manager: RuntimeStateManager | null = null;
@@ -582,7 +643,7 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery, 
       if (!staged.ok) {
         stateDb = 'unreadable';
       } else {
-        stagedRoots.push(staged.root);
+        stagedDisposers.push(staged.dispose);
         stateDbAccessRoot = staged.root;
       }
     }
@@ -620,9 +681,9 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery, 
         if (plan === 'stage') {
           const staged = stageWalSnapshot(trajectoryDbPath, ['.state', 'trajectory.db']);
           if (!staged.ok) {
-            throw new Error('readonly_precondition_failed: trajectory.db snapshot could not be verified');
+            throw new Error(`readonly_precondition_failed: trajectory.db snapshot could not be verified (${staged.reason})`);
           }
-          stagedRoots.push(staged.root);
+          stagedDisposers.push(staged.dispose);
           trajectoryAccessRoot = staged.root;
         }
       }
@@ -980,8 +1041,8 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery, 
     if (manager !== null) {
       await manager.close().catch(() => undefined);
     }
-    for (const root of stagedRoots) {
-      removeStagingRoot(root);
+    for (const dispose of stagedDisposers) {
+      dispose();
     }
   }
 }
