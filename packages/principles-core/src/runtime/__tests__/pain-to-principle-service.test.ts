@@ -60,7 +60,8 @@ vi.mock('../pain-signal-observability.js', () => ({
 }));
 
 import { PainToPrincipleService } from '../pain-to-principle-service.js';
-import type { PainToPrincipleServiceOptions } from '../pain-to-principle-service.js';
+import type { PainToPrincipleServiceOptions, PainToPrincipleServiceBaseOptions } from '../pain-to-principle-service.js';
+import { denyAllSourceMaterialAuthorization, type SourceMaterialAuthorizationPort } from '../source-material-authorization.js';
 import type { LedgerAdapter } from '../candidate-intake.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -70,8 +71,44 @@ const SUCCEEDED: PainSignalBridgeResult = {
   runId: 'run-001', artifactId: 'art-001', candidateIds: ['c1'], ledgerEntryIds: ['l1'],
 };
 
-function makeOpts(overrides?: Partial<PainToPrincipleServiceOptions>): PainToPrincipleServiceOptions {
-  return { workspaceDir: '/tmp/ws', stateDir: '/tmp/st', ledgerAdapter: {} as LedgerAdapter, isAutoPainSubmissionAuthorized: () => true, ...overrides };
+const EMPTY_TRAJECTORY_READER: TrajectoryTurnReader = {
+  listUserTurnsForSession: () => [],
+  listAssistantTurns: () => [],
+};
+
+type ServiceOptionOverrides = Partial<PainToPrincipleServiceBaseOptions> & {
+  trajectoryTurnReader?: TrajectoryTurnReader;
+  sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+};
+
+/**
+ * An explicitly LEGAL option set. The D1 discriminated union
+ * (SPEC-PD-PIPELINE-SPINE-001) requires the two sync-only collaborators on
+ * the synchronous member, so these bridge-level unit tests declare sync mode
+ * with the given collaborators or — by default — the fail-closed deny-all
+ * authorization and an empty reader, exactly the behavior the service had
+ * before D1 made the requirement explicit.
+ */
+function makeOpts(
+  overrides: ServiceOptionOverrides = {},
+  mode: 'sync' | 'async' = 'sync',
+): PainToPrincipleServiceOptions {
+  const { trajectoryTurnReader, sourceMaterialAuthorization, ...rest } = overrides;
+  const base = {
+    workspaceDir: '/tmp/ws',
+    stateDir: '/tmp/st',
+    ledgerAdapter: {} as LedgerAdapter,
+    isAutoPainSubmissionAuthorized: () => true,
+    ...rest,
+  };
+  return mode === 'async'
+    ? { ...base, asyncMode: true, ...(trajectoryTurnReader ? { trajectoryTurnReader } : {}), ...(sourceMaterialAuthorization ? { sourceMaterialAuthorization } : {}) }
+    : {
+      ...base,
+      asyncMode: false,
+      trajectoryTurnReader: trajectoryTurnReader ?? EMPTY_TRAJECTORY_READER,
+      sourceMaterialAuthorization: sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization,
+    };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -307,7 +344,7 @@ describe('PainToPrincipleService async mode — evidence durable-first (P1, §�
     submitPainSignalCalls = 0;
     observabilityCalled = false;
     lastFactoryOpts = null;
-    const service = new PainToPrincipleService(makeOpts({ asyncMode: true }));
+    const service = new PainToPrincipleService(makeOpts({}, 'async'));
     const result = await service.recordPain({
       painId: 'pain-async-1',
       painType: 'user_frustration',
@@ -331,7 +368,7 @@ describe('PainToPrincipleService async mode — evidence durable-first (P1, §�
 
   it('asyncMode: returns failed when the task store cannot write', async () => {
     mockBridgeError = new PDRuntimeError('storage_unavailable', 'disk full');
-    const service = new PainToPrincipleService(makeOpts({ asyncMode: true }));
+    const service = new PainToPrincipleService(makeOpts({}, 'async'));
     const result = await service.recordPain({
       painId: 'pain-async-2', painType: 'user_frustration', source: 'manual',
       reason: 'x', score: 80, sessionId: 'cli', agentId: 'pd-cli',

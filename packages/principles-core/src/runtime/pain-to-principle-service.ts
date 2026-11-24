@@ -20,6 +20,7 @@ import type { EffectivePdConfig } from './config/pd-config-types.js';
 import { resolveDiagnosticianCapability } from './diagnostician-capability.js';
 import type { IntentDocReader } from './intent/intent-doc-reader-port.js';
 import type { TrajectoryTurnReader } from './store/context/trajectory-turn-reader.js';
+import type { SourceMaterialAuthorizationPort } from './source-material-authorization.js';
 import type { TelemetryEvent } from '../telemetry-event.js';
 
 export type FailureCategory =
@@ -39,7 +40,18 @@ export type FailureCategory =
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export interface PainToPrincipleServiceOptions {
+/**
+ * SPEC-PD-PIPELINE-SPINE-001 D1: the options are a discriminated union on
+ * `asyncMode`. Async mode only persists the pending task and may omit the
+ * sync-only collaborators; a synchronous (or possibly-synchronous) entry MUST
+ * inject both `trajectoryTurnReader` and `sourceMaterialAuthorization` at the
+ * type level — before D1 the sync bridge call silently fell back to
+ * `denyAllSourceMaterialAuthorization` and filtered already-authorized
+ * governance material as unauthorized. Unit-test helpers may explicitly pass
+ * `denyAllSourceMaterialAuthorization` or an empty reader; production code
+ * must never let `undefined` slip through the compile-time check.
+ */
+export interface PainToPrincipleServiceBaseOptions {
   workspaceDir: string;
   stateDir: string;
   ledgerAdapter: LedgerAdapter;
@@ -51,15 +63,11 @@ export interface PainToPrincipleServiceOptions {
   effectiveConfig?: EffectivePdConfig;
   /** PRI-306: Env var accessor for readiness checks. Defaults to process.env. */
   getEnvVar?: (name: string) => string | undefined;
-  /** PRI-369: When true, recordPain returns immediately after task creation (status='submitted').
-   *  The diagnosis runs in background via orchestrator wakeOnce/recovery-sweep. */
-  asyncMode?: boolean;
   /**
    * PRI-468: Optional INTENT.md reader for Stage A intent tension check.
    * Plugin layer supplies the concrete I/O adapter; core only consumes the port.
    */
   intentDocReader?: IntentDocReader;
-  trajectoryTurnReader?: TrajectoryTurnReader;
   /**
    * PRI-939 Option A: optional workspace-scoped telemetry sink forwarded to
    * createPainSignalBridge so short-lived CLI processes persist the allowlisted
@@ -76,6 +84,22 @@ export interface PainToPrincipleServiceOptions {
    */
   isAutoPainSubmissionAuthorized?: () => boolean;
 }
+
+export type PainToPrincipleServiceOptions =
+  | (PainToPrincipleServiceBaseOptions & {
+      /** PRI-369: recordPain returns immediately after task creation
+       * (status='submitted'); the diagnosis runs in background via
+       * orchestrator wakeOnce/recovery-sweep. */
+      readonly asyncMode: true;
+      readonly trajectoryTurnReader?: TrajectoryTurnReader;
+      readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+    })
+  | (PainToPrincipleServiceBaseOptions & {
+      /** Synchronous diagnosis: the two collaborators below are REQUIRED. */
+      readonly asyncMode?: false;
+      readonly trajectoryTurnReader: TrajectoryTurnReader;
+      readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
+    });
 
 export interface PainToPrincipleInput {
   painId: string;
@@ -273,65 +297,76 @@ export class PainToPrincipleService {
         };
       }
 
-      const bridge = await createPainSignalBridge({
-        workspaceDir: this.opts.workspaceDir,
-        stateDir: this.opts.stateDir,
-        ledgerAdapter: this.opts.ledgerAdapter,
-        owner: this.opts.owner,
-        autoIntakeEnabled: this.opts.autoIntakeEnabled,
-        effectiveConfig: this.opts.effectiveConfig,
-        getEnvVar: this.opts.getEnvVar,
-        intentDocReader: this.opts.intentDocReader,
-        trajectoryTurnReader: this.opts.trajectoryTurnReader,
-        // PRI-939 Option A: workspace-scoped persistence for allowlisted events.
-        ...(this.opts.telemetrySink ? { telemetrySink: this.opts.telemetrySink } : {}),
-        isAutoPainSubmissionAuthorized: this.opts.isAutoPainSubmissionAuthorized,
-      });
-
-      const bridgeResult = await bridge.onPainDetected(painData);
-
-      let observabilityWarnings: string[] = [];
-      if (input.recordObservability !== false) {
-        const obs = recordPainSignalObservability({
+      let releaseBridge: (() => Promise<void>) | undefined;
+      try {
+        const bridge = await createPainSignalBridge({
           workspaceDir: this.opts.workspaceDir,
           stateDir: this.opts.stateDir,
-          data: painData,
-          canonicalPainId: painId,
-          runtimeTaskId: taskId,
-        });
-        observabilityWarnings = obs.warnings;
+          ledgerAdapter: this.opts.ledgerAdapter,
+          owner: this.opts.owner,
+          autoIntakeEnabled: this.opts.autoIntakeEnabled,
+          effectiveConfig: this.opts.effectiveConfig,
+          getEnvVar: this.opts.getEnvVar,
+          intentDocReader: this.opts.intentDocReader,
+          trajectoryTurnReader: this.opts.trajectoryTurnReader,
+          // SPEC-PD-PIPELINE-SPINE-001 D1: forward the sync entry's
+          // authorization so authorized governance material survives the
+          // bridge's latest-consent gate instead of silently falling back to
+          // deny-all.
+          sourceMaterialAuthorization: this.opts.sourceMaterialAuthorization,
+          // PRI-939 Option A: workspace-scoped persistence for allowlisted events.
+          ...(this.opts.telemetrySink ? { telemetrySink: this.opts.telemetrySink } : {}),
+          isAutoPainSubmissionAuthorized: this.opts.isAutoPainSubmissionAuthorized,
+        }, (release) => { releaseBridge = release; });
+
+        const bridgeResult = await bridge.onPainDetected(painData);
+
+        let observabilityWarnings: string[] = [];
+        if (input.recordObservability !== false) {
+          const obs = recordPainSignalObservability({
+            workspaceDir: this.opts.workspaceDir,
+            stateDir: this.opts.stateDir,
+            data: painData,
+            canonicalPainId: painId,
+            runtimeTaskId: taskId,
+          });
+          observabilityWarnings = obs.warnings;
+        }
+
+        const latencyMs = Date.now() - startTime;
+
+        return {
+          status: bridgeResult.status,
+          painId: bridgeResult.painId,
+          taskId: bridgeResult.taskId,
+          runId: bridgeResult.runId,
+          artifactId: bridgeResult.artifactId,
+          candidateIds: bridgeResult.candidateIds,
+          ledgerEntryIds: bridgeResult.ledgerEntryIds,
+          admissionResults: bridgeResult.admissionResults,
+          progress: bridgeResult.progress,
+          candidateOutcomes: bridgeResult.candidateOutcomes,
+          message: bridgeResult.message,
+          // PRI-939 Option A: bridge-shaped degradation notes (semantic reuse
+          // evaluation unavailable on a CREATE path) merge ahead of the
+          // observability-write warnings — both are rc-9 signals for the Owner.
+          observabilityWarnings: [
+            ...(bridgeResult.observabilityWarnings ?? []),
+            ...observabilityWarnings,
+          ],
+          // PRI-638 P1-D: classification comes from the bridge result itself —
+          // `capability_disabled` only when DisabledDiagnosticianRunner returned
+          // (errorCategory capability_missing + nextAction). A real persistence /
+          // runtime exception below must keep its own category; the capability
+          // state is context, never an exception-classification override.
+          failureCategory: classifyFromBridge(bridgeResult),
+          ...(bridgeResult.nextAction !== undefined ? { nextAction: bridgeResult.nextAction } : {}),
+          latencyMs,
+        };
+      } finally {
+        await releaseBridge?.();
       }
 
-      const latencyMs = Date.now() - startTime;
-
-      return {
-        status: bridgeResult.status,
-        painId: bridgeResult.painId,
-        taskId: bridgeResult.taskId,
-        runId: bridgeResult.runId,
-        artifactId: bridgeResult.artifactId,
-        candidateIds: bridgeResult.candidateIds,
-        ledgerEntryIds: bridgeResult.ledgerEntryIds,
-        admissionResults: bridgeResult.admissionResults,
-        progress: bridgeResult.progress,
-        candidateOutcomes: bridgeResult.candidateOutcomes,
-        message: bridgeResult.message,
-        // PRI-939 Option A: bridge-shaped degradation notes (semantic reuse
-        // evaluation unavailable on a CREATE path) merge ahead of the
-        // observability-write warnings — both are rc-9 signals for the Owner.
-        observabilityWarnings: [
-          ...(bridgeResult.observabilityWarnings ?? []),
-          ...observabilityWarnings,
-        ],
-        // PRI-638 P1-D: classification comes from the bridge result itself —
-        // `capability_disabled` only when DisabledDiagnosticianRunner returned
-        // (errorCategory capability_missing + nextAction). A real persistence /
-        // runtime exception below must keep its own category; the capability
-        // state is context, never an exception-classification override.
-        failureCategory: classifyFromBridge(bridgeResult),
-        ...(bridgeResult.nextAction !== undefined ? { nextAction: bridgeResult.nextAction } : {}),
-        latencyMs,
-      };
     } catch (err: unknown) {
       const latencyMs = Date.now() - startTime;
       return {

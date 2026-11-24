@@ -61,6 +61,7 @@ function makeBridge(): { bridge: PainSignalBridge; createdTasks: TaskRecord[] } 
   const createdTasks: TaskRecord[] = [];
   const stateManager = {
     getCandidatesByTaskId: async () => candidates,
+    getCandidate: async (candidateId: string) => candidates.find((item) => item.candidateId === candidateId) ?? null,
     getRun: async () => ({ taskId: TASK_ID, executionStatus: 'succeeded', outputPayload: JSON.stringify(OUTPUT) }),
     getArtifact: async () => ({ runId: 'run-1', taskId: TASK_ID }),
     getRunsByTask: async () => [],

@@ -37,7 +37,12 @@ import {
   DEFAULT_PAIN_SCORE,
 } from '@principles/core/runtime';
 import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation, PainEvidenceBundle } from '@principles/core/runtime';
-import { createHostIntentDocReader, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
+import {
+  createConsentLedgerSourceMaterialAuthorization,
+  createGovernanceTrajectoryTurnReader,
+  createHostIntentDocReader,
+  isAutomaticPainSubmissionAuthorized,
+} from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
@@ -449,7 +454,19 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   const asyncFlagEnabled = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
   const asyncMode = asyncFlagEnabled && !opts.wait; // --wait overrides flag to force sync
 
-  const service = new PainToPrincipleService({
+  // SPEC-PD-PIPELINE-SPINE-001 D1: the runtime `asyncMode` boolean cannot be
+  // assigned to the literal-narrowed union directly — construct the two
+  // branches explicitly (no `as` assertion). The SYNC branch carries the two
+  // mandatory collaborators: the workspace consent-ledger authorization and
+  // the governance trajectory reader bound to the SAME authorization
+  // instance (the reference wiring diagnostician-auto-run and the codex
+  // worker already use).
+  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
+  const trajectoryTurnReader = createGovernanceTrajectoryTurnReader({
+    workspaceDir,
+    sourceMaterialAuthorization,
+  });
+  const baseServiceOptions = {
     workspaceDir,
     stateDir,
     ledgerAdapter,
@@ -457,7 +474,6 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     autoIntakeEnabled: true,
     effectiveConfig,
     getEnvVar: (name: string) => process.env[name],
-    asyncMode,
     // PRI-939 Option A: persist allowlisted critical events (reuse gate /
     // evaluation degradation) to <workspace>/.pd/telemetry/critical-events.jsonl.
     telemetrySink: createWorkspaceTelemetryEmitter(workspaceDir),
@@ -469,7 +485,12 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     // SPEC §9.6: lazy Workspace authorization probe for automatic_hook
     // provenance (manual submissions are exempt by provenance, not by flag).
     isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
-  });
+  };
+  const service = new PainToPrincipleService(
+    asyncMode
+      ? { ...baseServiceOptions, asyncMode: true }
+      : { ...baseServiceOptions, asyncMode: false, trajectoryTurnReader, sourceMaterialAuthorization },
+  );
 
   const result = await service.recordPain({
     painId,

@@ -153,38 +153,44 @@ export async function runPendingDiagnosticianOnce(
 
     const stateDir = path.join(options.workspaceDir, '.state');
     try {
-      const bridge = await createPainSignalBridge({
-        workspaceDir: options.workspaceDir,
-        stateDir,
-        ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
-        owner: options.owner ?? DIAGNOSTICIAN_AUTO_RUN_OWNER,
-        effectiveConfig: config.effective,
-        getEnvVar: options.getEnvVar ?? ((name: string) => process.env[name]),
-        // PRI-1233 / SPEC §9.2: the L3 consumer executes admitted tasks, so it
-        // is where Stage A actually runs for governance-admitted pains — the
-        // neutral host reader must ride along or admission would never capture
-        // a snapshot on this path. Flag-off keeps zero filesystem access.
-        intentDocReader: createHostIntentDocReader({ workspaceDir: options.workspaceDir, effectiveConfig: config.effective }),
-        // PRI-1265: the auto-run path sees the bound session's ORIGINAL turns
-        // like every other diagnosis entry.
-        trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir: options.workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(options.workspaceDir) }),
-        // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
-        sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(options.workspaceDir),
-        // SPEC §9.6: lazy probe — a flag revoked between candidate pick and
-        // execution still stops the run at the bridge boundary.
-        isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(options.workspaceDir),
-      });
-      const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
-      if (executed.status === 'failed') {
-        return {
-          served: false,
-          taskId: candidate.taskId,
-          reason: 'execution_failed',
-          ...(executed.message !== undefined ? { message: executed.message.slice(0, 200) } : {}),
-          nextAction: 'Inspect the workspace runtime profile; the task keeps its pending/retry state for the next tick or Console (L2).',
-        };
+      let releaseBridge: (() => Promise<void>) | undefined;
+      try {
+        const bridge = await createPainSignalBridge({
+          workspaceDir: options.workspaceDir,
+          stateDir,
+          ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
+          owner: options.owner ?? DIAGNOSTICIAN_AUTO_RUN_OWNER,
+          effectiveConfig: config.effective,
+          getEnvVar: options.getEnvVar ?? ((name: string) => process.env[name]),
+          // PRI-1233 / SPEC §9.2: the L3 consumer executes admitted tasks, so it
+          // is where Stage A actually runs for governance-admitted pains — the
+          // neutral host reader must ride along or admission would never capture
+          // a snapshot on this path. Flag-off keeps zero filesystem access.
+          intentDocReader: createHostIntentDocReader({ workspaceDir: options.workspaceDir, effectiveConfig: config.effective }),
+          // PRI-1265: the auto-run path sees the bound session's ORIGINAL turns
+          // like every other diagnosis entry.
+          trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir: options.workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(options.workspaceDir) }),
+          // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
+          sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(options.workspaceDir),
+          // SPEC §9.6: lazy probe — a flag revoked between candidate pick and
+          // execution still stops the run at the bridge boundary.
+          isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(options.workspaceDir),
+        }, (release) => { releaseBridge = release; });
+        const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
+        if (executed.status === 'failed') {
+          return {
+            served: false,
+            taskId: candidate.taskId,
+            reason: 'execution_failed',
+            ...(executed.message !== undefined ? { message: executed.message.slice(0, 200) } : {}),
+            nextAction: 'Inspect the workspace runtime profile; the task keeps its pending/retry state for the next tick or Console (L2).',
+          };
+        }
+        return { served: true, taskId: candidate.taskId };
+      } finally {
+        await releaseBridge?.();
       }
-      return { served: true, taskId: candidate.taskId };
+
     } catch (error) {
       // A missing/!invalid runtime profile must not throw out of the timer that
       // hosts us, and must not silently look like "no work" (rc-9).

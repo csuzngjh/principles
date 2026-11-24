@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RuntimeStateManager, SqliteDiagnosticianCommitter } from '@principles/core/runtime';
 import { SqliteConnection } from '@principles/core/runtime';
 import type { DiagnosticianOutputV2 } from '@principles/core/runtime';
@@ -241,6 +241,30 @@ describe('the real pd-cli write gate honours the candidate own diagnosis round',
     const refusal = await enforceFullAdmissionForWrite(manager, candidateId);
     expect(refusal).not.toBeNull();
     expect(refusal?.reason).toContain('candidate_diagnosis_round_unresolved');
+  }, REAL_SQLITE_TIMEOUT_MS);
+
+  it('serializes persisted admission revalidation with the candidate coordination lock', async () => {
+    const { manager, workspaceDir } = await realManager();
+    const candidateId = await seedSplitRound(manager, workspaceDir, { parent: 'gate_p_lock', router: 'gate_r_lock', round: 'r1' });
+    let insideCoordination = false;
+    const coordination = {
+      withCandidateCoordination: async <T>(id: string, operation: () => Promise<T>): Promise<T> => {
+        expect(id).toBe(candidateId);
+        expect(insideCoordination).toBe(false);
+        insideCoordination = true;
+        try { return await operation(); }
+        finally { insideCoordination = false; }
+      },
+    };
+    const append = manager.appendAdmissionEvaluation.bind(manager);
+    const appendSpy = vi.spyOn(manager, 'appendAdmissionEvaluation').mockImplementation(async (...args) => {
+      expect(insideCoordination).toBe(true);
+      return append(...args);
+    });
+
+    expect(await enforceFullAdmissionForWrite(manager, candidateId, { coordination })).toBeNull();
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(insideCoordination).toBe(false);
   }, REAL_SQLITE_TIMEOUT_MS);
 
   it('re-validating twice is idempotent: the same round appends no extra evaluation', async () => {

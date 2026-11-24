@@ -26,10 +26,11 @@ import {
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
 import { evaluateDreamerSeedSuppression } from './candidate-seed-suppression.js';
 import type { DreamerSeedSuppression } from './candidate-seed-suppression.js';
-import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE, MVP_ENABLED_CHANNELS } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
 import { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
+import { validateRecommendationKind } from './store/candidate/recommendation-kind-resolver.js';
 import {
   parsePainIngressV1Payload,
   checkIngressTopLevelConsistency,
@@ -42,6 +43,7 @@ import type { PainIngressV1Payload, PainDeviationAnchor } from './pain-ingress-p
 import type { PainRecoveryDisposition } from './pain-admission-disposition.js';
 import { sanitizeStringUnbounded } from './evidence-sanitizer.js';
 import type { PainAnchor, PainCorrectionEvidence } from './context-payload.js';
+import { deviationAnchorToPainAnchor } from './context-payload.js';
 
 export type { PainProvenance };
 
@@ -164,6 +166,51 @@ export type PainSignalBridgeStatus = 'succeeded' | 'skipped' | 'failed' | 'retri
 export interface NotInternalizableCandidate {
   candidateId: string;
   reason: string;
+}
+
+/**
+ * SPEC-PD-PIPELINE-SPINE-001 D4 (review round 2, P1-2) — the structured
+ * disposition of a candidate refused at the automatic seed gate because its
+ * RAW persisted recommendation kind is invalid or missing.
+ *
+ *   reason        — the stable refusal code (outcome + telemetry + lastFailure)
+ *   blockedReason — the bounded blocker persisted with the saved
+ *                   `awaiting_owner` processing state
+ * Module-private on purpose: the runtime barrel surface is frozen
+ * (PRI-775), and nothing outside this module needs the refusal shape.
+ */
+interface SeedRefusal {
+  readonly reason:
+    | 'candidate_kind_invalid'
+    | 'candidate_kind_recovery_required'
+    | 'admission_document_unreadable'
+    | 'candidate_seed_authority_unavailable'
+    | 'candidate_seed_coordination_failed';
+  readonly blockedReason?: string;
+  readonly nextAction: string;
+}
+
+/**
+ * The refusal for one candidate. The persisted raw kind is untrusted data:
+ * only a bounded copy of it reaches the blocker, never free-form content.
+ */
+function seedRefusalFor(
+  candidate: Pick<CandidateRecord, 'candidateId' | 'rawRecommendationKind'>,
+  workspaceDir?: string,
+): SeedRefusal {
+  const raw = typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : '';
+  const shown = raw.trim().length === 0 ? 'missing' : raw.slice(0, 40);
+  const workspaceArg = workspaceDir === undefined ? '<workspace>' : `"${workspaceDir}"`;
+  return {
+    reason: 'candidate_kind_invalid',
+    blockedReason: `candidate_kind_invalid:${shown}`,
+    nextAction:
+      `The persisted recommendation_kind of candidate ${candidate.candidateId} is invalid (${shown}); no Dreamer task was created. `
+      + 'Restore the intended RAW kind from the source recommendation; do not change it merely to bypass admission. '
+      + 'After verifying a seedable kind (principle | rule | prompt), a registered Owner must explicitly authorize recovery with '
+      + `pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace ${workspaceArg} --reason "<why this repair is safe>" --confirm. `
+      + 'This appends an audit record and returns the candidate to the existing worker backlog; it does not create a Dreamer task. A genuine reuse_pending_owner park is never resumed by this command.',
+  };
 }
 
 /**
@@ -482,7 +529,17 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     provenanceReason: provenanceReason(provenance),
     ...(data.hostKind ? { hostKind: data.hostKind } : {}),
     ...(data.deviationAnchor ? { deviationAnchor: data.deviationAnchor } : {}),
-    ...(data.anchor ? { anchor: data.anchor } : {}),
+    // D2 single-track: the structured anchor wins; when it is absent but a
+    // verified deviation pair is present (historical/non-MCP entries), derive
+    // the canonical anchor from that pair instead of losing it downstream.
+    ...(data.anchor
+      ? { anchor: data.anchor }
+      : (data.deviationAnchor !== undefined
+          ? (() => {
+              const derived = deviationAnchorToPainAnchor(data.deviationAnchor);
+              return derived !== undefined ? { anchor: derived } : {};
+            })()
+          : {})),
     evidence: data.evidence ?? [],
     workspaceDir: workspaceDir ?? null,
     // PRI-844: the Owner's verbatim correction rides as its own top-level
@@ -925,6 +982,15 @@ export class PainSignalBridge {
   private readonly workspaceDir: string | undefined;
   private readonly eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
   private readonly ownedResources: readonly { close: () => void | Promise<void> }[];
+  /** Bridge-level operations in flight (see trackOperation / disposeWhenIdle). */
+  private activeOperations = 0;
+  // Each scoped factory caller owns its own idempotent release closure.
+  private outstandingFactoryBorrows = 0;
+  private disposeRequested = false;
+  private disposed = false;
+  private closePromise: Promise<void> | undefined;
+  private retirementPromise: Promise<boolean> | undefined;
+  private notifyIdle: (() => void) | undefined;
   private readonly capabilityDisabled: PainSignalBridgeOptions['capabilityDisabled'];
   private readonly isAutoPainSubmissionAuthorized: PainSignalBridgeOptions['isAutoPainSubmissionAuthorized'];
 
@@ -938,7 +1004,22 @@ export class PainSignalBridge {
     this.diagnosisPersistenceEnabled = opts.diagnosisPersistenceEnabled ?? false;
     this.fullPipelinePromptSeeds = opts.fullPipelinePromptSeeds ?? false;
     this.workspaceDir = opts.workspaceDir;
-    this.eventEmitter = opts.eventEmitter;
+    // Telemetry is an observer (SPEC-PD-PIPELINE-SPINE-001 review round 2,
+    // P1-2): a throwing sink must never abort post-processing. Uncontained,
+    // the throw left a seeded task unconsumed and the rest of the batch
+    // unprocessed. Normal emissions are unchanged; only the throw is
+    // contained, at the single point where the emitter enters the bridge.
+    this.eventEmitter = opts.eventEmitter === undefined
+      ? undefined
+      : {
+          emitTelemetry: (event: Parameters<NonNullable<PainSignalBridgeOptions['eventEmitter']>['emitTelemetry']>[0]) => {
+            try {
+              opts.eventEmitter?.emitTelemetry(event);
+            } catch {
+              // the sink is broken; the core state writes stay authoritative
+            }
+          },
+        };
     this.ownedResources = opts.ownedResources ?? [];
     this.capabilityDisabled = opts.capabilityDisabled;
     this.isAutoPainSubmissionAuthorized = opts.isAutoPainSubmissionAuthorized;
@@ -995,7 +1076,7 @@ export class PainSignalBridge {
    *     awaiting_owner / exhausted — are skipped and reported, not rescanned);
    *   - read/CLI paths never call this; only the worker continuation does.
    */
-  async resumeSucceededDiagnosisPostProcessing(input: { taskId: string }): Promise<{
+  private async resumeSucceededDiagnosisPostProcessingInner(input: { taskId: string }): Promise<{
     status: 'resumed' | 'not_applicable' | 'blocked';
     reason?: string;
     nextAction?: string;
@@ -1028,25 +1109,29 @@ export class PainSignalBridge {
       const blockedAt = new Date().toISOString();
       for (const candidate of candidates) {
         try {
-          await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, {
-            evaluationId: `ae_blocked_${fingerprintMaterial([candidate.candidateId, reentry.errorCode]).slice(0, 16)}`,
-            decision: 'needs_evidence',
-            reason: `diagnostic_material_unusable:${reentry.errorCode}`,
-            nextAction: 'repair or re-run the diagnosis via the supported CLI command; the candidate resumes automatically afterwards',
-            evaluatedAt: blockedAt,
-            policyVersion: ADMISSION_POLICY_VERSION,
-            provenance: 'automatic_hook',
-            inputEvidenceCount: 0,
-            ownerStatementPresent: false,
-            recommendationKind: candidate.rawRecommendationKind,
-            confidence: null,
-            materialFingerprint: fingerprintMaterial(['unusable', reentry.errorCode]),
-            materialSummary: { inputEvidenceCount: 0, outputEvidenceCount: 0, ownerStatementPresent: false },
-          });
-          await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
-            state: 'exhausted',
-            attempts: MAX_POST_PROCESSING_ATTEMPTS,
-            blockedReason: `diagnostic_material_unusable:${reentry.errorCode}`,
+          await this.withCandidateCoordination(candidate.candidateId, async () => {
+            if (await this.automaticProcessingProtected(candidate.candidateId, true)) return;
+            const appended = await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, {
+              evaluationId: `ae_blocked_${fingerprintMaterial([candidate.candidateId, reentry.errorCode]).slice(0, 16)}`,
+              decision: 'needs_evidence',
+              reason: `diagnostic_material_unusable:${reentry.errorCode}`,
+              nextAction: 'repair or re-run the diagnosis via the supported CLI command; the candidate resumes automatically afterwards',
+              evaluatedAt: blockedAt,
+              policyVersion: ADMISSION_POLICY_VERSION,
+              provenance: 'automatic_hook',
+              inputEvidenceCount: 0,
+              ownerStatementPresent: false,
+              recommendationKind: candidate.rawRecommendationKind,
+              confidence: null,
+              materialFingerprint: fingerprintMaterial(['unusable', reentry.errorCode]),
+              materialSummary: { inputEvidenceCount: 0, outputEvidenceCount: 0, ownerStatementPresent: false },
+            });
+            if (appended.status === 'refused') return;
+            await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+              state: 'exhausted',
+              attempts: MAX_POST_PROCESSING_ATTEMPTS,
+              blockedReason: `diagnostic_material_unusable:${reentry.errorCode}`,
+            });
           });
         } catch {
           // persistence of the terminal state itself failed → stay scannable
@@ -1093,6 +1178,9 @@ export class PainSignalBridge {
       }
       const processingState = admission.document?.processing?.state;
       if (processingState === 'complete' || processingState === 'awaiting_owner' || processingState === 'exhausted') {
+        // A raw-kind repair is not itself Owner authorization to resume. Only
+        // the explicit audited recovery transition may move this row from
+        // awaiting_owner to the existing in_progress worker backlog.
         skipped.push({ candidateId: candidate.candidateId, reason: `processing_${processingState}` });
         continue;
       }
@@ -1108,22 +1196,92 @@ export class PainSignalBridge {
       painId: typeof task.inputRef === 'string' && task.inputRef.length > 0 ? task.inputRef : `diagnosis-source:${input.taskId}`,
       provenance: reentry.provenance,
       inputEvidenceCount: reentry.evidenceCount,
+      candidateIds: eligible.map((candidate) => candidate.candidateId),
       ...(reentry.correctionEvidence !== undefined ? { correctionEvidence: reentry.correctionEvidence } : {}),
     });
     return {
       status: 'resumed',
       result,
-      processedCandidateIds: eligible.map((c) => c.candidateId),
+      processedCandidateIds: result.candidateIds,
       skipped,
       remainingCount: 0,
     };
   }
 
   async dispose(): Promise<void> {
-    for (const resource of this.ownedResources) {
-      try { await resource.close(); } catch { /* best-effort cleanup */ }
+    // Direct owners use dispose; the factory retires shared bridges via
+    // disposeWhenIdle. Concurrent close callers share the actual close.
+    this.closePromise ??= (async () => {
+      this.disposed = true;
+      for (const resource of this.ownedResources) {
+        try { await resource.close(); } catch { /* best-effort cleanup */ }
+      }
+      await this.stateManager.close();
+    })();
+    return this.closePromise;
+  }
+
+  /** Acquire a distinct factory borrow; only its owner can release it. */
+  retainFactoryBorrow(): () => Promise<void> {
+    if (this.disposed || this.disposeRequested) throw new Error('Cannot borrow a retired PainSignalBridge');
+    this.outstandingFactoryBorrows += 1;
+    let released = false;
+    return async () => {
+      if (released) return;
+      released = true;
+      this.outstandingFactoryBorrows -= 1;
+      await this.notifyRetirementIfIdle();
+    };
+  }
+
+  private async notifyRetirementIfIdle(): Promise<void> {
+    if (this.activeOperations === 0 && this.outstandingFactoryBorrows === 0 && this.disposeRequested) {
+      const notify = this.notifyIdle;
+      this.notifyIdle = undefined;
+      notify?.();
+      await this.retirementPromise?.catch(() => undefined);
     }
-    await this.stateManager.close();
+  }
+
+  private async trackOperation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.disposed) throw new Error('PainSignalBridge has been disposed');
+    this.activeOperations += 1;
+    try {
+      return await operation();
+    } finally {
+      this.activeOperations -= 1;
+      await this.notifyRetirementIfIdle();
+    }
+  }
+
+  /** Retire once; resolve only after every borrower and operation has drained. */
+  async disposeWhenIdle(): Promise<boolean> {
+    if (this.retirementPromise === undefined) {
+      this.disposeRequested = true;
+      this.retirementPromise = (async () => {
+        if (this.activeOperations > 0 || this.outstandingFactoryBorrows > 0) {
+          await new Promise<void>((resolve) => { this.notifyIdle = resolve; });
+        }
+        await this.dispose();
+        return true;
+      })();
+    }
+    return this.retirementPromise;
+  }
+
+  async resumeSucceededDiagnosisPostProcessing(input: { taskId: string }): ReturnType<PainSignalBridge['resumeSucceededDiagnosisPostProcessingInner']> {
+    return this.trackOperation(() => this.resumeSucceededDiagnosisPostProcessingInner(input));
+  }
+
+  async onPainDetected(data: PainDetectedData): Promise<PainSignalBridgeResult> {
+    return this.trackOperation(() => this.onPainDetectedInner(data));
+  }
+
+  async executePendingDiagnosis(input: {
+    taskId: string;
+    provenance?: PainProvenance;
+  }): Promise<PainSignalBridgeResult> {
+    return this.trackOperation(() => this.executePendingDiagnosisInner(input));
   }
 
   private emitAdmissionEvent(
@@ -1146,10 +1304,10 @@ export class PainSignalBridge {
    * PRI-369: async pain-record CLI — fire-and-forget submission.
    */
   async submitPainSignal(data: PainDetectedData): Promise<{ taskId: string }> {
-    return persistPendingPainSignal(this.stateManager, data, this.workspaceDir);
+    return this.trackOperation(() => persistPendingPainSignal(this.stateManager, data, this.workspaceDir));
   }
 
-  async onPainDetected(data: PainDetectedData): Promise<PainSignalBridgeResult> {
+  private async onPainDetectedInner(data: PainDetectedData): Promise<PainSignalBridgeResult> {
     const { painId } = data;
     const taskId = data.taskId ?? createDiagnosticianTaskId(painId);
     const provenance = data.provenance ?? inferProvenance(data);
@@ -1294,7 +1452,7 @@ export class PainSignalBridge {
    * 'needs_human_review' are skipped: terminal states need explicit
    * Owner/manual action, never silent worker retries.
    */
-  async executePendingDiagnosis(input: {
+  private async executePendingDiagnosisInner(input: {
     taskId: string;
     /**
      * @deprecated PRI-642 SPEC §9: re-entry reads the provenance from the
@@ -1413,13 +1571,53 @@ export class PainSignalBridge {
   }
 
   /** Fire-and-forget processing-domain update that must never break the loop (sync-safe). */
-  private safeUpdateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): void {
-    try {
-      void this.stateManager.updateAdmissionProcessing(candidateId, processing).catch(() => undefined);
-    } catch {
-      // partial state-manager seams (test doubles) may not implement the
-      // processing domain; the primary outcome path stays authoritative
+  /**
+   * Serialize admission writes with Owner decisions and candidate internalize.
+   * Production LedgerAdapter supplies the cross-process candidate lock;
+   * narrow test doubles may omit it and exercise the same state-store path.
+   */
+  private async withCandidateCoordination<T>(candidateId: string, operation: () => Promise<T>): Promise<T> {
+    if (typeof this.ledgerAdapter.withCandidateCoordination === 'function') {
+      return this.ledgerAdapter.withCandidateCoordination(candidateId, operation);
     }
+    return operation();
+  }
+
+  /** Check durable governance inside the same lock as any automatic write. */
+  private async automaticProcessingProtected(candidateId: string, protectAllOwnerParks = false): Promise<boolean> {
+    if (typeof this.stateManager.getAdmissionDocument !== 'function') {
+      // Only narrow legacy test doubles lack the production read seam.
+      return typeof this.ledgerAdapter.withCandidateCoordination === 'function';
+    }
+    const read = await this.stateManager.getAdmissionDocument(candidateId);
+    if (!read.ok) return true;
+    const processing = read.document?.processing;
+    const blocker = processing?.blockedReason ?? '';
+    return pendingOwnerDecision(read.document ?? null) !== null
+      || processing?.state === 'complete'
+      || processing?.state === 'exhausted'
+      || (processing?.state === 'awaiting_owner' && (
+        protectAllOwnerParks || blocker === 'reuse_pending_owner'
+        || blocker.startsWith('candidate_kind_invalid') || blocker.startsWith('candidate_identity_')
+      ));
+  }
+
+  private async safeUpdateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<void> {
+    try {
+      await this.withCandidateCoordination(candidateId, async () => {
+        if (await this.automaticProcessingProtected(candidateId)) return;
+        await this.stateManager.updateAdmissionProcessing(candidateId, processing);
+      });
+    } catch {
+      // Failed coordination or persistence never falls back to an unlocked write.
+    }
+  }
+
+  private async consumeCandidateIfUnblocked(candidateId: string): Promise<void> {
+    await this.withCandidateCoordination(candidateId, async () => {
+      if (await this.automaticProcessingProtected(candidateId)) return;
+      await this.stateManager.updateCandidateStatus(candidateId, { status: 'consumed' });
+    });
   }
 
   /**
@@ -1431,9 +1629,20 @@ export class PainSignalBridge {
    */
   private async recordPostProcessingFailure(candidateId: string, rawReason: string): Promise<void> {
     try {
+      await this.withCandidateCoordination(candidateId, () => this.recordPostProcessingFailureUnderLock(candidateId, rawReason));
+    } catch {
+      // A competing Owner operation or failed lock must not cause an unlocked write.
+    }
+  }
+
+  /** Caller already owns the candidate coordination lock. Never re-enter it. */
+  private async recordPostProcessingFailureUnderLock(candidateId: string, rawReason: string): Promise<void> {
+    try {
       const read = await this.stateManager.getAdmissionDocument(candidateId);
       if (!read.ok) return;
       const current = read.document?.processing;
+      if (current?.state === 'awaiting_owner' || current?.state === 'complete' || current?.state === 'exhausted'
+        || pendingOwnerDecision(read.document ?? null) !== null) return;
       const attempts = (current?.attempts ?? 0) + 1;
       const nowIso = new Date().toISOString();
       const reason = rawReason.slice(0, 300);
@@ -1471,13 +1680,27 @@ export class PainSignalBridge {
     painId: string;
     provenance: PainProvenance;
     inputEvidenceCount?: number;
+    /** Restrict worker continuation to the candidate ids proven eligible by its durable backlog scan. */
+    candidateIds?: readonly string[];
     /** SPEC-CODEX-PAIN-CLOSURE-001 CR-02: the pain's correction evidence, when one was submitted. */
     correctionEvidence?: PainCorrectionEvidence;
   }): Promise<PainSignalBridgeResult> {
+    return this.trackOperation(() => this.onDiagnosisCompleteInner(opts));
+  }
+
+  private async onDiagnosisCompleteInner(opts: Parameters<PainSignalBridge['onDiagnosisComplete']>[0]): Promise<PainSignalBridgeResult> {
     const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0, correctionEvidence } = opts;
     const ownerStatementPresent = isOwnerStatementEvidence(correctionEvidence);
     const statementFingerprint = ownerStatementPresent && correctionEvidence ? fingerprintStatement(correctionEvidence.text) : undefined;
-    const candidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
+    const allCandidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
+    // The post-processing worker has already classified every row in the
+    // batch. Re-read the task's candidates but only admit the exact eligible
+    // ids; otherwise one authorized in_progress candidate could accidentally
+    // pull an awaiting_owner sibling through this batch-wide entry point.
+    const candidateFilter = opts.candidateIds === undefined ? null : new Set(opts.candidateIds);
+    const candidates: CandidateRecord[] = candidateFilter === null
+      ? allCandidates
+      : allCandidates.filter((candidate) => candidateFilter.has(candidate.candidateId));
     const ledgerEntryIds: string[] = [];
 
     if (this.diagnosisPersistenceEnabled && diagnosticianOutput) {
@@ -1573,7 +1796,9 @@ export class PainSignalBridge {
           if (typeof this.stateManager.appendAdmissionEvaluation !== 'function') {
             throw new Error('state_manager_admission_persistence_unavailable');
           }
-          const persisted = await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, evaluation);
+          const persisted = await this.withCandidateCoordination(candidate.candidateId, () =>
+            this.stateManager.appendAdmissionEvaluation(candidate.candidateId, evaluation),
+          );
           if (persisted.status === 'refused') {
             admissionPersistBlocked.add(candidate.candidateId);
             this.eventEmitter?.emitTelemetry({
@@ -1610,6 +1835,11 @@ export class PainSignalBridge {
     // decision — kept OUT of seeding/consumption/completion; the decision
     // lifecycle (Phase B/C re-run) owns their terminal state.
     const ownerDecisionPendingByCandidate = new Set<string>();
+    // SPEC-PD-PIPELINE-SPINE-001 D4 (review round 2, P1-2): candidates whose
+    // RAW persisted kind is invalid or missing — refused at the seed gate
+    // with a SAVED state (see seedRefusalFor); kept OUT of seeding, consumption
+    // and completion.
+    const seedRefusedByCandidate = new Map<string, SeedRefusal>();
     // PRI-939 Option A: auto-path hook outcomes for CREATE dispositions —
     // `unavailable` must reach the Owner's output, not die at the gate.
     const reuseRecommendationByCandidate = new Map<string, ReuseRecommendationOutcome>();
@@ -1624,7 +1854,7 @@ export class PainSignalBridge {
           this.emitAdmissionEvent(candidate.candidateId, admission.admission);
           // CR-03: a non-admitted disposition is a saved, explainable terminal
           // state for this material — the worker must not keep rescanning it.
-          this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+          await this.safeUpdateAdmissionProcessing(candidate.candidateId, {
             state: 'awaiting_owner',
             attempts: 0,
             blockedReason: `${admission.admission.decision}:${admission.admission.reason}`,
@@ -1672,7 +1902,8 @@ export class PainSignalBridge {
           // CR-05 (SPEC §9.1): the succeeded diagnosis with an unfinished
           // intake is an orphan the worker continuation must pick up — record
           // the attempt in the independent processing domain.
-          void this.recordPostProcessingFailure(candidate.candidateId, `intake_failed:${intakeErr instanceof Error ? intakeErr.message : String(intakeErr)}`).catch(() => undefined);
+          await this.recordPostProcessingFailure(candidate.candidateId, `intake_failed:${intakeErr instanceof Error ? intakeErr.message : String(intakeErr)}`);
+          admissionPersistBlocked.add(candidate.candidateId);
           continue;
         }
         // Phase 1 / PR1 (Principle Ledger write boundary): the intake service only
@@ -1719,7 +1950,7 @@ export class PainSignalBridge {
           });
           // CR-05: waiting for the Owner's reuse decision is a saved
           // awaiting-owner state, not a technical retry.
-          this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+          await this.safeUpdateAdmissionProcessing(candidate.candidateId, {
             state: 'awaiting_owner',
             attempts: 0,
             blockedReason: 'reuse_pending_owner',
@@ -1744,169 +1975,312 @@ export class PainSignalBridge {
           continue;
         }
 
-        // Phase 7.2 B2.5 — Dreamer seed suppression. A candidate already
-        // resolved onto an existing principle (Owner reuse decision, INV-R07
-        // replay, or the B1 exact-duplicate guard — all durable via the
-        // ledger's reuseEvidence, i.e. identity basis 'principle_reuse') or
-        // still parked for the Owner (persisted admission processing) has no
-        // information gain from an independent exploration chain. The check
-        // reads PERSISTENT facts, so it holds across restarts, rescans and
-        // this very recovery loop (production anomaly 19aa989d: consumed AND
-        // parked AND seeded).
-        let seedSuppression: DreamerSeedSuppression = { suppress: false };
-        try {
-          const resolveIdentity = this.ledgerAdapter.resolveCandidatePrincipleIdentity;
-          if (typeof resolveIdentity === 'function') {
-            const admissionDoc = await this.stateManager.getAdmissionDocument(candidate.candidateId);
-            const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
-            seedSuppression = evaluateDreamerSeedSuppression({
-              identity: resolveIdentity.call(
-                this.ledgerAdapter,
-                candidate.candidateId,
-                candidate.recommendationKind ?? 'principle',
-              ),
-              processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
-              ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
-            });
-          }
-        } catch (identityErr: unknown) {
-          // Fail-open with visible telemetry: the suppression is a
-          // chain-budget correctness guard, not a safety gate — an unexpected
-          // identity/processing read failure must not block learning (Rule 4
-          // posture), but it must be observable (rc-9). Distinct event type
-          // so it never masks a real seed failure.
+        // An invalid-kind park remains authoritative after the raw row is
+        // repaired. Intake returns this refusal before ledger replay; never
+        // turn a valid-looking current kind into an implicit recovery.
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'candidate_kind_recovery_required') {
+          const refusal: SeedRefusal = {
+            reason: 'candidate_kind_recovery_required',
+            nextAction: `After repairing the persisted RAW kind, run pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${this.workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
+          };
+          seedRefusedByCandidate.set(candidate.candidateId, refusal);
           this.eventEmitter?.emitTelemetry({
-            eventType: 'candidate_seed_suppression_check_failed',
+            eventType: 'candidate_seed_refused',
             traceId: candidate.candidateId,
             timestamp: new Date().toISOString(),
-            payload: { error: `seed-suppression check failed: ${String(identityErr)}` },
+            payload: { candidateId: candidate.candidateId, reason: refusal.reason, nextAction: refusal.nextAction },
           });
+          continue;
         }
-        if (seedSuppression.suppress) {
-          seedSuppressedByCandidate.set(candidate.candidateId, seedSuppression);
-        } else {
-        // Hoisted so the catch can adopt the deterministic seed id when a
-        // concurrent writer won the insert (CodeRabbit PR #2684 #9 follow-up).
-        let seedTaskIdForAdoption: string | null = null;
-        try {
-          const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
-          if (route) {
-            // PRI-539: `ready` reflects only whether the route maps to a channel.
-            // Let computeBridgeDecision() itself decide MVP-disabled so the
-            // not_internalizable reason is accurate ("Channel ... MVP-disabled")
-            // instead of the misleading "not ready — missing required fields".
-            const channel = ROUTE_CHANNEL_MAP[route];
-            const ready = !!channel;
-            const seed = buildDreamerSeedFromCandidate(candidate, {
-              route,
-              ready,
-              sourcePainId: painId,
-              // PRI-720: explicit full-chain override when the Owner switched
-              // prompt_full_pipeline on. Seed-time application — in-flight
-              // chains keep their seeded topology.
-              pipelineMode: this.fullPipelinePromptSeeds ? 'full_chain' : undefined,
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'admission_document_unreadable') {
+          const refusal: SeedRefusal = {
+            reason: 'admission_document_unreadable',
+            nextAction: 'Inspect and repair the persisted admission_json. Automatic Dreamer seeding failed closed; no candidate consumption or processing completion occurred.',
+          };
+          seedRefusedByCandidate.set(candidate.candidateId, refusal);
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'candidate_seed_refused',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: { candidateId: candidate.candidateId, reason: refusal.reason, nextAction: refusal.nextAction },
+          });
+          continue;
+        }
+
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'candidate_changed_during_intake') {
+          seedRefusedByCandidate.set(candidate.candidateId, {
+            reason: 'candidate_seed_authority_unavailable',
+            nextAction: 'Candidate changed during intake. No Dreamer task was created. Inspect the current persisted candidate and retry post-processing.',
+          });
+          await this.recordPostProcessingFailure(candidate.candidateId, 'candidate_changed_during_intake');
+          continue;
+        }
+
+        // Final seed authorization, identity and task creation share the
+        // candidate coordination lock used by Owner reuse and CLI
+        // internalization. Only bounded SQLite/ledger work is performed here;
+        // no LLM or network call is permitted inside this critical section.
+        const seedUnderCandidateLock = async (): Promise<void> => {
+          const currentCandidate = await this.stateManager.getCandidate(candidate.candidateId);
+          if (currentCandidate === null) {
+            seedRefusedByCandidate.set(candidate.candidateId, {
+              reason: 'candidate_seed_authority_unavailable',
+              nextAction: 'Candidate disappeared before Dreamer seeding. Re-run diagnosis after verifying candidate lineage.',
             });
-            if ('decision' in seed) {
-              // Not internalizable — nothing to adopt on a race below.
-              seedTaskIdForAdoption = null;
-            } else {
-              seedTaskIdForAdoption = seed.taskId;
-            }
-            // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
-            if (!('decision' in seed)) {
-              // PRI-720 C6: dedup at candidate level — the demotion may have
-              // changed the derived channel suffix vs a pre-existing chain.
-              const existingTask = await findExistingDreamerTask(
-                (id) => this.stateManager.getTask(id),
-                candidate.candidateId,
-              );
-              if (!existingTask) {
-                await this.stateManager.createTask({
-                  taskId: seed.taskId,
-                  taskKind: seed.taskKind,
-                  inputRef: '',
-                  status: seed.status,
-                  attemptCount: seed.attemptCount,
-                  maxAttempts: seed.maxAttempts,
-                  diagnosticJson: seed.diagnosticJson,
-                });
-                seededTaskByCandidate.set(candidate.candidateId, seed.taskId);
-                this.eventEmitter?.emitTelemetry({
-                  eventType: 'candidate_dreamer_task_seeded',
-                  traceId: candidate.candidateId,
-                  timestamp: new Date().toISOString(),
-                  // rc-9: the full-chain override and the C6 channel demotion
-                  // must both be observable at seed time.
-                  payload: {
-                    taskId: seed.taskId,
-                    channel: seed.channel,
-                    ...(seed.pipelineMode ? { pipelineMode: seed.pipelineMode } : {}),
-                    ...(seed.demotedFromChannel ? { demotedFromChannel: seed.demotedFromChannel } : {}),
-                  },
-                });
-              }
-            } else if (seed.decision === 'not_internalizable') {
-              // PRI-539: surface MVP-disabled candidates instead of silently
-              // marking them consumed (rc-9-no-silent-fallback / ERR-002).
-              notInternalizable.push({ candidateId: candidate.candidateId, reason: seed.reason });
-              this.eventEmitter?.emitTelemetry({
-                eventType: 'candidate_not_internalizable',
-                traceId: candidate.candidateId,
-                timestamp: new Date().toISOString(),
-                payload: { reason: seed.reason, channel: channel ?? null, route },
+            return;
+          }
+
+          const admissionDoc = await this.stateManager.getAdmissionDocument(candidate.candidateId);
+          if (!admissionDoc.ok) {
+            seedRefusedByCandidate.set(candidate.candidateId, {
+              reason: 'admission_document_unreadable',
+              nextAction: 'Inspect and repair the persisted admission_json. No Dreamer task was created.',
+            });
+            return;
+          }
+          const processing = admissionDoc.document?.processing;
+          if (processing?.state === 'awaiting_owner' && processing.blockedReason === 'reuse_pending_owner') {
+            seedSuppressedByCandidate.set(candidate.candidateId, { suppress: true, reason: 'reuse_park_pending_owner' });
+            return;
+          }
+          if (processing?.state === 'awaiting_owner'
+            && typeof processing.blockedReason === 'string'
+            && processing.blockedReason.startsWith('candidate_kind_invalid')
+            && validateRecommendationKind(currentCandidate.rawRecommendationKind) !== null) {
+            seedRefusedByCandidate.set(candidate.candidateId, {
+              reason: 'candidate_kind_recovery_required',
+              nextAction: `After repairing the persisted RAW kind, run pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${this.workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
+            });
+            return;
+          }
+          const pending = pendingOwnerDecision(admissionDoc.document ?? null);
+          if (pending !== null) {
+            ownerDecisionPendingByCandidate.add(candidate.candidateId);
+            return;
+          }
+
+          // Validate the latest persisted RAW kind, not the earlier task
+          // snapshot. The normalized recommendationKind folds invalid values
+          // to 'principle' and is never a write-boundary authority.
+          const rawKind = validateRecommendationKind(currentCandidate.rawRecommendationKind);
+          if (rawKind === null) {
+            const refusal = seedRefusalFor(currentCandidate, this.workspaceDir);
+            seedRefusedByCandidate.set(candidate.candidateId, refusal);
+            // Intake may already have persisted the same invalid-kind park.
+            // Do not replace the original blocker timestamp on replay.
+            const alreadyParked = processing?.state === 'awaiting_owner'
+              && typeof processing.blockedReason === 'string'
+              && processing.blockedReason.startsWith('candidate_kind_invalid');
+            const persisted = alreadyParked || await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+              state: 'awaiting_owner',
+              attempts: processing?.attempts ?? 0,
+              lastFailure: { reason: refusal.reason, nextAction: refusal.nextAction, at: new Date().toISOString() },
+              blockedReason: refusal.blockedReason ?? 'candidate_kind_invalid',
+            });
+            if (!persisted) {
+              seedRefusedByCandidate.set(candidate.candidateId, {
+                reason: 'candidate_seed_authority_unavailable',
+                nextAction: 'The invalid-kind refusal could not be persisted. Do not retry automatically; inspect admission_json and candidate storage.',
               });
             }
-          }
-        } catch (seedErr) {
-          // PR #2684 CodeRabbit #9 follow-up: the dreamer seed id is
-          // DETERMINISTIC (`dreamer-<candidateId>-<channel>`), and the
-          // check-then-insert above is not atomic across connections — a
-          // concurrent writer (e.g. the worker's post-processing resume on a
-          // second bridge instance) can insert the same task between
-          // findExistingDreamerTask and createTask. A UNIQUE violation on
-          // tasks.task_id is therefore the idempotency contract WINNING, not
-          // a seed failure — the same convergence the diagnostician task
-          // creation already applies (Case-B repair). Adopt the existing
-          // seed and continue; only genuine errors degrade.
-          const adoptedSeedTaskId = seedErr instanceof Error
-            && seedTaskIdForAdoption !== null
-            && seedErr.message.includes('UNIQUE constraint failed: tasks.task_id')
-            && (await this.stateManager.getTask(seedTaskIdForAdoption)) !== null
-            ? seedTaskIdForAdoption
-            : null;
-          if (adoptedSeedTaskId !== null) {
-            seededTaskByCandidate.set(candidate.candidateId, adoptedSeedTaskId);
             this.eventEmitter?.emitTelemetry({
-              eventType: 'candidate_dreamer_task_seed_failed',
+              eventType: 'candidate_seed_refused',
               traceId: candidate.candidateId,
               timestamp: new Date().toISOString(),
               payload: {
-                error: String(seedErr),
-                adopted: true,
-                adoptedTaskId: adoptedSeedTaskId,
-                note: 'a concurrent writer created the deterministic seed first; adopted instead of degrading (idempotency contract)',
+                candidateId: candidate.candidateId,
+                reason: refusal.reason,
+                nextAction: refusal.nextAction,
+                rawRecommendationKind: typeof currentCandidate.rawRecommendationKind === 'string'
+                  ? currentCandidate.rawRecommendationKind
+                  : null,
               },
             });
-            // CodeRabbit PR #2684 r2: adopted seeds fall through to the SHARED
-            // consume logic below (seedFailure NOT recorded — the candidate is
-            // healthy, just raced). The previous `continue` skipped the
-            // consumed-status update, stranding the candidate as
-            // processing=complete but NOT consumed.
-          } else {
-            seedFailureCandidateIds.push(candidate.candidateId);
-            this.eventEmitter?.emitTelemetry({
-              eventType: 'candidate_dreamer_task_seed_failed',
-              traceId: candidate.candidateId,
-              timestamp: new Date().toISOString(),
-              payload: { error: String(seedErr) },
-            });
-            // CR-05 (SPEC §9.1): seed failure is a post-processing orphan —
-            // consumed-but-unseeded must stay discoverable by the worker
-            // continuation (never hidden behind the consumed status).
-            void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
+            return;
           }
+
+          let seedSuppression: DreamerSeedSuppression;
+          try {
+            const resolveIdentity = this.ledgerAdapter.resolveCandidatePrincipleIdentity;
+            if (typeof resolveIdentity === 'function') {
+              const identity = resolveIdentity.call(
+                this.ledgerAdapter,
+                candidate.candidateId,
+                currentCandidate.rawRecommendationKind,
+              );
+              seedSuppression = evaluateDreamerSeedSuppression({ identity, processing });
+              // A persisted Owner park takes precedence over identity availability.
+              if (seedSuppression.suppress) {
+                seedSuppressedByCandidate.set(candidate.candidateId, seedSuppression);
+                return;
+              }
+              const identityOptional = identity.status !== 'resolved'
+                && identity.reason === 'missing'
+                && rawKind !== 'principle';
+              if (identity.status !== 'resolved' && !identityOptional) {
+                const nextAction = `Ledger identity is ${identity.reason}; inspect and repair the Principle Ledger or candidate binding before seeding. No Dreamer task was created.`;
+                seedRefusedByCandidate.set(candidate.candidateId, {
+                  reason: 'candidate_seed_authority_unavailable',
+                  nextAction,
+                });
+                if (identity.reason === 'ledger_unavailable') {
+                  // A temporarily unavailable ledger is retryable: persist
+                  // bounded backoff so an old candidate cannot monopolize the
+                  // worker's oldest-first backlog page.
+                  await this.recordPostProcessingFailureUnderLock(candidate.candidateId, 'candidate_seed_authority_unavailable:ledger_unavailable');
+                } else {
+                  // Ambiguous, revoked, corrupt, missing or ineligible
+                  // identities require a human repair. Persist an explicit
+                  // Owner blocker; an in-memory refusal alone would leave the
+                  // candidate eligible at the head of every worker scan.
+                  const persisted = await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+                    state: 'awaiting_owner',
+                    attempts: processing?.attempts ?? 0,
+                    lastFailure: {
+                      reason: 'candidate_seed_authority_unavailable',
+                      nextAction,
+                      at: new Date().toISOString(),
+                    },
+                    blockedReason: `candidate_identity_${identity.reason}`,
+                  });
+                  if (!persisted) {
+                    await this.recordPostProcessingFailureUnderLock(candidate.candidateId, 'candidate_seed_authority_refusal_persistence_failed');
+                  }
+                }
+                this.eventEmitter?.emitTelemetry({
+                  eventType: 'candidate_seed_refused',
+                  traceId: candidate.candidateId,
+                  timestamp: new Date().toISOString(),
+                  payload: { candidateId: candidate.candidateId, reason: 'candidate_seed_authority_unavailable', identityReason: identity.reason, nextAction },
+                });
+                return;
+              }
+            } else {
+              // Test doubles may omit the optional identity capability. The
+              // production file-backed adapter implements it; pending Owner
+              // and invalid-kind parks were checked above from durable state.
+              seedSuppression = { suppress: false };
+            }
+          } catch {
+            seedRefusedByCandidate.set(candidate.candidateId, {
+              reason: 'candidate_seed_authority_unavailable',
+              nextAction: 'The ledger identity or admission state could not be read. Seeding failed closed; inspect the workspace before retrying.',
+            });
+            return;
+          }
+
+          if (seedSuppression.suppress) {
+            seedSuppressedByCandidate.set(candidate.candidateId, seedSuppression);
+          } else {
+            let seedTaskIdForAdoption: string | null = null;
+            try {
+              const route = CANDIDATE_KIND_TO_ROUTE[rawKind];
+              if (route) {
+                const channel = ROUTE_CHANNEL_MAP[route];
+                const ready = !!channel && MVP_ENABLED_CHANNELS.has(channel);
+                const seed = buildDreamerSeedFromCandidate(currentCandidate, {
+                  route,
+                  ready,
+                  sourcePainId: painId,
+                  pipelineMode: this.fullPipelinePromptSeeds ? 'full_chain' : undefined,
+                });
+                // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
+                if (!('decision' in seed)) {
+                  seedTaskIdForAdoption = seed.taskId;
+                  const existingTask = await findExistingDreamerTask(
+                    (id) => this.stateManager.getTask(id),
+                    candidate.candidateId,
+                  );
+                  if (!existingTask) {
+                    await this.stateManager.createTask({
+                      taskId: seed.taskId,
+                      taskKind: seed.taskKind,
+                      inputRef: '',
+                      status: seed.status,
+                      attemptCount: seed.attemptCount,
+                      maxAttempts: seed.maxAttempts,
+                      diagnosticJson: seed.diagnosticJson,
+                    });
+                    seededTaskByCandidate.set(candidate.candidateId, seed.taskId);
+                    this.eventEmitter?.emitTelemetry({
+                      eventType: 'candidate_dreamer_task_seeded',
+                      traceId: candidate.candidateId,
+                      timestamp: new Date().toISOString(),
+                      payload: {
+                        taskId: seed.taskId,
+                        channel: seed.channel,
+                        ...(seed.pipelineMode ? { pipelineMode: seed.pipelineMode } : {}),
+                        ...(seed.demotedFromChannel ? { demotedFromChannel: seed.demotedFromChannel } : {}),
+                      },
+                    });
+                  }
+                } else if (seed.decision === 'not_internalizable') {
+                  notInternalizable.push({ candidateId: candidate.candidateId, reason: seed.reason });
+                  this.eventEmitter?.emitTelemetry({
+                    eventType: 'candidate_not_internalizable',
+                    traceId: candidate.candidateId,
+                    timestamp: new Date().toISOString(),
+                    payload: { reason: seed.reason, channel: channel ?? null, route },
+                  });
+                }
+              }
+            } catch (seedErr) {
+              const adoptedSeedTaskId = seedErr instanceof Error
+                && seedTaskIdForAdoption !== null
+                && seedErr.message.includes('UNIQUE constraint failed: tasks.task_id')
+                && (await this.stateManager.getTask(seedTaskIdForAdoption)) !== null
+                ? seedTaskIdForAdoption
+                : null;
+              if (adoptedSeedTaskId !== null) {
+                seededTaskByCandidate.set(candidate.candidateId, adoptedSeedTaskId);
+                this.eventEmitter?.emitTelemetry({
+                  eventType: 'candidate_dreamer_task_seed_failed',
+                  traceId: candidate.candidateId,
+                  timestamp: new Date().toISOString(),
+                  payload: {
+                    error: String(seedErr),
+                    adopted: true,
+                    adoptedTaskId: adoptedSeedTaskId,
+                    note: 'a concurrent writer created the deterministic seed first; adopted instead of degrading',
+                  },
+                });
+              } else {
+                seedFailureCandidateIds.push(candidate.candidateId);
+                this.eventEmitter?.emitTelemetry({
+                  eventType: 'candidate_dreamer_task_seed_failed',
+                  traceId: candidate.candidateId,
+                  timestamp: new Date().toISOString(),
+                  payload: { error: String(seedErr) },
+                });
+                await this.recordPostProcessingFailureUnderLock(candidate.candidateId, `seed_failed:${String(seedErr)}`);
+              }
+            }
+          }
+        };
+
+        try {
+          const coordinate = this.ledgerAdapter.withCandidateCoordination;
+          if (typeof coordinate === 'function') {
+            await coordinate.call(this.ledgerAdapter, candidate.candidateId, seedUnderCandidateLock);
+          } else {
+            // The LedgerAdapter contract permits this only for test doubles;
+            // production file-backed adapters implement the cross-process lock.
+            await seedUnderCandidateLock();
+          }
+        } catch {
+          seedRefusedByCandidate.set(candidate.candidateId, {
+            reason: 'candidate_seed_coordination_failed',
+            nextAction: 'Candidate coordination lock failed. No unlocked seed fallback was attempted; retry after the competing operation finishes.',
+          });
         }
-        } // end of the !seedSuppression.suppress guard (Phase 7.2 B2.5)
+
+        // Do not consume or complete any candidate whose durable seed
+        // authorization failed or which still awaits an Owner decision.
+        if (seedRefusedByCandidate.has(candidate.candidateId)
+          || ownerDecisionPendingByCandidate.has(candidate.candidateId)) {
+          continue;
+        }
+
 
         // Phase 7.2 B2.5 (CodeRabbit): a candidate suppressed because a
         // persisted reuse PARK is still awaiting the Owner must NOT be
@@ -1918,7 +2292,10 @@ export class PainSignalBridge {
         const suppression = seedSuppressedByCandidate.get(candidate.candidateId);
         const parkedSuppressed = suppression?.suppress === true && suppression.reason === 'reuse_park_pending_owner';
         if (!parkedSuppressed && candidate.status !== 'consumed') {
-          await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
+          // A failed Dreamer seed does not undo a successful Ledger write.
+          // Preserve the established consumed contract, but still re-check
+          // Owner governance under the candidate lock before changing status.
+          await this.consumeCandidateIfUnblocked(candidate.candidateId);
         }
       }
     }
@@ -1940,7 +2317,12 @@ export class PainSignalBridge {
       // Phase 7.2 P1-01: a pending Owner decision keeps its own lifecycle
       // state — Phase C (not this loop) completes the candidate.
       if (ownerDecisionPendingByCandidate.has(candidate.candidateId)) continue;
-      this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+      // D4 (review round 2, P1-2): a seed-refused candidate keeps its saved
+      // `awaiting_owner` state. Marking it `complete` claimed a finished
+      // post-processing that never happened, and the worker then skipped the
+      // candidate forever while it still read as pending.
+      if (seedRefusedByCandidate.has(candidate.candidateId)) continue;
+      await this.safeUpdateAdmissionProcessing(candidate.candidateId, {
         state: 'complete',
         attempts: 0,
         completedAt: new Date().toISOString(),
@@ -1983,6 +2365,16 @@ export class PainSignalBridge {
           outcome.reason = 'dreamer_seed_failed';
           outcome.nextAction = 'Inspect state.db and telemetry; re-run intake.';
         }
+      }
+      // D4 (review round 2, P1-2): the seed refusal is the candidate's outcome
+      // — not the admission's. Without this override the caller saw the
+      // admission's `admitted` + reason and could not tell that the candidate
+      // was refused at the seed gate (rc-9 / EP-03: structured reason + next
+      // action for every refusal).
+      const seedRefused = seedRefusedByCandidate.get(candidate.candidateId);
+      if (seedRefused !== undefined) {
+        outcome.reason = seedRefused.reason;
+        outcome.nextAction = seedRefused.nextAction;
       }
       // PRI-917 v0.3.3 — park override LAST: a Reuse-Review-Gate candidate is
       // neither seed-failed nor not-internalizable; it is deliberately awaiting
@@ -2147,7 +2539,7 @@ export class PainSignalBridge {
         const ledgerEntry = this.ledgerAdapter.existsForCandidate(candidate.candidateId);
         if (ledgerEntry) ledgerEntryIds.push(ledgerEntry.id);
         if (candidate.status !== 'consumed' && ledgerEntry) {
-          await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
+          await this.consumeCandidateIfUnblocked(candidate.candidateId);
         }
         if (candidate.status === 'pending' && !ledgerEntry && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind) && this.intakeService?.reuseReviewEnabled) {
           try {

@@ -29,10 +29,10 @@ import {
 
 let tmpDir = '';
 
+/** Exclusive temp directory: mkdtemp creates it atomically with an
+ * unguessable suffix (never a predictable Date.now/Math.random name). */
 function makeTmpDir(): string {
-  const dir = path.join(os.tmpdir(), `pd-pri435-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri435-'));
 }
 
 function diagnosticianDiagnosticJson(painId: string): string {
@@ -170,6 +170,47 @@ async function seedDiagnosisToCandidateWithoutLineage(
   return { taskId, candidateId: candidate.candidateId };
 }
 
+/**
+ * SPEC-PD-PIPELINE-SPINE-001 D4: `pd candidate internalize` now refuses a
+ * principle candidate that never entered the ledger, so lineage fixtures that
+ * expect a Dreamer task must reflect the normally-INTAKED state — the ledger
+ * records the candidate as the principle's derivation source.
+ */
+function writeLedgerWithDerivedCandidate(stateDir: string, candidateId: string): void {
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(path.join(stateDir, 'principle_training_state.json'), JSON.stringify({
+    trainingStore: {},
+    _tree: {
+      principles: {
+        '22222222-3333-4111-8111-111111111111': {
+          id: '22222222-3333-4111-8111-111111111111',
+          version: 1,
+          text: 'Never write to system paths without owner approval',
+          triggerPattern: '*',
+          action: 'noop',
+          status: 'active',
+          priority: 'medium',
+          scope: 'global',
+          evaluability: 'manual_only',
+          valueScore: 0,
+          adherenceRate: 0,
+          painPreventedCount: 0,
+          derivedFromPainIds: [candidateId],
+          ruleIds: [],
+          conflictsWithPrincipleIds: [],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+      rules: {},
+      implementations: {},
+      metrics: {},
+      ruleCandidateBindings: {},
+      lastUpdated: '2026-11-23T00:00:00.000Z',
+    },
+  }, null, 2));
+}
+
 describe('PRI-435: candidate internalize resolves sourcePainId from diagnostician chain', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
@@ -197,6 +238,8 @@ describe('PRI-435: candidate internalize resolves sourcePainId from diagnosticia
       const seeded = await seedDiagnosisToCandidate(sm, painId);
       candidateId = seeded.candidateId;
       await sm.close();
+      // D4: reflect the normally-intaked state (ledger records derivation).
+      writeLedgerWithDerivedCandidate(path.join(tmpDir, '.state'), candidateId);
     }
 
     // ── Act: run the real CLI handler (not dry-run → creates the task) ──
@@ -258,6 +301,8 @@ describe('PRI-435: candidate internalization backfill (consumed) resolves source
       // the broken state where consumed candidates lack a dreamer task.
       const updated = await sm.updateCandidateStatus(candidateId, { status: 'consumed' });
       if (!updated) throw new Error(`Failed to mark candidate ${candidateId} as consumed`);
+      // D4: reflect the normally-intaked state (ledger records derivation).
+      writeLedgerWithDerivedCandidate(path.join(tmpDir, '.state'), candidateId);
       await sm.close();
     }
 
@@ -546,6 +591,8 @@ describe('candidate internalize resolves the production diag_router candidate ch
     await sm.initialize();
     const painId = 'pain-router-lineage-001';
     const seeded = await seedDiagnosisToCandidate(sm, painId);
+    // D4: reflect the normally-intaked state (ledger records derivation).
+    writeLedgerWithDerivedCandidate(path.join(tmpDir, '.state'), seeded.candidateId);
     const routerTaskId = `diag_router-${seeded.taskId}`;
     await sm.createTask({
       taskId: routerTaskId, taskKind: 'diag_router', status: 'pending',

@@ -668,4 +668,60 @@ describe('CandidateIntakeService', () => {
       expect(mockLedgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
     });
   });
+  it('persists an invalid RAW kind as an awaiting_owner refusal and never consumes or writes the ledger', async () => {
+    const candidate = createCandidate({ rawRecommendationKind: 'wizardry', recommendationKind: 'principle' });
+    vi.spyOn(mockStateManager, 'getCandidate').mockResolvedValue(candidate);
+    vi.spyOn(mockStateManager, 'getAdmissionDocument').mockResolvedValue({ ok: true, document: null } as never);
+    vi.spyOn(mockLedgerAdapter, 'existsForCandidate').mockReturnValue(null);
+    vi.spyOn(mockLedgerAdapter, 'writeProbationEntry').mockImplementation((entry) => entry);
+
+    const result = await service.intake(candidate.candidateId);
+
+    expect(result).toMatchObject({ outcome: 'refused', reason: 'unknown_kind', candidateId: candidate.candidateId });
+    expect(mockStateManager.updateAdmissionProcessing).toHaveBeenCalledWith(candidate.candidateId, expect.objectContaining({
+      state: 'awaiting_owner',
+      blockedReason: 'candidate_kind_invalid:wizardry',
+      lastFailure: expect.objectContaining({ reason: 'candidate_kind_invalid' }),
+    }));
+    expect(mockStateManager.updateCandidateStatus).not.toHaveBeenCalled();
+    expect(mockLedgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-resume a repaired raw kind while the invalid-kind Owner park remains', async () => {
+    const stateManager = createMockStateManager({
+      getAdmissionDocument: vi.fn().mockResolvedValue({
+        ok: true,
+        document: {
+          schemaVersion: 1,
+          evaluations: [],
+          currentEvaluationId: null,
+          processing: { state: 'awaiting_owner', attempts: 0, blockedReason: 'candidate_kind_invalid:wizardry' },
+        },
+      }),
+    });
+    const ledgerAdapter = createMockLedgerAdapter();
+    const gatedService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+
+    const result = await gatedService.intake('test-candidate-001');
+
+    expect(result).toMatchObject({ outcome: 'refused', reason: 'candidate_kind_recovery_required' });
+    expect((stateManager as unknown as { getCandidate: ReturnType<typeof vi.fn> }).getCandidate).not.toHaveBeenCalled();
+    expect(ledgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the admission document cannot be read', async () => {
+    const stateManager = createMockStateManager({
+      getAdmissionDocument: vi.fn().mockResolvedValue({ ok: false, reason: 'admission_json_corrupt' }),
+    });
+    const ledgerAdapter = createMockLedgerAdapter();
+    const gatedService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+
+    const result = await gatedService.intake('test-candidate-001');
+
+    expect(result).toMatchObject({ outcome: 'refused', reason: 'admission_document_unreadable' });
+    expect((stateManager as unknown as { getCandidate: ReturnType<typeof vi.fn> }).getCandidate).not.toHaveBeenCalled();
+    expect(ledgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
+  });
+
+
 });

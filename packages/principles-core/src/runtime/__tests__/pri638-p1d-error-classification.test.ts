@@ -47,6 +47,13 @@ vi.mock('../pain-signal-observability.js', () => ({
 }));
 
 import { PainToPrincipleService } from '../pain-to-principle-service.js';
+import { denyAllSourceMaterialAuthorization } from '../source-material-authorization.js';
+import type { TrajectoryTurnReader } from '../store/context/trajectory-turn-reader.js';
+
+const EMPTY_TRAJECTORY_READER: TrajectoryTurnReader = {
+  listUserTurnsForSession: () => [],
+  listAssistantTurns: () => [],
+};
 
 function makeOpts(): PainToPrincipleServiceOptions {
   return {
@@ -54,6 +61,13 @@ function makeOpts(): PainToPrincipleServiceOptions {
     stateDir: '/tmp/st',
     ledgerAdapter: {} as LedgerAdapter,
     effectiveConfig: undefined,
+    // SPEC-PD-PIPELINE-SPINE-001 D1: the synchronous member of the options
+    // union requires the two collaborators. This file exercises error
+    // classification only, so the fail-closed defaults are made explicit —
+    // the behavior the service had before D1.
+    asyncMode: false,
+    trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
+    sourceMaterialAuthorization: denyAllSourceMaterialAuthorization,
   };
 }
 

@@ -129,7 +129,10 @@ export type LedgerRefusalReason =
   | 'unknown_kind'
   | 'reuse_selected'
   | 'reuse_pending_owner'
-  | 'owner_decision_pending';
+  | 'owner_decision_pending'
+  | 'candidate_kind_recovery_required'
+  | 'admission_document_unreadable'
+  | 'candidate_changed_during_intake';
 
 /**
  * Explicit disposition returned by {@link CandidateIntakeService.intake}.
@@ -437,8 +440,17 @@ export function extractIntakeRecommendation(
    */
 function automaticGateRefusal(
   candidateId: string,
-  context: { ok: boolean; park: boolean; pendingDecision: OwnerDecisionRecord | null },
+  context: { ok: boolean; park: boolean; invalidKindPark: boolean; pendingDecision: OwnerDecisionRecord | null },
 ): CandidateIntakeResult | null {
+  if (!context.ok) {
+    return {
+      outcome: 'refused',
+      reason: 'admission_document_unreadable',
+      candidateId,
+      rawRecommendationKind: null,
+      message: `Candidate ${candidateId} has an unreadable admission document. Automatic intake fails closed: no ledger write or candidate consumption occurred. Inspect and repair the persisted admission_json before retrying.`,
+    };
+  }
   if (context.park) {
     return {
       outcome: 'refused',
@@ -465,6 +477,18 @@ function automaticGateRefusal(
         'The automatic path did not override it — no park, no ledger write, no consumption. The pending decision ' +
         `is resumed by re-running the SAME verdict: pd candidate review --candidate-id ${candidateId} ` +
         `--decide ${context.pendingDecision.decision}${context.pendingDecision.decision === 'reuse' ? ` --principle-id ${context.pendingDecision.selectedPrincipleId}` : ''} --reason "..."`,
+    };
+  }
+  if (context.invalidKindPark) {
+    return {
+      outcome: 'refused',
+      reason: 'candidate_kind_recovery_required',
+      candidateId,
+      rawRecommendationKind: null,
+      message:
+        `Candidate ${candidateId} is still parked because its persisted RAW kind was invalid. Repair the original kind, then obtain explicit Owner authorization with `
+        + `pd candidate resume-post-processing --candidate-id ${candidateId} --reason "<why this repair is safe>" --confirm. `
+        + 'Automatic intake will not lift this park or create a Dreamer task.',
     };
   }
   return null;
@@ -529,14 +553,18 @@ export class CandidateIntakeService {
   async #readAdmissionContext(candidateId: string): Promise<{
     ok: boolean;
     park: boolean;
+    invalidKindPark: boolean;
     pendingDecision: OwnerDecisionRecord | null;
   }> {
     const admission = await this.#stateManager.getAdmissionDocument(candidateId);
-    if (!admission.ok) return { ok: false, park: false, pendingDecision: null };
+    if (!admission.ok) return { ok: false, park: false, invalidKindPark: false, pendingDecision: null };
+    const processing = admission.document?.processing;
     return {
       ok: true,
-      park: admission.document?.processing?.state === 'awaiting_owner'
-        && admission.document.processing.blockedReason === 'reuse_pending_owner',
+      park: processing?.state === 'awaiting_owner' && processing.blockedReason === 'reuse_pending_owner',
+      invalidKindPark: processing?.state === 'awaiting_owner'
+        && typeof processing.blockedReason === 'string'
+        && processing.blockedReason.startsWith('candidate_kind_invalid'),
       pendingDecision: pendingOwnerDecision(admission.document ?? null),
     };
   }
@@ -797,15 +825,78 @@ export class CandidateIntakeService {
       const validatedKind = validateRecommendationKind(candidate.rawRecommendationKind);
       const reason: LedgerRefusalReason = validatedKind === null ? 'unknown_kind' : 'non_principle_kind';
       const rawKind = typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null;
-      return {
-        outcome: 'refused',
-        reason,
-        candidateId,
-        rawRecommendationKind: rawKind,
-        message: reason === 'non_principle_kind'
-          ? `Candidate ${candidateId} has recommendation_kind '${rawKind}' which does not target the Principle Ledger; ledger write refused (existing routing/defer handling preserved).`
-          : `Candidate ${candidateId} has an unrecognized recommendation_kind (${rawKind === null ? 'absent' : `'${rawKind}'`}); Principle Ledger write refused fail-closed.`,
-      };
+      if (validatedKind !== null) {
+        return {
+          outcome: 'refused',
+          reason,
+          candidateId,
+          rawRecommendationKind: rawKind,
+          message: `Candidate ${candidateId} has recommendation_kind '${rawKind}' which does not target the Principle Ledger; ledger write refused (existing routing/defer handling preserved).`,
+        };
+      }
+
+      return this.#runCoordinated(candidateId, async (): Promise<CandidateIntakeResult> => {
+        const current = await this.#stateManager.getCandidate(candidateId);
+        if (current === null) {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.CANDIDATE_NOT_FOUND,
+            `Candidate ${candidateId} not found while saving its invalid-kind refusal`,
+            { candidateId },
+          );
+        }
+        // The saved Owner park outranks a concurrent kind repair. Re-read
+        // governance under the lock before deciding that the row changed.
+        const context = await this.#readAdmissionContext(candidateId);
+        const existingRefusal = automaticGateRefusal(candidateId, context);
+        if (existingRefusal !== null) return existingRefusal;
+        // A concurrent repair between the fast read and this lock is not an
+        // implicit recovery. Ask the caller to retry against the new row.
+        if (validateRecommendationKind(current.rawRecommendationKind) !== null) {
+          return {
+            outcome: 'refused',
+            reason: 'candidate_changed_during_intake',
+            candidateId,
+            rawRecommendationKind: typeof current.rawRecommendationKind === 'string' ? current.rawRecommendationKind : null,
+            message: `Candidate ${candidateId} changed while intake was validating its RAW kind. No ledger write occurred; re-run the command against the current candidate state.`,
+          };
+        }
+
+        const admission = await this.#stateManager.getAdmissionDocument(candidateId);
+        if (!admission.ok) {
+          return {
+            outcome: 'refused',
+            reason: 'admission_document_unreadable',
+            candidateId,
+            rawRecommendationKind: null,
+            message: `Candidate ${candidateId} has an unreadable admission document. Automatic intake fails closed: no ledger write or candidate consumption occurred. Inspect and repair the persisted admission_json before retrying.`,
+          };
+        }
+        const currentRaw = typeof current.rawRecommendationKind === 'string' ? current.rawRecommendationKind : null;
+        const shown = currentRaw === null || currentRaw.trim().length === 0 ? 'missing' : JSON.stringify(currentRaw).slice(1, -1).slice(0, 40);
+        const nextAction = `Repair the persisted RAW kind from the source recommendation, then request explicit Owner authorization: pd candidate resume-post-processing --candidate-id ${candidateId} --workspace "${this.#stateManager.workspaceDir}" --reason "<why this repair is safe>" --confirm.`;
+        const now = new Date().toISOString();
+        const previous = admission.document?.processing;
+        const persisted = await this.#stateManager.updateAdmissionProcessing(candidateId, {
+          state: 'awaiting_owner',
+          attempts: previous?.attempts ?? 0,
+          lastFailure: { reason: 'candidate_kind_invalid', nextAction, at: now },
+          blockedReason: `candidate_kind_invalid:${shown}`,
+        });
+        if (!persisted) {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.LEDGER_WRITE_FAILED,
+            `Candidate ${candidateId} has an invalid RAW kind, but its awaiting_owner refusal could not be persisted. No ledger write occurred.`,
+            { candidateId, reason: 'candidate_kind_refusal_persistence_failed' },
+          );
+        }
+        return {
+          outcome: 'refused',
+          reason: 'unknown_kind',
+          candidateId,
+          rawRecommendationKind: currentRaw,
+          message: `Candidate ${candidateId} has an unrecognized RAW recommendation_kind (${shown}); no ledger write or candidate consumption occurred. ${nextAction}`,
+        };
+      });
     }
 
     // 4. Load artifact (E-04)

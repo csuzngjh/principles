@@ -33,7 +33,7 @@ import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-
 import { buildManualPainObservation, resolveSourceKind } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import type { ProductionPainEnrichment } from '@principles/host-runtime';
-import { isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
+import { createConsentLedgerSourceMaterialAuthorization, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 
 import {
   classifyToolCallOutcome,
@@ -67,6 +67,12 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
     // delegating to safeReadIntentDoc (which owns the flag-first check).
     intentDocReader: createIntentDocReader(wctx.workspaceDir, resolveIntentLang(wctx.workspaceDir)),
     trajectoryTurnReader,
+    // SPEC-PD-PIPELINE-SPINE-001 D1: the sync diagnosis must run against the
+    // workspace's LATEST source-material consent — without this the bridge
+    // falls back to deny-all and filters authorized governance material.
+    // (telemetrySink consolidation belongs to Phase 2A's
+    // resolveWorkspacePipelineHostDeps, not this fix.)
+    sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(wctx.workspaceDir),
     // SPEC §9.6: lazy per-call probe — Owner revocation takes effect on the
     // very next submission/execution attempt, even on cached bridges.
     isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(wctx.workspaceDir),
