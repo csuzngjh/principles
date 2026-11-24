@@ -563,6 +563,7 @@ describe('P2-2 — diagnose guidance classifies every candidate and suggests onl
       expect(nextAction).not.toContain(`pd candidate intake --candidate-id ${refused}`);
     }
     expect(nextAction).not.toContain('No candidates were generated');
+    expect(nextAction).toContain('\n\n');
     // an admission refusal keeps the PRI-1222 exit-code contract
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
@@ -639,8 +640,11 @@ describe('P2-2 — diagnose guidance classifies every candidate and suggests onl
 
     const nextAction = String(output.nextAction);
     // a principle candidate is outside the ledger under --no-intake: intake FIRST
-    expect(nextAction).toContain('pd candidate intake --candidate-id c-principle --workspace "/tmp/fake-workspace"');
-    expect(nextAction).not.toContain('pd candidate internalize --candidate-id c-principle');
+    const intakeIndex = nextAction.indexOf('pd candidate intake --candidate-id c-principle --workspace "/tmp/fake-workspace"');
+    const internalizeIndex = nextAction.indexOf('pd candidate internalize --candidate-id c-principle --workspace "/tmp/fake-workspace"');
+    expect(intakeIndex).toBeGreaterThanOrEqual(0);
+    expect(internalizeIndex).toBeGreaterThan(intakeIndex);
+    expect(nextAction).toContain('Intake writes the ledger only; it does NOT start Dreamer');
     // intake answers non_principle_kind for a rule candidate: internalize is the valid step
     expect(nextAction).toContain('pd candidate internalize --candidate-id c-rule --workspace "/tmp/fake-workspace"');
     expect(nextAction).not.toContain('pd candidate intake --candidate-id c-rule');
@@ -699,4 +703,32 @@ describe('P2-2 — diagnose guidance classifies every candidate and suggests onl
     expect(tty).toContain('dreamer seeded');
     expect(tty).not.toContain('has NOT started automatically');
   });
+  it('invalid RAW kind outranks storage retry and never receives intake/internalize; retry command follows principle vs rule', async () => {
+    const guidance = await import('../../src/commands/intake-outcome-guidance.js');
+    const result = guidance.buildIntakeOutcomeGuidance({
+      workspaceDir: '/tmp/fake-workspace',
+      intakeEnabled: true,
+      candidates: [
+        { candidateId: 'c-invalid', rawRecommendationKind: 'wizardry' },
+        { candidateId: 'c-principle', rawRecommendationKind: 'principle' },
+        { candidateId: 'c-rule', rawRecommendationKind: 'rule' },
+        { candidateId: 'c-prompt', rawRecommendationKind: 'prompt' },
+      ],
+      intakeResults: [
+        { candidateId: 'c-invalid', status: 'intake_failed', nextAction: 'storage retry' },
+        { candidateId: 'c-invalid', status: 'refused', nextAction: 'repair raw kind' },
+        { candidateId: 'c-principle', status: 'intake_failed' },
+        { candidateId: 'c-rule', status: 'intake_failed' },
+        { candidateId: 'c-prompt', status: 'intake_failed' },
+      ],
+    });
+    expect(result.byClass.seed_refused).toEqual(['c-invalid']);
+    expect(result.byClass.intake_failed).toEqual(['c-principle', 'c-rule', 'c-prompt']);
+    expect(result.nextAction).not.toContain('pd candidate intake --candidate-id c-invalid');
+    expect(result.nextAction).not.toContain('pd candidate internalize --candidate-id c-invalid');
+    expect(result.nextAction).toContain('pd candidate intake --candidate-id c-principle');
+    expect(result.nextAction).toContain('pd candidate internalize --candidate-id c-rule');
+    expect(result.nextAction).toContain('pd candidate internalize --candidate-id c-prompt');
+  });
+
 });

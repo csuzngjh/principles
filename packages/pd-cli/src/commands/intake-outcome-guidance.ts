@@ -128,6 +128,10 @@ export function classifyIntakeOutcome(
 ): IntakeOutcomeClass {
   const own = records.filter((record) => record.candidateId === candidate.candidateId);
   const hasStatus = (status: string): boolean => own.some((record) => record.status === status);
+  // Invalid RAW kind is a data blocker, never an Owner park or a retryable
+  // intake failure. Do not offer either command even if storage also failed.
+  const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
+  if (rawKind === null) return 'seed_refused';
   // Ordered by the strength of the recorded fact: an Owner-facing outcome
   // (parked / suppressed / admission-refused) outranks the seed result.
   if (hasStatus('review_required')) return 'parked';
@@ -137,7 +141,6 @@ export function classifyIntakeOutcome(
   if (hasStatus('dreamer_seed_failed')) return 'seed_failed';
   if (hasStatus('intake_failed')) return 'intake_failed';
   if (hasStatus('refused')) return 'seed_refused';
-  const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
   return nextStepFor(rawKind, intakeEnabled);
 }
 
@@ -176,9 +179,14 @@ export function buildIntakeOutcomeGuidance(args: {
     manualSteps.push({ title: 'To begin internalization:', commands });
   }
   if (count('intake_first') > 0) {
-    const commands = ids('intake_first').map((id) => intakeCommand(id, workspaceDir));
-    sections.push(`--no-intake was set: ${count('intake_first')} principle candidate(s) are not in the ledger yet. To intake first (internalization follows the intake), run:\n  ${commands.join('\n  ')}`);
-    manualSteps.push({ title: 'To intake first (internalization follows the intake):', commands });
+    // Intake only writes the Principle Ledger. It does NOT create a Dreamer
+    // task, so the manual path must show both commands in the right order.
+    const commands = ids('intake_first').flatMap((id) => [
+      intakeCommand(id, workspaceDir),
+      internalizeCommand(id, workspaceDir),
+    ]);
+    sections.push(`--no-intake was set: ${count('intake_first')} principle candidate(s) are not in the ledger yet. Intake writes the ledger only; it does NOT start Dreamer. For each candidate, run intake first and then internalize:\n  ${commands.join('\n  ')}`);
+    manualSteps.push({ title: 'Intake first, then start internalization (intake does not start Dreamer):', commands });
   }
   if (count('parked') > 0) {
     sections.push(`${count('parked')} candidate(s) parked for reuse review (suspected duplicates) — decide before internalizing: ${ids('parked').map(reviewCommand).join('; ')}`);
@@ -196,9 +204,20 @@ export function buildIntakeOutcomeGuidance(args: {
     notes.push(`${count('admission_refused')} candidate(s) were REFUSED by the admission gate — do NOT intake or internalize them.`);
   }
   if (count('intake_failed') > 0) {
-    const commands = ids('intake_failed').map((id) => intakeCommand(id, workspaceDir));
-    sections.push(`${count('intake_failed')} candidate(s) failed intake (storage) — retry: ${commands.join('; ')}`);
-    manualSteps.push({ title: 'Intake failed (storage) — retry:', commands });
+    const commands = ids('intake_failed').flatMap((id) => {
+      const candidate = candidates.find((item) => item.candidateId === id);
+      const rawKind = validateRecommendationKind(candidate?.rawRecommendationKind);
+      if (rawKind === 'principle') return [intakeCommand(id, workspaceDir)];
+      if (rawKind === 'rule' || rawKind === 'prompt') return [internalizeCommand(id, workspaceDir)];
+      return [];
+    });
+    if (commands.length > 0) {
+      sections.push(`${count('intake_failed')} candidate(s) hit a storage failure — after repairing the store, retry the valid command for each RAW kind:\n  ${commands.join('\n  ')}`);
+      manualSteps.push({ title: 'Storage failed — retry the command valid for each RAW kind:', commands });
+    } else {
+      sections.push(`${count('intake_failed')} candidate(s) hit a storage failure but have no valid intake/internalize route; inspect intake.candidates[] and repair the RAW kind or route before retrying.`);
+      notes.push('Storage failure does not make an invalid or non-routable RAW kind eligible for intake/internalize.');
+    }
   }
   if (count('seed_refused') > 0) {
     sections.push(`${count('seed_refused')} candidate(s) were REFUSED (candidate_kind_invalid — the persisted recommendation_kind is not a valid kind; no task was created, and they must not be intaken or internalized): ${ids('seed_refused').join(', ')}`);
@@ -212,7 +231,7 @@ export function buildIntakeOutcomeGuidance(args: {
   return {
     byClass,
     nextAction: sections.length > 0
-      ? sections.join(' ')
+      ? sections.join('\n\n')
       : 'No candidates were generated from this diagnosis.',
     manualSteps,
     notes,
