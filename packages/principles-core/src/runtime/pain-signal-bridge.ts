@@ -200,12 +200,11 @@ function seedRefusalFor(
     reason: 'candidate_kind_invalid',
     blockedReason: `candidate_kind_invalid:${shown}`,
     nextAction:
-      `The persisted recommendation_kind of candidate ${candidate.candidateId} is not a valid kind (${shown}); `
-      + 'no Dreamer task was created and the candidate waits for a manual repair. '
-      + 'Repair the candidate row to a valid kind (principle | rule | prompt | implementation | defer) or re-run the diagnosis, then run '
-      + `pd candidate intake --candidate-id ${candidate.candidateId} --workspace ${workspaceArg} (principle) or `
-      + `pd candidate internalize --candidate-id ${candidate.candidateId} --workspace ${workspaceArg} (rule / prompt); `
-      + 'the workspace worker also resumes a repaired candidate by itself.',
+      `The persisted recommendation_kind of candidate ${candidate.candidateId} is invalid (${shown}); no Dreamer task was created. `
+      + 'Restore the intended RAW kind from the source recommendation; do not change it merely to bypass admission. '
+      + 'After verifying a seedable kind (principle | rule | prompt), a registered Owner must explicitly authorize recovery with '
+      + `pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace ${workspaceArg} --reason "<why this repair is safe>" --confirm. `
+      + 'This appends an audit record and returns the candidate to the existing worker backlog; it does not create a Dreamer task. A genuine reuse_pending_owner park is never resumed by this command.',
   };
 }
 

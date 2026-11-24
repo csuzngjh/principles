@@ -30,6 +30,7 @@ import { RuntimeStateManager, type CandidateRecord } from '../store/runtime-stat
 import { SqliteDiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
 import { CandidateIntakeService } from '../candidate-intake-service.js';
 import { PrincipleTreeLedgerAdapter } from '../adapter/principle-tree-ledger-adapter.js';
+import { buildOwnerDecisionIntent } from '../store/candidate/admission-document.js';
 
 const worlds: World[] = [];
 
@@ -53,16 +54,9 @@ interface World {
   options: { failTelemetry: boolean };
 }
 
-async function createWorld(): Promise<World> {
-  const root = mkdtempSync(join(tmpdir(), 'pri-1291-seed-refusal-'));
-  const workspaceDir = join(root, 'workspace');
-  mkdirSync(workspaceDir, { recursive: true });
-  const stateManager = new RuntimeStateManager({ workspaceDir });
-  await stateManager.initialize();
-  const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') });
-  const telemetry: Record<string, unknown>[] = [];
-  const options = { failTelemetry: false };
-  const bridge = new PainSignalBridge({
+function createBridgeForWorld(world: Pick<World, 'workspaceDir' | 'telemetry' | 'options'>, stateManager: RuntimeStateManager): PainSignalBridge {
+  const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: join(world.workspaceDir, '.state') });
+  return new PainSignalBridge({
     stateManager,
     // the LLM boundary only — never reached by onDiagnosisComplete
     runner: {
@@ -71,18 +65,24 @@ async function createWorld(): Promise<World> {
     intakeService: new CandidateIntakeService({ stateManager, ledgerAdapter }),
     ledgerAdapter,
     autoIntakeEnabled: true,
-    workspaceDir,
+    workspaceDir: world.workspaceDir,
     isAutoPainSubmissionAuthorized: () => true,
     eventEmitter: {
       emitTelemetry: (event: Record<string, unknown>) => {
-        if (options.failTelemetry) throw new Error('telemetry sink down');
-        telemetry.push(event);
+        if (world.options.failTelemetry) throw new Error('telemetry sink down');
+        world.telemetry.push(event);
       },
     },
   });
-  const world: World = { root, workspaceDir, stateManager, bridge, telemetry, options };
-  worlds.push(world);
-  return world;
+}
+
+async function restartWorker(world: World): Promise<void> {
+  await world.bridge.dispose();
+  await world.stateManager.close();
+  const stateManager = new RuntimeStateManager({ workspaceDir: world.workspaceDir });
+  await stateManager.initialize();
+  world.stateManager = stateManager;
+  world.bridge = createBridgeForWorld(world, stateManager);
 }
 
 function diagnosticJson(painId: string): string {
@@ -200,7 +200,8 @@ async function expectSavedRefusal(world: World, candidateId: string, blockedReas
   expect(processing?.blockedReason).toBe(blockedReason);
   const lastFailure = processing?.lastFailure as { reason?: string; nextAction?: string } | undefined;
   expect(lastFailure?.reason).toBe('candidate_kind_invalid');
-  expect(lastFailure?.nextAction).toContain(`pd candidate intake --candidate-id ${candidateId} --workspace "${world.workspaceDir}"`);
+  expect(lastFailure?.nextAction).toContain(`pd candidate resume-post-processing --candidate-id ${candidateId} --workspace "${world.workspaceDir}"`);
+  expect(lastFailure?.nextAction).toContain('--confirm');
   expect(await dreamerTasksFor(world, candidateId)).toEqual([]);
 }
 
@@ -217,7 +218,8 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
     await expectSavedRefusal(world, invalid.candidateId, 'candidate_kind_invalid:wizardry');
     const outcome = outcomeOf(result, invalid.candidateId);
     expect(outcome.reason).toBe('candidate_kind_invalid');
-    expect(outcome.nextAction).toContain('pd candidate intake --candidate-id');
+    expect(outcome.nextAction).toContain('pd candidate resume-post-processing --candidate-id');
+    expect(outcome.nextAction).not.toContain('pd candidate intake --candidate-id');
     const refused = world.telemetry.filter((event) => event.eventType === 'candidate_seed_refused');
     expect(refused).toHaveLength(1);
     expect((refused[0]?.payload as Record<string, unknown>).candidateId).toBe(invalid.candidateId);
@@ -305,7 +307,7 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
     expect(await dreamerTasksFor(world, legal.candidateId)).toHaveLength(1);
   });
 
-  it('manual repair of the raw kind, then the worker continuation resumes the candidate by itself', async () => {
+  it('raw-kind repair alone cannot resume; explicit Owner authorization is audited, idempotent and survives worker restart', async () => {
     const world = await createWorld();
     const { taskId, output, candidates } = await commitDiagnosis(world, 'pain-repair', ['principle']);
     const [candidate] = candidates;
@@ -314,19 +316,58 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
     await runPostProcessing(world, { taskId, output }, 'pain-repair');
     await expectSavedRefusal(world, candidate.candidateId, 'candidate_kind_invalid:wizardry');
 
-    // while the blocker still holds the continuation leaves the candidate alone
+    // A still-invalid raw kind cannot be authorized.
+    const invalidAttempt = await world.stateManager.authorizeInvalidKindPostProcessingRecovery(candidate.candidateId, {
+      ownerId: 'owner-recovery-test', identitySource: 'file', reason: 'Repair raw kind', authorizedAt: new Date().toISOString(),
+    });
+    expect(invalidAttempt).toMatchObject({ status: 'refused', reason: 'candidate_kind_still_invalid' });
+
+    // The worker must not treat a manual raw-kind edit as authorization.
+    setPersistedKind(world, candidate.candidateId, 'principle');
     const stillBlocked = await world.bridge.resumeSucceededDiagnosisPostProcessing({ taskId });
     expect(stillBlocked.status).toBe('not_applicable');
     expect(stillBlocked.skipped?.map((item) => item.reason)).toEqual(['processing_awaiting_owner']);
+    expect(await dreamerTasksFor(world, candidate.candidateId)).toEqual([]);
 
-    // the manual repair: the persisted kind is valid again
-    setPersistedKind(world, candidate.candidateId, 'principle');
+    const authorization = {
+      ownerId: 'owner-recovery-test',
+      identitySource: 'file',
+      reason: 'Restored the intended principle kind from the persisted source recommendation',
+      authorizedAt: new Date().toISOString(),
+    };
+    const authorized = await world.stateManager.authorizeInvalidKindPostProcessingRecovery(candidate.candidateId, authorization);
+    expect(authorized.status).toBe('authorized');
+    if (authorized.status === 'refused') throw new Error(authorized.reason);
+    expect(authorized.document.processing?.state).toBe('in_progress');
+    expect(authorized.recovery).toMatchObject({
+      candidateId: candidate.candidateId,
+      rawRecommendationKind: 'principle',
+      priorBlockedReason: 'candidate_kind_invalid:wizardry',
+      ownerId: 'owner-recovery-test',
+      identitySource: 'file',
+      reason: authorization.reason,
+    });
+    const duplicateAuthorization = await world.stateManager.authorizeInvalidKindPostProcessingRecovery(candidate.candidateId, authorization);
+    expect(duplicateAuthorization.status).toBe('already_authorized');
+    if (duplicateAuthorization.status === 'refused') throw new Error(duplicateAuthorization.reason);
+    expect(duplicateAuthorization.recovery.recoveryId).toBe(authorized.recovery.recoveryId);
+
+    // A new state manager + bridge models a worker process restart. The
+    // authorized in_progress row must be visible in the ordinary backlog.
+    await restartWorker(world);
+    const backlog = await world.stateManager.listDiagnosisPostProcessingBacklog({ limit: 100 });
+    expect(backlog.eligible.some((item) => item.candidateId === candidate.candidateId && item.processingState === 'in_progress')).toBe(true);
+
     const resumed = await world.bridge.resumeSucceededDiagnosisPostProcessing({ taskId });
-
     expect(resumed.status).toBe('resumed');
     expect(resumed.processedCandidateIds).toEqual([candidate.candidateId]);
     expect((await candidateOf(world, candidate.candidateId)).status).toBe('consumed');
     expect((await processingOf(world, candidate.candidateId))?.state).toBe('complete');
+    expect((await world.stateManager.getAdmissionDocument(candidate.candidateId)).ok && (await world.stateManager.getAdmissionDocument(candidate.candidateId) as {ok:true;document:any}).document?.postProcessingRecoveries).toHaveLength(1);
+    expect(await dreamerTasksFor(world, candidate.candidateId)).toHaveLength(1);
+
+    const replay = await world.bridge.resumeSucceededDiagnosisPostProcessing({ taskId });
+    expect(replay.status).toBe('not_applicable');
     expect(await dreamerTasksFor(world, candidate.candidateId)).toHaveLength(1);
   });
 
@@ -345,4 +386,54 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
     expect(await dreamerTasksFor(world, legal.candidateId)).toHaveLength(1);
     expect(outcomeOf(result, toRefuse.candidateId).reason).toBe('candidate_kind_invalid');
   });
+  it('does not recover a genuine reuse_pending_owner park or a candidate with a pending Owner decision', async () => {
+    const world = await createWorld();
+    const { taskId, output, candidates } = await commitDiagnosis(world, 'pain-owner-park', ['principle']);
+    const [candidate] = candidates;
+    if (candidate === undefined) throw new Error('no candidate');
+    setPersistedKind(world, candidate.candidateId, 'wizardry');
+    await runPostProcessing(world, { taskId, output }, 'pain-owner-park');
+    setPersistedKind(world, candidate.candidateId, 'principle');
+
+    const processing = await processingOf(world, candidate.candidateId);
+    if (!processing) throw new Error('missing processing record');
+    const reusePark = await world.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+      ...(processing as { state: 'awaiting_owner'; attempts: number; lastFailure?: { reason: string; nextAction: string; at: string }; blockedReason?: string }),
+      state: 'awaiting_owner',
+      blockedReason: 'reuse_pending_owner',
+    });
+    expect(reusePark).toBe(true);
+    const reuseDenied = await world.stateManager.authorizeInvalidKindPostProcessingRecovery(candidate.candidateId, {
+      ownerId: 'owner-recovery-test', identitySource: 'file', reason: 'try not to resume reuse park', authorizedAt: new Date().toISOString(),
+    });
+    expect(reuseDenied).toMatchObject({ status: 'refused', reason: 'processing_not_blocked_by_invalid_raw_kind' });
+    expect((await world.stateManager.getAdmissionDocument(candidate.candidateId)).ok).toBe(true);
+
+    // Even an invalid-kind blocker is not recoverable while a typed Owner
+    // decision intent is pending.
+    await world.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+      state: 'awaiting_owner',
+      attempts: 0,
+      blockedReason: 'candidate_kind_invalid:wizardry',
+      lastFailure: { reason: 'candidate_kind_invalid', nextAction: 'repair raw kind', at: new Date().toISOString() },
+    });
+    const intent = buildOwnerDecisionIntent({
+      candidateId: candidate.candidateId,
+      decision: 'create',
+      ownerId: 'owner-recovery-test',
+      identitySource: 'file',
+      reason: 'Pending Owner decision must win over recovery',
+    });
+    const recorded = await world.stateManager.recordOwnerDecision(candidate.candidateId, intent);
+    expect(recorded.status).toBe('appended');
+    const pendingDenied = await world.stateManager.authorizeInvalidKindPostProcessingRecovery(candidate.candidateId, {
+      ownerId: 'owner-recovery-test', identitySource: 'file', reason: 'must not bypass pending Owner decision', authorizedAt: new Date().toISOString(),
+    });
+    expect(pendingDenied).toMatchObject({ status: 'refused', reason: 'owner_decision_pending_recovery_forbidden' });
+    const admission = await world.stateManager.getAdmissionDocument(candidate.candidateId);
+    expect(admission.ok && admission.document?.postProcessingRecoveries).toBeUndefined();
+    expect(await dreamerTasksFor(world, candidate.candidateId)).toEqual([]);
+  });
+
+
 });
