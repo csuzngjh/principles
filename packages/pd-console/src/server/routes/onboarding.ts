@@ -184,6 +184,7 @@ async function handleRunDemo(
       {
         stdio: ['pipe', 'pipe', 'pipe'],
         // No shell:true — argv is passed directly to the OS.
+        windowsHide: true,
       },
     );
   } catch (err) {
