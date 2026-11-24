@@ -7,18 +7,6 @@
  */
 import {
   RuntimeStateManager,
-  SqliteHistoryQuery,
-  SqliteContextAssembler,
-  SqliteDiagnosticianCommitter,
-  SqliteTrajectoryLocator,
-  SqliteSourceTraceLocator,
-  SplitDiagnosticianRunner,
-  DiagRootCauseRunner,
-  DiagDistillerRunner,
-  DiagRouterRunner,
-  DefaultDiagRootCauseValidator,
-  DefaultDiagDistillerValidator,
-  type DiagnosticianRunnerLike,
   TestDoubleRuntimeAdapter,
   PDRuntimeError,
   isRuntimeConfigError,
@@ -40,12 +28,14 @@ import {
   pendingOwnerDecision,
   validateRecommendationKind,
   type DreamerSeedSuppression,
+  // SPEC-PD-PIPELINE-SPINE-001 §4.3 (PRI-1292): the ONE cache-free diagnostician
+  // runner assembly shared with the cached-bridge factory and `pd pain retry`.
+  createDiagnosticianRunnerBundle,
 } from '@principles/core/runtime';
-import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
-import { createGovernanceTrajectoryTurnReader, createConsentLedgerSourceMaterialAuthorization, createHostIntentDocReader } from '@principles/host-runtime';
+import type { PDRuntimeAdapter } from '@principles/core/runtime';
+import { resolveWorkspacePipelineHostDeps } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
-import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, resolveDiagnosticianCapability } from '@principles/core/runtime';
 import { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from '../services/runtime-adapter-resolver.js';
@@ -385,28 +375,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
   try {
     await stateManager.initialize();
-
-    // Build context assembler from internal stores
-    const sqliteConn = stateManager.connection;
-    const {taskStore} = stateManager;
-    const {runStore} = stateManager;
-    const historyQuery = new SqliteHistoryQuery(sqliteConn);
-    const trajectoryLocator = new SqliteTrajectoryLocator(sqliteConn);
-    const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
-    // PRI-1265: inject the authorized trajectory reader so a bound session
-    // with stored turns gets its ORIGINAL text in the diagnosis context window
-    // (same adapter the OpenClaw hook path uses, over the workspace's own
-    // consent-tiered governance store).
-    // PRI-1283 R2: one port per command invocation; every consumption
-    // surface below (assembler + all three stage runners) shares it.
-    const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
-    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {
-      sourceTraceLocator,
-      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization }),
-      // PRI-1283 R2: latest-consent gate — governance-sourced evidence and
-      // conversation material are filtered at assembly time.
-      sourceMaterialAuthorization,
-    });
+    // SPEC-PD-PIPELINE-SPINE-001 §4.2/§4.3 (PRI-1292 Phase 2A): the runner
+    // chain and its collaborators are assembled below by the ONE cache-free
+    // bundle; the five host collaborators come from the ONE workspace deps
+    // resolver (the admission gate at :732 reuses the SAME authorization
+    // instance from those deps).
 
     // PRI-939 Option A: workspace-scoped sink — allowlisted critical events
     // (persisted to critical-events.jsonl) must not emit into the bare singleton.
@@ -508,23 +481,6 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       throw err;
     }
 
-    // PRI-1146 P1-01: the split runners emit through the SAME workspace-scoped
-    // sink as the bridge/persistence path — allowlisted critical events (e.g.
-    // diag_router_trusted_context_unavailable) reach critical-events.jsonl
-    // instead of the unsubscribed bare singleton; everything else forwards
-    // upstream unchanged.
-    const eventEmitter = diagnoseTelemetry;
-    const committer = new SqliteDiagnosticianCommitter(sqliteConn);
-
-    // PRI-336: Read outputLanguage from workspace config
-    const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
-    const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
-
-    // PRI-638: implementation selection is gone. The split pipeline is the only
-    // Diagnostician implementation in the tree, so it always runs with its
-    // documented 3-stage budget; `diagnostician_split_pipeline` no longer
-    // selects a runner nor disables capability.
-    const pipelineTimeoutMs = SPLIT_PIPELINE_TOTAL_TIMEOUT_MS;
     // BUG-1 (PRI-442): extract effectiveConfig so ADR-0019 LLM rate-limit
     // degradation (isDegradationEnabled in base-peer-runner) can read the
     // diagnostician_llm_degradation feature flag. Without this, the runners
@@ -551,39 +507,42 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     );
 
     const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
-    const perStageTimeoutMs = pipelineTimeoutMs / 3;
+    // PRI-638: implementation selection is gone. The split pipeline is the only
+    // Diagnostician implementation in the tree, so it always runs with its
+    // documented 3-stage budget; `diagnostician_split_pipeline` no longer
+    // selects a runner nor disables capability.
+    const perStageTimeoutMs = SPLIT_PIPELINE_TOTAL_TIMEOUT_MS / 3;
     // PRI-1146 / SPEC v0.6 §5: the router's trusted canonical principle source.
     // One adapter instance serves both the router exposure and the intake path
     // below (same ledger authority).
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-    const rootCauseRunner = new DiagRootCauseRunner(
-      // PRI-1231 / SPEC §9.2: Stage A reads INTENT.md through the neutral
-      // host reader (same Core semantics as every entry point). A task with
-      // a persisted snapshot keeps using it — the runner never re-reads
-      // INTENT.md for an already-captured task (SPEC §6.6).
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }), sourceMaterialAuthorization },
-      { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-    );
-    const distillerRunner = new DiagDistillerRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), sourceMaterialAuthorization },
-      { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-    );
-    const routerRunner = new DiagRouterRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, trustedPrincipleSource: ledgerAdapter, sourceMaterialAuthorization },
-      { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-    );
 
-    const runner: DiagnosticianRunnerLike = new SplitDiagnosticianRunner({
-      rootCauseRunner,
-      distillerRunner,
-      routerRunner,
-      stateManager,
-      committer,
-      // PRI-1266: the parent run records the ACTUAL runtime — the same
-      // resolved kind the stage runners carry.
+    // SPEC-PD-PIPELINE-SPINE-001 §4.2/§4.3 (PRI-1292 Phase 2A): the ~100-line
+    // hand-rolled Diag*Runner + SplitDiagnosticianRunner assembly is replaced
+    // by the ONE cache-free bundle the cached-bridge factory uses. The five
+    // host collaborators come from the ONE workspace deps resolver — the
+    // admission gate below reuses the SAME authorization instance.
+    // PRI-1146 P1-01: the split runners emit through the SAME workspace-scoped
+    // sink as the bridge/persistence path. This command owns stateManager
+    // (created + initialized above), so the bundle reuses its connection and
+    // dispose() never closes it — the outer finally keeps the original
+    // ownership.
+    const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig });
+    const bundle = await createDiagnosticianRunnerBundle({
+      workspaceDir,
+      ledgerAdapter,
+      owner: 'pd-cli-diagnose',
+      runtimeAdapter,
       runtimeKind: resolvedKind,
-      perStageTimeoutMs,
+      stageTimeoutMs: perStageTimeoutMs,
+      effectiveConfig,
+      stateManager,
+      intentDocReader: hostDeps.intentDocReader,
+      trajectoryTurnReader: hostDeps.trajectoryTurnReader,
+      sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
+      telemetrySink: diagnoseTelemetry,
     });
+    const { runner } = bundle;
 
     if (!opts.json) {
       console.log(`\nRunning diagnostician for task: ${opts.taskId}`);
@@ -729,7 +688,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         // cli-6-output-next-action: refusal result carries admissionBlock.nextAction.
         // SPEC review round-3 P1: the FULL write gate (persisted disposition /
         // re-evaluation), not the confidence/kind-only partial check.
-        const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization, coordination: ledgerAdapter })) ?? checkAdmissionGate(candidate);
+        const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization, coordination: ledgerAdapter })) ?? checkAdmissionGate(candidate);
         if (admissionBlock) {
           intakeFailed = true;
           intakeResults.push({

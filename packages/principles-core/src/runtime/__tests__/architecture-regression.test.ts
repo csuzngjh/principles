@@ -4282,3 +4282,102 @@ describe('SEC-BASE-5: network & config isolation guards', () => {
     ).toBe(true);
   });
 });
+
+// ===========================================================================
+// SPEC-PD-PIPELINE-SPINE-001 §4.2/§4.3 (PRI-1292 Phase 2A) — pipeline-spine
+// assembly wiring guards.
+//
+// A new entry must not re-introduce hand-rolled host collaborator assembly
+// (the drift that produced PRI-1230/1233, PRI-1265 and D1), and the cache-free
+// runner bundle must stay free of bridgeCache contact so the CLI override
+// paths (--runtime test-double / --no-intake, pain-retry dead-letter) can
+// never pollute or be swallowed by the process-level cache.
+// ===========================================================================
+describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2A: pipeline-spine assembly wiring', () => {
+  const REPO_ROOT = pathSync.resolve(__dirname, '../../../../..');
+
+  function readProductionSource(relFromPackages: string): string {
+    return fsSync.readFileSync(pathSync.join(REPO_ROOT, 'packages', relFromPackages), 'utf8');
+  }
+
+  const MUST_USE_HOST_DEPS_RESOLVER = [
+    // The eight migrated production assembly points (per real call sites).
+    'pd-cli/src/commands/pain-record.ts',
+    'openclaw-plugin/src/hooks/pain.ts',
+    'openclaw-plugin/src/commands/pain.ts',
+    'openclaw-plugin/src/core/pain-service.ts',
+    'host-runtime/src/diagnostician-auto-run.ts',
+    'codex-adapter/src/worker/workspace-worker.ts',
+    'workbuddy-adapter/src/worker/workspace-worker.ts',
+    'pd-cli/src/commands/diagnose.ts',
+    'pd-cli/src/commands/pain-retry.ts',
+  ] as const;
+
+  it('every migrated pipeline entry assembles collaborators via resolveWorkspacePipelineHostDeps', () => {
+    const missing = MUST_USE_HOST_DEPS_RESOLVER.filter((rel) => {
+      let src: string;
+      try {
+        src = readProductionSource(rel);
+      } catch {
+        return true;
+      }
+      return !src.includes('resolveWorkspacePipelineHostDeps');
+    });
+    expect(
+      missing,
+      `files that must call resolveWorkspacePipelineHostDeps but no longer do: ${missing.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('the codex/workbuddy workers and the auto-run no longer create per-call inline collaborators', () => {
+    // The three host-runtime-consuming diagnostician entries previously built
+    // their own createGovernanceTrajectoryTurnReader / createHostIntentDocReader /
+    // isAutomaticPainSubmissionAuthorized closures per call (the double
+    // authorization-instance defect). They must go through the resolver now.
+    // The codex worker may KEEP createConsentLedgerSourceMaterialAuthorization:
+    // its target-evidence reconcile is a separate consumption surface that
+    // still constructs the port directly.
+    for (const rel of [
+      'host-runtime/src/diagnostician-auto-run.ts',
+      'workbuddy-adapter/src/worker/workspace-worker.ts',
+      'codex-adapter/src/worker/workspace-worker.ts',
+    ] as const) {
+      const src = readProductionSource(rel);
+      expect(
+        src.includes('createGovernanceTrajectoryTurnReader') || src.includes('createHostIntentDocReader'),
+        `${rel} still hand-assembles trajectory/intent collaborators instead of resolveWorkspacePipelineHostDeps`,
+      ).toBe(false);
+    }
+  });
+
+  it('createDiagnosticianRunnerBundle never touches bridgeCache', () => {
+    // SPEC §4.4: the bundle is the cache-free assembly shared by the cached
+    // bridge, `pd diagnose run` and `pd pain retry`. Any bridgeCache contact
+    // would let the CLI override paths pollute the process cache.
+    const factorySrc = readProductionSource('principles-core/src/runtime/pain-signal-runtime-factory.ts');
+    const bundleStart = factorySrc.indexOf('export async function createDiagnosticianRunnerBundle');
+    expect(bundleStart, 'bundle factory must exist in pain-signal-runtime-factory.ts').toBeGreaterThan(-1);
+    const bundleEnd = factorySrc.indexOf('async function constructBridge', bundleStart);
+    expect(bundleEnd, 'constructBridge must follow the bundle in the factory file').toBeGreaterThan(bundleStart);
+    const bundleBody = factorySrc.slice(bundleStart, bundleEnd);
+    expect(bundleBody, 'bundle body must not reference bridgeCache').not.toContain('bridgeCache');
+    expect(bundleBody, 'bundle body must not call createPainSignalBridge').not.toContain('createPainSignalBridge');
+  });
+
+  it('the two CLI commands assemble their runners through createDiagnosticianRunnerBundle', () => {
+    for (const rel of [
+      'pd-cli/src/commands/diagnose.ts',
+      'pd-cli/src/commands/pain-retry.ts',
+    ] as const) {
+      const src = readProductionSource(rel);
+      expect(
+        src.includes('createDiagnosticianRunnerBundle'),
+        `${rel} must assemble its diagnostician runner via createDiagnosticianRunnerBundle`,
+      ).toBe(true);
+      expect(
+        /\bnew (DiagRootCause|DiagDistiller|DiagRouter|SplitDiagnostician)Runner\(/.test(src),
+        `${rel} still hand-rolls a Diag*Runner/SplitDiagnosticianRunner instead of the shared bundle`,
+      ).toBe(false);
+    }
+  });
+});

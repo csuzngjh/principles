@@ -121,6 +121,13 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-468: Plugin adapter implementing core IntentDocReader port — pure type
     // mapping from safeReadIntentDoc result to core IntentDocReadResult. No new I/O.
     'intent-doc-reader-adapter.ts',
+    // SPEC-PD-PIPELINE-SPINE-001 §4.2 point 3 (PRI-1292 Phase 2A): the ONE
+    // plugin PainToPrincipleService factory shared by the pain hook and the
+    // /pd pain command. Plugin I/O boundary — binds WorkspaceContext (the
+    // Gateway's in-process trajectory) and loadPdConfigForPlugin to the shared
+    // resolveWorkspacePipelineHostDeps assembly; no new I/O beyond those
+    // bindings.
+    'pain-service.ts',
     // RuleCode safety containment I/O boundary — reads approved scope from
     // state.db and persists circuit isolation through the core safety store.
     'rulecode-safety-circuit.ts',

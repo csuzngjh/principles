@@ -25,15 +25,15 @@ import { createTraceId } from '../utils/trace-id.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { resolveWorkspaceDirForRuntime } from '../utils/workspace-resolver.js';
-import { PainToPrincipleService, PrincipleTreeLedgerAdapter, SqliteConnection, SqliteDeadLetterStore, type PainDetectedData, type TrajectoryTurnReader } from '@principles/core/runtime';
+import { SqliteConnection, SqliteDeadLetterStore, type PainDetectedData } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
-import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
+import { createPluginPainToPrincipleService } from '../core/pain-service.js';
 import { evaluateTriggerController } from '@principles/core/runtime';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
 import { buildManualPainObservation, resolveSourceKind } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import type { ProductionPainEnrichment } from '@principles/host-runtime';
-import { createConsentLedgerSourceMaterialAuthorization, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
+import { isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 
 import {
   classifyToolCallOutcome,
@@ -46,38 +46,10 @@ import {
 import { ingressDecisionForPluginPain } from './pain-ingress-adapter.js';
 
 // ── Service Factory ─────────────────────────────────────────────────────────
-
-function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleService {
-  const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
-  const configResult = loadPdConfigForPlugin(wctx.workspaceDir);
-  const trajectoryTurnReader: TrajectoryTurnReader = {
-    listUserTurnsForSession: (sessionId) => wctx.trajectory.listUserTurnsForSession(sessionId),
-    listAssistantTurns: (sessionId) => wctx.trajectory.listAssistantTurns(sessionId),
-  };
-  return new PainToPrincipleService({
-    workspaceDir: wctx.workspaceDir,
-    stateDir: wctx.stateDir,
-    ledgerAdapter,
-    owner: 'openclaw-plugin',
-    autoIntakeEnabled: true,
-    effectiveConfig: configResult.effective,
-    getEnvVar: (name: string) => process.env[name],
-    // PRI-468: wire INTENT.md reader so Stage A can produce intentTension
-    // when intent_engineering flag is on. Adapter performs no I/O beyond
-    // delegating to safeReadIntentDoc (which owns the flag-first check).
-    intentDocReader: createIntentDocReader(wctx.workspaceDir, resolveIntentLang(wctx.workspaceDir)),
-    trajectoryTurnReader,
-    // SPEC-PD-PIPELINE-SPINE-001 D1: the sync diagnosis must run against the
-    // workspace's LATEST source-material consent — without this the bridge
-    // falls back to deny-all and filters authorized governance material.
-    // (telemetrySink consolidation belongs to Phase 2A's
-    // resolveWorkspacePipelineHostDeps, not this fix.)
-    sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(wctx.workspaceDir),
-    // SPEC §9.6: lazy per-call probe — Owner revocation takes effect on the
-    // very next submission/execution attempt, even on cached bridges.
-    isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(wctx.workspaceDir),
-  });
-}
+// SPEC-PD-PIPELINE-SPINE-001 §4.2 point 3 (PRI-1292 Phase 2A): the hook and
+// the /pd pain command share ONE plugin service factory; the five host
+// collaborators come from resolveWorkspacePipelineHostDeps inside it, with the
+// Gateway's in-process WorkspaceContext.trajectory as the reader override.
 
 // Trajectory evidence acquisition lives in ./trajectory-evidence.ts.
 
@@ -97,7 +69,7 @@ export async function emitPainDetectedEvent(
   if (event.type === 'pain_detected') {
     const painData = event.data as PainDetectedData;
     try {
-      const service = createPainToPrincipleService(wctx);
+      const service = createPluginPainToPrincipleService(wctx);
       const isManual = painData.source === 'manual' || painData.source === 'pain' || painData.source === 'skill:pain';
 
       // PEAT-B2: Record trigger decision for observability

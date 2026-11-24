@@ -33,7 +33,6 @@ import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-commi
 import { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
 import type { TrajectoryTurnReader } from './store/context/trajectory-turn-reader.js';
 import { SqliteHistoryQuery } from './store/history/sqlite-history-query.js';
-import { SqliteConnection } from './store/sqlite-connection.js';
 import { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';
 import { SqliteSourceTraceLocator } from './store/trajectory/sqlite-source-trace-locator.js';
 import { PiAiRuntimeAdapter } from './adapter/pi-ai-runtime-adapter.js';
@@ -817,6 +816,203 @@ export function createBridgeTelemetryEventEmitter(sink?: {
   };
 }
 
+// ── SPEC-PD-PIPELINE-SPINE-001 §4.3 (PRI-1292 Phase 2A) ─────────────────────
+// Cache-free diagnostician runner assembly, extracted IN PLACE from
+// constructBridge so the cached-bridge path, `pd diagnose run` and
+// `pd pain retry` share ONE construction sequence instead of three hand-rolled
+// copies (~100 duplicated lines per CLI). This function never touches
+// `bridgeCache`: the CLI's `--runtime test-double` / `--no-intake` overrides
+// and pain-retry's independent assembly cannot pollute or be swallowed by the
+// process-level cache.
+
+export interface CreateDiagnosticianRunnerBundleOptions {
+  readonly workspaceDir: string;
+  readonly ledgerAdapter: LedgerAdapter;
+  readonly owner: string;
+  readonly runtimeAdapter: PDRuntimeAdapter;
+  /** Resolved runtime kind carried by the stage runners and the parent task. */
+  readonly runtimeKind: string;
+  /** Max wall clock for ONE stage; parent budget derives as 3× (existing contract). */
+  readonly stageTimeoutMs: number;
+  readonly effectiveConfig?: EffectivePdConfig;
+  /**
+   * Externally owned state manager. When provided it MUST already be
+   * initialized; the bundle reuses `stateManager.connection` and `dispose()`
+   * NEVER closes it — the caller's existing finally (CLI) or the wrapping
+   * PainSignalBridge keeps ownership exactly as before.
+   * When omitted, the bundle creates and owns one; `dispose()` closes it and
+   * is idempotent.
+   */
+  readonly stateManager?: RuntimeStateManager;
+  /**
+   * Pass-through collaborators. Absent values keep the stage runners'
+   * existing semantics (intent reader absent → Stage A skips the intent
+   * check; authorization absent → the runners and the assembler fall back to
+   * deny-all). The production cache-free callers (`diagnose.ts`,
+   * `pain-retry.ts`) always provide all three; the cached-bridge factory path
+   * forwards its own optional options verbatim (e.g. post-processing resumes
+   * construct a bridge whose runner never executes).
+   */
+  readonly intentDocReader?: IntentDocReader;
+  readonly trajectoryTurnReader?: TrajectoryTurnReader;
+  readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+  /** Workspace-scoped sink for runner telemetry; absent = storeEmitter singleton. */
+  readonly telemetrySink?: { emitTelemetry: (event: TelemetryEvent) => void };
+}
+
+export interface DiagnosticianRunnerBundle {
+  readonly stateManager: RuntimeStateManager;
+  /** True when the factory created `stateManager` and `dispose()` closes it. */
+  readonly ownsStateManager: boolean;
+  readonly contextAssembler: SqliteContextAssembler;
+  readonly committer: SqliteDiagnosticianCommitter;
+  readonly runner: DiagnosticianRunnerLike;
+  readonly executionTiming: ReturnType<typeof resolveExecutionTiming>;
+  /**
+   * Release bundle-owned resources. Idempotent. With an externally provided
+   * state manager this is a deliberate no-op: the CLI's existing finally
+   * (or the wrapping bridge) closes the connection exactly once.
+   */
+  readonly dispose: () => Promise<void>;
+}
+
+export async function createDiagnosticianRunnerBundle(
+  options: CreateDiagnosticianRunnerBundleOptions,
+): Promise<DiagnosticianRunnerBundle> {
+  const ownsStateManager = options.stateManager === undefined;
+  const stateManager = options.stateManager ?? new RuntimeStateManager({ workspaceDir: options.workspaceDir });
+  let initializedHere = false;
+  try {
+    if (ownsStateManager) {
+      await stateManager.initialize();
+      initializedHere = true;
+    }
+
+    // Single-connection topology (the CLI-proven one): every collaborator
+    // below shares the state manager's connection. There is no second
+    // SqliteConnection to track or mis-close.
+    const { connection } = stateManager;
+    const historyQuery = new SqliteHistoryQuery(connection);
+    const committer = new SqliteDiagnosticianCommitter(connection);
+    const trajectoryLocator = new SqliteTrajectoryLocator(connection);
+    const sourceTraceLocator = new SqliteSourceTraceLocator(stateManager.taskStore, trajectoryLocator);
+
+    const contextAssembler = new SqliteContextAssembler(
+      stateManager.taskStore,
+      historyQuery,
+      stateManager.runStore,
+      {
+        sourceTraceLocator,
+        trajectoryTurnReader: options.trajectoryTurnReader,
+        sourceMaterialAuthorization: options.sourceMaterialAuthorization,
+      },
+    );
+
+    // PRI-336: resolve outputLanguage from the entry-provided effective config
+    // (same resolution authority as the cached-bridge path). Per ERR-002 the
+    // degradation is observable, not a silent fallback.
+    const resolvedLang = resolveOutputLanguage(options.effectiveConfig?.config.principles?.outputLanguage);
+    const outputLanguage: OutputLanguage = resolvedLang.outputLanguage;
+    if (resolvedLang.degradationWarning) {
+      (options.telemetrySink ?? storeEmitter).emitTelemetry({
+        eventType: 'degradation_triggered',
+        traceId: `output-language-config-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        sessionId: '',
+        payload: {
+          component: 'DiagnosticianRunnerBundle',
+          reason: 'invalid_output_language_config',
+          warning: resolvedLang.degradationWarning,
+          fallbackValue: resolvedLang.outputLanguage,
+        },
+      });
+    }
+
+    // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.1: resolve the timing
+    // contract ONCE and hand it to every stage. Parent budget = 3× stage —
+    // identical to the previous factory formula and to the SplitDiagnostician
+    // runner's own default derivation the CLIs relied on.
+    const executionTiming = resolveExecutionTiming({
+      stageTimeoutMs: options.stageTimeoutMs,
+      parentBudgetMs: options.stageTimeoutMs * 3,
+    });
+    const stageRunnerOptions = {
+      owner: options.owner,
+      runtimeKind: options.runtimeKind,
+      outputLanguage,
+      effectiveConfig: options.effectiveConfig,
+      timeoutMs: executionTiming.stageTimeoutMs,
+      leaseTtlMs: executionTiming.leaseTtlMs,
+      heartbeatIntervalMs: executionTiming.heartbeatIntervalMs,
+    };
+    const runnerEventEmitter = options.telemetrySink ?? storeEmitter;
+
+    const rootCauseRunner = new DiagRootCauseRunner(
+      { stateManager, runtimeAdapter: options.runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: options.intentDocReader, sourceMaterialAuthorization: options.sourceMaterialAuthorization },
+      stageRunnerOptions,
+    );
+    const distillerRunner = new DiagDistillerRunner(
+      { stateManager, runtimeAdapter: options.runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), sourceMaterialAuthorization: options.sourceMaterialAuthorization },
+      stageRunnerOptions,
+    );
+    const routerRunner = new DiagRouterRunner(
+      {
+        stateManager, runtimeAdapter: options.runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, committer,
+        // Same structural detection as the cached-bridge path: a narrow
+        // LedgerAdapter double degrades to a typed `source_not_configured`
+        // receipt (observable, never a guessed allowlist).
+        trustedPrincipleSource: isRouterTrustedPrincipleSource(options.ledgerAdapter)
+          ? options.ledgerAdapter
+          : { readTrustedPrinciples: () => ({ status: 'unavailable' as const, reason: 'source_not_configured' as const }) },
+        sourceMaterialAuthorization: options.sourceMaterialAuthorization,
+      },
+      stageRunnerOptions,
+    );
+
+    const runner: DiagnosticianRunnerLike = new SplitDiagnosticianRunner({
+      rootCauseRunner,
+      distillerRunner,
+      routerRunner,
+      stateManager,
+      committer,
+      runtimeKind: options.runtimeKind,
+      perStageTimeoutMs: executionTiming.stageTimeoutMs,
+      parentBudgetMs: executionTiming.parentBudgetMs,
+      leaseTtlMs: executionTiming.leaseTtlMs,
+      heartbeatIntervalMs: executionTiming.heartbeatIntervalMs,
+    });
+
+    let disposed = false;
+    const dispose = async (): Promise<void> => {
+      if (disposed) return;
+      disposed = true;
+      // Externally provided state manager: owned by the caller — never closed
+      // here (no double-close; the CLI finally keeps its original duty).
+      if (ownsStateManager) {
+        await stateManager.close();
+      }
+    };
+
+    return {
+      stateManager,
+      ownsStateManager,
+      contextAssembler,
+      committer,
+      runner,
+      executionTiming,
+      dispose,
+    };
+  } catch (err) {
+    // Construction failure must not leak the manager the bundle created; an
+    // externally provided manager stays untouched (rc-9: the caller still
+    // owns its cleanup).
+    if (initializedHere) {
+      await stateManager.close().catch(() => undefined);
+    }
+    throw err;
+  }
+}
+
 async function constructBridge(
   opts: PainSignalRuntimeFactoryOptions,
   runtimeConfig: RuntimeConfig,
@@ -831,23 +1027,6 @@ async function constructBridge(
 ): Promise<PainSignalBridge> {
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
   await stateManager.initialize();
-
-  const connection = new SqliteConnection(opts.workspaceDir);
-  const historyQuery = new SqliteHistoryQuery(connection);
-  const committer = new SqliteDiagnosticianCommitter(connection);
-  const trajectoryLocator = new SqliteTrajectoryLocator(connection);
-  const sourceTraceLocator = new SqliteSourceTraceLocator(stateManager.taskStore, trajectoryLocator);
-
-  const contextAssembler = new SqliteContextAssembler(
-    stateManager.taskStore,
-    historyQuery,
-    stateManager.runStore,
-    {
-      sourceTraceLocator,
-      trajectoryTurnReader: opts.trajectoryTurnReader,
-      sourceMaterialAuthorization: opts.sourceMaterialAuthorization,
-    },
-  );
 
   // ADR-0029: one adapter, one construction site. validateRuntimeConfig already
   // rejected every other kind before this point.
@@ -864,99 +1043,25 @@ async function constructBridge(
     ...(runtimeConfig.systemPrompt ? { systemPrompt: runtimeConfig.systemPrompt } : {}),
   });
 
-  // PRI-336: Resolve outputLanguage from effective config
-  // Per EP-07: use canonical resolved value, not raw input
-  const resolvedLang = resolveOutputLanguage(opts.effectiveConfig?.config.principles?.outputLanguage);
-  const outputLanguage: OutputLanguage = resolvedLang.outputLanguage;
-
-  // Per ERR-002: degradation must be observable, not silent fallback
-  if (resolvedLang.degradationWarning) {
-    storeEmitter.emitTelemetry({
-      eventType: 'degradation_triggered',
-      traceId: `output-language-config-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      sessionId: '',
-      payload: {
-        component: 'PainSignalRuntimeFactory',
-        reason: 'invalid_output_language_config',
-        warning: resolvedLang.degradationWarning,
-        fallbackValue: resolvedLang.outputLanguage,
-      },
-    });
-  }
-
-  // PRI-638: implementation selection is no longer a decision this factory
-  // makes. `diagnostician_split_pipeline` used to gate this on a second,
-  // non-canonical kill switch; the split pipeline is the only implementation
-  // left in the tree (no monolithic DiagnosticianRunner exists any more), so
-  // the flag retains no implementation-selection or disable responsibility.
-  //
-  // P0-1 fix: onDiagnosisComplete is no longer wired into the router.
-  // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
-  // PRI-1146 (round 2, P1-01): runner telemetry uses the SAME effective sink as
-  // the bridge. When a workspace-scoped sink is injected (CLI short processes),
-  // allowlisted runner events (e.g. diag_router_trusted_context_unavailable)
-  // persist to critical-events.jsonl; the sink forwards every non-allowlisted
-  // event to the storeEmitter singleton, so existing DB telemetry is preserved
-  // without duplicating the event. Absent a sink, behavior is unchanged.
-  const runnerEventEmitter = opts.telemetrySink ?? storeEmitter;
-  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.1: resolve the timing
-  // contract ONCE and hand it to every stage. Previously `perStageTimeoutMs`
-  // only reached sub-task metadata; the stage runners fell back to the
-  // BasePeerRunner 300 s default.
-  const executionTiming = resolveExecutionTiming({
-    stageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    parentBudgetMs: (runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS) * 3,
-  });
-  const stageRunnerOptions = {
+  // PRI-1292 Phase 2A: the diagnostician runner chain is assembled by the ONE
+  // cache-free bundle (same sequence `pd diagnose run` / `pd pain retry` use).
+  // This bridge path passes its own just-created stateManager, so the bundle
+  // owns nothing — the bridge's dispose() keeps closing it exactly as before.
+  // The bundle resolves outputLanguage (incl. the ERR-002 degradation event),
+  // execution timing and the single-connection collaborator topology.
+  const bundle = await createDiagnosticianRunnerBundle({
+    workspaceDir: opts.workspaceDir,
+    ledgerAdapter: opts.ledgerAdapter,
     owner: opts.owner ?? 'pain-signal-bridge',
+    runtimeAdapter,
     runtimeKind: runtimeConfig.runtimeKind,
-    outputLanguage,
+    stageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     effectiveConfig: opts.effectiveConfig,
-    timeoutMs: executionTiming.stageTimeoutMs,
-    leaseTtlMs: executionTiming.leaseTtlMs,
-    heartbeatIntervalMs: executionTiming.heartbeatIntervalMs,
-  };
-  const rootCauseRunner = new DiagRootCauseRunner(
-    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader, sourceMaterialAuthorization: opts.sourceMaterialAuthorization },
-    stageRunnerOptions,
-  );
-  const distillerRunner = new DiagDistillerRunner(
-    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), sourceMaterialAuthorization: opts.sourceMaterialAuthorization },
-    stageRunnerOptions,
-  );
-  const routerRunner = new DiagRouterRunner(
-    {
-      stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, committer,
-      // PRI-1146 / SPEC v0.6 §5: the trusted canonical principle exposure is
-      // assembled BEFORE the model call. The concrete PrincipleTreeLedgerAdapter
-      // implements the port; a narrow LedgerAdapter double without the port is
-      // detected structurally and degrades to a typed `source_not_configured`
-      // receipt (observable, never a guessed allowlist).
-      trustedPrincipleSource: isRouterTrustedPrincipleSource(opts.ledgerAdapter)
-        ? opts.ledgerAdapter
-        : { readTrustedPrinciples: () => ({ status: 'unavailable' as const, reason: 'source_not_configured' as const }) },
-      sourceMaterialAuthorization: opts.sourceMaterialAuthorization,
-    },
-    // PRI-818 (R-08): effectiveConfig must reach Stage C like it does for
-    // Stage A/B — without it, isDegradationEnabled() is always false and the
-    // ADR-0019 rate-limit fast-fail degradation path can never fire here.
-    stageRunnerOptions,
-  );
-
-  const runner: DiagnosticianRunnerLike = new SplitDiagnosticianRunner({
-    rootCauseRunner,
-    distillerRunner,
-    routerRunner,
     stateManager,
-    committer,
-    // PRI-1266: the parent run records the ACTUAL execution runtime — the same
-    // resolved kind the stage runners carry (stageRunnerOptions.runtimeKind).
-    runtimeKind: runtimeConfig.runtimeKind,
-    perStageTimeoutMs: executionTiming.stageTimeoutMs,
-    parentBudgetMs: executionTiming.parentBudgetMs,
-    leaseTtlMs: executionTiming.leaseTtlMs,
-    heartbeatIntervalMs: executionTiming.heartbeatIntervalMs,
+    intentDocReader: opts.intentDocReader,
+    trajectoryTurnReader: opts.trajectoryTurnReader,
+    sourceMaterialAuthorization: opts.sourceMaterialAuthorization,
+    telemetrySink: opts.telemetrySink,
   });
 
   // PRI-917 v0.3.3 — auto-path Reuse Review Gate: inject the semantic reuse
@@ -973,8 +1078,8 @@ async function constructBridge(
   });
 
   const bridge = new PainSignalBridge({
-    stateManager,
-    runner,
+    stateManager: bundle.stateManager,
+    runner: bundle.runner,
     intakeService,
     ledgerAdapter: opts.ledgerAdapter,
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
@@ -990,9 +1095,10 @@ async function constructBridge(
     // PRI-939 Option A: forward into the caller's workspace-scoped sink when
     // provided (CLI short processes) so allowlisted events persist.
     eventEmitter: createBridgeTelemetryEventEmitter(opts.telemetrySink),
-    // PRI-624: the factory opens one extra connection (history/committer/
-    // context assemblers) beyond the state manager — dispose() releases both.
-    ownedResources: [connection],
+    // PRI-1292 Phase 2A: the bundle's single-connection topology removed the
+    // extra SqliteConnection — dispose() closes the state manager, whose own
+    // connection serves every collaborator.
+    ownedResources: [],
   });
 
   return bridge;

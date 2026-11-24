@@ -21,9 +21,18 @@ function readSrc(relative: string): string {
 }
 
 describe('PRI-939 Option A — CLI telemetry wiring guard', () => {
-  it.each(CLI_COMMANDS)('%s constructs the workspace-scoped telemetry emitter', (file) => {
+  // PRI-1292 Phase 2A: pain-record / pain-retry obtain the SAME
+  // workspace-scoped emitter from the shared resolveWorkspacePipelineHostDeps
+  // assembly (hostDeps.telemetrySink — the same WorkspaceTelemetryEmitter
+  // class over the same storeEmitter singleton, same allowlist, same
+  // critical-events.jsonl path); candidate / diagnose keep their direct
+  // construction. Either wiring satisfies the anti「发射即丢」invariant.
+  it.each(CLI_COMMANDS)('%s wires the workspace-scoped telemetry emitter', (file) => {
     const source = readSrc(`../../src/commands/${file}`);
-    expect(source).toContain('createWorkspaceTelemetryEmitter(');
+    const directConstruction = source.includes('createWorkspaceTelemetryEmitter(');
+    const viaHostDeps = source.includes('resolveWorkspacePipelineHostDeps(')
+      && source.includes('telemetrySink: hostDeps.telemetrySink');
+    expect(directConstruction || viaHostDeps, `${file} must wire a workspace-scoped sink`).toBe(true);
   });
 
   it('no CLI command emits reuse/critical telemetry into the bare singleton anymore', () => {

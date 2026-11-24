@@ -79,6 +79,10 @@ export * from './internalization-consumer-cycle.js';
 // policy for the existing consumer timer chain (no new background service).
 export * from './adaptive-consumer-schedule.js';
 export * from './diagnostician-auto-run.js';
+// SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): the single workspace
+// pipeline host collaborator assembly point — all five collaborators required,
+// one shared consent-ledger authorization instance.
+export * from './workspace-pipeline-host-deps.js';
 // PRI-634-F R2: durable host-authored tool declaration — hosts persist, host-
 // neutral consumers (pd-cli/pd-console) resolve through the ONE resolver.
 export * from './host-tool-declaration.js';

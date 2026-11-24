@@ -70,9 +70,10 @@ describe('Runtime V2 pain entrypoint guard', () => {
 
     expect(source).toMatch(/emitPainDetectedEvent\(wctx,\s*\{/);
     expect(source).toMatch(/type:\s*'pain_detected'/);
-    expect(source).toMatch(/PainToPrincipleService/);
-    // Verify it calls createPainToPrincipleService (the factory function inside pain.ts)
-    expect(source).toMatch(/createPainToPrincipleService\(/);
+    // PRI-1292 Phase 2A: the hook delegates service construction to the ONE
+    // shared plugin factory (createPluginPainToPrincipleService), which owns
+    // the collaborator assembly.
+    expect(source).toMatch(/createPluginPainToPrincipleService\(/);
     // Verify it does NOT call createPainSignalBridge (legacy factory)
     expect(source).not.toMatch(/createPainSignalBridge\(/);
     expect(source).not.toMatch(/writePainFlag|recordAndWritePainFlag/);
@@ -80,19 +81,30 @@ describe('Runtime V2 pain entrypoint guard', () => {
     expect(source).not.toMatch(/atomicWriteFileSync\s*\([^)]*painFlagPath/s);
   });
 
-  // PRI-29: emitPainDetectedEvent → PainToPrincipleService service contract guards
-  it('pain.ts constructs PainToPrincipleService with workspaceDir and stateDir from wctx', () => {
-    const source = read('packages/openclaw-plugin/src/hooks/pain.ts');
+  // PRI-29: emitPainDetectedEvent → PainToPrincipleService service contract
+  // guards. Since PRI-1292 Phase 2A the construction lives in the shared
+  // plugin factory (src/core/pain-service.ts); the wctx binding contract is
+  // asserted there.
+  it('pain service factory constructs PainToPrincipleService with workspaceDir and stateDir from wctx', () => {
+    const hookSource = read('packages/openclaw-plugin/src/hooks/pain.ts');
+    const factorySource = read('packages/openclaw-plugin/src/core/pain-service.ts');
+
+    // The hook delegates to the shared factory instead of assembling inline.
+    expect(hookSource).toMatch(/createPluginPainToPrincipleService\(wctx\)/);
+    expect(hookSource).not.toMatch(/new PainToPrincipleService\(\{/);
 
     // Must construct PrincipleTreeLedgerAdapter with wctx.stateDir
-    expect(source).toMatch(/new PrincipleTreeLedgerAdapter\(\{\s*stateDir:\s*wctx\.stateDir\s*\}\)/);
+    expect(factorySource).toMatch(/new PrincipleTreeLedgerAdapter\(\{\s*stateDir:\s*wctx\.stateDir\s*\}\)/);
 
-    // Must construct PainToPrincipleService with wctx properties
-    expect(source).toMatch(/new PainToPrincipleService\(\{/);
-    expect(source).toMatch(/workspaceDir:\s*wctx\.workspaceDir/);
-    expect(source).toMatch(/stateDir:\s*wctx\.stateDir/);
-    expect(source).toMatch(/owner:\s*['"]openclaw-plugin['"]/);
-    expect(source).toMatch(/autoIntakeEnabled:\s*true/);
+    // Must construct PainToPrincipleService with wctx properties (via the
+    // shared host collaborator assembly and the sync-mode union)
+    expect(factorySource).toMatch(/new PainToPrincipleService\(\{/);
+    expect(factorySource).toMatch(/workspaceDir:\s*wctx\.workspaceDir/);
+    expect(factorySource).toMatch(/stateDir:\s*wctx\.stateDir/);
+    expect(factorySource).toMatch(/owner:\s*['"]openclaw-plugin['"]/);
+    expect(factorySource).toMatch(/autoIntakeEnabled:\s*true/);
+    expect(factorySource).toMatch(/resolveWorkspacePipelineHostDeps\(/);
+    expect(factorySource).toMatch(/trajectoryTurnReaderOverride/);
   });
 
   it('pain.ts passes recordObservability to service.recordPain with default true', () => {

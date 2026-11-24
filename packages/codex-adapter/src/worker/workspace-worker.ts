@@ -47,10 +47,8 @@ import {
   runInternalizationConsumerCycle,
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
-  createGovernanceTrajectoryTurnReader,
   createConsentLedgerSourceMaterialAuthorization,
-  createHostIntentDocReader,
-  isAutomaticPainSubmissionAuthorized,
+  resolveWorkspacePipelineHostDeps,
   saveHostToolDeclaration,
   HOST_TOOL_DECLARATION_VERSION,
   type InternalizationConsumerCycleOutcome,
@@ -434,6 +432,15 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
           const stateDir = path.join(workspaceDir, '.state');
           let releaseBridge: (() => Promise<void>) | undefined;
           try {
+            // SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): ONE assembly
+            // point for the five host collaborators. The trajectory reader and
+            // the source-material gate share the SAME consent-ledger
+            // authorization instance (previously two separate instances per
+            // call). PRI-1233 / SPEC §9.2: this worker is where Stage A
+            // actually runs for governance-admitted Codex pains; PRI-1265: the
+            // Stage A gets the bound session's ORIGINAL turns from the
+            // workspace's consent-tiered governance store.
+            const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig: config.effective });
             const bridge = await createPainSignalBridge({
               workspaceDir,
               stateDir,
@@ -441,18 +448,15 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
               owner: WORKER_OWNER,
               effectiveConfig: config.effective,
               getEnvVar: (name: string) => process.env[name],
-              // PRI-1233 / SPEC §9.2: this worker is where Stage A actually runs
-              // for governance-admitted Codex pains — the neutral host reader
-              // must ride along (flag-off = zero filesystem access inside it).
-              intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
-              // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
-              // turns from the workspace's own consent-tiered governance store.
-              trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
-              // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
-              sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+              intentDocReader: hostDeps.intentDocReader,
+              trajectoryTurnReader: hostDeps.trajectoryTurnReader,
+              sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
+              // PRI-939 Option A: allowlisted runner/bridge events persist to
+              // the workspace sink instead of the unsubscribed singleton.
+              telemetrySink: hostDeps.telemetrySink,
               // SPEC §9.6: lazy probe — a revoked flag stops persisted
               // automatic_hook tasks at the bridge's execution boundary.
-              isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
+              isAutoPainSubmissionAuthorized: hostDeps.isAutoPainSubmissionAuthorized,
             }, (release) => { releaseBridge = release; });
             const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
             // PRI-917 v0.3.3 review fix (P2-2): forward the parked-candidate
@@ -532,6 +536,11 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
           const stateDir = path.join(workspaceDir, '.state');
           let releaseBridge: (() => Promise<void>) | undefined;
           try {
+            // SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): same single
+            // assembly point as the diagnosis site above — PRI-1265 authorized
+            // trajectory context, PRI-1283 R2 latest-consent gate, and the
+            // SAME consent-ledger authorization instance for both.
+            const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig: config.effective });
             const bridge = await createPainSignalBridge({
               workspaceDir,
               stateDir,
@@ -539,14 +548,15 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
               owner: WORKER_OWNER,
               effectiveConfig: config.effective,
               getEnvVar: (name: string) => process.env[name],
-              // PRI-1265: post-processing resumes see the same authorized
-              // trajectory context as the initial diagnosis run.
-              trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
-              // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
-              sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+              intentDocReader: hostDeps.intentDocReader,
+              trajectoryTurnReader: hostDeps.trajectoryTurnReader,
+              sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
+              // PRI-939 Option A: allowlisted runner/bridge events persist to
+              // the workspace sink instead of the unsubscribed singleton.
+              telemetrySink: hostDeps.telemetrySink,
               // SPEC §9.6: lazy probe — automatic_hook backlog resumes honor
               // the Workspace authorization too.
-              isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
+              isAutoPainSubmissionAuthorized: hostDeps.isAutoPainSubmissionAuthorized,
             }, (release) => { releaseBridge = release; });
             for (const item of backlog) {
               const resumed = await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: item.taskId });

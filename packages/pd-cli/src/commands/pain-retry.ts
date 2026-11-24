@@ -12,18 +12,6 @@
  */
 import {
   RuntimeStateManager,
-  SqliteHistoryQuery,
-  SqliteContextAssembler,
-  SqliteDiagnosticianCommitter,
-  SqliteTrajectoryLocator,
-  SqliteSourceTraceLocator,
-  SplitDiagnosticianRunner,
-  DiagRootCauseRunner,
-  DiagDistillerRunner,
-  DiagRouterRunner,
-  DefaultDiagRootCauseValidator,
-  DefaultDiagDistillerValidator,
-  type DiagnosticianRunnerLike,
   TestDoubleRuntimeAdapter,
   PiAiRuntimeAdapter,
   PDRuntimeError,
@@ -47,17 +35,18 @@ import {
   type PainDetectedData,
   type PainSignalBridgeResult,
   type DeadLetterRow,
+  // SPEC-PD-PIPELINE-SPINE-001 §4.3 (PRI-1292): the ONE cache-free diagnostician
+  // runner assembly shared with the cached-bridge factory and `pd diagnose run`.
+  createDiagnosticianRunnerBundle,
 } from '@principles/core/runtime';
-import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime';
-import { createGovernanceTrajectoryTurnReader, createConsentLedgerSourceMaterialAuthorization, createHostIntentDocReader, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
+import type { PDRuntimeAdapter, RuntimeConfig } from '@principles/core/runtime';
+import { resolveWorkspacePipelineHostDeps, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 import type { Command } from 'commander';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import type { PDTaskStatus } from '@principles/core/runtime';
-import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';
-import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import * as path from 'path';
 
@@ -628,41 +617,6 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     }
 
     // Step 5: Build runner and execute (same as diagnose run)
-    const sqliteConn = stateManager.connection;
-    const { taskStore } = stateManager;
-    const { runStore } = stateManager;
-    const historyQuery = new SqliteHistoryQuery(sqliteConn);
-    const trajectoryLocator = new SqliteTrajectoryLocator(sqliteConn);
-    const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
-    // PRI-1265: same authorized trajectory reader as `pd diagnose run` — the
-    // retried diagnosis must see the bound session's original turns too.
-    // PRI-1283 R2: one port per command invocation; every consumption
-    // surface below (assembler + all three stage runners) shares it.
-    const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
-    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {
-      sourceTraceLocator,
-      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization }),
-      // PRI-1283 R2: latest-consent gate — governance-sourced evidence and
-      // conversation material are filtered at assembly time.
-      sourceMaterialAuthorization,
-    });
-
-    // PRI-1146 (round 2, P1-01): use the workspace-scoped sink, not a bare
-    // StoreEventEmitter with no subscribers. The sink persists allowlisted
-    // runner events (e.g. diag_router_trusted_context_unavailable) and forwards
-    // all other events to the storeEmitter singleton.
-    const eventEmitter = createWorkspaceTelemetryEmitter(workspaceDir);
-    const committer = new SqliteDiagnosticianCommitter(sqliteConn);
-
-    // PRI-336: Read outputLanguage from workspace config
-    const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
-    const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
-
-    // PRI-638: implementation selection is gone. The split pipeline is the only
-    // Diagnostician implementation, so it always runs with its documented
-    // 3-stage budget; `diagnostician_split_pipeline` no longer selects a runner
-    // nor disables capability (the capability gate above owns that).
-    const pipelineTimeoutMs = SPLIT_PIPELINE_TOTAL_TIMEOUT_MS;
     // BUG-1 (PRI-442): extract effectiveConfig so ADR-0019 LLM rate-limit
     // degradation (isDegradationEnabled in base-peer-runner) can read the
     // diagnostician_llm_degradation feature flag. Without this, the runners
@@ -690,39 +644,42 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     );
 
     const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
-    const perStageTimeoutMs = pipelineTimeoutMs / 3;
-    // PRI-1146 / SPEC v0.6 §5: trusted canonical principle source for the
-    // router (one ledger adapter, same authority as the intake paths below).
-    const routerLedgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-    const rootCauseRunner = new DiagRootCauseRunner(
-      // PRI-1232 / SPEC §9.2: retry passes the neutral host reader so a task
-      // WITHOUT a persisted snapshot may capture one when the flag is on.
-      // A task WITH a persisted snapshot keeps its original strategic basis —
-      // the runner reuses the snapshot and never reads the latest INTENT.md
-      // (SPEC §6.6 snapshot immutability). Flag-off = zero file access.
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }), sourceMaterialAuthorization },
-      { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-    );
-    const distillerRunner = new DiagDistillerRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), sourceMaterialAuthorization },
-      { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-    );
-    const routerRunner = new DiagRouterRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, trustedPrincipleSource: routerLedgerAdapter, sourceMaterialAuthorization },
-      { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-    );
+    // PRI-638: implementation selection is gone. The split pipeline is the only
+    // Diagnostician implementation, so it always runs with its documented
+    // 3-stage budget; `diagnostician_split_pipeline` no longer selects a runner
+    // nor disables capability (the capability gate above owns that).
+    const perStageTimeoutMs = SPLIT_PIPELINE_TOTAL_TIMEOUT_MS / 3;
 
-    const runner: DiagnosticianRunnerLike = new SplitDiagnosticianRunner({
-      rootCauseRunner,
-      distillerRunner,
-      routerRunner,
-      stateManager,
-      committer,
-      // PRI-1266: the parent run records the ACTUAL runtime — the same
-      // resolved kind the stage runners carry.
+    // SPEC-PD-PIPELINE-SPINE-001 §4.2/§4.3 (PRI-1292 Phase 2A): the ~100-line
+    // hand-rolled Diag*Runner + SplitDiagnosticianRunner assembly is replaced
+    // by the ONE cache-free bundle the cached-bridge factory and `pd diagnose
+    // run` use. The five host collaborators come from the ONE workspace deps
+    // resolver — the dead-letter bridge below reuses the SAME authorization
+    // instance and telemetry sink. This command owns stateManager (created +
+    // initialized above), so the bundle reuses its connection and dispose()
+    // never closes it — the outer finally keeps the original ownership.
+    // PRI-1146 (round 2, P1-01): the workspace-scoped sink persists allowlisted
+    // runner events instead of dropping them in the unsubscribed singleton.
+    // PRI-1232 / SPEC §9.2: the neutral host reader rides along so a task
+    // WITHOUT a persisted snapshot may capture one when the flag is on; a task
+    // WITH a snapshot keeps its original strategic basis (SPEC §6.6).
+    const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig });
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+    const bundle = await createDiagnosticianRunnerBundle({
+      workspaceDir,
+      ledgerAdapter,
+      owner: 'pd-cli-pain-retry',
+      runtimeAdapter,
       runtimeKind: resolvedKind,
-      perStageTimeoutMs,
+      stageTimeoutMs: perStageTimeoutMs,
+      effectiveConfig,
+      stateManager,
+      intentDocReader: hostDeps.intentDocReader,
+      trajectoryTurnReader: hostDeps.trajectoryTurnReader,
+      sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
+      telemetrySink: hostDeps.telemetrySink,
     });
+    const { runner } = bundle;
 
     // ── Dead letter replay branch ──────────────────────────────────────────
     // When task was null but a dead letter was found, replay the pain signal
@@ -740,7 +697,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         console.log(`  Workspace:      ${workspaceDir}\n`);
       }
 
-      const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+      // The dead-letter branch reuses the SAME ledger adapter instance the
+      // bundle above received (identical construction — one ledger authority
+      // per command invocation).
       // PRI-917 v0.3.3 — auto-path Reuse Review Gate (dead-letter replay is an
       // automatic intake path too): inject the semantic reuse recommendation
       // hook. Undefined when reuseEvaluation.enabled=false → old behavior (T11).
@@ -758,7 +717,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           : {}),
       });
       const bridge = new PainSignalBridge({
-        stateManager,
+        stateManager: bundle.stateManager,
         runner,
         intakeService,
         ledgerAdapter,
@@ -771,14 +730,15 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         // rc-9: same production degradation-telemetry wiring as the factory —
         // only persistence events reach the store emitter.
         // PRI-939 Option A: workspace-scoped sink persists allowlisted events
-        // (reuse_gate_triggered) that the bare singleton would drop.
-        eventEmitter: createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir)),
+        // (reuse_gate_triggered) that the bare singleton would drop — the SAME
+        // sink instance the bundle's runner telemetry uses.
+        eventEmitter: createBridgeTelemetryEventEmitter(hostDeps.telemetrySink),
         // PRI-720: honor the Owner's full-prompt-pipeline switch on replay seeds.
         fullPipelinePromptSeeds: resolvePromptFullPipelineSeedMode(workspaceDir) === 'full_chain',
         // SPEC §9.6: lazy probe — the CLI pre-check above is the primary
         // refuse; this closes any residual bridge-level execution window
         // (e.g. a flag revoked between the check and onPainDetected).
-        isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
+        isAutoPainSubmissionAuthorized: hostDeps.isAutoPainSubmissionAuthorized,
       });
 
       let bridgeResult: PainSignalBridgeResult;
@@ -1054,7 +1014,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // emitter shared by persistPainDiagnosis AND the direct intake loop, so
     // reuse-gate degradation/park events reach the durable sink here too (the
     // bridge path emits its own; this loop bypasses the bridge).
-    const retryBridgeTelemetry = createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir));
+    const retryBridgeTelemetry = createBridgeTelemetryEventEmitter(hostDeps.telemetrySink);
     let painDiagnosisLedgerWrite: 'attempted' | 'disabled' = 'disabled';
     if (diagnosisPersistenceEnabled && result.output) {
       await persistPainDiagnosis(
@@ -1078,7 +1038,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string; reuseRecommendation?: { status: 'recommended' } | { status: 'unavailable'; reason: string } }[] = [];
     let intakeFailed = false;
 
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+    // The intake loop reuses the SAME ledger adapter instance the bundle above
+    // received (identical construction — one ledger authority per invocation).
     // PRI-917 v0.3.3 — auto-path Reuse Review Gate: inject the semantic reuse
     // recommendation hook. Undefined when reuseEvaluation.enabled=false →
     // intake behaves exactly as before (T11 rollback switch).
@@ -1104,7 +1065,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       // SPEC review round-3 P1: the FULL write gate (persisted disposition /
       // re-evaluation), not the confidence/kind-only partial check — a
       // corrupted or stale admission document can never be intaked here.
-      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization, coordination: ledgerAdapter })) ?? checkAdmissionGate(candidate);
+      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization, coordination: ledgerAdapter })) ?? checkAdmissionGate(candidate);
       if (admissionBlock) {
         intakeFailed = true;
         intakeResults.push({
