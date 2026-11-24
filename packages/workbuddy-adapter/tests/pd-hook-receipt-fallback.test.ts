@@ -4,7 +4,7 @@
  * a fake home, helpers/hook-runner.ts).
  *
  * Drives the entry with the REAL captured PostToolUse MCP payload shape
- * (content-block ARRAY tool_response, `mcp__pd_recall__pd_submit_pain` name,
+ * (content-block ARRAY tool_response, `mcp__pd-recall__pd_submit_pain` name,
  * engine per-call uuid ids) against a REAL governance workspace holding a
  * REAL unbound task created by the REAL submit capability, and asserts the
  * SAME task comes back bound — no Console, no manual ids, no resubmission.
@@ -47,11 +47,17 @@ import {
 
 afterEach(() => { cleanupTempDirs(); });
 
-/** The REAL captured PostToolUse identity (PRI-1275 probe, engine 2.165.0). */
+/** The REAL captured PostToolUse identity (PRI-1275 probe, engine 2.165.0):
+ * session_id + the engine per-call uuid call_id. GENERATION_ID is the event's
+ * `generation_id` — it stays in the payload (real fixture shape) and every
+ * assertion below proves the hook does NOT map it to a submission/target
+ * turn (unproven equivalence, review round: Devin BUG + CodeRabbit CR-4). */
 const SESSION_ID = '01a20d41-fc4f-71ec-ab89-7d83a970215a';
-const TURN_ID = '01a20d41fbb377cfa975b1b725b6238e';
+const GENERATION_ID = '01a20d41fbb377cfa975b1b725b6238e';
 const CALL_ID = '01a20d41-fdfd-758f-ab69-4df2fe1fe263';
-const REAL_TOOL_NAME = 'mcp__pd_recall__pd_submit_pain';
+/** Real engine naming preserves the hyphen — NO sanitization (Devin SEC):
+ * a literal `pd_recall` server is third-party attack surface. */
+const REAL_TOOL_NAME = 'mcp__pd-recall__pd_submit_pain';
 
 /** A governance workspace with WorkBuddy enabled, the receipt fallback's
  * `host_identity_minimal_metadata` authorization ON, and the trajectory
@@ -127,7 +133,7 @@ function postToolUsePayload(projectDir: string, toolResponse: unknown, toolName 
   const payload = fixturePayload('post-tool-use-mcp-echo.json', {
     cwd: projectDir,
     session_id: SESSION_ID,
-    generation_id: TURN_ID,
+    generation_id: GENERATION_ID,
     call_id: CALL_ID,
     tool_use_id: CALL_ID,
     tool_name: toolName,
@@ -151,7 +157,7 @@ function receiptLines(stderr: string): string[] {
 }
 
 describe('pd-hook PostToolUse receipt fallback (B2 through the real spawned entry)', () => {
-  it('recovers the same original task without Console, manual ids or resubmission', async () => {
+  it('generation_id is NOT mapped to a submission/target turn (unproven equivalence); the same original task is recovered without Console, manual ids or resubmission', async () => {
     const { home, governance } = governanceHome();
     const painId = 'mcp_1700000000131_dd000131';
     const taskId = await persistUnboundPain(governance, painId);
@@ -162,6 +168,8 @@ describe('pd-hook PostToolUse receipt fallback (B2 through the real spawned entr
     expect(JSON.parse(before?.diagnosticJson ?? '{}').sessionIdHint).toBeNull();
 
     const project = makeProjectDir(home, 'receipt');
+    // The payload CARRIES generation_id (real fixture shape) — the hook must
+    // bind session + call id ONLY, never pinning the unproven turn.
     const result = runEntry(home, postToolUsePayload(project, arrayEnvelopeReceipt(painId, governance)), 'PostToolUse');
 
     // Fail-open channel: EMPTY stdout (P04) + exit 0 + exactly one bounded
@@ -178,13 +186,17 @@ describe('pd-hook PostToolUse receipt fallback (B2 through the real spawned entr
     expect(after.inputRef).toBe(painId);
     const diagnostic = JSON.parse(after.diagnosticJson);
     expect(diagnostic.sessionIdHint).toBe(SESSION_ID);
+    // EXACT equality: the binding carries NO submissionTurnId / targetTurnId
+    // (generation_id equivalence is unproven — it must never wedge the task
+    // into waiting_for_target_evidence).
     expect(diagnostic.painIngress.verifiedHostSession).toEqual({
       status: 'verified',
       sessionId: SESSION_ID,
-      submissionTurnId: TURN_ID,
-      targetTurnId: TURN_ID,
     });
-    expect(diagnostic.recovery.state).toBe('waiting_for_target_evidence');
+    expect(Object.hasOwn(diagnostic.painIngress.verifiedHostSession, 'submissionTurnId')).toBe(false);
+    expect(Object.hasOwn(diagnostic.painIngress.verifiedHostSession, 'targetTurnId')).toBe(false);
+    // No turn pin → the disposition is NOT waiting for an unresolvable turn.
+    expect(diagnostic.recovery.state).toBe('ready_for_diagnosis');
     expect(diagnostic.recovery.receiptRef.toolCallId).toBe(CALL_ID);
   });
 
@@ -215,15 +227,17 @@ describe('pd-hook PostToolUse receipt fallback (B2 through the real spawned entr
     expect(receiptLines(second.stderr).some((line) => line.includes('pain_receipt_idempotent:taskId='))).toBe(true);
   });
 
-  it('P1-1: a same-named tool on a FOREIGN MCP server never triggers the fallback', async () => {
+  it('P1-1: a same-named tool on a FOREIGN MCP server never triggers the fallback (incl. the unsanitized pd_recall spelling)', async () => {
     const { home, governance } = governanceHome();
     const painId = 'mcp_1700000000134_9a000134';
     const taskId = await persistUnboundPain(governance, painId);
     const project = makeProjectDir(home, 'foreign');
-    const result = runEntry(home, postToolUsePayload(project, arrayEnvelopeReceipt(painId, governance), 'mcp__evil_mirror__pd_submit_pain'), 'PostToolUse');
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
-    expect(receiptLines(result.stderr)).toHaveLength(0);
+    for (const toolName of ['mcp__evil_mirror__pd_submit_pain', 'mcp__pd_recall__pd_submit_pain']) {
+      const result = runEntry(home, postToolUsePayload(project, arrayEnvelopeReceipt(painId, governance), toolName), 'PostToolUse');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(receiptLines(result.stderr)).toHaveLength(0);
+    }
     const after = await readTask(governance, taskId);
     expect(JSON.parse(after?.diagnosticJson ?? '{}').sessionIdHint).toBeNull();
   });

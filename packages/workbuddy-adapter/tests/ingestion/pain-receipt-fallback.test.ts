@@ -6,8 +6,9 @@
  * tool_response is the CallToolResult CONTENT BLOCK ARRAY (probe-verified on
  * the REAL installed engine, CodeBuddy Code 2.165.0, 2026-11-24 — never
  * assumed from Codex's `{content:[…]}` object), identity comes from the EVENT
- * (session/generation/call ids, never model parameters), and the hand-off
- * into the Core CAS recovery carries hostKind 'workbuddy'.
+ * (session/call ids only, never model parameters — `generation_id` is NOT
+ * mapped to a submission/target turn), and the hand-off into the Core CAS
+ * recovery carries hostKind 'workbuddy' with server gate `pd-recall` only.
  *
  * The Core barrel is mocked as a spy-through (importOriginal + delegation):
  * the REAL validate/recovery still runs against a REAL unbound task created
@@ -47,15 +48,20 @@ import {
   parseWorkbuddyMcpToolName,
 } from '../../src/codec/input-decoder.js';
 
-/** REAL engine naming: server `pd-recall` sanitized to `pd_recall` + tool
- * `pd_submit_pain` (PRI-1275 probe, CodeBuddy Code 2.165.0). */
-const REAL_TOOL_NAME = 'mcp__pd_recall__pd_submit_pain';
+/** REAL engine naming (Devin SEC finding): the real WorkBuddy/CodeBuddy
+ * engine preserves the hyphen — MCP tools register as
+ * `mcp__pd-recall__pd_submit_pain` verbatim, with NO identifier
+ * sanitization. A literal `pd_recall` server on this host is a DIFFERENT
+ * third-party server and must stay NOT_APPLICABLE (attack surface). */
+const REAL_TOOL_NAME = 'mcp__pd-recall__pd_submit_pain';
 
 /** Identity shape of the REAL captured PostToolUse payload (probe 2026-11-24):
- * session_id, generation_id, and the engine per-call uuid call_id. */
+ * session_id + the engine per-call uuid call_id. The event's `generation_id`
+ * is deliberately NOT part of the identity — its equivalence to a PD
+ * submission turn is unproven (review round: Devin BUG + CodeRabbit CR-4),
+ * so the input type physically omits it. */
 const EVENT_IDENTITY = {
   sessionId: '01a20d41-fc4f-71ec-ab89-7d83a970215a',
-  turnId: '01a20d41fbb377cfa975b1b725b6238e',
   toolCallId: '01a20d41-fdfd-758f-ab69-4df2fe1fe263',
 } as const;
 
@@ -120,35 +126,37 @@ function arrayEnvelopeReceipt(painId: string, workspaceDir: string, overrides: R
 
 describe('P1-1 — exact MCP namespace gate (real WorkBuddy naming)', () => {
   it('parses real namespaced names into server + tool ids', () => {
-    expect(parseWorkbuddyMcpToolName('mcp__pd_recall__pd_submit_pain')).toEqual({ serverId: 'pd_recall', toolId: 'pd_submit_pain' });
     expect(parseWorkbuddyMcpToolName('mcp__pd-recall__pd_submit_pain')).toEqual({ serverId: 'pd-recall', toolId: 'pd_submit_pain' });
+    expect(parseWorkbuddyMcpToolName('mcp__pd_recall__pd_submit_pain')).toEqual({ serverId: 'pd_recall', toolId: 'pd_submit_pain' });
     expect(parseWorkbuddyMcpToolName('mcp__pdprobe__echo_meta')).toEqual({ serverId: 'pdprobe', toolId: 'echo_meta' });
     expect(parseWorkbuddyMcpToolName('pd_submit_pain')).toBeNull();
     expect(parseWorkbuddyMcpToolName('mcp__onlyonesegment')).toBeNull();
     expect(parseWorkbuddyMcpToolName('mcp____pd_submit_pain')).toBeNull();
   });
 
-  it('accepts exactly the PD server ids (configured and sanitized spellings) + pd_submit_pain', () => {
+  it('accepts ONLY the real hyphenated PD server id + pd_submit_pain (Devin SEC: no sanitization)', () => {
     expect(PAIN_SUBMIT_MCP_SERVER_IDS.has('pd-recall')).toBe(true);
-    expect(PAIN_SUBMIT_MCP_SERVER_IDS.has('pd_recall')).toBe(true);
+    expect(PAIN_SUBMIT_MCP_SERVER_IDS.has('pd_recall')).toBe(false);
     expect(isPainSubmitWorkbuddyToolName('mcp__pd-recall__pd_submit_pain')).toBe(true);
-    expect(isPainSubmitWorkbuddyToolName('mcp__pd_recall__pd_submit_pain')).toBe(true);
   });
 
   it('isolates every other server and tool — equality on BOTH segments, never a substring', () => {
+    // The sanitized-looking spelling is the NEW negative control: the real
+    // engine never sanitizes, so a literal `pd_recall` server is third-party.
+    expect(isPainSubmitWorkbuddyToolName('mcp__pd_recall__pd_submit_pain')).toBe(false);
     expect(isPainSubmitWorkbuddyToolName('mcp__other__pd_submit_pain')).toBe(false);
     expect(isPainSubmitWorkbuddyToolName('mcp__pd_recall_clone__pd_submit_pain')).toBe(false);
-    expect(isPainSubmitWorkbuddyToolName('mcp__pd_recall__pd_recall_principle_pains')).toBe(false);
+    expect(isPainSubmitWorkbuddyToolName('mcp__pd-recall__pd_recall_principle_pains')).toBe(false);
     expect(isPainSubmitWorkbuddyToolName('pd_submit_pain')).toBe(false);
     expect(isPainSubmitWorkbuddyToolName('pd-recall__pd_submit_pain')).toBe(false);
-    expect(isPainSubmitWorkbuddyToolName('xmcp__pd_recall__pd_submit_pain')).toBe(false);
-    expect(isPainSubmitWorkbuddyToolName('mcp__pd_recall__pd_submit_pain_extra')).toBe(false);
+    expect(isPainSubmitWorkbuddyToolName('xmcp__pd-recall__pd_submit_pain')).toBe(false);
+    expect(isPainSubmitWorkbuddyToolName('mcp__pd-recall__pd_submit_pain_extra')).toBe(false);
   });
 
-  it('attemptPainReceiptFallback is not_applicable for non-PD tools and enters for both PD spellings', async () => {
+  it('attemptPainReceiptFallback is not_applicable for non-PD tools (incl. pd_recall) and enters for pd-recall', async () => {
     const ws = workspace();
     const notJson = [{ type: 'text', text: '{not json' }];
-    for (const toolName of ['pd_submit_pain', 'pd_submit_pain_v2', 'mcp__other__pd_submit_pain', 'mcp__pd_recall__pd_recall_principle_pains', 'Bash']) {
+    for (const toolName of ['mcp__pd_recall__pd_submit_pain', 'pd_submit_pain', 'pd_submit_pain_v2', 'mcp__other__pd_submit_pain', 'mcp__pd-recall__pd_recall_principle_pains', 'Bash']) {
       const result = await attemptPainReceiptFallback({
         workspaceDir: ws,
         toolName,
@@ -158,22 +166,20 @@ describe('P1-1 — exact MCP namespace gate (real WorkBuddy naming)', () => {
       });
       expect(result).toEqual({ status: 'not_applicable' });
     }
-    // The gate LET these in: the envelope is decoded (and rejected on its own
+    // The gate LET this in: the envelope is decoded (and rejected on its own
     // merits) instead of the tool name refusing the attempt outright.
-    for (const toolName of ['mcp__pd-recall__pd_submit_pain', 'mcp__pd_recall__pd_submit_pain']) {
-      const result = await attemptPainReceiptFallback({
-        workspaceDir: ws,
-        toolName,
-        toolResponse: notJson,
-        identity: { ...EVENT_IDENTITY },
-        minimalMetadataGranted: true,
-      });
-      expect(result.status).toBe('attempted');
-      if (result.status !== 'attempted') return;
-      expect(result.outcome.status).toBe('rejected');
-      if (result.outcome.status !== 'rejected') return;
-      expect(result.outcome.reasonCode).toBe('receipt_text_not_json');
-    }
+    const result = await attemptPainReceiptFallback({
+      workspaceDir: ws,
+      toolName: 'mcp__pd-recall__pd_submit_pain',
+      toolResponse: notJson,
+      identity: { ...EVENT_IDENTITY },
+      minimalMetadataGranted: true,
+    });
+    expect(result.status).toBe('attempted');
+    if (result.status !== 'attempted') return;
+    expect(result.outcome.status).toBe('rejected');
+    if (result.outcome.status !== 'rejected') return;
+    expect(result.outcome.reasonCode).toBe('receipt_text_not_json');
   });
 });
 
@@ -196,9 +202,9 @@ describe('attemptPainReceiptFallback — array envelope decode and recovery', ()
     if (result.outcome.status !== 'recovered') return;
     expect(result.outcome.taskId).toBe(taskId);
     expect(result.outcome.painId).toBe(painId);
-    // P1-3: the event turn is the target turn; no target text in the store
-    // yet, so the disposition waits for that exact turn.
-    expect(result.outcome.disposition.state).toBe('waiting_for_target_evidence');
+    // No submission/target turn exists (generation_id is not mapped), so the
+    // recovery is not pinned to an unproven evidence wait.
+    expect(result.outcome.disposition.state).toBe('ready_for_diagnosis');
 
     // Spy-through: the adapter→Core hand-off carries the WORKBUDDY host kind
     // and the NORMALIZED event identity (same values the envelope decode used).
@@ -208,7 +214,6 @@ describe('attemptPainReceiptFallback — array envelope decode and recovery', ()
       hostKind: 'workbuddy',
       identity: {
         sessionId: EVENT_IDENTITY.sessionId,
-        submissionTurnId: EVENT_IDENTITY.turnId,
         toolCallId: EVENT_IDENTITY.toolCallId,
       },
       authorization: { minimalMetadataGranted: true },
@@ -224,11 +229,11 @@ describe('attemptPainReceiptFallback — array envelope decode and recovery', ()
       expect(task.inputRef).toBe(painId);
       const diagnostic = JSON.parse(task.diagnosticJson);
       expect(diagnostic.sessionIdHint).toBe(EVENT_IDENTITY.sessionId);
+      // EXACT equality: no submissionTurnId / targetTurnId may appear — the
+      // WorkBuddy event provides no proven turn id (review round).
       expect(diagnostic.painIngress.verifiedHostSession).toEqual({
         status: 'verified',
         sessionId: EVENT_IDENTITY.sessionId,
-        submissionTurnId: EVENT_IDENTITY.turnId,
-        targetTurnId: EVENT_IDENTITY.turnId,
       });
       expect(diagnostic.recovery.receiptRef.toolCallId).toBe(EVENT_IDENTITY.toolCallId);
     } finally {
@@ -236,7 +241,7 @@ describe('attemptPainReceiptFallback — array envelope decode and recovery', ()
     }
   });
 
-  it('the target turn is OPTIONAL: an event with no generation_id still recovers (absence never blocks)', async () => {
+  it('generation_id is NOT mapped to a submission/target turn (unproven equivalence): the Core identity is session + call only', async () => {
     const ws = workspace();
     const painId = 'mcp_1700000000122_ac000122';
     const taskId = await persistUnboundPain(ws, painId);
@@ -254,7 +259,10 @@ describe('attemptPainReceiptFallback — array envelope decode and recovery', ()
     expect(result.outcome.taskId).toBe(taskId);
     const recoverArg: unknown = recoverSpy.mock.calls.at(-1)?.[0];
     expect(recoverArg).toMatchObject({ hostKind: 'workbuddy', identity: { sessionId: EVENT_IDENTITY.sessionId, toolCallId: EVENT_IDENTITY.toolCallId } });
+    // The Core call must not receive a submission turn — not even undefined
+    // spelled differently: the identity object carries exactly two ids.
     expect(recoverArg).not.toMatchObject({ identity: { submissionTurnId: expect.anything() } });
+    expect(recoverArg).not.toMatchObject({ identity: { targetTurnId: expect.anything() } });
   });
 
   it('P2: a multi-text-block envelope is ambiguous and rejected, not first-block-trusted', async () => {
@@ -365,8 +373,8 @@ describe('attemptPainReceiptFallback — event identity normalization', () => {
 
   it('a MISSING session or toolCall id is rejected as event_identity_missing (rc-3)', async () => {
     for (const identity of [
-      { turnId: EVENT_IDENTITY.turnId, toolCallId: EVENT_IDENTITY.toolCallId },
-      { sessionId: EVENT_IDENTITY.sessionId, turnId: EVENT_IDENTITY.turnId },
+      { toolCallId: EVENT_IDENTITY.toolCallId },
+      { sessionId: EVENT_IDENTITY.sessionId },
     ]) {
       const result = await attempt(identity, arrayEnvelopeReceipt('mcp_x', workspace()));
       expect(result.status).toBe('attempted');
@@ -403,7 +411,6 @@ describe('attemptPainReceiptFallback — event identity normalization', () => {
       toolResponse: arrayEnvelopeReceipt(painId, ws),
       identity: {
         sessionId: ` ${EVENT_IDENTITY.sessionId} `,
-        turnId: ` ${EVENT_IDENTITY.turnId} `,
         toolCallId: ` ${EVENT_IDENTITY.toolCallId} `,
       },
       minimalMetadataGranted: true,
@@ -510,7 +517,7 @@ describe('attemptPainReceiptFallback — authorization and idempotency', () => {
 
   it('the target-text probe fails closed on an empty workspace (and never throws on degenerate ids)', () => {
     const ws = workspace();
-    expect(workbuddyTargetTurnTextAvailable(ws, EVENT_IDENTITY.sessionId, EVENT_IDENTITY.turnId)).toBe(false);
+    expect(workbuddyTargetTurnTextAvailable(ws, EVENT_IDENTITY.sessionId, 'turn-under-probe')).toBe(false);
     expect(workbuddyTargetTurnTextAvailable(ws, ' ', '')).toBe(false);
   });
 });
