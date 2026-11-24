@@ -1145,9 +1145,26 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           });
           continue;
         }
-        // Phase 1 / PR1: candidate status handling is deliberately unchanged
-        // (SPEC v2.1 Step 2 "保持现有 candidate persistence 行为"). Only the
-        // Principle Ledger write is gated on a validated recommendation_kind.
+        // Invalid RAW kinds are durable Owner parks, not ordinary routing
+        // refusals. Keep the candidate pending so the explicit recovery
+        // command can validate and resume it after the source kind is repaired.
+        if (intakeResult.outcome === 'refused' && (
+          intakeResult.reason === 'unknown_kind'
+          || intakeResult.reason === 'candidate_kind_recovery_required'
+        )) {
+          intakeFailed = true;
+          const invalidKind = intakeResult.reason === 'unknown_kind';
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'refused',
+            error: intakeResult.message,
+            reason: invalidKind ? 'candidate_kind_invalid' : 'candidate_kind_recovery_required',
+            nextAction: `After restoring the intended RAW kind, obtain explicit Owner authorization: pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
+          });
+          continue;
+        }
+        // Phase 1 / PR1: only validated ledger entries and legal non-principle
+        // routing outcomes reach the legacy consumed-status transition.
         if (candidate.status !== 'consumed') {
           await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
