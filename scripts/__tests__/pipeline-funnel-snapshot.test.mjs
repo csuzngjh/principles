@@ -950,6 +950,10 @@ describe('recent window', () => {
       insertTask(db, 'in-dreamer', 'dreamer', 'completed', inside);
       insertTask(db, 'out-diagnostician', 'diagnostician', 'completed', outside);
       insertTask(db, 'out-dreamer', 'dreamer', 'completed', outside);
+      for (const kind of ['diag_rootcause', 'diag_distiller', 'diag_router']) {
+        insertTask(db, `in-${kind}`, kind, 'completed', inside);
+        insertTask(db, `out-${kind}`, kind, 'completed', outside);
+      }
       const approval = db.prepare(`INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
         VALUES (?, 'a', 'prompt', 'low', ?, ?)`);
       approval.run('appr-in', 'pending', inside);
@@ -961,20 +965,62 @@ describe('recent window', () => {
         VALUES (?, ?, 'a', 'prompt', 'activate', ?, ?)`);
       activation.run('act-in', 'ik-in', 'p-1', inside);
       activation.run('act-out', 'ik-out', 'p-2', outside);
-      // candidates: a legal no-seed route, two awaiting an Owner decision (one
-      // by the admission state machine, one by a recorded Owner decision), one
-      // whose admission is exhausted, and one out of window
+      // candidates: a legal no-seed route, one explicit pending Owner intent,
+      // one applied + superseded history, one invalid-kind blocker (not an
+      // Owner decision), one exhausted admission, and one out of window.
       insertCandidate(db, 'c-impl', 'implementation', 'consumed', inside);
       insertCandidate(db, 'c-prompt-owner', 'prompt', 'pending', inside, JSON.stringify({
         evaluations: [],
         currentEvaluationId: null,
-        processing: { state: 'in_progress' },
-        ownerDecisions: [{ decision: 'defer' }],
+        processing: { state: 'awaiting_owner', blockedReason: 'reuse_pending_owner' },
+        ownerDecisions: [{
+          decisionId: 'decision-pending',
+          candidateId: 'c-prompt-owner',
+          decision: 'create',
+          ownerId: 'owner-test',
+          identitySource: 'test',
+          reason: 'pending lifecycle fixture',
+          decidedAt: inside,
+          executionStatus: 'pending',
+          policyVersion: 'owner-decision@1',
+        }],
       }));
-      insertCandidate(db, 'c-prompt-awaiting', 'prompt', 'pending', inside, JSON.stringify({
+      insertCandidate(db, 'c-prompt-applied', 'prompt', 'pending', inside, JSON.stringify({
         evaluations: [],
         currentEvaluationId: null,
-        processing: { state: 'awaiting_owner' },
+        processing: { state: 'complete' },
+        ownerDecisions: [
+          {
+            decisionId: 'decision-superseded',
+            candidateId: 'c-prompt-applied',
+            decision: 'create',
+            ownerId: 'owner-test',
+            identitySource: 'test',
+            reason: 'superseded lifecycle fixture',
+            decidedAt: inside,
+            executionStatus: 'superseded',
+            policyVersion: 'owner-decision@1',
+          },
+          {
+            decisionId: 'decision-applied',
+            candidateId: 'c-prompt-applied',
+            decision: 'create',
+            ownerId: 'owner-test',
+            identitySource: 'test',
+            reason: 'applied lifecycle fixture',
+            decidedAt: inside,
+            executionStatus: 'applied',
+            policyVersion: 'owner-decision@1',
+            executedAt: inside,
+            resultingPrincipleId: 'principle-fixture',
+          },
+        ],
+      }));
+      insertCandidate(db, 'c-invalid-kind-awaiting', 'wizardry', 'pending', inside, JSON.stringify({
+        evaluations: [],
+        currentEvaluationId: null,
+        processing: { state: 'awaiting_owner', blockedReason: 'candidate_kind_invalid:wizardry' },
+        ownerDecisions: [],
       }));
       insertCandidate(db, 'c-exhausted', 'principle', 'pending', inside, JSON.stringify({
         evaluations: [],
@@ -1003,7 +1049,7 @@ describe('recent window', () => {
     const stages = model.window.stages;
     // counts are window-only: the out-of-window rows never leak in
     expect(stages.pain).toMatchObject({ table: 'trajectory.pain_events', column: 'created_at', count: 2, unparseableTimestamps: 0 });
-    expect(stages.diagnostician).toMatchObject({ table: 'state.tasks', column: 'created_at', count: 2 });
+    expect(stages.diagnostician).toMatchObject({ table: 'state.tasks', column: 'created_at', count: 5 });
     expect(stages.dreamer).toMatchObject({ column: 'created_at', count: 2 });
     for (const kind of ['philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer']) {
       expect(stages[kind], kind).toMatchObject({ column: 'created_at', count: 1 });
@@ -1011,27 +1057,112 @@ describe('recent window', () => {
     expect(stages.approvals).toMatchObject({ table: 'state.approvals', column: 'requested_at', count: 1, unparseableTimestamps: 1 });
     expect(stages.activations).toMatchObject({ table: 'state.activations', column: 'activated_at', count: 2, unparseableTimestamps: 0 });
     // all-history numbers are reported separately and are NOT reused for the window
-    expect(model.state.candidates.total).toBe(6);
-    expect(model.state.candidates.windowed).toBe(5);
+    expect(model.state.candidates.total).toBe(7);
+    expect(model.state.candidates.windowed).toBe(6);
 
     // windowed outcomes stay distinct: failure / awaiting Owner / exhausted / legal no-seed
     expect(model.window.taskStatusByKind.artificer).toEqual({ failed: 1 });
+    expect(model.window.taskStatusByKind.diag_rootcause).toEqual({ completed: 1 });
+    expect(model.window.taskStatusByKind.diag_distiller).toEqual({ completed: 1 });
+    expect(model.window.taskStatusByKind.diag_router).toEqual({ completed: 1 });
     expect(model.window.approvalsByStatus).toEqual({ pending: 1 });
     expect(model.window.activationsByAction).toEqual({ activate: 2 });
-    expect(model.window.candidateBreakdown).toMatchObject({ total: 5, consumed: 2, awaitingOwner: 2, exhausted: 1 });
-    expect(model.window.candidateBreakdown.byRawKind).toEqual({ implementation: 1, principle: 2, prompt: 2 });
+    expect(model.window.candidateBreakdown).toMatchObject({
+      total: 6,
+      consumed: 2,
+      awaitingOwner: 1,
+      exhausted: 1,
+      ownerDecisionRecordsByStatus: { pending: 1, applied: 1, superseded: 1 },
+    });
+    expect(model.window.candidateBreakdown.byRawKind).toEqual({ implementation: 1, principle: 2, prompt: 2, wizardry: 1 });
 
     const report = fs.readFileSync(path.join(reportsDir, `PD_PIPELINE_FUNNEL_BASELINE_${model.meta.runDate}.md`), 'utf-8');
-    expect(report).toContain(`## 6. 近 30 天漏斗（窗口 [${model.window.cutoffIso}, 快照 T1)）`);
+    expect(report).toContain(`## 6. 近 30 天漏斗（共同窗口 [${model.window.cutoffIso}, ${model.window.windowT1Iso})）`);
+    expect(report).toContain(`- 共同窗口 T1：${model.window.windowT1Iso}`);
     expect(report).toContain('| Pain | trajectory.pain_events | created_at | 2 | 0 |');
     expect(report).toContain('| Diagnostician 任务（父任务 + diag_* 子任务） | state.tasks | created_at | 2 | 0 |');
     expect(report).toContain('| Approval 请求 | state.approvals | requested_at | 1 | 1 |');
     expect(report).toContain('| Activation | state.activations | activated_at | 2 | 0 |');
     expect(report).toContain('- artificer 任务状态：failed: 1');
+    expect(report).toContain('- diag_rootcause 任务状态：completed: 1');
+    expect(report).toContain('- diag_distiller 任务状态：completed: 1');
+    expect(report).toContain('- diag_router 任务状态：completed: 1');
     expect(report).toContain('- Approval 请求按状态（pending=等待 Owner）：pending: 1');
     expect(report).toContain('- 合法跳过（implementation/defer，本就不播种）：1');
-    expect(report).toContain('等待 Owner（准入 processing.state=awaiting_owner，或文档带 Owner 决策记录）：2');
+    expect(report).toContain('等待 Owner（仅存在 ownerDecisions.executionStatus=pending 的未执行决策）：1');
     expect(report).toContain('准入耗尽（processing.state=exhausted）：1');
+  });
+
+  it('stops counting an Owner decision as pending after it is applied, while retaining its audit history', async () => {
+    const ws = seedWorkspace();
+    const reportsDir = makeTempDir('pd-funnel-owner-lifecycle-');
+    const candidateId = 'candidate-owner-lifecycle';
+    const pendingDecision = {
+      decisionId: 'decision-owner-lifecycle',
+      candidateId,
+      decision: 'create',
+      ownerId: 'owner-test',
+      identitySource: 'test',
+      reason: 'exercise pending to applied transition',
+      decidedAt: SEED_AT,
+      executionStatus: 'pending',
+      policyVersion: 'owner-decision@1',
+    };
+    const pendingDocument = {
+      evaluations: [],
+      currentEvaluationId: null,
+      processing: { state: 'awaiting_owner', blockedReason: 'reuse_pending_owner' },
+      ownerDecisions: [pendingDecision],
+    };
+    withState(ws, (db) => insertCandidate(db, candidateId, 'principle', 'pending', SEED_AT, JSON.stringify(pendingDocument)));
+
+    const pendingModel = await main(['--workspace', ws.workspace], { reportsDir });
+    expect(pendingModel.window.candidateBreakdown.awaitingOwner).toBe(1);
+    expect(pendingModel.window.candidateBreakdown.ownerDecisionRecordsByStatus).toEqual({ pending: 1 });
+    expect(pendingModel.state.candidates.admission.candidatesWithPendingOwnerDecision).toBe(1);
+
+    const appliedDocument = {
+      ...pendingDocument,
+      processing: { state: 'complete' },
+      ownerDecisions: [{
+        ...pendingDecision,
+        executionStatus: 'applied',
+        executedAt: SEED_AT,
+        resultingPrincipleId: 'principle-owner-lifecycle',
+      }],
+    };
+    withState(ws, (db) => {
+      db.prepare('UPDATE principle_candidates SET admission_json = ? WHERE candidate_id = ?')
+        .run(JSON.stringify(appliedDocument), candidateId);
+    });
+
+    const appliedModel = await main(['--workspace', ws.workspace], { reportsDir });
+    expect(appliedModel.window.candidateBreakdown.awaitingOwner).toBe(0);
+    expect(appliedModel.window.candidateBreakdown.ownerDecisionRecordsByStatus).toEqual({ applied: 1 });
+    expect(appliedModel.state.candidates.admission.candidatesWithOwnerDecisions).toBe(1);
+    expect(appliedModel.state.candidates.admission.candidatesWithPendingOwnerDecision).toBe(0);
+    expect(appliedModel.state.candidates.admission.ownerDecisionRecordsByStatus).toEqual({ applied: 1 });
+  });
+
+  it('reports 0% approvals when the denominator is positive and NA only when it is zero', async () => {
+    const ws = seedWorkspace();
+    const reportsDir = makeTempDir('pd-funnel-zero-approval-');
+    withState(ws, (db) => {
+      const insert = db.prepare(`INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
+        VALUES (?, 'artifact', 'prompt', 'low', ?, ?)`);
+      insert.run('approval-pending', 'pending', SEED_AT);
+      insert.run('approval-rejected', 'rejected', SEED_AT);
+    });
+
+    await main(['--workspace', ws.workspace], { reportsDir });
+    const reportPath = path.join(reportsDir, `PD_PIPELINE_FUNNEL_BASELINE_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.md`);
+    const withDenominator = fs.readFileSync(reportPath, 'utf-8');
+    expect(withDenominator).toContain("| 审批通过 | approvals status='approved' | approvals 全部 | 0.000 |");
+
+    withState(ws, (db) => db.exec('DELETE FROM approvals'));
+    await main(['--workspace', ws.workspace], { reportsDir });
+    const withoutDenominator = fs.readFileSync(reportPath, 'utf-8');
+    expect(withoutDenominator).toContain("| 审批通过 | approvals status='approved' | approvals 全部 | NA |");
   });
 
   it('marks a missing table NA instead of fabricating a zero', async () => {
@@ -1050,6 +1181,89 @@ describe('recent window', () => {
     expect(report).toContain('| 审批请求→激活 | Activation | Approval 请求 | NA |');
     expect(report).toMatch(/审批 approvals\s+NA\(表缺失\)/);
     expect(report).toMatch(/- Approval 请求按状态（pending=等待 Owner）：_table missing_/);
+  });
+});
+
+describe('recent window boundaries', () => {
+  it('uses one UTC half-open [cutoff, earliest snapshot T1) window at millisecond boundaries for every stage', async () => {
+    const ws = seedWorkspace();
+    const fixedT1 = '2030-02-01T00:00:00.000Z';
+    const laterT1 = '2030-02-01T00:00:00.003Z';
+    const fixedCutoff = '2030-01-02T00:00:00.000Z';
+    const boundaryRows = [
+      ['before-cutoff', '2030-01-01T23:59:59.999Z'],
+      ['at-cutoff', fixedCutoff],
+      ['before-t1', '2030-01-31T23:59:59.999Z'],
+      ['at-t1', fixedT1],
+      ['after-t1', '2030-02-01T00:00:00.001Z'],
+    ];
+    const taskKinds = [
+      'diagnostician', 'diag_rootcause', 'diag_distiller', 'diag_router',
+      'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer',
+    ];
+    withState(ws, (db) => {
+      for (const kind of taskKinds) {
+        for (const [label, timestamp] of boundaryRows) {
+          insertTask(db, `boundary-${kind}-${label}`, kind, 'completed', timestamp);
+        }
+      }
+      for (const [label, timestamp] of boundaryRows) {
+        insertCandidate(db, `boundary-candidate-${label}`, 'principle', 'pending', timestamp);
+        db.prepare(`INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
+          VALUES (?, 'artifact', 'prompt', 'low', 'pending', ?)`).run(`boundary-approval-${label}`, timestamp);
+        db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+          VALUES (?, ?, 'artifact', 'prompt', 'activate', ?, ?)`)
+          .run(`boundary-activation-${label}`, `ik-${label}`, `target-${label}`, timestamp);
+        db.prepare(`INSERT INTO pain_diagnoses (id, pain_id, task_id, diagnosis_id, category, root_cause, created_at)
+          VALUES (?, ?, 'diag-parent-1', ?, 'test', 'test', ?)`)
+          .run(`boundary-diagnosis-${label}`, `pain-${label}`, `diagnosis-${label}`, timestamp);
+        db.prepare(`INSERT INTO principle_applications (principle_id, channel, level, kind, created_at)
+          VALUES (?, 'prompt', 'presence', 'prompt_injected', ?)`)
+          .run(`principle-${label}`, timestamp);
+        db.prepare(`INSERT INTO gate_blocks (session_id, tool_name, reason, created_at)
+          VALUES (?, 'Bash', 'test', ?)`).run(`session-${label}`, timestamp);
+      }
+    });
+    const trajectory = new Database(ws.trajectoryDbPath);
+    try {
+      const insertPain = trajectory.prepare(`INSERT INTO pain_events (session_id, source, score, host_kind, created_at)
+        VALUES (?, 'manual', 0.5, 'codex', ?)`);
+      for (const [label, timestamp] of boundaryRows) insertPain.run(`pain-session-${label}`, timestamp);
+    } finally {
+      trajectory.close();
+    }
+
+    const stageSnapshot = (dbPath, relSegments) => {
+      const staged = painRecall.stageWalSnapshot(dbPath, relSegments);
+      if (!staged.ok) return staged;
+      // The state snapshot is the earlier linearization point; all stage
+      // queries must use it as their shared upper bound.
+      return { ...staged, capturedAt: path.basename(dbPath) === 'state.db' ? fixedT1 : laterT1 };
+    };
+    const reportsDir = makeTempDir('pd-funnel-boundary-');
+    const model = await main(['--workspace', ws.workspace], { reportsDir, stageSnapshot });
+
+    expect(model.meta.windowT1).toBe(fixedT1);
+    expect(model.window.windowT1Iso).toBe(fixedT1);
+    expect(model.window.cutoffIso).toBe(fixedCutoff);
+    expect(model.window.stages.pain.count).toBe(2);
+    expect(model.window.stages.diagnostician.count).toBe(8);
+    for (const kind of ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer']) {
+      expect(model.window.stages[kind].count, kind).toBe(2);
+    }
+    expect(model.window.stages.approvals.count).toBe(2);
+    expect(model.window.stages.activations.count).toBe(2);
+    expect(model.window.taskStatusByKind.diag_rootcause).toEqual({ completed: 2 });
+    expect(model.window.taskStatusByKind.diag_distiller).toEqual({ completed: 2 });
+    expect(model.window.taskStatusByKind.diag_router).toEqual({ completed: 2 });
+    expect(model.window.approvalsByStatus).toEqual({ pending: 2 });
+    expect(model.window.activationsByAction).toEqual({ activate: 2 });
+    expect(model.window.candidateBreakdown.total).toBe(2);
+    expect(model.state.candidates.windowed).toBe(2);
+    expect(model.state.diagnosis.painDiagnoses.windowed).toBe(2);
+    expect(model.state.application.windowed).toBe(2);
+    expect(model.trajectory.pain.windowed).toBe(2);
+    expect(model.trajectory.interception.gateBlocks.windowed).toBe(2);
   });
 });
 

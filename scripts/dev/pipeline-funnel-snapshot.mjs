@@ -344,17 +344,26 @@ function totalCount(db, table, extraWhere = '', params = []) {
 }
 
 /**
- * COUNT of rows whose timestamp column falls inside the window
- * [cutoff, snapshot T1). Returns null when the table is missing.
+ * COUNT of rows whose timestamp column falls inside the common UTC window
+ * [cutoffIso, windowT1Iso). julianday() retains the fractional-second
+ * precision of the ISO timestamps written by the runtime; datetime() would
+ * truncate those fractions and admit records just before the cutoff.
+ * Returns null when the table is missing.
  *
- * `unparseableTimestamps` counts non-NULL values SQLite's datetime() cannot
- * read (epoch integers, malformed text): such rows silently fall outside
- * the window, so they are SURFACED next to the count, never dropped.
+ * `unparseableTimestamps` counts non-NULL values SQLite cannot parse; those
+ * rows are surfaced separately and never silently treated as in-window.
  */
-function windowedCount(db, table, column, cutoffIso, extraWhere = '', params = []) {
+function windowedCount(db, table, column, cutoffIso, windowT1Iso, extraWhere = '', params = []) {
   if (!tableExists(db, table)) return null;
-  const count = db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE datetime(${column}) >= datetime(?) ${extraWhere}`).get(cutoffIso, ...params).n;
-  const unparseable = db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} IS NOT NULL AND datetime(${column}) IS NULL ${extraWhere}`).get(...params).n;
+  const count = db.prepare(
+    `SELECT COUNT(*) AS n FROM ${table}
+      WHERE julianday(${column}) >= julianday(?)
+        AND julianday(${column}) < julianday(?) ${extraWhere}`,
+  ).get(cutoffIso, windowT1Iso, ...params).n;
+  const unparseable = db.prepare(
+    `SELECT COUNT(*) AS n FROM ${table}
+      WHERE ${column} IS NOT NULL AND julianday(${column}) IS NULL ${extraWhere}`,
+  ).get(...params).n;
   return { count, unparseableTimestamps: unparseable };
 }
 
@@ -474,12 +483,22 @@ function parseAdmissionSummary(admissionJson) {
   const processing = parsed !== null && typeof parsed.processing === 'object' && parsed.processing !== null && !Array.isArray(parsed.processing)
     ? parsed.processing
     : null;
+  const ownerDecisions = Array.isArray(parsed.ownerDecisions) ? parsed.ownerDecisions : [];
+  const ownerDecisionStatusCounts = {};
+  for (const ownerDecision of ownerDecisions) {
+    const status = isRecord(ownerDecision) && typeof ownerDecision.executionStatus === 'string'
+      ? ownerDecision.executionStatus
+      : '(unknown)';
+    ownerDecisionStatusCounts[status] = (ownerDecisionStatusCounts[status] ?? 0) + 1;
+  }
   return {
     kind: 'present',
     decision: current && typeof current.decision === 'string' ? current.decision : null,
     reason: current && typeof current.reason === 'string' ? current.reason : null,
     processingState: processing && typeof processing.state === 'string' ? processing.state : null,
-    ownerDecisions: Array.isArray(parsed.ownerDecisions) ? parsed.ownerDecisions.length : 0,
+    ownerDecisions: ownerDecisions.length,
+    ownerDecisionStatusCounts,
+    pendingOwnerDecisions: ownerDecisionStatusCounts.pending ?? 0,
   };
 }
 
@@ -553,7 +572,7 @@ function runFailureCategories(db, kinds) {
   return out;
 }
 
-function collectStateFunnel(db, cutoffIso) {
+function collectStateFunnel(db, cutoffIso, windowT1Iso) {
   const funnel = {};
 
   // ── 诊断 stage ──
@@ -585,13 +604,13 @@ function collectStateFunnel(db, cutoffIso) {
   };
   funnel.diagnosis.painDiagnoses = {
     total: totalCount(db, 'pain_diagnoses'),
-    windowed: windowedCount(db, 'pain_diagnoses', 'created_at', cutoffIso)?.count ?? null,
+    windowed: windowedCount(db, 'pain_diagnoses', 'created_at', cutoffIso, windowT1Iso)?.count ?? null,
   };
 
   // ── 候选 + 准入 stage ──
   funnel.candidates = { available: true };
   funnel.candidates.total = totalCount(db, 'principle_candidates');
-  funnel.candidates.windowed = windowedCount(db, 'principle_candidates', 'created_at', cutoffIso)?.count ?? null;
+  funnel.candidates.windowed = windowedCount(db, 'principle_candidates', 'created_at', cutoffIso, windowT1Iso)?.count ?? null;
   funnel.candidates.byStatus = countBy(db, 'principle_candidates', 'status');
   // recommendation_kind IS the raw persisted kind (candidate-store maps
   // rawRecommendationKind = r.recommendation_kind; the normalized view is
@@ -608,7 +627,9 @@ function collectStateFunnel(db, cutoffIso) {
       const processingCounts = {};
       let invalid = 0;
       let absent = 0;
-      let ownerDecisionPending = 0;
+      let candidatesWithOwnerDecisions = 0;
+      let candidatesWithPendingOwnerDecision = 0;
+      const ownerDecisionRecordsByStatus = {};
       for (const row of rows) {
         const summary = parseAdmissionSummary(row.a);
         if (summary.kind === 'absent') {
@@ -630,7 +651,11 @@ function collectStateFunnel(db, cutoffIso) {
         }
         const proc = summary.processingState ?? '(none)';
         processingCounts[proc] = (processingCounts[proc] ?? 0) + 1;
-        if (summary.ownerDecisions > 0) ownerDecisionPending += 1;
+        if (summary.ownerDecisions > 0) candidatesWithOwnerDecisions += 1;
+        if (summary.pendingOwnerDecisions > 0) candidatesWithPendingOwnerDecision += 1;
+        for (const [status, count] of Object.entries(summary.ownerDecisionStatusCounts)) {
+          ownerDecisionRecordsByStatus[status] = (ownerDecisionRecordsByStatus[status] ?? 0) + count;
+        }
       }
       funnel.candidates.admission = {
         absent,
@@ -639,7 +664,9 @@ function collectStateFunnel(db, cutoffIso) {
         reasonsTop: topN(reasonCounts, 8),
         refusalReasonsTop: topN(refusalReasonCounts, 8),
         processingStates: processingCounts,
-        candidatesWithOwnerDecisions: ownerDecisionPending,
+        candidatesWithOwnerDecisions,
+        candidatesWithPendingOwnerDecision,
+        ownerDecisionRecordsByStatus,
       };
     }
   }
@@ -696,7 +723,7 @@ function collectStateFunnel(db, cutoffIso) {
   funnel.application.byKind = countBy(db, 'principle_applications', 'kind');
   funnel.application.byLevel = countBy(db, 'principle_applications', 'level');
   funnel.application.total = totalCount(db, 'principle_applications');
-  funnel.application.windowed = windowedCount(db, 'principle_applications', 'created_at', cutoffIso)?.count ?? null;
+  funnel.application.windowed = windowedCount(db, 'principle_applications', 'created_at', cutoffIso, windowT1Iso)?.count ?? null;
   {
     const rows = safeAll(db, 'SELECT COUNT(DISTINCT principle_id) AS n FROM principle_applications');
     funnel.application.distinctPrinciples = rows === null ? null : rows[0].n;
@@ -718,11 +745,11 @@ function topN(counts, n) {
   return Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, n));
 }
 
-function collectTrajectoryFunnel(db, cutoffIso) {
+function collectTrajectoryFunnel(db, cutoffIso, windowT1Iso) {
   const funnel = {};
   funnel.pain = { available: true };
   funnel.pain.total = totalCount(db, 'pain_events');
-  funnel.pain.windowed = windowedCount(db, 'pain_events', 'created_at', cutoffIso)?.count ?? null;
+  funnel.pain.windowed = windowedCount(db, 'pain_events', 'created_at', cutoffIso, windowT1Iso)?.count ?? null;
   funnel.pain.bySource = countBy(db, 'pain_events', 'source');
   funnel.pain.byHostKind = countBy(db, 'pain_events', 'host_kind');
   funnel.pain.bySeverity = countBy(db, 'pain_events', 'severity');
@@ -731,7 +758,7 @@ function collectTrajectoryFunnel(db, cutoffIso) {
   funnel.interception = { available: true };
   funnel.interception.gateBlocks = {
     total: totalCount(db, 'gate_blocks'),
-    windowed: windowedCount(db, 'gate_blocks', 'created_at', cutoffIso)?.count ?? null,
+    windowed: windowedCount(db, 'gate_blocks', 'created_at', cutoffIso, windowT1Iso)?.count ?? null,
     byTool: countBy(db, 'gate_blocks', 'tool_name'),
   };
   return funnel;
@@ -759,12 +786,12 @@ const WINDOW_STAGES = Object.freeze([
  * "全量与近 30 天各阶段数量"). A missing table yields `null` — rendered as
  * NA, never as a fabricated 0.
  */
-function collectWindow(stateDb, trajectoryDb, cutoffIso) {
+function collectWindow(stateDb, trajectoryDb, cutoffIso, windowT1Iso) {
   const stages = {};
   for (const def of WINDOW_STAGES) {
     const db = def.db === 'state' ? stateDb : trajectoryDb;
     const extraWhere = def.kinds ? `AND task_kind IN (${placeholders(def.kinds)})` : '';
-    const windowed = windowedCount(db, def.table, def.column, cutoffIso, extraWhere, def.kinds ?? []);
+    const windowed = windowedCount(db, def.table, def.column, cutoffIso, windowT1Iso, extraWhere, def.kinds ?? []);
     stages[def.stage] = {
       label: def.label,
       table: def.db === 'state' ? `state.${def.table}` : `trajectory.${def.table}`,
@@ -778,8 +805,10 @@ function collectWindow(stateDb, trajectoryDb, cutoffIso) {
   // route / missing link are different outcomes and must not be merged.
   const taskStatus = safeAll(
     stateDb,
-    `SELECT task_kind AS k, status AS s, COUNT(*) AS n FROM tasks WHERE datetime(created_at) >= datetime(?) GROUP BY task_kind, status`,
-    [cutoffIso],
+    `SELECT task_kind AS k, status AS s, COUNT(*) AS n FROM tasks
+       WHERE julianday(created_at) >= julianday(?) AND julianday(created_at) < julianday(?)
+       GROUP BY task_kind, status`,
+    [cutoffIso, windowT1Iso],
   );
   const taskStatusByKind = {};
   for (const row of taskStatus ?? []) {
@@ -789,8 +818,9 @@ function collectWindow(stateDb, trajectoryDb, cutoffIso) {
   const candidates = safeAll(
     stateDb,
     `SELECT candidate_id AS id, status AS s, recommendation_kind AS k, consumed_at AS consumed_at, admission_json AS a, created_at AS c
-       FROM principle_candidates WHERE datetime(created_at) >= datetime(?)`,
-    [cutoffIso],
+       FROM principle_candidates
+       WHERE julianday(created_at) >= julianday(?) AND julianday(created_at) < julianday(?)`,
+    [cutoffIso, windowT1Iso],
   );
   const candidateBreakdown = candidates === null
     ? null
@@ -805,17 +835,17 @@ function collectWindow(stateDb, trajectoryDb, cutoffIso) {
     stateDb,
     'approvals',
     'status',
-    'WHERE datetime(requested_at) >= datetime(?)',
-    [cutoffIso],
+    'WHERE julianday(requested_at) >= julianday(?) AND julianday(requested_at) < julianday(?)',
+    [cutoffIso, windowT1Iso],
   );
   const activationsByAction = countBy(
     stateDb,
     'activations',
     'action',
-    'WHERE datetime(activated_at) >= datetime(?)',
-    [cutoffIso],
+    'WHERE julianday(activated_at) >= julianday(?) AND julianday(activated_at) < julianday(?)',
+    [cutoffIso, windowT1Iso],
   );
-  return { cutoffIso, stages, taskStatusByKind: taskStatus === null ? null : taskStatusByKind, candidateBreakdown, approvalsByStatus, activationsByAction };
+  return { cutoffIso, windowT1Iso, stages, taskStatusByKind: taskStatus === null ? null : taskStatusByKind, candidateBreakdown, approvalsByStatus, activationsByAction };
 }
 
 // ── Consumed-without-Dreamer classification (pure, unit-tested) ──────────────
@@ -865,6 +895,7 @@ function summarizeCandidateRows(rows) {
   const byRawKind = {};
   const byStatus = {};
   const processingStates = {};
+  const ownerDecisionRecordsByStatus = {};
   let awaitingOwner = 0;
   let exhausted = 0;
   let consumed = 0;
@@ -877,14 +908,29 @@ function summarizeCandidateRows(rows) {
     if (admission.kind === 'present') {
       const state = admission.processingState ?? '(none)';
       processingStates[state] = (processingStates[state] ?? 0) + 1;
-      if (state === 'awaiting_owner' || admission.ownerDecisions > 0) awaitingOwner += 1;
+      // awaiting_owner is also used for non-decision blockers (for example,
+      // invalid raw kind). Only an explicit, still-executable Owner intent
+      // counts as waiting for an Owner decision.
+      if (admission.pendingOwnerDecisions > 0) awaitingOwner += 1;
       if (state === 'exhausted') exhausted += 1;
+      for (const [status, count] of Object.entries(admission.ownerDecisionStatusCounts)) {
+        ownerDecisionRecordsByStatus[status] = (ownerDecisionRecordsByStatus[status] ?? 0) + count;
+      }
     } else {
       const state = admission.kind === 'absent' ? '(no document)' : '(invalid document)';
       processingStates[state] = (processingStates[state] ?? 0) + 1;
     }
   }
-  return { total: rows.length, byRawKind, byStatus, consumed, processingStates, awaitingOwner, exhausted };
+  return {
+    total: rows.length,
+    byRawKind,
+    byStatus,
+    consumed,
+    processingStates,
+    ownerDecisionRecordsByStatus,
+    awaitingOwner,
+    exhausted,
+  };
 }
 
 // ── Cross-database linkage ───────────────────────────────────────────────────
@@ -1148,7 +1194,7 @@ function renderReport(model) {
     push(`- 准入决定分布：${fmtCounts(model.state.candidates.admission.decisions)}`);
     push(`- 当前评估 reason Top（含 admitted）：${fmtCounts(model.state.candidates.admission.reasonsTop)}`);
     push(`- processing.state 分布：${fmtCounts(model.state.candidates.admission.processingStates)}`);
-    push(`- 文档缺失：${model.state.candidates.admission.absent}；文档损坏（JSON 无效）：${model.state.candidates.admission.invalid}；带 Owner 决策记录：${model.state.candidates.admission.candidatesWithOwnerDecisions}`);
+    push(`- 文档缺失：${model.state.candidates.admission.absent}；文档损坏（JSON 无效）：${model.state.candidates.admission.invalid}；带 Owner 决策记录：${model.state.candidates.admission.candidatesWithOwnerDecisions}；仍有 pending 决策的候选：${model.state.candidates.admission.candidatesWithPendingOwnerDecision}；Owner 决策历史状态（记录数）：${fmtCounts(model.state.candidates.admission.ownerDecisionRecordsByStatus)}`);
   } else {
     push('- 准入文档：_表缺失_');
   }
@@ -1197,8 +1243,9 @@ function renderReport(model) {
   push(`| 候选consumed→播种 | dreamer 任务数 | status='consumed' 的候选数 | ${ratio(dreamerTotal, consumed)} |`);
   const scribeTotal = kindTotalOrNull(model.state.internalization, 'scribe', true);
   push(`| 播种→Scribe | scribe 任务数 | dreamer 任务数 | ${ratio(scribeTotal, dreamerTotal)} |`);
-  const approved = model.state.activation.approvalsByStatus?.approved ?? null;
-  push(`| 审批通过 | approvals status='approved' | approvals 全部 | ${ratio(approved, sumOrNA(model.state.activation.approvalsByStatus))} |`);
+  const approvalsByStatus = model.state.activation.approvalsByStatus;
+  const approved = approvalsByStatus === null ? null : (approvalsByStatus.approved ?? 0);
+  push(`| 审批通过 | approvals status='approved' | approvals 全部 | ${ratio(approved, sumOrNA(approvalsByStatus))} |`);
   push(`| 激活→应用 | DISTINCT principle_id in principle_applications | 激活目标 DISTINCT target_ref | ${ratio(model.state.application.distinctPrinciples, model.state.activation.targets?.distinct)} |`);
   push();
   push('> 上述比率是**观测比例**而非严格漏斗转化（各阶段登记面与去重口径不同，已在分子/分母列声明）。');
@@ -1237,7 +1284,8 @@ function renderReport(model) {
 
 function renderWindow(push, model) {
   const window = model.window;
-  push(`## 6. 近 ${model.meta.days} 天漏斗（窗口 [${window.cutoffIso}, 快照 T1)）`);
+  push(`## 6. 近 ${model.meta.days} 天漏斗（共同窗口 [${window.cutoffIso}, ${window.windowT1Iso})）`);
+  push(`- 共同窗口 T1：${window.windowT1Iso}（取 state.db 与 trajectory.db 的 capturedAt 中较早者，确保两个快照均覆盖该时点）。`);
   push();
   push('每个阶段使用自身的真实事件时间列（见「时间列」），全部落在同一个窗口内；表缺失时记 `NA(表缺失)`，不补零。');
   push();
@@ -1266,7 +1314,7 @@ function renderWindow(push, model) {
   push('窗口内结果拆分（失败 / 等待 Owner / 合法跳过 / 缺失关联分开计）：');
   push();
   const taskStatus = window.taskStatusByKind;
-  for (const kind of ['diagnostician', 'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer']) {
+  for (const kind of [...DIAGNOSTICIAN_KINDS, ...PEER_RUNNER_KINDS]) {
     push(`- ${kind} 任务状态：${taskStatus === null ? '_table missing_' : fmtCounts(taskStatus[kind] ?? {})}`);
   }
   const cb = window.candidateBreakdown;
@@ -1278,7 +1326,7 @@ function renderWindow(push, model) {
       .reduce((acc, [, n]) => acc + n, 0);
     push(`- 候选（窗口内 ${cb.total}）：按原始 kind ${fmtCounts(cb.byRawKind)}；按状态 ${fmtCounts(cb.byStatus)}；已消费 ${cb.consumed}`);
     push(`  - 合法跳过（implementation/defer，本就不播种）：${legalNoSeed}`);
-    push(`  - 等待 Owner（准入 processing.state=awaiting_owner，或文档带 Owner 决策记录）：${cb.awaitingOwner}；准入耗尽（processing.state=exhausted）：${cb.exhausted}；processing.state：${fmtCounts(cb.processingStates)}`);
+    push(`  - 等待 Owner（仅存在 ownerDecisions.executionStatus=pending 的未执行决策）：${cb.awaitingOwner}；准入耗尽（processing.state=exhausted）：${cb.exhausted}；processing.state：${fmtCounts(cb.processingStates)}`);
   }
   push(`- Approval 请求按状态（pending=等待 Owner）：${fmtCounts(window.approvalsByStatus)}`);
   push(`- Activation 按动作：${fmtCounts(window.activationsByAction)}`);
@@ -1387,23 +1435,28 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     }
   }
 
-  const pair = snapshotPair(stateDbPath, trajectoryDbPath);
+  const pair = snapshotPair(stateDbPath, trajectoryDbPath, { stage: deps.stageSnapshot ?? stageWalSnapshotOf });
   let stateDb = null;
   let trajectoryDb = null;
   let model;
   try {
     stateDb = openStagedReadonly(pair.state.staged.stagedDbPath);
     trajectoryDb = openStagedReadonly(pair.trajectory.staged.stagedDbPath);
-    const laterT1 = Date.parse(pair.state.staged.capturedAt) >= Date.parse(pair.trajectory.staged.capturedAt)
-      ? pair.state.staged.capturedAt
-      : pair.trajectory.staged.capturedAt;
-    const cutoffIso = new Date(Date.parse(laterT1) - options.days * 24 * 60 * 60 * 1000).toISOString();
+    const stateT1Ms = Date.parse(pair.state.staged.capturedAt);
+    const trajectoryT1Ms = Date.parse(pair.trajectory.staged.capturedAt);
+    if (!Number.isFinite(stateT1Ms) || !Number.isFinite(trajectoryT1Ms)) {
+      throw new Error('snapshot_t1_invalid: both staged snapshots must expose a parseable UTC capturedAt');
+    }
+    // The earlier T1 is the latest instant guaranteed to be covered by BOTH
+    // independently captured databases; every stage shares this one bound.
+    const windowT1Iso = new Date(Math.min(stateT1Ms, trajectoryT1Ms)).toISOString();
+    const cutoffIso = new Date(Date.parse(windowT1Iso) - options.days * 24 * 60 * 60 * 1000).toISOString();
 
     const ledger = collectLedgerStats(workspace);
-    const state = collectStateFunnel(stateDb, cutoffIso);
-    const trajectory = collectTrajectoryFunnel(trajectoryDb, cutoffIso);
+    const state = collectStateFunnel(stateDb, cutoffIso, windowT1Iso);
+    const trajectory = collectTrajectoryFunnel(trajectoryDb, cutoffIso, windowT1Iso);
     const linkage = collectLinkage(stateDb, trajectoryDb, pair.state.staged.capturedAt, pair.trajectory.staged.capturedAt, ledger);
-    const window = collectWindow(stateDb, trajectoryDb, cutoffIso);
+    const window = collectWindow(stateDb, trajectoryDb, cutoffIso, windowT1Iso);
 
     model = {
       meta: {
@@ -1411,6 +1464,7 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
         workspace,
         days: options.days,
         cutoffIso,
+        windowT1: windowT1Iso,
         stateT1: pair.state.staged.capturedAt,
         stateFingerprint: pair.state.staged.fingerprint,
         stateAttempts: pair.state.attempts,
