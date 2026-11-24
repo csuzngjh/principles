@@ -810,9 +810,13 @@ describe('skew accounting', () => {
     expect(classifyConsumedWithoutDreamer({ rawKind: null, hasReuseEvidence: false })).toBe(c.INVALID_RAW_KIND);
     expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', hasReuseEvidence: true })).toBe(c.LEGAL_REUSE_RESOLVED);
     expect(classifyConsumedWithoutDreamer({ rawKind: 'prompt', hasReuseEvidence: true })).toBe(c.LEGAL_REUSE_RESOLVED);
-    // parked for an Owner decision: not in the ledger yet, so no seed is correct
+    // A saved Owner park with no typed decision remains actionable.
     expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', hasReuseEvidence: false, admissionProcessingState: 'awaiting_owner' })).toBe(c.AWAITING_OWNER);
     expect(classifyConsumedWithoutDreamer({ rawKind: 'rule', hasReuseEvidence: false, admissionProcessingState: 'awaiting_owner' })).toBe(c.AWAITING_OWNER);
+    // Typed Owner history is pending only while executionStatus is pending.
+    expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', admissionPendingOwnerDecision: true, admissionOwnerDecisionCount: 1 })).toBe(c.AWAITING_OWNER);
+    expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', admissionProcessingState: 'awaiting_owner', admissionProcessingBlockedReason: 'candidate_kind_invalid:principle', admissionOwnerDecisionCount: 0 })).toBe(c.UNEXPLAINED);
+    expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', admissionProcessingState: 'awaiting_owner', admissionOwnerDecisionCount: 1 })).toBe(c.UNEXPLAINED);
     // every other state (complete, exhausted, no document, …) is unexplained
     for (const state of ['complete', 'exhausted', 'not_started', 'in_progress', null, undefined]) {
       expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', hasReuseEvidence: false, admissionProcessingState: state }), String(state)).toBe(c.UNEXPLAINED);
@@ -985,6 +989,12 @@ describe('recent window', () => {
           policyVersion: 'owner-decision@1',
         }],
       }));
+      insertCandidate(db, 'c-prompt-awaiting', 'prompt', 'pending', inside, JSON.stringify({
+        evaluations: [],
+        currentEvaluationId: null,
+        processing: { state: 'awaiting_owner', blockedReason: 'needs_evidence:evidence_array_empty' },
+        ownerDecisions: [],
+      }));
       insertCandidate(db, 'c-prompt-applied', 'prompt', 'pending', inside, JSON.stringify({
         evaluations: [],
         currentEvaluationId: null,
@@ -1057,8 +1067,8 @@ describe('recent window', () => {
     expect(stages.approvals).toMatchObject({ table: 'state.approvals', column: 'requested_at', count: 1, unparseableTimestamps: 1 });
     expect(stages.activations).toMatchObject({ table: 'state.activations', column: 'activated_at', count: 2, unparseableTimestamps: 0 });
     // all-history numbers are reported separately and are NOT reused for the window
-    expect(model.state.candidates.total).toBe(7);
-    expect(model.state.candidates.windowed).toBe(6);
+    expect(model.state.candidates.total).toBe(8);
+    expect(model.state.candidates.windowed).toBe(7);
 
     // windowed outcomes stay distinct: failure / awaiting Owner / exhausted / legal no-seed
     expect(model.window.taskStatusByKind.artificer).toEqual({ failed: 1 });
@@ -1068,13 +1078,14 @@ describe('recent window', () => {
     expect(model.window.approvalsByStatus).toEqual({ pending: 1 });
     expect(model.window.activationsByAction).toEqual({ activate: 2 });
     expect(model.window.candidateBreakdown).toMatchObject({
-      total: 6,
+      total: 7,
       consumed: 2,
-      awaitingOwner: 1,
+      awaitingOwner: 2,
+      pendingOwnerDecisionCandidates: 1,
       exhausted: 1,
       ownerDecisionRecordsByStatus: { pending: 1, applied: 1, superseded: 1 },
     });
-    expect(model.window.candidateBreakdown.byRawKind).toEqual({ implementation: 1, principle: 2, prompt: 2, wizardry: 1 });
+    expect(model.window.candidateBreakdown.byRawKind).toEqual({ implementation: 1, principle: 2, prompt: 3, wizardry: 1 });
 
     const report = fs.readFileSync(path.join(reportsDir, `PD_PIPELINE_FUNNEL_BASELINE_${model.meta.runDate}.md`), 'utf-8');
     expect(report).toContain(`## 6. 近 30 天漏斗（共同窗口 [${model.window.cutoffIso}, ${model.window.windowT1Iso})）`);
@@ -1089,7 +1100,7 @@ describe('recent window', () => {
     expect(report).toContain('- diag_router 任务状态：completed: 1');
     expect(report).toContain('- Approval 请求按状态（pending=等待 Owner）：pending: 1');
     expect(report).toContain('- 合法跳过（implementation/defer，本就不播种）：1');
-    expect(report).toContain('等待 Owner（仅存在 ownerDecisions.executionStatus=pending 的未执行决策）：1');
+    expect(report).toContain('等待 Owner（awaiting_owner 且 blocker 非 candidate_kind_invalid，或存在 pending 决策）：2；其中显式 pending 决策候选：1');
     expect(report).toContain('准入耗尽（processing.state=exhausted）：1');
   });
 
@@ -1138,9 +1149,11 @@ describe('recent window', () => {
 
     const appliedModel = await main(['--workspace', ws.workspace], { reportsDir });
     expect(appliedModel.window.candidateBreakdown.awaitingOwner).toBe(0);
+    expect(appliedModel.window.candidateBreakdown.pendingOwnerDecisionCandidates).toBe(0);
     expect(appliedModel.window.candidateBreakdown.ownerDecisionRecordsByStatus).toEqual({ applied: 1 });
     expect(appliedModel.state.candidates.admission.candidatesWithOwnerDecisions).toBe(1);
     expect(appliedModel.state.candidates.admission.candidatesWithPendingOwnerDecision).toBe(0);
+    expect(appliedModel.state.candidates.admission.candidatesAwaitingOwner).toBe(0);
     expect(appliedModel.state.candidates.admission.ownerDecisionRecordsByStatus).toEqual({ applied: 1 });
   });
 

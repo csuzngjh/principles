@@ -496,6 +496,7 @@ function parseAdmissionSummary(admissionJson) {
     decision: current && typeof current.decision === 'string' ? current.decision : null,
     reason: current && typeof current.reason === 'string' ? current.reason : null,
     processingState: processing && typeof processing.state === 'string' ? processing.state : null,
+    processingBlockedReason: processing && typeof processing.blockedReason === 'string' ? processing.blockedReason : null,
     ownerDecisions: ownerDecisions.length,
     ownerDecisionStatusCounts,
     pendingOwnerDecisions: ownerDecisionStatusCounts.pending ?? 0,
@@ -504,6 +505,20 @@ function parseAdmissionSummary(admissionJson) {
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Owner backlog includes a saved awaiting_owner park unless it is a known
+ * data-format blocker. Typed decision history is authoritative when present:
+ * only a pending intent is still executable; applied/superseded history is
+ * retained for audit but never counted as waiting.
+ */
+function isAwaitingOwnerAction(admission) {
+  if (admission?.kind !== 'present') return false;
+  if (admission.pendingOwnerDecisions > 0) return true;
+  if (admission.ownerDecisions > 0) return false;
+  return admission.processingState === 'awaiting_owner'
+    && !String(admission.processingBlockedReason ?? '').startsWith('candidate_kind_invalid:');
 }
 
 function collectLedgerStats(workspaceDir) {
@@ -629,6 +644,7 @@ function collectStateFunnel(db, cutoffIso, windowT1Iso) {
       let absent = 0;
       let candidatesWithOwnerDecisions = 0;
       let candidatesWithPendingOwnerDecision = 0;
+      let candidatesAwaitingOwner = 0;
       const ownerDecisionRecordsByStatus = {};
       for (const row of rows) {
         const summary = parseAdmissionSummary(row.a);
@@ -653,6 +669,7 @@ function collectStateFunnel(db, cutoffIso, windowT1Iso) {
         processingCounts[proc] = (processingCounts[proc] ?? 0) + 1;
         if (summary.ownerDecisions > 0) candidatesWithOwnerDecisions += 1;
         if (summary.pendingOwnerDecisions > 0) candidatesWithPendingOwnerDecision += 1;
+        if (isAwaitingOwnerAction(summary)) candidatesAwaitingOwner += 1;
         for (const [status, count] of Object.entries(summary.ownerDecisionStatusCounts)) {
           ownerDecisionRecordsByStatus[status] = (ownerDecisionRecordsByStatus[status] ?? 0) + count;
         }
@@ -666,6 +683,7 @@ function collectStateFunnel(db, cutoffIso, windowT1Iso) {
         processingStates: processingCounts,
         candidatesWithOwnerDecisions,
         candidatesWithPendingOwnerDecision,
+        candidatesAwaitingOwner,
         ownerDecisionRecordsByStatus,
       };
     }
@@ -864,7 +882,14 @@ export const NO_DREAMER_CLASSIFICATION = Object.freeze({
  * Classify why a consumed candidate has no Dreamer task. Both rows live in
  * the SAME database snapshot, so this is not a cross-database skew sample.
  */
-export function classifyConsumedWithoutDreamer({ rawKind, hasReuseEvidence, admissionProcessingState }) {
+export function classifyConsumedWithoutDreamer({
+  rawKind,
+  hasReuseEvidence,
+  admissionProcessingState,
+  admissionProcessingBlockedReason,
+  admissionPendingOwnerDecision = false,
+  admissionOwnerDecisionCount = 0,
+}) {
   const kind = typeof rawKind === 'string' ? rawKind : '';
   if (NO_SEED_ROUTE_KINDS.includes(kind)) {
     // implementation → channel 'skill' is MVP-disabled; defer → deferred route.
@@ -878,10 +903,13 @@ export function classifyConsumedWithoutDreamer({ rawKind, hasReuseEvidence, admi
     // Dreamer seed is suppressed by design (candidate-seed-suppression).
     return NO_DREAMER_CLASSIFICATION.LEGAL_REUSE_RESOLVED;
   }
-  if (admissionProcessingState === 'awaiting_owner') {
-    // Parked for an Owner decision (AdmissionProcessingState). The candidate
-    // is not in the ledger yet, so NOT seeding a Dreamer is the required
-    // behaviour — an Owner backlog item, not a pipeline gap.
+  const awaitingOwner = admissionPendingOwnerDecision
+    || (admissionProcessingState === 'awaiting_owner'
+      && admissionOwnerDecisionCount === 0
+      && !String(admissionProcessingBlockedReason ?? '').startsWith('candidate_kind_invalid:'));
+  if (awaitingOwner) {
+    // A saved Owner park without a typed decision is still actionable unless
+    // it is a known raw-kind data blocker; typed history counts only while pending.
     return NO_DREAMER_CLASSIFICATION.AWAITING_OWNER;
   }
   return NO_DREAMER_CLASSIFICATION.UNEXPLAINED;
@@ -898,6 +926,7 @@ function summarizeCandidateRows(rows) {
   const processingStates = {};
   const ownerDecisionRecordsByStatus = {};
   let awaitingOwner = 0;
+  let pendingOwnerDecisionCandidates = 0;
   let exhausted = 0;
   let consumed = 0;
   for (const row of rows) {
@@ -912,7 +941,8 @@ function summarizeCandidateRows(rows) {
       // awaiting_owner is also used for non-decision blockers (for example,
       // invalid raw kind). Only an explicit, still-executable Owner intent
       // counts as waiting for an Owner decision.
-      if (admission.pendingOwnerDecisions > 0) awaitingOwner += 1;
+      if (isAwaitingOwnerAction(admission)) awaitingOwner += 1;
+      if (admission.pendingOwnerDecisions > 0) pendingOwnerDecisionCandidates += 1;
       if (state === 'exhausted') exhausted += 1;
       for (const [status, count] of Object.entries(admission.ownerDecisionStatusCounts)) {
         ownerDecisionRecordsByStatus[status] = (ownerDecisionRecordsByStatus[status] ?? 0) + count;
@@ -930,6 +960,7 @@ function summarizeCandidateRows(rows) {
     processingStates,
     ownerDecisionRecordsByStatus,
     awaitingOwner,
+    pendingOwnerDecisionCandidates,
     exhausted,
   };
 }
@@ -1041,6 +1072,9 @@ function collectLinkage(stateDb, trajectoryDb, stateT1, trajectoryT1, ledger) {
         rawKind,
         hasReuseEvidence: ledger.reuseCandidateIds.has(row.cid),
         admissionProcessingState: admission.kind === 'present' ? admission.processingState : null,
+        admissionProcessingBlockedReason: admission.kind === 'present' ? admission.processingBlockedReason : null,
+        admissionPendingOwnerDecision: admission.kind === 'present' && admission.pendingOwnerDecisions > 0,
+        admissionOwnerDecisionCount: admission.kind === 'present' ? admission.ownerDecisions : 0,
       });
       const kindKey = rawKind === null ? '(null)' : rawKind;
       byRawKind[kindKey] = (byRawKind[kindKey] ?? 0) + 1;
@@ -1195,7 +1229,7 @@ function renderReport(model) {
     push(`- 准入决定分布：${fmtCounts(model.state.candidates.admission.decisions)}`);
     push(`- 当前评估 reason Top（含 admitted）：${fmtCounts(model.state.candidates.admission.reasonsTop)}`);
     push(`- processing.state 分布：${fmtCounts(model.state.candidates.admission.processingStates)}`);
-    push(`- 文档缺失：${model.state.candidates.admission.absent}；文档损坏（JSON 无效）：${model.state.candidates.admission.invalid}；带 Owner 决策记录：${model.state.candidates.admission.candidatesWithOwnerDecisions}；仍有 pending 决策的候选：${model.state.candidates.admission.candidatesWithPendingOwnerDecision}；Owner 决策历史状态（记录数）：${fmtCounts(model.state.candidates.admission.ownerDecisionRecordsByStatus)}`);
+    push(`- 文档缺失：${model.state.candidates.admission.absent}；文档损坏（JSON 无效）：${model.state.candidates.admission.invalid}；带 Owner 决策记录：${model.state.candidates.admission.candidatesWithOwnerDecisions}；当前等待 Owner：${model.state.candidates.admission.candidatesAwaitingOwner}；显式 pending 决策候选：${model.state.candidates.admission.candidatesWithPendingOwnerDecision}；Owner 决策历史状态（记录数）：${fmtCounts(model.state.candidates.admission.ownerDecisionRecordsByStatus)}`);
   } else {
     push('- 准入文档：_表缺失_');
   }
@@ -1327,7 +1361,7 @@ function renderWindow(push, model) {
       .reduce((acc, [, n]) => acc + n, 0);
     push(`- 候选（窗口内 ${cb.total}）：按原始 kind ${fmtCounts(cb.byRawKind)}；按状态 ${fmtCounts(cb.byStatus)}；已消费 ${cb.consumed}`);
     push(`  - 合法跳过（implementation/defer，本就不播种）：${legalNoSeed}`);
-    push(`  - 等待 Owner（仅存在 ownerDecisions.executionStatus=pending 的未执行决策）：${cb.awaitingOwner}；准入耗尽（processing.state=exhausted）：${cb.exhausted}；processing.state：${fmtCounts(cb.processingStates)}`);
+    push(`  - 等待 Owner（awaiting_owner 且 blocker 非 candidate_kind_invalid，或存在 pending 决策）：${cb.awaitingOwner}；其中显式 pending 决策候选：${cb.pendingOwnerDecisionCandidates}；准入耗尽（processing.state=exhausted）：${cb.exhausted}；processing.state：${fmtCounts(cb.processingStates)}`);
   }
   push(`- Approval 请求按状态（pending=等待 Owner）：${fmtCounts(window.approvalsByStatus)}`);
   push(`- Activation 按动作：${fmtCounts(window.activationsByAction)}`);
@@ -1356,7 +1390,7 @@ function renderLinkage(push, model, skew) {
     push(`- 分类：${fmtCounts(c2d.classification)}`);
     push('  - `legal_no_seed_route`：implementation（通道 MVP 未启用）/ defer（延迟路由）——设计上不播种，不是异常。');
     push('  - `legal_reuse_resolved`：账本 reuseEvidence 记录该候选已复用既有原则——按设计抑制独立 Dreamer 播种。');
-    push('  - `awaiting_owner_decision`：准入处理停在 awaiting_owner（等待 Owner 决策/入库），尚未入账本——不播种是规定行为，属 Owner 待办而非管道缺口。');
+    push('  - `awaiting_owner_decision`：存在未执行的 Owner 决策，或准入处理停在 awaiting_owner 且不是 candidate_kind_invalid 数据格式阻塞；尚未入账本时不播种是规定行为。');
     push('  - `invalid_raw_kind`：原始 kind 不在已知集合——数据问题，逐条列出。');
     push('  - `unexplained_requires_investigation`：既无不播种理由、无 reuse 证据、也未停在等待 Owner——需要逐条调查。');
     const awaitingOwner = (c2d.samples ?? []).filter((sample) => sample.classification === NO_DREAMER_CLASSIFICATION.AWAITING_OWNER);
