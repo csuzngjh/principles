@@ -36,6 +36,38 @@ export interface WorkspaceInfo {
   coreFiles: string[];      // 已存在的核心文件列表
 }
 
+/** Core files whose presence marks a workspace as already initialized. */
+const CORE_WORKSPACE_FILES = ['AGENTS.md', 'SOUL.md', 'USER.md'] as const;
+
+export interface WorkspaceInspection {
+  readonly exists: boolean;
+  readonly hasPrinciples: boolean;
+  readonly isFirstInstall: boolean;
+  readonly coreFiles: string[];
+}
+
+/**
+ * Inspect ONE workspace directory with the exact rule `detectWorkspace` uses.
+ *
+ * PRI-1278 Phase 5 review: the install MODE must be recommended from the
+ * workspace the operator actually selected. Deriving it from a different
+ * (pre-prompt / neutral) directory let `force` overwrite user files in the
+ * final target.
+ */
+export function inspectWorkspaceDir(dir: string): WorkspaceInspection {
+  if (!fs.existsSync(dir)) {
+    return { exists: false, hasPrinciples: false, isFirstInstall: true, coreFiles: [] };
+  }
+  const hasPrinciples = fs.existsSync(path.join(dir, '.principles', 'THINKING_OS.md'));
+  const coreFiles = CORE_WORKSPACE_FILES.filter((file) => fs.existsSync(path.join(dir, file)));
+  return {
+    exists: true,
+    hasPrinciples,
+    isFirstInstall: !hasPrinciples && coreFiles.length === 0,
+    coreFiles,
+  };
+}
+
 const IS_WIN32 = process.platform === 'win32';
 
 /** 探测超时：卡死的 .cmd shim / 挂起的二进制不应挂住安装器（rc-9 降级）。 */
@@ -71,8 +103,8 @@ export function checkEnvironment(): EnvCheckResult {
   // nvm-windows 等场景），CreateProcess 直连会跳过它命中真 node.exe，
   // 让版本门形同虚设。
   const nodeVersion = IS_WIN32
-    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'node', '-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
-    : probeVersion(() => execFileSync('node', ['-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'node', '-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }))
+    : probeVersion(() => execFileSync('node', ['-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   if (nodeVersion !== null && nodeVersion.length > 0) {
     result.nodeVersion = nodeVersion;
     // 注：此处刻意用 String.match 并禁用 prefer-regexp-exec——写门确定性
@@ -86,16 +118,16 @@ export function checkEnvironment(): EnvCheckResult {
 
   // 检测 OpenClaw（win32 上 openclaw 是 .cmd shim，无 .exe，须经 cmd.exe /c）
   const openclawVersion = IS_WIN32
-    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'openclaw', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
-    : probeVersion(() => execFileSync('openclaw', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'openclaw', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }))
+    : probeVersion(() => execFileSync('openclaw', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   if (openclawVersion !== null) {
     result.openclawVersion = openclawVersion;
     result.hasOpenClaw = true;
   } else {
     // 尝试 clawd 命令
     const clawdVersion = IS_WIN32
-      ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'clawd', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
-      : probeVersion(() => execFileSync('clawd', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+      ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'clawd', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }))
+      : probeVersion(() => execFileSync('clawd', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
     if (clawdVersion !== null) {
       result.openclawVersion = clawdVersion;
       result.hasOpenClaw = true;
@@ -103,9 +135,9 @@ export function checkEnvironment(): EnvCheckResult {
   }
 
   // 检测 Python（win32 上 python.org 安装通常只提供 python.exe，python3 可能不在 PATH）
-  let pythonVersion: string | null = probeVersion(() => execFileSync('python3', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  let pythonVersion: string | null = probeVersion(() => execFileSync('python3', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   if (pythonVersion === null && IS_WIN32) {
-    pythonVersion = probeVersion(() => execFileSync('python', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+    pythonVersion = probeVersion(() => execFileSync('python', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   }
   if (pythonVersion !== null) {
     const [, version] = pythonVersion.split(' ');
@@ -114,7 +146,7 @@ export function checkEnvironment(): EnvCheckResult {
   }
 
   // 检测 Git
-  const gitVersion = probeVersion(() => execFileSync('git', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  const gitVersion = probeVersion(() => execFileSync('git', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS, windowsHide: true }));
   if (gitVersion !== null) {
     result.hasGit = true;
   }
@@ -122,7 +154,7 @@ export function checkEnvironment(): EnvCheckResult {
   return result;
 }
 
-export type WorkspaceHost = 'openclaw' | 'codex' | 'workbuddy' | 'all';
+export type WorkspaceHost = 'openclaw' | 'codex' | 'workbuddy' | 'all' | 'none';
 
 export interface DetectWorkspaceOptions {
   /**
@@ -240,6 +272,14 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
     ));
   } else if (host === 'workbuddy') {
     candidates.push(hostRoots.workbuddyWorkspaceDir);
+  } else if (host === 'none') {
+    // Service-Host-only (PRI-1278 Phase 5): no host owns a default workspace,
+    // so the neutral PD-owned location is the only honest default. Never
+    // inherit OpenClaw's ~/clawd — that would imply a host that isn't installed.
+    if (typeof env.PD_WORKSPACE_DIR === 'string' && env.PD_WORKSPACE_DIR.trim().length > 0) {
+      candidates.push(env.PD_WORKSPACE_DIR);
+    }
+    candidates.push(path.join(homePaths.homeDir, 'pd-workspace'));
   } else {
     // OpenClaw owns its default workspace under the active OpenClaw state dir.
     if (typeof env.OPENCLAW_WORKSPACE === 'string' && env.OPENCLAW_WORKSPACE.trim().length > 0) {
@@ -252,39 +292,12 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
     candidates.push(path.join(hostRoots.openclawHome, 'workspace'));
   }
 
-  // 核心文件列表（用于检测是否已安装）
-  const CORE_FILES = [
-    'AGENTS.md',
-    'SOUL.md',
-    'USER.md',
-  ];
-
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      // Fix-8 (P1-BUG-2): detect via THINKING_OS.md — the file the installer
-      // actually creates under .principles/. The previous check for
-      // PRINCIPLES.md never matched because the installer doesn't create
-      // that file, so hasPrinciples was always false on reinstall.
-      const principlesPath = path.join(candidate, '.principles', 'THINKING_OS.md');
-      const hasPrinciples = fs.existsSync(principlesPath);
-
-      // 检测已存在的核心文件
-      const coreFiles: string[] = [];
-      for (const file of CORE_FILES) {
-        if (fs.existsSync(path.join(candidate, file))) {
-          coreFiles.push(file);
-        }
-      }
-
-      // 判断是否首次安装：没有 THINKING_OS.md 且没有核心文件
-      const isFirstInstall = !hasPrinciples && coreFiles.length === 0;
-
+    const inspection = inspectWorkspaceDir(candidate);
+    if (inspection.exists) {
       return {
         detectedPath: candidate,
-        exists: true,
-        hasPrinciples,
-        isFirstInstall,
-        coreFiles,
+        ...inspection,
       };
     }
   }
@@ -294,7 +307,9 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
     ? hostRoots.codexWorkspaceDir
     : host === 'workbuddy'
       ? hostRoots.workbuddyWorkspaceDir
-      : path.join(hostRoots.homeDir, 'clawd');
+      : host === 'none'
+        ? path.join(homePaths.homeDir, 'pd-workspace')
+        : path.join(hostRoots.homeDir, 'clawd');
   return {
     detectedPath: defaultPath,
     exists: false,
@@ -411,8 +426,8 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
     // element or a JS-side output match — it never enters a shell string.
     if (Number.isInteger(port) && port > 0 && port < 65536) {
       const output = IS_WIN32
-        ? execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf-8', timeout: 5000 })
-        : execFileSync('lsof', ['-i', `:${port}`, '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000 });
+        ? execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf-8', timeout: 5000, windowsHide: true })
+        : execFileSync('lsof', ['-i', `:${port}`, '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000, windowsHide: true });
       const text = output.trim();
       if (text) {
         let listeningLine: string | undefined;
@@ -480,13 +495,13 @@ function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlR
       if (IS_WIN32) {
         execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', 'stop', '--force'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
       } else {
-        execFileSync('openclaw', ['gateway', 'stop', '--force'], { encoding: 'utf-8', timeout: 15000 });
+        execFileSync('openclaw', ['gateway', 'stop', '--force'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
       }
     } else {
       if (IS_WIN32) {
         execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', 'start'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
       } else {
-        execFileSync('openclaw', ['gateway', 'start'], { encoding: 'utf-8', timeout: 15000 });
+        execFileSync('openclaw', ['gateway', 'start'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
       }
     }
     return { ok: true };
@@ -516,9 +531,10 @@ const GATEWAY_STOP_POLL_INTERVAL_MS = 1_000;
  * Deliberately NOT a copy of the two sibling liveness probes
  * (`openclaw-plugin/src/utils/file-lock.ts` and
  * `principles-core/src/principle-tree-ledger.ts`), which read ANY
- * `process.kill` failure as "dead". The sibling stop leg in
- * `pd-console/src/server/utils/gateway.ts` decides by exit code alone and has
- * no liveness probe to reuse. The OpenClaw gateway is a high-integrity
+ * `process.kill` failure as "dead". The Console's former stop leg
+ * (`pd-console/src/server/utils/gateway.ts`) decided by exit code alone and had
+ * no liveness probe to reuse; it was unreferenced and has been removed, so
+ * this stays the only stop-side liveness probe. The OpenClaw gateway is a high-integrity
  * scheduled task on Windows, and a medium-IL installer that signals it gets
  * EPERM — which means ALIVE. A false "dead" here would confirm a stop that
  * never happened, so win32 asks the SCM read-only via tasklist and POSIX

@@ -40,10 +40,25 @@ export type HostTarget = 'openclaw' | 'codex' | 'workbuddy' | 'all';
 export const HOST_TARGETS: readonly HostTarget[] = ['openclaw', 'codex', 'workbuddy', 'all'];
 
 /**
+ * PRI-1278 Phase 5: host integration and the background lifecycle are TWO
+ * independent dimensions. `none` installs no host adapter at all — the PD
+ * Service Host is the only background executor and the workspace truthfully
+ * waits for a host binding. It is NOT a host id: it never enters the install
+ * manifest `hosts` array and never fabricates a host worker.
+ */
+export type HostSelection = HostTarget | 'none';
+
+export const HOST_SELECTIONS: readonly HostSelection[] = [...HOST_TARGETS, 'none'];
+
+/**
  * Validate a CLI --host value. rc-1/rc-3: treat input as unknown, fail loud.
  */
 export function isHostTarget(value: unknown): value is HostTarget {
   return typeof value === 'string' && (HOST_TARGETS as readonly string[]).includes(value);
+}
+
+export function isHostSelection(value: unknown): value is HostSelection {
+  return typeof value === 'string' && (HOST_SELECTIONS as readonly string[]).includes(value);
 }
 
 /**

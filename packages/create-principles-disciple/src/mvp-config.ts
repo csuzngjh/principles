@@ -686,7 +686,7 @@ export function readEnabledChannelsFromConfigYaml(workspaceDir: string): string[
  */
 export function getNpmGlobalBinDir(): string | null {
   try {
-    const prefix = execSync('npm prefix -g', { encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const prefix = execSync('npm prefix -g', { encoding: 'utf-8', stdio: 'pipe', windowsHide: true }).trim();
     if (!prefix) return null;
     return isWindows() ? prefix : path.join(prefix, 'bin');
   } catch {
