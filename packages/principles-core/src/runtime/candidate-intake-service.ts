@@ -870,8 +870,8 @@ export class CandidateIntakeService {
           };
         }
         const currentRaw = typeof current.rawRecommendationKind === 'string' ? current.rawRecommendationKind : null;
-        const shown = currentRaw === null ? 'missing' : JSON.stringify(currentRaw).slice(1, -1).slice(0, 40);
-        const nextAction = `Repair the persisted RAW kind from the source recommendation, then request explicit Owner authorization: pd candidate resume-post-processing --candidate-id ${candidateId} --reason "<why this repair is safe>" --confirm.`;
+        const shown = currentRaw === null || currentRaw.trim().length === 0 ? 'missing' : JSON.stringify(currentRaw).slice(1, -1).slice(0, 40);
+        const nextAction = `Repair the persisted RAW kind from the source recommendation, then request explicit Owner authorization: pd candidate resume-post-processing --candidate-id ${candidateId} --workspace "${this.#stateManager.workspaceDir}" --reason "<why this repair is safe>" --confirm.`;
         const now = new Date().toISOString();
         const previous = admission.document?.processing;
         const persisted = await this.#stateManager.updateAdmissionProcessing(candidateId, {
