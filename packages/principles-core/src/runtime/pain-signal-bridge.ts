@@ -984,6 +984,10 @@ export class PainSignalBridge {
   private readonly ownedResources: readonly { close: () => void | Promise<void> }[];
   /** Bridge-level operations in flight (see trackOperation / disposeWhenIdle). */
   private activeOperations = 0;
+  // A factory return is a short-lived borrower lease until the caller starts
+  // its first bridge operation. Eviction must not close the state manager in
+  // the gap between createPainSignalBridge() resolving and that call.
+  private outstandingFactoryBorrows = 0;
   private disposeRequested = false;
   private disposed = false;
   private readonly capabilityDisabled: PainSignalBridgeOptions['capabilityDisabled'];
@@ -1219,14 +1223,30 @@ export class PainSignalBridge {
   // bridge-level operation is counted; `disposeWhenIdle` defers the disposal
   // to the moment the last running operation finishes.
 
+  /**
+   * Register one caller that has just received this cached bridge. The lease
+   * is consumed atomically when that caller starts its first operation.
+   */
+  retainFactoryBorrow(): void {
+    if (this.disposed) throw new Error('Cannot borrow a disposed PainSignalBridge');
+    this.outstandingFactoryBorrows += 1;
+  }
+
+  /** Consume one factory-return lease when the caller starts using the bridge. */
+  private releaseFactoryBorrow(): void {
+    if (this.outstandingFactoryBorrows > 0) this.outstandingFactoryBorrows -= 1;
+  }
+
   /** Run one bridge-level operation (nested operations count once each). */
   private async trackOperation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.disposed) throw new Error('PainSignalBridge has been disposed');
+    this.releaseFactoryBorrow();
     this.activeOperations += 1;
     try {
       return await operation();
     } finally {
       this.activeOperations -= 1;
-      if (this.activeOperations === 0 && this.disposeRequested) {
+      if (this.activeOperations === 0 && this.outstandingFactoryBorrows === 0 && this.disposeRequested) {
         this.disposeRequested = false;
         await this.dispose().catch(() => undefined);
       }
@@ -1239,7 +1259,7 @@ export class PainSignalBridge {
    * running operation (that operation's own completion performs it).
    */
   async disposeWhenIdle(): Promise<boolean> {
-    if (this.activeOperations > 0) {
+    if (this.activeOperations > 0 || this.outstandingFactoryBorrows > 0) {
       this.disposeRequested = true;
       return false;
     }
