@@ -66,4 +66,57 @@ describe('real-home write sentinel', () => {
     fs.writeFileSync(manifest, `${JSON.stringify({ layoutVersion: 1, hosts: ['openclaw'], workspaces: [] })}\n`);
     expect(() => assertRealHomeStateUnchanged(before, 'simulated leak')).toThrow(/install\.json/);
   });
+
+  // ── WorkBuddy governance workspace coverage (2026-11-22 incident) ──────
+  // The watched home doubles as the "real" profile: pinning makes
+  // `<watchedHome>/.workbuddy/pd-workspace/...` a guarded target.
+
+  const governanceFile = (...segs: string[]) =>
+    path.join(watchedHome, '.workbuddy', 'pd-workspace', ...segs);
+
+  it('fails and names config.yaml when a fixture overwrites the governance config', () => {
+    fs.mkdirSync(path.dirname(governanceFile('.pd', 'config.yaml')), { recursive: true });
+    fs.writeFileSync(governanceFile('.pd', 'config.yaml'), 'version: 1\n');
+    const before = snapshotRealHomeState();
+    fs.writeFileSync(governanceFile('.pd', 'config.yaml'), 'version: 1\nfeatures: {}\n');
+    expect(() => assertRealHomeStateUnchanged(before, 'simulated leak')).toThrow(/config\.yaml/);
+  });
+
+  it('fails when trajectory.db is overwritten', () => {
+    fs.mkdirSync(path.dirname(governanceFile('.state', 'trajectory.db')), { recursive: true });
+    fs.writeFileSync(governanceFile('.state', 'trajectory.db'), 'sqlite-governance-data');
+    const before = snapshotRealHomeState();
+    fs.writeFileSync(governanceFile('.state', 'trajectory.db'), 'overwritten');
+    expect(() => assertRealHomeStateUnchanged(before, 'simulated leak')).toThrow(/trajectory\.db/);
+  });
+
+  it('fails when a guarded file is deleted', () => {
+    fs.mkdirSync(path.dirname(governanceFile('.pd', 'config.yaml')), { recursive: true });
+    fs.writeFileSync(governanceFile('.pd', 'config.yaml'), 'version: 1\n');
+    const before = snapshotRealHomeState();
+    fs.rmSync(governanceFile('.pd', 'config.yaml'));
+    expect(() => assertRealHomeStateUnchanged(before, 'simulated leak')).toThrow(/config\.yaml/);
+  });
+
+  it('fails when an unexpected directory appears under the config root', () => {
+    const before = snapshotRealHomeState();
+    fs.mkdirSync(path.join(watchedHome, '.workbuddy', 'sneaky-fixture'), { recursive: true });
+    expect(() => assertRealHomeStateUnchanged(before, 'simulated leak')).toThrow(/\.workbuddy/);
+  });
+
+  it('fails on a write under an ambient WORKBUDDY_CONFIG_DIR outside every home', () => {
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-wb-external-'));
+    const previous = process.env.WORKBUDDY_CONFIG_DIR;
+    process.env.WORKBUDDY_CONFIG_DIR = external;
+    try {
+      const before = snapshotRealHomeState();
+      fs.mkdirSync(path.join(external, 'pd-workspace', '.pd'), { recursive: true });
+      fs.writeFileSync(path.join(external, 'pd-workspace', '.pd', 'config.yaml'), 'version: 1\n');
+      expect(() => assertRealHomeStateUnchanged(before, 'simulated leak')).toThrow(/config\.yaml/);
+    } finally {
+      if (previous === undefined) delete process.env.WORKBUDDY_CONFIG_DIR;
+      else process.env.WORKBUDDY_CONFIG_DIR = previous;
+      fs.rmSync(external, { recursive: true, force: true });
+    }
+  });
 });

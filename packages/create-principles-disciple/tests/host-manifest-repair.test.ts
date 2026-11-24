@@ -16,10 +16,25 @@ import { WORKBUDDY_PLUGIN_KEY, WORKBUDDY_PLUGIN_NAME, WORKBUDDY_MARKETPLACE_NAME
 
 let home: string;
 
+/**
+ * Host overrides the repair's evidence reads honor ahead of the sandbox home.
+ * Pinned (workbuddy) or stripped (the rest) so a polluted process.env can
+ * never reroute the judgment outside the test home.
+ */
+const AMBIENT_HOST_OVERRIDE_KEYS = [
+  'CODEBUDDY_CONFIG_DIR',
+  'CODEX_HOME',
+  'OPENCLAW_HOME',
+  'OPENCLAW_STATE_DIR',
+  'PD_EXPERIMENT_ROOT',
+] as const;
+
 beforeEach(() => {
   home = mkdtempSync(path.join(os.tmpdir(), 'pd-host-repair-'));
   vi.stubEnv('HOME', home);
   vi.stubEnv('USERPROFILE', home);
+  vi.stubEnv('WORKBUDDY_CONFIG_DIR', path.join(home, '.workbuddy'));
+  for (const key of AMBIENT_HOST_OVERRIDE_KEYS) vi.stubEnv(key, undefined);
 });
 
 afterEach(() => {

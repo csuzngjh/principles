@@ -59,6 +59,22 @@ const PRINCIPLE_TEXT = 'WB_CHAIN_DIRECTIVE_20261013';
 let savedEnv: Record<string, string | undefined>;
 const tempDirs: string[] = [];
 
+/**
+ * Ambient host overrides the installer/wrapper resolution honors AHEAD of the
+ * sandbox home. Every real boundary in this file (in-process install, spawned
+ * wrapper) must resolve only inside the lab sandbox — the 2026-11-22 incident
+ * was a fixture landing in the host's real governance workspace via exactly
+ * this seam.
+ */
+const AMBIENT_HOST_OVERRIDE_KEYS = [
+  'WORKBUDDY_CONFIG_DIR',
+  'CODEBUDDY_CONFIG_DIR',
+  'CODEX_HOME',
+  'OPENCLAW_HOME',
+  'OPENCLAW_STATE_DIR',
+  'PD_EXPERIMENT_ROOT',
+] as const;
+
 function track(dir: string): string {
   tempDirs.push(dir);
   return dir;
@@ -82,6 +98,13 @@ function makeChainLab(): ChainLab {
   fs.rmSync(runtimeAdapterDir, { recursive: true, force: true });
   fs.symlinkSync(fs.realpathSync(ADAPTER_PKG), runtimeAdapterDir, process.platform === 'win32' ? 'junction' : 'dir');
   const project = track(fs.mkdtempSync(path.join(TMP, 'pd-wb-chain-proj-')));
+  // Pin/strip host overrides at the process level: the real install resolves
+  // its governance workspace through process.env, so an ambient
+  // WORKBUDDY_CONFIG_DIR would route `runtime init` outside the sandbox.
+  process.env.WORKBUDDY_CONFIG_DIR = path.join(home, '.workbuddy');
+  for (const key of AMBIENT_HOST_OVERRIDE_KEYS) {
+    if (key !== 'WORKBUDDY_CONFIG_DIR') delete process.env[key];
+  }
   const installer = new WorkBuddyHostInstaller({
     homeDir: () => home,
     enginePath: () => FAKE_ENGINE, // deterministic registration boundary (S2 covers the real engine)
@@ -91,10 +114,16 @@ function makeChainLab(): ChainLab {
 }
 
 function runRealWrapper(home: string, payload: Record<string, unknown>, channel: string): { status: number; stdout: string; stderr: string } {
+  // Controlled child env: strip ambient host overrides, pin the workbuddy
+  // config root to this home — never inherit a polluted process.env.
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home, WORKBUDDY_CONFIG_DIR: path.join(home, '.workbuddy') };
+  for (const key of AMBIENT_HOST_OVERRIDE_KEYS) {
+    if (key !== 'WORKBUDDY_CONFIG_DIR') delete env[key];
+  }
   const result = spawnSync(process.execPath, [WRAPPER, channel], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
-    env: { ...process.env, HOME: home, USERPROFILE: home },
+    env,
     windowsHide: true,
     timeout: 60_000,
   });
@@ -148,8 +177,8 @@ describe.skipIf(!PD_CLI_AVAILABLE)('R1 chain: real install → enable → real w
     savedEnv = {
       HOME: process.env.HOME,
       USERPROFILE: process.env.USERPROFILE,
-      WORKBUDDY_CONFIG_DIR: process.env.WORKBUDDY_CONFIG_DIR,
       PD_WORKBUDDY_ADAPTER_ENTRY: process.env.PD_WORKBUDDY_ADAPTER_ENTRY,
+      ...Object.fromEntries(AMBIENT_HOST_OVERRIDE_KEYS.map((key) => [key, process.env[key]])),
     };
     vi.spyOn(logger, 'info').mockImplementation(() => undefined);
     vi.spyOn(logger, 'warn').mockImplementation(() => undefined);

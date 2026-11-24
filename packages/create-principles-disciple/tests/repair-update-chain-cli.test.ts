@@ -79,8 +79,13 @@ describe('repair-host-manifest CLI (real entry)', () => {
   }
 
   function run(args: string[]): { status: number | null; stdout: string } {
+    // The spawned CLI resolves host evidence through ambient overrides —
+    // strip them and pin the workbuddy config root to the sandbox so the
+    // repair judges only this test's planted footprint.
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home, WORKBUDDY_CONFIG_DIR: path.join(home, '.workbuddy') };
+    for (const key of ['CODEBUDDY_CONFIG_DIR', 'CODEX_HOME', 'OPENCLAW_HOME', 'OPENCLAW_STATE_DIR', 'PD_EXPERIMENT_ROOT']) delete env[key];
     const result = spawnSync(process.execPath, [CLI_ENTRY, 'repair-host-manifest', ...args], {
-      env: { ...process.env, HOME: home, USERPROFILE: home },
+      env,
       encoding: 'utf8',
       timeout: 60_000,
     });
