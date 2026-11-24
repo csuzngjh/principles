@@ -314,7 +314,11 @@ export function painReceiptFallbackDiagnostic(result: PainReceiptFallbackResult)
     case 'already_bound':
       return `pain_receipt_idempotent:taskId=${outcome.taskId}`;
     case 'rejected':
-      return `pain_receipt_rejected:${outcome.reasonCode}:stage=after_tool_call:unbound=true${outcome.detail !== undefined ? `:detail=${Array.from(outcome.detail).slice(0, 80).join('')}` : ''}${outcome.taskId !== undefined ? `:taskId=${outcome.taskId}` : ''}`;
+      // CodeRabbit round: NEVER echo `outcome.detail` here — Core fills it on
+      // `recovery_store_error` with a raw exception message that may embed a
+      // workspace path or newlines; the ids-only line contract admits codes
+      // and ids only.
+      return `pain_receipt_rejected:${outcome.reasonCode}:stage=after_tool_call:unbound=true${outcome.taskId !== undefined ? `:taskId=${outcome.taskId}` : ''}`;
   }
 }
 

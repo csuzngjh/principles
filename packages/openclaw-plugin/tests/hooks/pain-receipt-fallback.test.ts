@@ -523,21 +523,26 @@ describe('diagnostics — bounded, ids and codes only', () => {
     expect(painReceiptFallbackDiagnostic({ status: 'not_applicable' })).toBeNull();
   });
 
-  it('rejections carry the stage, the unbound fact and a bounded detail', () => {
+  it('rejections carry the stage and the unbound fact — NEVER the raw detail (path-leak surface)', () => {
     const line = painReceiptFallbackDiagnostic({
       status: 'attempted',
       outcome: {
         status: 'rejected',
-        reasonCode: 'receipt_text_not_json',
-        detail: 'x'.repeat(500),
+        reasonCode: 'recovery_store_error',
+        // Core fills detail with a raw exception message that can embed an
+        // absolute workspace path — the ids-only line must not echo it.
+        detail: 'SqliteError: unable to open D:\\secret\\paths\\ws\\.pd\\state.db',
         painId: 'mcp_p',
         taskId: 'task_p',
       },
     });
-    expect(line).toContain('pain_receipt_rejected:receipt_text_not_json');
+    expect(line).toContain('pain_receipt_rejected:recovery_store_error');
     expect(line).toContain('stage=after_tool_call');
     expect(line).toContain('unbound=true');
-    expect(line!.length).toBeLessThan(220);
+    expect(line).toContain('taskId=task_p');
+    expect(line).not.toContain('detail=');
+    expect(line).not.toContain('secret');
+    expect(line).not.toContain('\n');
   });
 
   it('target-turn probe reads the exact (session, turn) or nothing', () => {
