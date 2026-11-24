@@ -1,5 +1,28 @@
 # create-principles-disciple
 
+## 1.155.3
+
+### Patch Changes
+
+- 35ceb54: Bump tuf-js from 6.0.2 to 6.0.3 in the installer runtime dependencies (dependabot PR #2767).
+- ac9a4f6: Bump @inquirer/prompts from 8.7.x to 8.8.x in the installer runtime dependencies (dependabot PR #2768).
+- ad018fe: Bump commander from 14.0.3 to 15.1.0 in the installer runtime dependencies (dependabot PR #2769). CLI usage stays on the stable Command/option/action API surface; Node engine floor >=22.12.0 is below the existing project floor.
+
+## 1.155.2
+
+### Patch Changes
+
+- 8b44fbf: pd console open: detect and evict stale console processes that still answer
+  /api/health but can no longer serve the UI (deleted entry file or missing
+  web bundle). The console health endpoint now reports an instance block
+  (pid, serverEntry, webIndexExists); the launcher verifies the reported pid's
+  live command line AND its ownership of the listen socket before terminating
+  it (fail closed when unverifiable), then binds a healthy console on the
+  preferred port. pd health reports the state as stale_running.
+- 7357f97: Dependency bump: react-router-dom 7.18.5 -> 7.18.6 for the bundled @principles/pd-console UI; console release-lock re-synced to keep staged  reproducible.
+- bfe31e9: Dependency bump: undici 7.x -> ^8.13.0 (runtime dependency of @principles/core and the bundled installer; installer lockfile re-synced to keep  reproducible).
+- 86c7a63: Harden internal-package dependency governance: ignore @principles/* in dependabot for the root and installer directories (matching the existing openclaw-plugin rule), add a manifest-vs-lock spec parity gate for the installer lockfile, and re-sync that lockfile to the manifest (install-layout 0.8.2 -> 0.10.0 resolution).
+
 ## 1.155.1
 
 ### Patch Changes
