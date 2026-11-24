@@ -775,12 +775,17 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             continue;
           }
           if (intakeResult.outcome === 'refused' && intakeResult.reason === 'owner_decision_pending') {
-            const decision = intakeResult.message.includes('--decide reuse') ? 'reuse' : 'create';
+            const admission = await stateManager.getAdmissionDocument(candidate.candidateId);
+            const pending = pendingOwnerDecision(admission.ok ? admission.document ?? null : null);
+            const decision = pending?.decision ?? (intakeResult.message.includes('--decide reuse') ? 'reuse' : 'create');
+            const principleArg = decision === 'reuse' && pending?.selectedPrincipleId
+              ? ` --principle-id ${pending.selectedPrincipleId}`
+              : '';
             intakeResults.push({
               candidateId: candidate.candidateId,
               status: 'review_required',
               reason: 'owner_decision_pending',
-              nextAction: `Resume the SAME persisted Owner verdict: pd candidate review --candidate-id ${candidate.candidateId} --decide ${decision} --reason "...".`,
+              nextAction: `Resume the SAME persisted Owner verdict: pd candidate review --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --decide ${decision}${principleArg} --reason "...".`,
             });
             continue;
           }
@@ -959,11 +964,14 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             }
             const pending = pendingOwnerDecision(admissionDoc.document ?? null);
             if (pending !== null) {
+              const principleArg = pending.decision === 'reuse' && pending.selectedPrincipleId
+                ? ` --principle-id ${pending.selectedPrincipleId}`
+                : '';
               intakeResults.push({
                 candidateId: candidate.candidateId,
                 status: 'review_required',
                 reason: 'owner_decision_pending',
-                nextAction: `Resume the SAME persisted Owner verdict with pd candidate review --candidate-id ${candidate.candidateId} --decide ${pending.decision} --reason "...".`,
+                nextAction: `Resume the SAME persisted Owner verdict with pd candidate review --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --decide ${pending.decision}${principleArg} --reason "...".`,
               });
               return;
             }
