@@ -221,6 +221,7 @@ async function expectSavedRefusal(world: World, candidateId: string, blockedReas
   expect(processing?.blockedReason).toBe(blockedReason);
   const lastFailure = processing?.lastFailure as { reason?: string; nextAction?: string } | undefined;
   expect(lastFailure?.reason).toBe('candidate_kind_invalid');
+  expect(lastFailure?.nextAction).toContain('Repair the persisted RAW kind from the source recommendation');
   expect(lastFailure?.nextAction).toContain(`pd candidate resume-post-processing --candidate-id ${candidateId} --workspace "${world.workspaceDir}"`);
   expect(lastFailure?.nextAction).toContain('--confirm');
   expect(await dreamerTasksFor(world, candidateId)).toEqual([]);
