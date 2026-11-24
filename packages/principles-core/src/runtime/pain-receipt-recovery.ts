@@ -79,13 +79,29 @@ const RECEIPT_ALLOWED_KEYS = [
 
 /**
  * The ONLY unbound causes the PostToolUse fallback is allowed to repair
- * (P1-2). `codex_host_metadata_missing` is the designated fallback
- * territory: the host attached no trusted `_meta`, so the completion event's
- * own host identity is the designated repair source. Every other cause —
- * a conflict the main path detected, malformed metadata, a consent refusal,
- * an invalid target turn — stays refused here.
+ * (P1-2). Each entry is the designated fallback territory of one host —
+ * the cause arises ONLY when the trusted request `_meta` was absent AND the
+ * caller supplied no claim of its own, so the completion event's own host
+ * identity is the designated repair source:
+ *  - `codex_host_metadata_missing` (Codex, PRI-1274);
+ *  - `host_session_claim_empty` (non-Codex hosts, PRI-1275 WorkBuddy) — the
+ *    unbound outcome when no `_meta` identity existed and NO claim was
+ *    supplied at all.
+ * Every cause that records a REFUSAL of something the caller actually
+ * supplied stays refused here — a specific claim existed and was rejected,
+ * so the completion event must not overturn that recorded decision:
+ * `host_session_not_in_workspace_trajectory` (claim failed the trajectory
+ * check) and `host_session_claim_unusable` (claim carried only empty /
+ * sentinel spellings — PRI-1275 review round; before that split the sentinel
+ * case was folded into `host_session_claim_empty` and therefore became
+ * recoverable, contradicting this contract).
+ * The rest — a conflict the main path detected, malformed metadata, a
+ * consent refusal, an invalid target turn — also stays refused.
  */
-const RECOVERABLE_UNVERIFIED_DETAILS: ReadonlySet<string> = new Set(['codex_host_metadata_missing']);
+const RECOVERABLE_UNVERIFIED_DETAILS: ReadonlySet<string> = new Set([
+  'codex_host_metadata_missing',
+  'host_session_claim_empty',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -243,7 +259,10 @@ export interface ReceiptRecoveryAuthorization {
 
 export interface RecoverTaskIdentityFromReceiptOptions {
   readonly workspaceDir: string;
-  readonly hostKind: 'codex';
+  /** The host whose completion event produced this receipt. PRI-1274 froze
+   * 'codex'; PRI-1275 admits the WorkBuddy adapter through the SAME CAS
+   * recovery (per-host producers, one shared recovery authority). */
+  readonly hostKind: 'codex' | 'workbuddy';
   readonly receipt: ValidatedPainSubmitReceipt;
   readonly identity: ReceiptEventIdentity;
   readonly authorization: ReceiptRecoveryAuthorization;
@@ -347,8 +366,11 @@ function evaluateRecoveryPass(input: {
   authorized: boolean;
   targetTurnTextAvailable: ((sessionId: string, targetTurnId: string) => boolean) | undefined;
   nowIso: string;
+  /** The host whose completion event produced this receipt (P1-2.7 owner
+   * check — the original task must belong to the SAME host). */
+  hostKind: 'codex' | 'workbuddy';
 }): Evaluation {
-  const { task, diagnostic, receipt, identity, authorized, targetTurnTextAvailable, nowIso } = input;
+  const { task, diagnostic, receipt, identity, authorized, targetTurnTextAvailable, nowIso, hostKind } = input;
   const preconditions: TaskCasPreconditions = {
     expectedStatus: task.status,
     expectedLeaseOwner: task.leaseOwner ?? null,
@@ -364,9 +386,10 @@ function evaluateRecoveryPass(input: {
     return { action: 'report', outcome: { status: 'rejected', reasonCode: 'task_input_ref_mismatch', painId: receipt.painId, taskId: receipt.taskId } };
   }
   // P1-2.6/7: taskId/painId agreement alone proves nothing about WHO owns the
-  // task — the original task must be a Codex submission for THIS workspace
-  // before a Codex PostToolUse event may write identity onto it.
-  if (diagnostic.record.hostKind !== 'codex') {
+  // task — the original task must be a submission of the SAME host for THIS
+  // workspace before that host's completion event may write identity onto it
+  // (PRI-1275 admits the WorkBuddy adapter through the same rule).
+  if (diagnostic.record.hostKind !== hostKind) {
     return { action: 'report', outcome: { status: 'rejected', reasonCode: 'task_host_kind_mismatch', painId: receipt.painId, taskId: receipt.taskId } };
   }
   if (diagnostic.record.workspaceDir !== receipt.workspaceDir) {
@@ -558,6 +581,7 @@ export async function recoverTaskIdentityFromReceipt(
         authorized: options.authorization.minimalMetadataGranted,
         targetTurnTextAvailable: options.targetTurnTextAvailable,
         nowIso: now().toISOString(),
+        hostKind: options.hostKind,
       });
       if (evaluation.action === 'report') return evaluation.outcome;
       // P1-4: diagnostic_json, task status AND lease columns are asserted in

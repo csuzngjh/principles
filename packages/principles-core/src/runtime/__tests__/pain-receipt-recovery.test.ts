@@ -231,6 +231,91 @@ describe('recoverTaskIdentityFromReceipt — P1-2 sessionAssociation security ga
   });
 });
 
+describe('recoverTaskIdentityFromReceipt — WorkBuddy fallback territory (PRI-1275)', () => {
+  /** A real persisted ORIGINAL task with the WorkBuddy unbound MCP ingress
+   * shape (`host_session_claim_empty` arises ONLY when the caller supplied NO
+   * claim at all on a non-Codex host — a claim that was supplied and rejected
+   * gets its own refused cause, see the `host_session_claim_unusable` case). */
+  async function persistWorkbuddyUnboundPain(painId: string): Promise<string> {
+    const bridge = makeBridge();
+    const { taskId } = await bridge.submitPainSignal({
+      painId,
+      painType: 'principle_deviation',
+      source: 'mcp_agent_assisted',
+      reason: 'receipt fallback fixture (workbuddy)',
+      provenance: 'agent_reported_owner_approved',
+      hostKind: 'workbuddy',
+      evidence: [],
+      painIngress: unboundMcpIngress(0),
+    });
+    return taskId;
+  }
+
+  it('host_session_claim_empty (the missing-metadata cause) IS repairable by the WorkBuddy fallback', async () => {
+    const painId = 'mcp_1700000000022_3a000022';
+    const taskId = await persistWorkbuddyUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(
+      receiptJson(painId, tmpDir, { sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' } }),
+      { workspaceDir: tmpDir },
+    );
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'workbuddy', receipt: validated.receipt,
+      identity: { sessionId: 'wb-session-1', toolCallId: '01a20d41-fdfd-758f-ab69-4df2fe1fe263' },
+      authorization: authorize(true),
+    });
+    expect(outcome.status).toBe('recovered');
+    if (outcome.status !== 'recovered') return;
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.sessionIdHint).toBe('wb-session-1');
+  });
+
+  it('a FAILED model claim (host_session_not_in_workspace_trajectory) stays refused', async () => {
+    const painId = 'mcp_1700000000023_4b000023';
+    await persistWorkbuddyUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(
+      receiptJson(painId, tmpDir, { sessionAssociation: { status: 'unverified', detail: 'host_session_not_in_workspace_trajectory' } }),
+      { workspaceDir: tmpDir },
+    );
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'workbuddy', receipt: validated.receipt,
+      identity: { sessionId: 'wb-session-1', toolCallId: 'wb-call-1' },
+      authorization: authorize(true),
+    });
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.reasonCode).toBe('session_association_not_recoverable');
+    expect(outcome.detail).toBe('host_session_not_in_workspace_trajectory');
+  });
+
+  it('an UNUSABLE model claim (host_session_claim_unusable: empty/sentinel spellings) stays refused', async () => {
+    // Review round: `host_session_claim_empty` used to cover BOTH "no claim
+    // supplied" and "a claim supplied but only sentinel/blank". Only the
+    // former is the missing-metadata territory; the latter recorded a
+    // REFUSAL of something the caller supplied and must not become
+    // recoverable (P1-2). The cause was split, and this is its negative
+    // control: a task persisted with the sentinel-claim cause is never
+    // repaired by the PostToolUse event.
+    const painId = 'mcp_1700000000024_5c000024';
+    await persistWorkbuddyUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(
+      receiptJson(painId, tmpDir, { sessionAssociation: { status: 'unverified', detail: 'host_session_claim_unusable' } }),
+      { workspaceDir: tmpDir },
+    );
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'workbuddy', receipt: validated.receipt,
+      identity: { sessionId: 'wb-session-1', toolCallId: 'wb-call-unusable' },
+      authorization: authorize(true),
+    });
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.reasonCode).toBe('session_association_not_recoverable');
+    expect(outcome.detail).toBe('host_session_claim_unusable');
+  });
+});
+
 describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () => {
   it('recovers the SAME original task and keeps re-entry consistency', async () => {
     const painId = 'mcp_1700000000001_aa000001';

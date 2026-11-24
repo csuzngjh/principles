@@ -504,6 +504,47 @@ describe('input contract (§5.3) — rejected before any write', () => {
     }
   });
 
+  it('B2: a model claim carrying ONLY sentinel/blank spellings gets its OWN unusable cause — never the recoverable missing-metadata cause', async () => {
+    // Review round: `host_session_claim_empty` must mean exactly "no claim
+    // supplied" (the WorkBuddy receipt-fallback territory). A claim the model
+    // DID supply and this gate rejected (`cli` / `unknown` / blank) records a
+    // REFUSAL, so it carries a distinct cause that stays outside the P1-2
+    // recoverable whitelist — the PostToolUse event may not overturn it.
+    const workspaceDir = await b1Workspace({ minimalMetadata: true });
+    const state = new RuntimeStateManager({ workspaceDir });
+    await state.initialize();
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'workbuddy', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        for (const hostSession of [{ sessionId: 'cli' }, { threadId: 'unknown' }, { sessionId: '   ' }]) {
+          const result = parseReceipt(await h.client.callTool({
+            name: SUBMIT_TOOL_NAME,
+            arguments: {
+              reason: 'Anchor: owner expectation. Observed: behavior. Deviation: mismatch.',
+              anchorType: 'owner_expectation',
+              anchorRef: 'Owner statement',
+              painType: 'user_frustration',
+              hostSession,
+            },
+          }));
+          expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+          expect(result.sessionAssociation).toEqual({ status: 'unverified', detail: 'host_session_claim_unusable' });
+          expect(result.warnings).toContain('host_session_unverified:host_session_claim_unusable');
+          if (result.taskId === null) throw new Error('receipt missing task id');
+          const task = await state.getTask(result.taskId);
+          expect(JSON.parse(task?.diagnosticJson ?? '{}').sessionIdHint).toBeNull();
+        }
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('B1: non-Codex hosts consume the namespaced pd.host-context.v1 _meta (unified consumer contract)', async () => {
     const workspaceDir = await b1Workspace({ minimalMetadata: true });
     const state = new RuntimeStateManager({ workspaceDir });

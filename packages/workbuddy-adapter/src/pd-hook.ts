@@ -46,6 +46,8 @@ import { WorkBuddyDecoderError, WorkBuddyEncoderError, isWorkBuddyHookOutput, WO
 import { recordWorkbuddyOwnerStatement } from './explicit-owner-statement.js';
 import { recordWorkbuddyPromptDeliveryEvidence, recordWorkbuddyDenyEvidence } from './workbuddy-evidence-recorder.js';
 import { ingestWorkbuddyConversation } from './ingestion/ingestion.js';
+import { attemptPainReceiptFallback, painReceiptFallbackDiagnostic } from './ingestion/pain-receipt-fallback.js';
+import { isPainSubmitWorkbuddyToolName } from './codec/input-decoder.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface WorkBuddyPdHookResult { stdout: WorkBuddyHookOutput | null; exitCode: number; stderr: string[] }
@@ -618,12 +620,69 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
         evidenceDiagnostics.push(diagnostic('degraded', `workbuddy_evidence_deny_failed:${errorMessage(error)}`, 'The deny decision was already encoded; evidence replay from the durable source is safe.'));
       }
     }
+    // PRI-1275 (B2): PostToolUse structured-receipt fallback. When a
+    // pd_submit_pain MCP request carried no trusted host `_meta`, its
+    // original Pain/Task was legally persisted unbound; the host completion
+    // event's own structured receipt + host-authoritative identity now
+    // restores the SAME task via the Core CAS recovery. P1-1: the tool name
+    // arrives in WorkBuddy's MCP namespace (`mcp__pd-recall__pd_submit_pain`,
+    // hyphen preserved — the engine does NOT sanitize) and is gated by the
+    // exact codec parser — a bare or foreign-server name never enters.
+    // Independent of workbuddy_conversation_ingestion (no
+    // transcript read; ids only), gated by the Workspace-level
+    // host_identity_minimal_metadata authorization. Fail-open: a fallback
+    // failure never changes the host decision.
+    const receiptDiagnostics: string[] = [];
+    // Each hook invocation resolves the flags from the CURRENT config, so a
+    // revoked minimal identity authorization stops binding on the next event.
+    const minimalMetadataGranted = flags.host_identity_minimal_metadata?.enabled === true;
+    if (event.kind === 'after_tool_call'
+      && event.context.toolName !== undefined
+      && isPainSubmitWorkbuddyToolName(event.context.toolName)
+      && event.context.toolCallId !== undefined) {
+      try {
+        const fallback = await attemptPainReceiptFallback({
+          workspaceDir: resolution.workspaceDir,
+          toolName: event.context.toolName,
+          toolResponse: event.context.toolOutput,
+          // Identity comes from the EVENT's own session/call ids. The event's
+          // `generation_id` (decoder `context.turnId`) is deliberately NOT
+          // passed: its equivalence to a PD submission turn is unproven
+          // (SPEC TD §1.3 field rules; Devin/CodeRabbit round — mapping it
+          // would pin the recovery to a target the trajectory store cannot
+          // resolve, wedging the task in waiting_for_target_evidence).
+          identity: {
+            sessionId: event.context.sessionId,
+            toolCallId: event.context.toolCallId,
+          },
+          minimalMetadataGranted,
+        });
+        const line = painReceiptFallbackDiagnostic(fallback);
+        if (line !== null) {
+          const nextAction = fallback.status === 'not_applicable'
+            ? undefined
+            : fallback.outcome.status === 'recovered'
+              ? 'The submission identity was restored on the original task; no resubmission is needed.'
+              : fallback.outcome.status === 'already_bound'
+                ? 'The original task already carries this identity; nothing to do.'
+                : fallback.outcome.reasonCode === 'blocked_by_consent'
+                  ? 'The Workspace has not granted minimal identity-metadata collection; enable host_identity_minimal_metadata in .pd/config.yaml if binding is wanted.'
+                  : 'The recovery was refused and is not retried automatically; the submission stays legally unbound. Resubmit pd_submit_pain only if the binding is needed.';
+          receiptDiagnostics.push(nextAction === undefined
+            ? diagnostic('degraded', line, 'The receipt fallback outcome was recorded.')
+            : diagnostic('degraded', line, nextAction));
+        }
+      } catch (error: unknown) {
+        receiptDiagnostics.push(diagnostic('degraded', `pain_receipt_fallback_failed:${errorMessage(error)}`, 'The hook decision is unaffected; identity recovery for this call did not complete and is not retried automatically — the submission stays legally unbound.'));
+      }
+    }
     const stderr = [
       ...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic('degraded', warning, 'Inspect the PD governance workspace state and retry; the hook stayed permissive (allow+warnings is degraded health, not fail-closed).')),
       ...evaluationDiagnostics,
       ...evidenceDiagnostics,
       ...autoDiagnostics,
       ...toolSemanticsDiagnostics,
+      ...receiptDiagnostics,
     ];
     return { stdout: receiptOutput(encoded), exitCode: 0, stderr: [...stderr, ...(ownerReceipt === undefined ? [] : [ownerReceipt])] };
   } catch (error) {
