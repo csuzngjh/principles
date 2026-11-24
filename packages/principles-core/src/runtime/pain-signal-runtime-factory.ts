@@ -1005,7 +1005,10 @@ async function createDisabledBridge(
 ): Promise<PainSignalBridge> {
   const disabledCacheKey = `${opts.workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`;
   const cached = bridgeCache.get(disabledCacheKey);
-  if (cached) return cached;
+  if (cached) {
+    cached.retainFactoryBorrow();
+    return cached;
+  }
 
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
   await stateManager.initialize();
@@ -1040,9 +1043,11 @@ async function createDisabledBridge(
   const winner = bridgeCache.get(disabledCacheKey);
   if (winner !== undefined && winner !== bridge) {
     await bridge.dispose().catch(() => undefined);
+    winner.retainFactoryBorrow();
     return winner;
   }
   bridgeCache.set(disabledCacheKey, bridge);
+  bridge.retainFactoryBorrow();
   return bridge;
 }
 
@@ -1150,6 +1155,7 @@ export async function createPainSignalBridge(
     // recency refresh for the per-slot bound
     bridgeCache.delete(cacheKey);
     bridgeCache.set(cacheKey, cached);
+    cached.retainFactoryBorrow();
     return cached;
   }
 
@@ -1163,10 +1169,12 @@ export async function createPainSignalBridge(
   const winner = bridgeCache.get(cacheKey);
   if (winner !== undefined && winner !== bridge) {
     await bridge.dispose().catch(() => undefined);
+    winner.retainFactoryBorrow();
     return winner;
   }
   bridgeCache.set(cacheKey, bridge);
   evictSupersededCollaboratorVariants(slotKey, cacheKey);
+  bridge.retainFactoryBorrow();
   return bridge;
 }
 
