@@ -411,6 +411,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
       createTask: createTaskMock,
       updateTask: async () => { return; },
       getCandidatesByTaskId: async () => overrides.candidates,
+      getCandidate: async (candidateId: string) => overrides.candidates.find((candidate) => candidate.candidateId === candidateId) ?? null,
       getRunsByTask: async () => [{ runId: 'run-1', taskId: TASK_ID_DREAMER, status: 'succeeded' }],
       getRun: async (runId: string) => {
         const candidate = overrides.candidates.find((item) => item.sourceRunId === runId);
