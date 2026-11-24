@@ -1,6 +1,7 @@
 ---
 '@principles/core': minor
 '@principles/workbuddy-adapter': minor
+'@principles/pd-mcp-server': patch
 ---
 
 PRI-1275 (B2): WorkBuddy normal-entry host identity prebind and structured-receipt fallback
@@ -10,3 +11,5 @@ PRI-1275 (B2): WorkBuddy normal-entry host identity prebind and structured-recei
 - **Receipt fallback (same territory as Codex B1)**: new `workbuddy-adapter` `ingestion/pain-receipt-fallback.ts` — when the request carried NO trusted `_meta` (task legally unbound with `host_session_claim_empty`), the PostToolUse completion event's structured receipt (`pd.pain-submit-receipt.v1`) plus the event's own host identity (`session_id`/`generation_id`/`call_id`) restores the SAME original task through the shared Core CAS recovery. Gate is an exact `mcp__<server>__<tool>` parse (`pd-recall`/`pd_recall` + `pd_submit_pain`, equality both segments); more than one text content block is ambiguous and rejected; `submit_unconfirmed` still requires the exact-ID read-back; `pd-recall` server ids are never matched by substring. `recoverTaskIdentityFromReceipt` (Core) admits `hostKind: 'workbuddy'` through the SAME rules: the P1-2 recoverable whitelist gains `host_session_claim_empty` (the designated missing-metadata cause) while a FAILED model claim (`host_session_not_in_workspace_trajectory`) stays refused, and the original task's own hostKind must equal the recovering host's.
 - **Authorization and privacy unchanged from B1**: the Workspace-level `host_identity_minimal_metadata` quiet flag gates identity persistence; full `workbuddy_conversation_ingestion` can stay OFF (real-engine E2E ran with it off) — the fallback reads no transcript and persists ids/receipt metadata only.
 - Real-engine E2E (isolated lab, installed engine, real hook + real dist MCP server + SQLite read-back): prebind at the initial write with `sessionIdHint == engine session_id`, receipt association `verified` from engine baggage, PostToolUse fallback folds idempotently (`pain_receipt_idempotent`), exactly one Pain/Task. pi-mono client E2E: the modified real pi MCP client drives the built server — `options._meta["pd.host-context.v1"]` prebinds, missing `_meta` stays unbound with the WorkBuddy cause, receipt recovery restores the same task.
+
+Review round: pd-mcp-server submit-assembly resolves the minimal identity-metadata authorization PER REQUEST (revocation stops binding on the next submission without a server restart); core baggage parsing validates EVERY `codebuddy.session_id` entry and fails closed on disagreeing multi-entry values (`workbuddy_baggage_session_conflict`); the WorkBuddy fallback no longer maps `generation_id` into any turn id; the worker queue uses the shared candidate picker with SQL-level waiting-task exclusions.
