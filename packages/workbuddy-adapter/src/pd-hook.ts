@@ -625,9 +625,10 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
     // original Pain/Task was legally persisted unbound; the host completion
     // event's own structured receipt + host-authoritative identity now
     // restores the SAME task via the Core CAS recovery. P1-1: the tool name
-    // arrives in WorkBuddy's MCP namespace (`mcp__pd_recall__pd_submit_pain`)
-    // and is gated by the exact codec parser — a bare or foreign-server name
-    // never enters. Independent of workbuddy_conversation_ingestion (no
+    // arrives in WorkBuddy's MCP namespace (`mcp__pd-recall__pd_submit_pain`,
+    // hyphen preserved — the engine does NOT sanitize) and is gated by the
+    // exact codec parser — a bare or foreign-server name never enters.
+    // Independent of workbuddy_conversation_ingestion (no
     // transcript read; ids only), gated by the Workspace-level
     // host_identity_minimal_metadata authorization. Fail-open: a fallback
     // failure never changes the host decision.

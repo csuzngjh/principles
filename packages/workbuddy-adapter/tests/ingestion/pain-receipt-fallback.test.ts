@@ -460,6 +460,59 @@ describe('attemptPainReceiptFallback — workspace spelling normalization', () =
   });
 });
 
+describe('attemptPainReceiptFallback — the prebound happy path is NOT a fallback case', () => {
+  it('a `submitted` receipt that is already `verified` short-circuits to not_applicable (no store read, no degraded line)', async () => {
+    // The trusted `_meta` path bound this identity at the initial write, so
+    // there is nothing to repair. Before the short-circuit the recovery was
+    // still entered and answered `already_bound`, which the hook renders as
+    // `status=degraded reason=pain_receipt_idempotent:…` on EVERY successful
+    // submission — routine noise over the actionable degraded signals.
+    const ws = workspace();
+    const painId = 'mcp_1700000000127_c1000127';
+    await persistUnboundPain(ws, painId);
+    recoverSpy.mockClear();
+    const result = await attemptPainReceiptFallback({
+      workspaceDir: ws,
+      toolName: REAL_TOOL_NAME,
+      toolResponse: arrayEnvelopeReceipt(painId, ws, {
+        sessionAssociation: { status: 'verified', sessionId: EVENT_IDENTITY.sessionId },
+      }),
+      identity: { ...EVENT_IDENTITY },
+      minimalMetadataGranted: true,
+    });
+    expect(result).toEqual({ status: 'not_applicable' });
+    // No diagnostic at all — `painReceiptFallbackDiagnostic` is silent for
+    // not_applicable, so the hook emits zero receipt lines for this event.
+    expect(painReceiptFallbackDiagnostic(result)).toBeNull();
+    expect(recoverSpy).not.toHaveBeenCalled();
+  });
+
+  it('`submit_unconfirmed` is NOT short-circuited — its write outcome is unknown, the read-back recovery still runs', async () => {
+    const ws = workspace();
+    const painId = 'mcp_1700000000128_c2000128';
+    const taskId = await persistUnboundPain(ws, painId);
+    recoverSpy.mockClear();
+    const result = await attemptPainReceiptFallback({
+      workspaceDir: ws,
+      toolName: REAL_TOOL_NAME,
+      toolResponse: arrayEnvelopeReceipt(painId, ws, {
+        status: 'submit_unconfirmed',
+        sessionAssociation: { status: 'verified', sessionId: EVENT_IDENTITY.sessionId },
+      }),
+      identity: { ...EVENT_IDENTITY },
+      minimalMetadataGranted: true,
+    });
+    expect(recoverSpy).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('attempted');
+    if (result.status !== 'attempted') return;
+    // The original task exists (read-back confirmed) and the receipt says
+    // verified, so the recovery binds it — never a silent skip.
+    expect(result.outcome.status).toBe('recovered');
+    if (result.outcome.status !== 'recovered') return;
+    expect(result.outcome.taskId).toBe(taskId);
+  });
+});
+
 describe('attemptPainReceiptFallback — authorization and idempotency', () => {
   it('authorization off records blocked_by_consent on the original task (ids never persisted)', async () => {
     const ws = workspace();

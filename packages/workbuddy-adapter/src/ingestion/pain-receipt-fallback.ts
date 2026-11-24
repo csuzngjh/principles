@@ -15,9 +15,12 @@
  * CAS recovery.
  *
  * P1-1 (mirrored from PRI-1274): the gate is an exact parse of
- * `mcp__<server>__<tool>` against the PD server (`pd-recall`, sanitized
- * `pd_recall`) + `pd_submit_pain`. A bare `pd_submit_pain` or an
- * identically-named tool on another MCP server never enters this path.
+ * `mcp__<server>__<tool>` against the PD server id `pd-recall` + the tool id
+ * `pd_submit_pain`. The real WorkBuddy engine keeps the hyphen (probe
+ * 2026-11-24) — the sanitized `pd_recall` spelling is NOT admitted, because a
+ * locally registered server literally named `pd_recall` is a DIFFERENT
+ * third-party server. A bare `pd_submit_pain` or an identically-named tool on
+ * another MCP server never enters this path.
  *
  * Authorization: the Workspace-level `host_identity_minimal_metadata` quiet
  * flag — deliberately INDEPENDENT of `workbuddy_conversation_ingestion`
@@ -201,6 +204,18 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
   const validated = validatePainSubmitReceipt(parsed, { workspaceDir: normalizedWorkspace });
   if (!validated.ok) {
     return { status: 'attempted', outcome: { status: 'rejected', reasonCode: validated.reasonCode } };
+  }
+  // Nothing to repair: a `submitted` receipt whose association is already
+  // `verified` means the trusted `_meta` path bound the identity at the
+  // INITIAL write. Running the recovery anyway could only answer
+  // `already_bound`, which the hook renders as a routine `status=degraded`
+  // line on EVERY successful submission — drowning the genuinely actionable
+  // degraded signals (and the `blocked_by_consent` nextAction). This is the
+  // normal WorkBuddy happy path, not a fallback case at all.
+  // `submit_unconfirmed` is deliberately NOT skipped: its write outcome is
+  // unknown, so the read-back-confirmed recovery still applies.
+  if (validated.receipt.status === 'submitted' && validated.receipt.sessionAssociation.status === 'verified') {
+    return { status: 'not_applicable' };
   }
   const outcome = await recoverTaskIdentityFromReceipt({
     workspaceDir: normalizedWorkspace,

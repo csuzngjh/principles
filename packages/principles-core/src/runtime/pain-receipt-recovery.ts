@@ -80,17 +80,23 @@ const RECEIPT_ALLOWED_KEYS = [
 /**
  * The ONLY unbound causes the PostToolUse fallback is allowed to repair
  * (P1-2). Each entry is the designated fallback territory of one host —
- * the cause arises ONLY when the trusted request `_meta` was absent, so the
- * completion event's own host identity is the designated repair source:
+ * the cause arises ONLY when the trusted request `_meta` was absent AND the
+ * caller supplied no claim of its own, so the completion event's own host
+ * identity is the designated repair source:
  *  - `codex_host_metadata_missing` (Codex, PRI-1274);
  *  - `host_session_claim_empty` (non-Codex hosts, PRI-1275 WorkBuddy) — the
- *    unbound outcome when no `_meta` identity existed AND the model made no
- *    verifiable-trajectory claim. A model claim that FAILED trajectory
- *    verification (`host_session_not_in_workspace_trajectory`) is NOT in
- *    this set: a specific claim existed and was rejected, so the completion
- *    event must not overturn that recorded refusal.
- * Every other cause — a conflict the main path detected, malformed
- * metadata, a consent refusal, an invalid target turn — stays refused here.
+ *    unbound outcome when no `_meta` identity existed and NO claim was
+ *    supplied at all.
+ * Every cause that records a REFUSAL of something the caller actually
+ * supplied stays refused here — a specific claim existed and was rejected,
+ * so the completion event must not overturn that recorded decision:
+ * `host_session_not_in_workspace_trajectory` (claim failed the trajectory
+ * check) and `host_session_claim_unusable` (claim carried only empty /
+ * sentinel spellings — PRI-1275 review round; before that split the sentinel
+ * case was folded into `host_session_claim_empty` and therefore became
+ * recoverable, contradicting this contract).
+ * The rest — a conflict the main path detected, malformed metadata, a
+ * consent refusal, an invalid target turn — also stays refused.
  */
 const RECOVERABLE_UNVERIFIED_DETAILS: ReadonlySet<string> = new Set([
   'codex_host_metadata_missing',

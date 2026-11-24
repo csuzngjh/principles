@@ -189,7 +189,14 @@ export function assembleSubmitCapability(
     const candidates = [claim.threadId, claim.sessionId].filter((value): value is string =>
       typeof value === 'string' && value.trim().length > 0 && !isSentinelSessionId(value.trim()));
     if (candidates.length === 0) {
-      return { status: 'unverified', detail: 'host_session_claim_empty' };
+      // A claim carrying ONLY empty/sentinel spellings is a claim the model
+      // DID make and this gate REJECTS — NOT the "no metadata at all" state.
+      // The distinct cause keeps it outside the P1-2 recoverable whitelist:
+      // a specific (untrusted) claim existed and was refused, so the
+      // PostToolUse receipt fallback must never overturn that refusal
+      // (PRI-1275 review round; `host_session_claim_empty` is reserved for
+      // the caller supplying NO claim).
+      return { status: 'unverified', detail: 'host_session_claim_unusable' };
     }
     // PRI-1283 R2: the probe READS retained conversation text — the latest
     // consent must be granted. Blocked consent leaves the submission legal
