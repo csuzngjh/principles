@@ -1467,9 +1467,10 @@ async function seedDreamerForConsumedCandidate(deps: {
   // exploration of an already-learned mechanism. Fail-open on an unexpected
   // read failure (same posture as the bridge).
   let suppression: DreamerSeedSuppression;
+  let pendingDecision: ReturnType<typeof pendingOwnerDecision> = null;
   try {
     const admissionDoc = await deps.stateManager.getAdmissionDocument(deps.candidateId);
-    const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
+    pendingDecision = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
     suppression = evaluateDreamerSeedSuppression({
       // The suppression verdict reads the candidate's LEDGER LINEAGE, which
       // does not depend on the delivery kind: it is resolved with the
@@ -1479,7 +1480,7 @@ async function seedDreamerForConsumedCandidate(deps: {
       // an invalid kind never re-opens seeding (review round 2).
       identity: deps.ledgerAdapter.resolveCandidatePrincipleIdentity(deps.candidateId, candidate.recommendationKind),
       processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
-      ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
+      ...(pendingDecision !== null ? { pendingOwnerDecision: { decision: pendingDecision.decision } } : {}),
     });
   } catch {
     suppression = { suppress: false };
@@ -1493,13 +1494,13 @@ async function seedDreamerForConsumedCandidate(deps: {
       };
     }
     if (suppression.reason === 'owner_decision_pending') {
-      const pendingPrincipleArg = pending?.decision === 'reuse' && pending.selectedPrincipleId
-        ? ` --principle-id ${pending.selectedPrincipleId}`
+      const pendingPrincipleArg = pendingDecision?.decision === 'reuse' && pendingDecision.selectedPrincipleId
+        ? ` --principle-id ${pendingDecision.selectedPrincipleId}`
         : '';
       return {
         status: 'not_seeded',
         reason: `dreamer_seed_suppressed: an Owner ${suppression.decision} decision is recorded but its execution has not completed`,
-        nextAction: `pd candidate review --candidate-id ${deps.candidateId} --workspace "${deps.workspaceDir}" --decide ${pending?.decision ?? suppression.decision}${pendingPrincipleArg} --reason "..." (re-run the SAME verdict to resume the recorded decision)`,
+        nextAction: `pd candidate review --candidate-id ${deps.candidateId} --workspace "${deps.workspaceDir}" --decide ${pendingDecision?.decision ?? suppression.decision}${pendingPrincipleArg} --reason "..." (re-run the SAME verdict to resume the recorded decision)`,
       };
     }
     return {
