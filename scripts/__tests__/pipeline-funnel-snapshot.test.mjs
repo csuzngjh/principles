@@ -1242,15 +1242,18 @@ describe('recent window boundaries', () => {
         db.prepare(`INSERT INTO principle_applications (principle_id, channel, level, kind, created_at)
           VALUES (?, 'prompt', 'presence', 'prompt_injected', ?)`)
           .run(`principle-${label}`, timestamp);
-        db.prepare(`INSERT INTO gate_blocks (session_id, tool_name, reason, created_at)
-          VALUES (?, 'Bash', 'test', ?)`).run(`session-${label}`, timestamp);
       }
     });
     const trajectory = new Database(ws.trajectoryDbPath);
     try {
       const insertPain = trajectory.prepare(`INSERT INTO pain_events (session_id, source, score, host_kind, created_at)
         VALUES (?, 'manual', 0.5, 'codex', ?)`);
-      for (const [label, timestamp] of boundaryRows) insertPain.run(`pain-session-${label}`, timestamp);
+      const insertGateBlock = trajectory.prepare(`INSERT INTO gate_blocks (session_id, tool_name, reason, created_at)
+        VALUES (?, 'Bash', 'test', ?)`);
+      for (const [label, timestamp] of boundaryRows) {
+        insertPain.run(`pain-session-${label}`, timestamp);
+        insertGateBlock.run(`session-${label}`, timestamp);
+      }
     } finally {
       trajectory.close();
     }
