@@ -575,6 +575,18 @@
       ],
       "whyNotInternal": "run-once in pd-cli builds its --only-candidates skipCandidate on this membership predicate; a private copy in pd-cli would drift from the correlationId/taskId matching rules the orchestrator tests pin.",
       "alternativeConsidered": "Duplicating the match inside pd-cli was rejected: the membership rule (correlationId OR embedded taskId) is defined where the seeding semantics live; a copy silently diverges."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "TargetTurnEvidenceRead",
+      "kind": "type",
+      "addedIn": "PRI-1273",
+      "expiresAt": "2027-11-23",
+      "consumers": [
+        "packages/pd-mcp-server/src/submit-assembly.ts"
+      ],
+      "whyNotInternal": "The structured exact-turn read vocabulary is the shared contract between the submit path enrichment and the worker reconcile backfill; a pd-mcp-server-local copy would drift from the shape Core validates and persists.",
+      "alternativeConsidered": "A narrow runtime/pain-target-evidence subpath was rejected: the codex-adapter worker wiring and the mcp-server assembly both already consume the runtime barrel, and one more subpath widens the public entry map for a single type."
     }
   ],
   "removals": [

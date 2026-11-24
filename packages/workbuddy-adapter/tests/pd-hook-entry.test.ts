@@ -18,7 +18,6 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { runEntry, runWrapper, PACKAGE_ENTRY } from './helpers/hook-runner.js';
 import { cleanupTempDirs, fixturePayload, makeGovernance, makeHome, makeProjectDir } from './helpers/workbench.js';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 
 afterAll(() => { cleanupTempDirs(); });
 
@@ -60,7 +59,9 @@ describe('uninitialized governance workspace (OD-07/P06): actionable, never bloc
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain('workbuddy_workspace_not_initialized');
       expect(result.stderr).toContain('Run the PD WorkBuddy setup');
-      expect(fs.existsSync(getWorkbuddyWorkspaceDir(home))).toBe(false);
+      // Literal sandbox path: ambient WORKBUDDY_CONFIG_DIR/CODEBUDDY_CONFIG_DIR
+      // must never redirect this assertion outside the test home.
+      expect(fs.existsSync(path.join(home, '.workbuddy', 'pd-workspace'))).toBe(false);
     });
   }
 

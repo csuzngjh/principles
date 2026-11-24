@@ -87,30 +87,73 @@ export interface BootstrapManifest {
   readonly executorDigest?: string;
 }
 
+function missingExecutorDirectory(directory: string): InstallLayoutError {
+  return new InstallLayoutError('bootstrap_executor', `executor directory is missing: ${directory}`);
+}
+
+/** Per-directory name order is part of the persisted digest format: both walkers sort with this. */
+function compareEntryNames(a: fs.Dirent, b: fs.Dirent): number {
+  return a.name.localeCompare(b.name);
+}
+
+/** One file's record in the digest — the single definition of the per-file format. */
+function foldIntoDigest(hash: crypto.Hash, relative: string, contents: Buffer): void {
+  hash.update(`${relative}:`);
+  hash.update(contents);
+  hash.update('\n');
+}
+
 /**
  * PRI-850: deterministic digest over every file of a directory tree (relative
  * POSIX-style paths sorted, contents hashed). This is how a bootstrap
  * registration is re-verified against the deployed executor bytes.
  */
 export function digestDirectory(directory: string): string {
-  if (!fs.existsSync(directory)) {
-    throw new InstallLayoutError('bootstrap_executor', `executor directory is missing: ${directory}`);
-  }
+  if (!fs.existsSync(directory)) throw missingExecutorDirectory(directory);
   const hash = crypto.createHash('sha256');
   const walk = (current: string, prefix: string): void => {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort(compareEntryNames)) {
       const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
       if (entry.isDirectory()) {
         walk(path.join(current, entry.name), relative);
         continue;
       }
       if (!entry.isFile()) continue;
-      hash.update(`${relative}:`);
-      hash.update(fs.readFileSync(path.join(current, entry.name)));
-      hash.update('\n');
+      foldIntoDigest(hash, relative, fs.readFileSync(path.join(current, entry.name)));
     }
   };
   walk(directory, '');
+  return hash.digest('hex');
+}
+
+/**
+ * `digestDirectory` without holding the event loop: every directory listing
+ * and file read is awaited, so a request-serving thread that verifies the
+ * registration keeps answering while the executor tree is read. Same tree,
+ * same order, same per-file record — the result IS the sync digest.
+ *
+ * The sync form is for batch callers (the installer). A caller that serves
+ * requests must use this one: measured 2026-11-23 on a real install (~17k
+ * executor files), the sync form held its calling thread for ~0.6-0.7 s per
+ * call, and nothing else ran on that thread meanwhile.
+ */
+export async function digestDirectoryAsync(directory: string): Promise<string> {
+  if (!fs.existsSync(directory)) throw missingExecutorDirectory(directory);
+  const hash = crypto.createHash('sha256');
+  const walk = async (current: string, prefix: string): Promise<void> => {
+    const entries = await fs.promises.readdir(current, { withFileTypes: true });
+    entries.sort(compareEntryNames);
+    for (const entry of entries) {
+      const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) {
+        await walk(path.join(current, entry.name), relative);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      foldIntoDigest(hash, relative, await fs.promises.readFile(path.join(current, entry.name)));
+    }
+  };
+  await walk(directory, '');
   return hash.digest('hex');
 }
 

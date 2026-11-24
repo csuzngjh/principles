@@ -431,7 +431,7 @@
     {
       "entry": "./runtime",
       "source": "src/runtime/index.ts",
-      "count": 2065,
+      "count": 2066,
       "symbols": [
         "ADAPTIVE_DELIVERY_RECORD_ENUMS",
         "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1894,6 +1894,7 @@
         "TRAJECTORY_TABLES",
         "TRUSTED_HOST_CONTEXT_WINDOW_SOURCES",
         "TargetEvidenceReconcileReport",
+        "TargetTurnEvidenceRead",
         "TaskActionabilityResult",
         "TaskClassificationInput",
         "TaskFact",

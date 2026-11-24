@@ -35,7 +35,7 @@ import {
   type SourceMaterialAuthorizationPort,
   type SourceMaterialHostKind,
 } from '@principles/core/runtime';
-import { listGovernanceObservations, listGovernanceTurnTexts, type GovernanceTurnTextRow } from './governance-observation-store.js';
+import { listGovernanceConversationTextsForHostTurn, listGovernanceTurnTexts, type GovernanceTurnTextRow } from './governance-observation-store.js';
 
 /** Bound on turns per list call — the assembler bounds the window again. */
 const MAX_TURNS_PER_SESSION = 200;
@@ -132,45 +132,37 @@ export function createGovernanceTrajectoryTurnReader(args: GovernanceTrajectoryT
         || !port.isHostSourceMaterialAuthorized(authorizedHostKind).authorized) {
         return { userTurns: [], assistantTurns: [] };
       }
-      const result = listGovernanceObservations({
+      // PRI-1273 (devin BUG_0002): the shared exact-turn selection rule —
+      // conversational kind + retained readable text filtered INSIDE the SQL
+      // and the turn's LAST rows kept, so a final answer sitting behind
+      // dozens of tool/reasoning observations still enters the window (the
+      // old generic `ORDER BY id LIMIT 64` window cut it).
+      const result = listGovernanceConversationTextsForHostTurn({
         workspaceDir: args.workspaceDir,
-        rolloutIdentity: sessionId,
         hostKind: authorizedHostKind,
+        rolloutIdentity: sessionId,
         hostTurnId,
-        limit: 64,
+        limit: 32,
       });
       if (!result.ok) return { userTurns: [], assistantTurns: [] };
-      const retainedText = (row: (typeof result.observations)[number]): string | null =>
-        (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
-        && typeof row.visibleText === 'string'
-        && row.visibleText.trim() !== ''
-          ? row.visibleText
-          : null;
-      const userRows = result.observations.filter((row) => row.kind === 'user_turn');
       return {
-        userTurns: userRows.flatMap((row, index) => {
-          const text = retainedText(row);
-          return text === null ? [] : [{
-            id: row.id,
-            turnIndex: row.sourceOrdinal !== null && row.sourceOrdinal >= 0 ? row.sourceOrdinal : index,
-            rawExcerpt: text,
-            correctionDetected: false,
-            correctionCue: null,
-            createdAt: row.observedAt,
-          }];
-        }),
-        assistantTurns: result.observations.filter((row) => row.kind === 'assistant_turn').flatMap((row) => {
-          const text = retainedText(row);
-          return text === null ? [] : [{
-            id: row.id,
-            sessionId,
-            runId: '',
-            provider: '',
-            model: '',
-            sanitizedText: text,
-            createdAt: row.observedAt,
-          }];
-        }),
+        userTurns: result.rows.flatMap((row, index) => row.kind === 'user_turn' ? [{
+          id: row.id,
+          turnIndex: index,
+          rawExcerpt: row.visibleText,
+          correctionDetected: false,
+          correctionCue: null,
+          createdAt: row.observedAt,
+        }] : []),
+        assistantTurns: result.rows.flatMap((row) => row.kind === 'assistant_turn' ? [{
+          id: row.id,
+          sessionId,
+          runId: '',
+          provider: '',
+          model: '',
+          sanitizedText: row.visibleText,
+          createdAt: row.observedAt,
+        }] : []),
       };
     },
   };
