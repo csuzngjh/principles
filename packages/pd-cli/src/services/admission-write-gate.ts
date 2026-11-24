@@ -95,8 +95,8 @@ export async function enforceFullAdmissionForWrite(
     return null;
   };
 
-  const coordinate = options.coordination?.withCandidateCoordination;
-  return typeof coordinate === 'function'
-    ? coordinate.call(options.coordination, candidateId, evaluate)
-    : evaluate();
+  if (options.coordination !== undefined) {
+    return options.coordination.withCandidateCoordination(candidateId, evaluate);
+  }
+  return evaluate();
 }
