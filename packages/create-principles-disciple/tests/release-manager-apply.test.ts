@@ -280,6 +280,35 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     expect(transitions[0]!.detail).toBe('host=workbuddy mode=smart source=release-manager');
   });
 
+  it('PRI-1278 Phase 5: a legal empty hosts manifest updates as Service-Host-only (never OpenClaw)', async () => {
+    const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+    const artifact = buildReleaseAssetPayload(payloadRoot);
+    const fixture = await createShadowFixture({
+      candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+      artifact: () => artifact,
+    });
+    mergeIntoInstallJson(path.join(fixture.pdHome, 'install.json'), {
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: [],
+      workspaces: [fixture.pdHome],
+    });
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    let appliedHost: string | undefined;
+    installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+      appliedHost = options.host;
+      confirmThroughInstaller(journal);
+      return fakeInstallResult(options.workspaceDir);
+    });
+
+    const outcome: ApplyOutcome = await manager.apply({ workspaceDir: fixture.pdHome });
+    expect(outcome.kind).toBe('applied');
+    if (outcome.kind !== 'applied') return;
+    expect(appliedHost).toBe('none');
+    // The recorded empty host set is the truth — not a legacy fallback.
+    expect(readTransactionJournal(outcome.journalPath)[0]!.detail).toBe('host=none mode=smart source=release-manager');
+  });
+
   it('PRI-1204: an install.json without the manifest host record keeps the historical openclaw default', async () => {
     const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
     const artifact = buildReleaseAssetPayload(payloadRoot);

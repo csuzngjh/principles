@@ -308,6 +308,7 @@ async function spawnAndHandshake(input: SpawnAndHandshakeInput): Promise<McpProb
       child = spawn(process.execPath, [serverEntry], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env,
+        windowsHide: true,
       });
     } catch (err) {
       // Synchronous spawn failure (ERR-156: lexical catch cannot reach the

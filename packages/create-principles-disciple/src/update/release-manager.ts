@@ -45,7 +45,7 @@ import { compareProductVersions, parseProductVersion, type ReleaseChannelName } 
 import { installManifestHostsForPersist, parseInstallManifest } from '@principles/install-layout';
 import type { InstallerJournal } from '../installer.js';
 import type { Language } from '../i18n.js';
-import type { HostTarget } from '../installers/index.js';
+import type { HostSelection } from '../installers/index.js';
 
 export type ReleaseManagerReason =
   | 'bootstrap_not_installed'
@@ -110,8 +110,13 @@ export interface ApplyOptions {
   readonly workspaceDir: string;
   /** Installer language; defaults to 'zh' (the installer's default locale). */
   readonly language?: Language;
-  /** Host installers to run. Omitted ⇒ the host recorded in `~/.pd/install.json`; a legacy record without the manifest fields keeps the historical 'openclaw' default. */
-  readonly host?: HostTarget;
+  /**
+   * Host installers to run. Omitted ⇒ the host recorded in `~/.pd/install.json`
+   * (a legal empty `hosts` record resolves to `none` — Service-Host-only);
+   * a legacy record without the manifest fields keeps the historical
+   * 'openclaw' default.
+   */
+  readonly host?: HostSelection;
   /**
    * PRI-850 (SPEC §6.1/§12.1): caller-generated transaction id so the bootstrap
    * executor's initiator can query the journal while the executor keeps running
@@ -283,8 +288,14 @@ function toReleaseManagerError(error: unknown): ReleaseManagerError {
  *
  * A legacy install.json without the manifest fields keeps the historical
  * default — there is no record to contradict it.
+ *
+ * PRI-1278 Phase 5: a VALID manifest with `hosts: []` is a Service-Host-only
+ * installation, not a legacy one. Falling back to OpenClaw there deployed an
+ * adapter the operator never selected (and rewrote `hosts`). The empty record
+ * is the recorded truth: resolve `none` and let the installer deploy no host
+ * installer at all.
  */
-function resolveDeploymentHost(installConfigPath: string): HostTarget {
+function resolveDeploymentHost(installConfigPath: string): HostSelection {
   let value: unknown;
   try {
     value = JSON.parse(fs.readFileSync(installConfigPath, 'utf8'));
@@ -294,6 +305,7 @@ function resolveDeploymentHost(installConfigPath: string): HostTarget {
   const parsed = parseInstallManifest(value);
   if (!parsed.manifest) return 'openclaw';
   const recorded = installManifestHostsForPersist(parsed.manifest);
+  if (recorded.length === 0) return 'none';
   if (recorded.includes('openclaw')) return 'openclaw';
   if (recorded.includes('workbuddy')) return 'workbuddy';
   if (recorded.includes('codex')) return 'codex';

@@ -509,6 +509,9 @@ function extractReleaseAssetArchive(transactionDir: string, payloadDir: string):
   execFileSync('tar', ['xzf', 'release-asset.tar.gz', '-C', 'payload'], {
     cwd: transactionDir,
     stdio: 'pipe',
+    // This runs inside the detached update executor, which has no console on
+    // Windows: without it tar opens a visible terminal window mid-update.
+    windowsHide: true,
   });
   if (!fs.existsSync(path.join(payloadDir, '_release', 'manifest.json'))) {
     throw new Error(

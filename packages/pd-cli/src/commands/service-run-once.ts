@@ -50,7 +50,7 @@ export interface ServiceRunOnceArgs {
   /** Self-declared trigger source for the status record (default manual) —
    *  reported, never verified (task §11). */
   readonly trigger?: ServiceRunTriggerSource;
-  /** Set when --trigger was given a value outside manual|scheduler (fail-closed). */
+  /** Set when --trigger was given a value outside manual|scheduler|installer (fail-closed). */
   readonly invalidTrigger?: string;
   /** Trusted home injection (scheduler registration / installer / tests). */
   readonly pdHome?: string;
@@ -272,7 +272,7 @@ export async function handleServiceRunOnce(args: ServiceRunOnceArgs): Promise<vo
   // Invalid --trigger value: fail closed before any mode runs (cli-6).
   if (args.invalidTrigger !== undefined) {
     const reason = `invalid_trigger:${args.invalidTrigger.slice(0, 40)}`;
-    const nextAction = 'Use --trigger manual or --trigger scheduler. Login vs periodic is deliberately not distinguishable — PD never fabricates a finer trigger source than it can prove.';
+    const nextAction = 'Use --trigger manual, --trigger scheduler or --trigger installer. Login vs periodic is deliberately not distinguishable — PD never fabricates a finer trigger source than it can prove.';
     if (args.json) {
       const output: JsonOutput = { schemaVersion: 'pd.service-run-status.v1', outcome: 'refused', dryRun: false, runId: 'n/a', reason, nextAction };
       console.log(JSON.stringify(output));
@@ -528,11 +528,15 @@ export async function handleServiceRunOnce(args: ServiceRunOnceArgs): Promise<vo
       printHumanManaged(result);
     }
     // Exit-code policy: 0 only when the status write succeeded AND every
-    // EXECUTED workspace ended completed/paused. Skips (legacy-owned,
-    // transition states) are by-design non-executions, not failures; a run
-    // with zero service_host_owned workspaces is a legal empty success.
+    // EXECUTED workspace ended completed/paused — or is truthfully WAITING for
+    // a host binding (Service-Host-only install, PRI-1278 Phase 5). Skips
+    // (legacy-owned, transition states) are by-design non-executions, not
+    // failures; a run with zero service_host_owned workspaces is a legal empty
+    // success.
     const executed = result.executions.filter((e) => e.admission === 'executed');
-    const allHealthy = executed.every((e) => e.workspaceState === 'completed' || e.workspaceState === 'paused');
+    const allHealthy = executed.every((e) => e.workspaceState === 'completed'
+      || e.workspaceState === 'paused'
+      || e.workspaceState === 'waiting_for_host_binding');
     const statusFailed = !result.statusWrite.ok;
     process.exitCode = !statusFailed && allHealthy ? 0 : 1;
     return;

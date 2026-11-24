@@ -55,6 +55,24 @@ describe('resolveHostRefreshTargets', () => {
     expect(resolveHostRefreshTargets(['workbuddy', 'gamma'], 'workbuddy')).toEqual([]);
     expect(resolveHostRefreshTargets(['openclaw', 'gamma'], 'workbuddy')).toEqual(['openclaw']);
   });
+
+  // PRI-1278 Phase 5: an explicit Service-Host-only run covers NO host, so a
+  // shared-runtime replacement must still bring every already-installed host
+  // forward — and it must never be mistaken for installing one.
+  it('a Service-Host-only run refreshes every persisted host (it installs none)', () => {
+    expect(resolveHostRefreshTargets([], 'none')).toEqual([]);
+    expect(resolveHostRefreshTargets(['openclaw', 'codex'], 'none')).toEqual(['openclaw', 'codex']);
+  });
+});
+
+describe('mergeInstallManifestHosts — Service-Host-only (PRI-1278 Phase 5)', () => {
+  it('adds NO host for --host none', () => {
+    expect(mergeInstallManifestHosts(
+      { layoutVersion: 1, mode: 'canonical', hosts: ['openclaw'] },
+      'none',
+    )).toEqual(['openclaw']);
+    expect(mergeInstallManifestHosts(undefined, 'none')).toEqual([]);
+  });
 });
 
 describe('planUpgradeHosts (update chain 2026-11-11)', () => {
