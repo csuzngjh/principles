@@ -104,6 +104,7 @@ function makeHarness(overrides: {
     createTask: async () => { return; },
     updateTask: async () => { return; },
     getCandidatesByTaskId: async () => [makeCandidate('c-cr05')],
+    getCandidate: async (candidateId: string) => candidateId === 'c-cr05' ? makeCandidate('c-cr05') : null,
     getRunsByTask: async () => [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded', outputPayload: overrides.outputPayload ?? JSON.stringify(makeOutput()) }],
     getRun: async (runId: string) => runId === 'run-c-cr05'
       ? { runId, taskId: TASK_ID, executionStatus: 'succeeded', outputPayload: overrides.outputPayload ?? JSON.stringify(makeOutput()) }
