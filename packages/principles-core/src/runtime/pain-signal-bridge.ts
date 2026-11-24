@@ -1108,21 +1108,23 @@ export class PainSignalBridge {
       const blockedAt = new Date().toISOString();
       for (const candidate of candidates) {
         try {
-          await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, {
-            evaluationId: `ae_blocked_${fingerprintMaterial([candidate.candidateId, reentry.errorCode]).slice(0, 16)}`,
-            decision: 'needs_evidence',
-            reason: `diagnostic_material_unusable:${reentry.errorCode}`,
-            nextAction: 'repair or re-run the diagnosis via the supported CLI command; the candidate resumes automatically afterwards',
-            evaluatedAt: blockedAt,
-            policyVersion: ADMISSION_POLICY_VERSION,
-            provenance: 'automatic_hook',
-            inputEvidenceCount: 0,
-            ownerStatementPresent: false,
-            recommendationKind: candidate.rawRecommendationKind,
-            confidence: null,
-            materialFingerprint: fingerprintMaterial(['unusable', reentry.errorCode]),
-            materialSummary: { inputEvidenceCount: 0, outputEvidenceCount: 0, ownerStatementPresent: false },
-          });
+          await this.withCandidateCoordination(candidate.candidateId, () =>
+            this.stateManager.appendAdmissionEvaluation(candidate.candidateId, {
+              evaluationId: `ae_blocked_${fingerprintMaterial([candidate.candidateId, reentry.errorCode]).slice(0, 16)}`,
+              decision: 'needs_evidence',
+              reason: `diagnostic_material_unusable:${reentry.errorCode}`,
+              nextAction: 'repair or re-run the diagnosis via the supported CLI command; the candidate resumes automatically afterwards',
+              evaluatedAt: blockedAt,
+              policyVersion: ADMISSION_POLICY_VERSION,
+              provenance: 'automatic_hook',
+              inputEvidenceCount: 0,
+              ownerStatementPresent: false,
+              recommendationKind: candidate.rawRecommendationKind,
+              confidence: null,
+              materialFingerprint: fingerprintMaterial(['unusable', reentry.errorCode]),
+              materialSummary: { inputEvidenceCount: 0, outputEvidenceCount: 0, ownerStatementPresent: false },
+            }),
+          );
           await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
             state: 'exhausted',
             attempts: MAX_POST_PROCESSING_ATTEMPTS,
@@ -1569,6 +1571,19 @@ export class PainSignalBridge {
   }
 
   /** Fire-and-forget processing-domain update that must never break the loop (sync-safe). */
+  /**
+   * Serialize admission writes with Owner decisions and candidate internalize.
+   * Production LedgerAdapter supplies the cross-process candidate lock;
+   * narrow test doubles may omit it and exercise the same state-store path.
+   */
+  private async withCandidateCoordination<T>(candidateId: string, operation: () => Promise<T>): Promise<T> {
+    const coordinate = this.ledgerAdapter.withCandidateCoordination;
+    if (typeof coordinate === 'function') {
+      return coordinate.call(this.ledgerAdapter, candidateId, operation);
+    }
+    return operation();
+  }
+
   private safeUpdateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): void {
     try {
       void this.stateManager.updateAdmissionProcessing(candidateId, processing).catch(() => undefined);
@@ -1739,7 +1754,9 @@ export class PainSignalBridge {
           if (typeof this.stateManager.appendAdmissionEvaluation !== 'function') {
             throw new Error('state_manager_admission_persistence_unavailable');
           }
-          const persisted = await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, evaluation);
+          const persisted = await this.withCandidateCoordination(candidate.candidateId, () =>
+            this.stateManager.appendAdmissionEvaluation(candidate.candidateId, evaluation),
+          );
           if (persisted.status === 'refused') {
             admissionPersistBlocked.add(candidate.candidateId);
             this.eventEmitter?.emitTelemetry({
