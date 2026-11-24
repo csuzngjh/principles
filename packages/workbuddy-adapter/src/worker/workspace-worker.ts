@@ -36,6 +36,7 @@ import {
   createRuntimeStateHandle,
   createPainSignalBridge,
   isRetryWaitBackoffElapsed,
+  pickDiagnosticianCandidate,
   PrincipleTreeLedgerAdapter,
   resolveDiagnosticianCapability,
   type TaskRecord,
@@ -233,21 +234,21 @@ function finalizeLiveness(
 }
 
 /**
- * Oldest pending diagnostician first; retry_wait candidates are filtered to
- * those whose backoff window has ELAPSED (same discipline as the Codex
- * worker — an old-but-waiting task cannot starve a younger eligible one).
+ * PRI-1275 review round (CR-2): the candidate pick delegates to the SHARED
+ * Core `pickDiagnosticianCandidate` — the same authority the Codex worker
+ * uses. Its store queries exclude `waiting_for_target_evidence` /
+ * `blocked_by_source_material_consent` tasks INSIDE the SQL (before ORDER BY
+ * + LIMIT), so a task left waiting by the receipt recovery can never block
+ * the head of this host's diagnostician queue (SPEC §4 A3), and the
+ * pending/retry_wait fair-share cursor stays one implementation for both
+ * hosts. The local oldest-first variant this replaces had none of those
+ * exclusions.
  */
-async function pickDiagnosticianCandidate(stateManager: Awaited<ReturnType<typeof createRuntimeStateHandle>>['stateManager'], limit: number): Promise<TaskRecord | null> {
-  const pending = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', orderBy: 'updated_at_asc', limit });
-  const [first] = pending;
-  if (first !== undefined) return first;
-  const retrying = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'retry_wait', orderBy: 'updated_at_asc', limit });
-  for (const candidate of retrying) {
-    if (isRetryWaitBackoffElapsed(candidate.status, candidate.leaseExpiresAt)) {
-      return candidate;
-    }
-  }
-  return null;
+async function pickNextDiagnosticianCandidate(
+  stateManager: Awaited<ReturnType<typeof createRuntimeStateHandle>>['stateManager'],
+  limit: number,
+): Promise<TaskRecord | null> {
+  return pickDiagnosticianCandidate(stateManager, limit, new Date().toISOString());
 }
 
 /**
@@ -386,7 +387,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
         if (sweep.recovered > 0 || sweep.errors.length > 0) {
           emitEvent('WORKBUDDY_WORKER_RECOVERY_SWEEP', JSON.stringify({ recovered: sweep.recovered, failed: sweep.errors.length }));
         }
-        const candidate = await pickDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT);
+        const candidate = await pickNextDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT);
         if (candidate !== null) {
           const stateDir = path.join(workspaceDir, '.state');
           const bridge = await createPainSignalBridge({

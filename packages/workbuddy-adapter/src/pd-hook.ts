@@ -632,6 +632,9 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
     // host_identity_minimal_metadata authorization. Fail-open: a fallback
     // failure never changes the host decision.
     const receiptDiagnostics: string[] = [];
+    // Each hook invocation resolves the flags from the CURRENT config, so a
+    // revoked minimal identity authorization stops binding on the next event.
+    const minimalMetadataGranted = flags.host_identity_minimal_metadata?.enabled === true;
     if (event.kind === 'after_tool_call'
       && event.context.toolName !== undefined
       && isPainSubmitWorkbuddyToolName(event.context.toolName)
@@ -641,12 +644,17 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
           workspaceDir: resolution.workspaceDir,
           toolName: event.context.toolName,
           toolResponse: event.context.toolOutput,
+          // Identity comes from the EVENT's own session/call ids. The event's
+          // `generation_id` (decoder `context.turnId`) is deliberately NOT
+          // passed: its equivalence to a PD submission turn is unproven
+          // (SPEC TD §1.3 field rules; Devin/CodeRabbit round — mapping it
+          // would pin the recovery to a target the trajectory store cannot
+          // resolve, wedging the task in waiting_for_target_evidence).
           identity: {
             sessionId: event.context.sessionId,
-            ...(event.context.turnId !== undefined ? { turnId: event.context.turnId } : {}),
             toolCallId: event.context.toolCallId,
           },
-          minimalMetadataGranted: flags.host_identity_minimal_metadata?.enabled === true,
+          minimalMetadataGranted,
         });
         const line = painReceiptFallbackDiagnostic(fallback);
         if (line !== null) {

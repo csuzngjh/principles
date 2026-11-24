@@ -162,13 +162,11 @@ export function assembleSubmitCapability(
 
   const stateDir = path.join(workspaceDir, '.state');
   const effectiveConfig = config.effective;
-  // PRI-1274: the Workspace-level minimal identity-metadata authorization,
-  // resolved ONCE at startup from the same effective config every consumer
-  // reads. Off (the default) keeps every submission legally unbound with
-  // `blocked_by_consent` — identity metadata is never persisted from the
-  // trusted `_meta` path while the disclosure authorization is absent.
-  const { flags } = computeFeatureFlagsFromConfig(effectiveConfig);
-  const minimalMetadataGranted = flags.host_identity_minimal_metadata?.enabled === true;
+  // PRI-1274: the Workspace-level minimal identity-metadata authorization
+  // gates identity persistence off the trusted `_meta` path; PRI-1275 review
+  // round (Devin) moved the EFFECTIVE verdict to a PER-REQUEST re-read (see
+  // the call closure) so a revocation stops binding without a server
+  // restart. The startup read stays as the config health gate only.
 
   /**
    * PRI-1260 legacy path (non-Codex hosts without `_meta` producers yet —
@@ -220,6 +218,10 @@ export function assembleSubmitCapability(
   const resolveSessionVerification = (
     requestMeta: Readonly<Record<string, unknown>> | undefined,
     submission: { readonly targetTurnId?: string; readonly hostSession?: HostSessionClaim },
+    /** PRI-1275 review round: resolved PER REQUEST by the caller (see the
+     * call closure) so a Workspace-side revocation stops binding on the next
+     * submission without an MCP server restart (Stage 3 acceptance). */
+    minimalMetadataGranted: boolean,
   ): HostSessionVerification => {
     const metaResolution = resolveHostSubmissionContext(host, requestMeta);
 
@@ -292,10 +294,25 @@ export function assembleSubmitCapability(
   return {
     ok: true,
     call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission, requestMeta }) => {
+      // PRI-1275 review round (Devin): the minimal identity authorization is
+      // resolved PER REQUEST from the CURRENT workspace config — a Workspace
+      // admin revoking `host_identity_minimal_metadata` stops binding on the
+      // next submission without waiting for an MCP server restart (Stage 3:
+      // "最小授权撤回…时拒绝身份写入"). A config re-read failure fails closed
+      // for the identity path (rc-9 note) while the submission itself stays
+      // legal.
+      let minimalMetadataGranted = false;
+      const liveConfig = loadPdConfigForPlugin(boundWorkspaceDir);
+      if (liveConfig.ok) {
+        minimalMetadataGranted =
+          computeFeatureFlagsFromConfig(liveConfig.effective).flags.host_identity_minimal_metadata?.enabled === true;
+      } else {
+        console.error('[pd-submit] identity authorization re-read failed: pd_config_invalid; identity binding fails closed for this request');
+      }
       // One resolution seam for every host: the trusted `_meta` context when
       // present, the legal unbound reason when not. Codex never consults
       // model-supplied claims (its identity is host meta or unbound).
-      const verification = resolveSessionVerification(requestMeta, submission);
+      const verification = resolveSessionVerification(requestMeta, submission, minimalMetadataGranted);
       return submitPainCapability(
         {
           workspaceDir: boundWorkspaceDir,

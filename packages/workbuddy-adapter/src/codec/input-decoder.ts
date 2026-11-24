@@ -341,9 +341,13 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
 // froze in P1-1. Identical semantics here: exact parse of BOTH segments,
 // never a substring match.
 
-/** The MCP server ids whose `pd_submit_pain` the receipt fallback serves:
- * the configured id (`pd-recall`) and its identifier-sanitized spelling. */
-export const PAIN_SUBMIT_MCP_SERVER_IDS: ReadonlySet<string> = new Set(['pd-recall', 'pd_recall']);
+/** The MCP server ids whose `pd_submit_pain` the receipt fallback serves.
+ * WorkBuddy keeps the hyphen — the real installed engine (probe 2026-11-24)
+ * registers `mcp__pd-recall__pd_submit_pain` verbatim, with NO identifier
+ * sanitization (unlike Codex, whose CLI sanitizes `-`→`_`). A literal
+ * `pd_recall` server on this host is a DIFFERENT third-party server and must
+ * never reach the recovery path (Devin review, receipt-forgery surface). */
+export const PAIN_SUBMIT_MCP_SERVER_IDS: ReadonlySet<string> = new Set(['pd-recall']);
 
 export interface ParsedWorkbuddyMcpToolName {
   readonly serverId: string;

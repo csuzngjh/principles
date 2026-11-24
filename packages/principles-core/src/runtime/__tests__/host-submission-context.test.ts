@@ -263,6 +263,27 @@ describe('resolveHostSubmissionContext — WorkBuddy native engine baggage (PRI-
     })).toEqual({ status: 'invalid', reasonCode: 'workbuddy_context_conflict' });
   });
 
+  it('MULTIPLE baggage session entries with disagreeing values fail closed (CR-1)', () => {
+    // A later same-key entry is a competing identity, never an ignorable
+    // duplicate: `session-a,codebuddy.session_id=session-b` is a conflict.
+    expect(resolveHostSubmissionContext('workbuddy', {
+      baggage: 'codebuddy.session_id=session-a,codebuddy.session_id=session-b',
+    })).toEqual({ status: 'invalid', reasonCode: 'workbuddy_baggage_session_conflict' });
+    // A later INVALID entry fails closed even when the first looked fine.
+    expect(resolveHostSubmissionContext('workbuddy', {
+      baggage: 'codebuddy.session_id=session-a,codebuddy.session_id=cli',
+    })).toEqual({ status: 'invalid', reasonCode: 'workbuddy_baggage_session_invalid' });
+    // Repeated IDENTICAL entries are one identity, not a conflict.
+    expect(resolveHostSubmissionContext('workbuddy', {
+      baggage: 'codebuddy.session_id=sess-1,codebuddy.session_id=sess-1',
+    })).toEqual({ status: 'present', context: { sessionId: 'sess-1', source: 'mcp_request_meta' } });
+    // The conflict rule also guards the namespaced comparison path.
+    expect(resolveHostSubmissionContext('workbuddy', {
+      'pd.host-context.v1': { sessionId: 'sess-ns' },
+      baggage: 'codebuddy.session_id=sess-ns,codebuddy.session_id=sess-other',
+    })).toEqual({ status: 'invalid', reasonCode: 'workbuddy_baggage_session_conflict' });
+  });
+
   it('baggage identity is a WorkBuddy field — Codex and OpenClaw never consume it', () => {
     expect(resolveHostSubmissionContext('codex', { baggage: 'codebuddy.session_id=sess-1' }).status).toBe('missing');
     expect(resolveHostSubmissionContext('openclaw', { baggage: 'codebuddy.session_id=sess-1' }).status).toBe('missing');

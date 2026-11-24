@@ -181,5 +181,39 @@ describe('B2/T1 process acceptance — WorkBuddy prebind through the real dist s
     // never bind from either side (SPEC §G2 conflict rule).
     expect(receipt.sessionAssociation).toEqual({ status: 'unverified', detail: 'host_context_conflict' });
   });
+
+  it('REVOKING the minimal identity authorization stops binding on the NEXT submission, no restart (Stage 3 / Devin)', async () => {
+    if (client === undefined) throw new Error('client not connected');
+    // Flip the Workspace authorization OFF behind the RUNNING server.
+    const config = getDefaultPdConfig();
+    config.features['host.workbuddy'].enabled = true;
+    config.features.host_identity_minimal_metadata.enabled = false;
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    const result = await client.callTool({
+      name: SUBMIT_TOOL_NAME,
+      arguments: { ...SUBMIT_ARGS, anchorRef: 'A fourth Owner request in this conversation' },
+      _meta: { ...REAL_ENGINE_META },
+    });
+    const [block] = result.content;
+    if (block === undefined || block.type !== 'text') throw new Error('expected single text content block');
+    const receipt = JSON.parse(block.text) as {
+      status: string; taskId: string | null;
+      sessionAssociation?: { status: string; detail?: string };
+    };
+    expect(receipt.status).toBe('submitted');
+    // The per-request authorization re-read sees the revocation: the trusted
+    // engine identity is NOT persisted (fail closed, no server restart).
+    expect(receipt.sessionAssociation).toEqual({ status: 'unverified', detail: 'blocked_by_consent' });
+    if (receipt.taskId === null) throw new Error('receipt identity missing');
+    const manager = new RuntimeStateManager({ workspaceDir });
+    await manager.initialize();
+    try {
+      const task = await manager.getTask(receipt.taskId);
+      const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}') as Record<string, unknown>;
+      expect(diagnostic.sessionIdHint).toBeNull();
+    } finally {
+      await manager.close();
+    }
+  });
   });
 });

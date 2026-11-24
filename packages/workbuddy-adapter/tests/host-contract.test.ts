@@ -43,7 +43,11 @@ function mcpPostBase(toolResponse: unknown): Record<string, unknown> {
   return {
     session_id: '01a20d41-fc4f-71ec-ab89-7d83a970215a',
     transcript_path: null,
-    cwd: 'D:\\Code\\proj',
+    // `/proj` is absolute on POSIX AND Windows (review round CR-3) — the
+    // synthesized matrix must exercise the tool_response branches on every
+    // platform, not fail earlier at the cwd shape check. The REAL captured
+    // fixture keeps its original Windows cwd untouched.
+    cwd: '/proj',
     hook_event_name: 'PostToolUse',
     tool_name: 'mcp__pdprobe__echo_meta',
     tool_input: { hello: 'world' },

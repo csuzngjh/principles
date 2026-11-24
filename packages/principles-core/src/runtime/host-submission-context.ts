@@ -185,30 +185,35 @@ function resolveNamespacedContext(meta: Readonly<Record<string, unknown>>): Host
  * equivalence to a PD submission turn is unproven (SPEC §G2 field rules). */
 const WORKBUDDY_BAGGAGE_SESSION_PREFIX = 'codebuddy.session_id=';
 
-/**
- * Read the engine-injected session identity from `_meta.baggage`:
- * `undefined` = the field is absent or carries no `codebuddy.session_id`
- * entry (NOT an identity attempt — unrelated baggage never gates anything);
- * `null` = the field is present as an identity attempt but malformed
- * (non-string baggage, or a session value failing the bounded-id check) —
- * fail closed like every other present-but-unusable identity.
- */
-function readWorkbuddyBaggageSession(
-  meta: Readonly<Record<string, unknown>>,
-): string | undefined | null {
-  if (!Object.hasOwn(meta, 'baggage')) return undefined;
+/** One resolved baggage identity attempt. `absent` = no `codebuddy.session_id`
+ * entry exists (NOT an identity attempt); `invalid` = present but malformed,
+ * or MORE THAN ONE entry with disagreeing values (CR-1: a later same-key
+ * entry is a competing identity, never an ignorable duplicate — conflicting
+ * and invalid entries both fail closed). */
+type WorkbuddyBaggageResolution =
+  | { readonly status: 'absent' }
+  | { readonly status: 'ok'; readonly sessionId: string }
+  | { readonly status: 'invalid'; readonly reasonCode: 'workbuddy_baggage_session_invalid' | 'workbuddy_baggage_session_conflict' };
+
+function readWorkbuddyBaggageSession(meta: Readonly<Record<string, unknown>>): WorkbuddyBaggageResolution {
+  if (!Object.hasOwn(meta, 'baggage')) return { status: 'absent' };
   const raw = meta.baggage;
-  if (typeof raw !== 'string') return null;
+  if (typeof raw !== 'string') return { status: 'invalid', reasonCode: 'workbuddy_baggage_session_invalid' };
+  let sessionId: string | undefined;
   for (const entry of raw.split(',')) {
     const item = entry.trim();
     if (!item.startsWith(WORKBUDDY_BAGGAGE_SESSION_PREFIX)) continue;
     // Baggage entries may carry `;key=value` properties after the value —
     // the session id itself ends at the first `;`.
     const withoutProps = item.slice(WORKBUDDY_BAGGAGE_SESSION_PREFIX.length).split(';', 1)[0] ?? '';
-    const value = withoutProps.trim();
-    return readHostId(value) ?? null;
+    const value = readHostId(withoutProps.trim());
+    if (value === undefined) return { status: 'invalid', reasonCode: 'workbuddy_baggage_session_invalid' };
+    if (sessionId !== undefined && sessionId !== value) {
+      return { status: 'invalid', reasonCode: 'workbuddy_baggage_session_conflict' };
+    }
+    sessionId = value;
   }
-  return undefined;
+  return sessionId === undefined ? { status: 'absent' } : { status: 'ok', sessionId };
 }
 
 /**
@@ -220,20 +225,20 @@ function readWorkbuddyBaggageSession(
  * identities on one request is a half-broken identity, not a pick-one.
  */
 function resolveWorkbuddyContext(meta: Readonly<Record<string, unknown>>): HostSubmissionContextResolution {
-  const baggageSession = readWorkbuddyBaggageSession(meta);
-  if (baggageSession === null) {
-    return { status: 'invalid', reasonCode: 'workbuddy_baggage_session_invalid' };
+  const baggage = readWorkbuddyBaggageSession(meta);
+  if (baggage.status === 'invalid') {
+    return { status: 'invalid', reasonCode: baggage.reasonCode };
   }
   if (!Object.hasOwn(meta, PD_HOST_CONTEXT_META_KEY)) {
-    if (baggageSession === undefined) return { status: 'missing' };
+    if (baggage.status === 'absent') return { status: 'missing' };
     return {
       status: 'present',
-      context: { sessionId: baggageSession, source: HOST_SUBMISSION_CONTEXT_SOURCE },
+      context: { sessionId: baggage.sessionId, source: HOST_SUBMISSION_CONTEXT_SOURCE },
     };
   }
   const named = resolveNamespacedContext(meta);
-  if (named.status !== 'present' || baggageSession === undefined) return named;
-  if (named.context.sessionId !== baggageSession) {
+  if (named.status !== 'present' || baggage.status === 'absent') return named;
+  if (named.context.sessionId !== baggage.sessionId) {
     return { status: 'invalid', reasonCode: 'workbuddy_context_conflict' };
   }
   return named;

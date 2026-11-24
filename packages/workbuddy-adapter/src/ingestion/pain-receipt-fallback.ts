@@ -139,10 +139,11 @@ export interface PainReceiptFallbackInput {
   readonly toolName: string;
   /** Raw `tool_response` from the PostToolUse payload. */
   readonly toolResponse: unknown;
-  /** Host-authoritative identity from the event itself. */
+  /** Host-authoritative identity from the event itself. NO submission turn:
+   * the WorkBuddy event's `generation_id` is not a proven turn id (SPEC TD
+   * §1.3 field rules), so the type physically omits it (review round). */
   readonly identity: {
     readonly sessionId: string;
-    readonly turnId?: string;
     readonly toolCallId: string;
   };
   /** Caller-resolved `host_identity_minimal_metadata` flag verdict. */
@@ -166,8 +167,7 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
   // spelling in Core/SQLite (and make exact target-turn joins miss).
   const sessionId = normalizeEventId(input.identity.sessionId, { allowEmpty: false });
   const toolCallId = normalizeEventId(input.identity.toolCallId, { allowEmpty: false });
-  const turnId = normalizeEventId(input.identity.turnId, { allowEmpty: true });
-  if (sessionId === null || toolCallId === null || turnId === null) {
+  if (sessionId === null || toolCallId === null) {
     return { status: 'attempted', outcome: { status: 'rejected', reasonCode: 'event_identity_invalid' } };
   }
   if (sessionId === undefined || toolCallId === undefined) {
@@ -206,11 +206,10 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
     workspaceDir: normalizedWorkspace,
     hostKind: 'workbuddy',
     receipt: validated.receipt,
-    identity: {
-      sessionId,
-      ...(turnId === undefined ? {} : { submissionTurnId: turnId }),
-      toolCallId,
-    },
+    // No submissionTurnId: the WorkBuddy host provides no proven turn id.
+    // An absent turn never negates the session binding (SPEC §G2); a target
+    // turn pinned to an unproven id would wedge the task's evidence wait.
+    identity: { sessionId, toolCallId },
     authorization: { minimalMetadataGranted: input.minimalMetadataGranted },
     targetTurnTextAvailable: (hostSessionId, targetTurnId) =>
       workbuddyTargetTurnTextAvailable(normalizedWorkspace, hostSessionId, targetTurnId),
