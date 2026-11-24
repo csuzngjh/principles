@@ -119,6 +119,8 @@ export interface CandidatePostProcessingRecoveryRecord {
   candidateId: string;
   rawRecommendationKind: 'principle' | 'rule' | 'prompt';
   priorBlockedReason: string;
+  /** Original failure timestamp used to distinguish later recovery attempts. */
+  priorFailureAt: string | null;
   ownerId: string;
   identitySource: string;
   reason: string;
@@ -233,6 +235,7 @@ export function parseAdmissionDocument(raw: unknown): ParseAdmissionDocumentResu
         || typeof entry.candidateId !== 'string' || entry.candidateId === ''
         || (entry.rawRecommendationKind !== 'principle' && entry.rawRecommendationKind !== 'rule' && entry.rawRecommendationKind !== 'prompt')
         || typeof entry.priorBlockedReason !== 'string' || !entry.priorBlockedReason.startsWith('candidate_kind_invalid')
+        || !(entry.priorFailureAt === null || (typeof entry.priorFailureAt === 'string' && Number.isFinite(Date.parse(entry.priorFailureAt))))
         || typeof entry.ownerId !== 'string' || entry.ownerId === ''
         || typeof entry.identitySource !== 'string' || entry.identitySource === ''
         || typeof entry.reason !== 'string' || entry.reason.trim() === '' || entry.reason.length > 500
@@ -269,36 +272,102 @@ export function authorizeInvalidKindPostProcessingRecovery(
 ): CandidatePostProcessingRecoveryResult {
   const processing = existing?.processing;
   if (existing === null || processing === undefined) return { status: 'refused', reason: 'admission_processing_missing' };
-  if (processing.state !== 'awaiting_owner') return { status: 'refused', reason: 'processing_state_not_invalid_kind_park:' + processing.state };
-  const priorBlockedReason = processing.blockedReason ?? '';
-  if (!priorBlockedReason.startsWith('candidate_kind_invalid')) return { status: 'refused', reason: 'processing_not_blocked_by_invalid_raw_kind' };
-  if (pendingOwnerDecision(existing) !== null || priorBlockedReason === 'reuse_pending_owner') return { status: 'refused', reason: 'owner_decision_pending_recovery_forbidden' };
+
   const ownerId = input.ownerId.trim();
   const identitySource = input.identitySource.trim();
   const reason = input.reason.trim();
-  if (ownerId === '' || identitySource === '' || reason === '' || reason.length > 500) return { status: 'refused', reason: 'verified_owner_identity_and_reason_required' };
-  if (!Number.isFinite(Date.parse(input.authorizedAt))) return { status: 'refused', reason: 'recovery_authorized_at_invalid' };
-  const recoveryId = 'cpr_' + fingerprintMaterial([
-    candidateId, rawKind, priorBlockedReason, processing.lastFailure?.at ?? '', ownerId, identitySource, reason, POST_PROCESSING_RECOVERY_POLICY_VERSION,
-  ]).slice(0, 24);
+  if (ownerId === '' || identitySource === '' || reason === '' || reason.length > 500) {
+    return { status: 'refused', reason: 'verified_owner_identity_and_reason_required' };
+  }
+  if (!Number.isFinite(Date.parse(input.authorizedAt))) {
+    return { status: 'refused', reason: 'recovery_authorized_at_invalid' };
+  }
+
+  // Idempotency must be checked BEFORE the awaiting_owner guard. The first
+  // authorization atomically changes processing.state to in_progress; after
+  // worker completion the candidate row may also be consumed. Preserve the
+  // original blocker + failure timestamp in the audit so the same request can
+  // be recognized without reopening or rewriting its durable state.
   const history = existing.postProcessingRecoveries ?? [];
-  const previous = history.find((entry) => entry.recoveryId === recoveryId);
+  const previous = history.find((entry) => {
+    const expectedId = 'cpr_' + fingerprintMaterial([
+      candidateId,
+      rawKind,
+      entry.priorBlockedReason,
+      entry.priorFailureAt ?? '',
+      ownerId,
+      identitySource,
+      reason,
+      POST_PROCESSING_RECOVERY_POLICY_VERSION,
+    ]).slice(0, 24);
+    return entry.recoveryId === expectedId
+      && entry.candidateId === candidateId
+      && entry.rawRecommendationKind === rawKind
+      && entry.ownerId === ownerId
+      && entry.identitySource === identitySource
+      && entry.reason === reason
+      && entry.policyVersion === POST_PROCESSING_RECOVERY_POLICY_VERSION;
+  });
   if (previous !== undefined) {
-    if (processing.state === 'in_progress' || processing.state === 'complete') return { status: 'already_authorized', document: existing, recovery: previous };
+    if (processing.state === 'in_progress' || processing.state === 'complete') {
+      return { status: 'already_authorized', document: existing, recovery: previous };
+    }
     return { status: 'refused', reason: 'recovery_audit_state_inconsistent' };
   }
-  if (history.length >= MAX_POST_PROCESSING_RECOVERIES) return { status: 'refused', reason: 'post_processing_recovery_history_exceeded' };
+
+  if (processing.state !== 'awaiting_owner') {
+    return { status: 'refused', reason: 'processing_state_not_invalid_kind_park:' + processing.state };
+  }
+  const priorBlockedReason = processing.blockedReason ?? '';
+  if (!priorBlockedReason.startsWith('candidate_kind_invalid')) {
+    return { status: 'refused', reason: 'processing_not_blocked_by_invalid_raw_kind' };
+  }
+  if (pendingOwnerDecision(existing) !== null || priorBlockedReason === 'reuse_pending_owner') {
+    return { status: 'refused', reason: 'owner_decision_pending_recovery_forbidden' };
+  }
+
+  const candidateFailureAt = processing.lastFailure?.at;
+  const priorFailureAt = typeof candidateFailureAt === 'string' && Number.isFinite(Date.parse(candidateFailureAt))
+    ? candidateFailureAt
+    : null;
+  const recoveryId = 'cpr_' + fingerprintMaterial([
+    candidateId,
+    rawKind,
+    priorBlockedReason,
+    priorFailureAt ?? '',
+    ownerId,
+    identitySource,
+    reason,
+    POST_PROCESSING_RECOVERY_POLICY_VERSION,
+  ]).slice(0, 24);
+  if (history.length >= MAX_POST_PROCESSING_RECOVERIES) {
+    return { status: 'refused', reason: 'post_processing_recovery_history_exceeded' };
+  }
   const recovery: CandidatePostProcessingRecoveryRecord = {
-    recoveryId, candidateId, rawRecommendationKind: rawKind, priorBlockedReason, ownerId, identitySource, reason,
-    authorizedAt: input.authorizedAt, policyVersion: POST_PROCESSING_RECOVERY_POLICY_VERSION,
+    recoveryId,
+    candidateId,
+    rawRecommendationKind: rawKind,
+    priorBlockedReason,
+    priorFailureAt,
+    ownerId,
+    identitySource,
+    reason,
+    authorizedAt: input.authorizedAt,
+    policyVersion: POST_PROCESSING_RECOVERY_POLICY_VERSION,
   };
   const document: CandidateAdmissionDocument = {
     ...existing,
     postProcessingRecoveries: [...history, recovery],
-    processing: { ...processing, state: 'in_progress', nextRetryAt: input.authorizedAt, blockedReason: 'candidate_kind_invalid_recovery_authorized' },
+    processing: {
+      ...processing,
+      state: 'in_progress',
+      nextRetryAt: input.authorizedAt,
+      blockedReason: 'candidate_kind_invalid_recovery_authorized',
+    },
   };
   return { status: 'authorized', document, recovery };
 }
+
 export function serializeAdmissionDocument(document: CandidateAdmissionDocument): { ok: true; json: string } | { ok: false; reason: string } {
   const json = JSON.stringify(document);
   if (json.length > MAX_ADMISSION_JSON_CHARS) return { ok: false, reason: 'admission_json_size_exceeded' };

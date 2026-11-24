@@ -266,10 +266,6 @@ export class SqliteCandidateStore implements CandidateStore {
         outcome = { status: 'refused', reason: 'candidate_not_found' };
         return;
       }
-      if (row.status !== 'pending') {
-        outcome = { status: 'refused', reason: 'candidate_not_pending' };
-        return;
-      }
       const rawKind = validateRecommendationKind(row.recommendation_kind);
       if (rawKind !== 'principle' && rawKind !== 'rule' && rawKind !== 'prompt') {
         outcome = { status: 'refused', reason: rawKind === null ? 'candidate_kind_still_invalid' : 'candidate_kind_has_no_dreamer_route' };
@@ -281,6 +277,17 @@ export class SqliteCandidateStore implements CandidateStore {
         return;
       }
       const result = authorizeInvalidKindPostProcessingRecoveryInDocument(parsed.document, candidateId, rawKind, input);
+      // A completed/active recovery is an idempotent read even after the
+      // worker has consumed the candidate. It must return the original audit
+      // record without attempting another state write.
+      if (result.status === 'already_authorized') {
+        outcome = result;
+        return;
+      }
+      if (row.status !== 'pending') {
+        outcome = { status: 'refused', reason: 'candidate_not_pending' };
+        return;
+      }
       if (result.status === 'refused') {
         outcome = result;
         return;

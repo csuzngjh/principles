@@ -390,6 +390,18 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
     expect(recoveryAudit.document?.postProcessingRecoveries).toHaveLength(1);
     expect(await dreamerTasksFor(world, candidate.candidateId)).toHaveLength(1);
 
+    // Idempotency must also survive the worker consuming the candidate:
+    // a retry returns the original audit record and does not rewrite state.
+    const afterCompletionDuplicate = await world.stateManager.authorizeInvalidKindPostProcessingRecovery(candidate.candidateId, authorization);
+    expect(afterCompletionDuplicate.status).toBe('already_authorized');
+    if (afterCompletionDuplicate.status === 'refused') throw new Error(afterCompletionDuplicate.reason);
+    expect(afterCompletionDuplicate.recovery.recoveryId).toBe(authorized.recovery.recoveryId);
+    const changedAuthorization = await world.stateManager.authorizeInvalidKindPostProcessingRecovery(candidate.candidateId, {
+      ...authorization,
+      reason: 'A different authorization must not reopen a consumed candidate',
+    });
+    expect(changedAuthorization).toMatchObject({ status: 'refused', reason: 'candidate_not_pending' });
+
     const replay = await world.bridge.resumeSucceededDiagnosisPostProcessing({ taskId });
     expect(replay.status).toBe('not_applicable');
     expect(await dreamerTasksFor(world, candidate.candidateId)).toHaveLength(1);

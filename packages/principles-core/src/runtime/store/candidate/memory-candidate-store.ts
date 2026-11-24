@@ -77,13 +77,14 @@ export class MemoryCandidateStore implements CandidateStore {
   async authorizeInvalidKindPostProcessingRecovery(candidateId: string, input: CandidatePostProcessingRecoveryInput): Promise<CandidatePostProcessingRecoveryResult> {
     const candidate = this.candidates.get(candidateId);
     if (!candidate) return { status: 'refused', reason: 'candidate_not_found' };
-    if (candidate.status !== 'pending') return { status: 'refused', reason: 'candidate_not_pending' };
     const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
     if (rawKind !== 'principle' && rawKind !== 'rule' && rawKind !== 'prompt') {
       return { status: 'refused', reason: rawKind === null ? 'candidate_kind_still_invalid' : 'candidate_kind_has_no_dreamer_route' };
     }
     const existing = this.admissions.get(candidateId) ?? null;
     const result = authorizeInvalidKindPostProcessingRecoveryInDocument(existing, candidateId, rawKind, input);
+    if (result.status === 'already_authorized') return result;
+    if (candidate.status !== 'pending') return { status: 'refused', reason: 'candidate_not_pending' };
     if (result.status !== 'refused') this.admissions.set(candidateId, result.document);
     return result;
   }

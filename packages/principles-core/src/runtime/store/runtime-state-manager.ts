@@ -64,9 +64,6 @@ export type {
   AdmissionEvaluationRecord,
   AdmissionProcessingRecord,
   CandidateAdmissionDocument,
-  CandidatePostProcessingRecoveryRecord,
-  CandidatePostProcessingRecoveryInput,
-  CandidatePostProcessingRecoveryResult,
 } from './candidate/admission-document.js';
 export type { ArtifactRecord } from './artifact/artifact-store.js';
 export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
