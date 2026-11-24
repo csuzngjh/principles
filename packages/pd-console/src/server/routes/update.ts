@@ -12,6 +12,15 @@ import type * as authorityModule from 'create-principles-disciple/update-console
 
 type AuthorityModule = typeof authorityModule;
 type Authority = ReturnType<AuthorityModule['createReleaseManagerAuthority']>;
+/**
+ * The seam as this Console finds it on disk. An update swaps the runtime
+ * components one by one, so a Console can start against a release-manager
+ * deployed before the async factory existed. The synchronous factory is then
+ * the fallback, and `await` takes its result unchanged.
+ */
+type AuthoritySeam = Omit<AuthorityModule, 'createReleaseManagerAuthorityAsync'> & {
+  createReleaseManagerAuthorityAsync?: AuthorityModule['createReleaseManagerAuthorityAsync'];
+};
 const REPAIR_ACTION = 'Resolve the reported cause, or run the official installer (npx create-principles-disciple) to repair the installation, then retry.';
 
 function appendGovernedUpdateHistory(workspaceDir: string, entry: Parameters<typeof appendUpdateHistory>[1]): void {
@@ -138,6 +147,12 @@ async function applyFullUpdate(authority: Authority, res: ServerResponse, worksp
         success: true,
         state: 'update_in_progress',
         transactionId,
+        // The console that accepted the update. The page keeps it as the
+        // baseline for the release handover: by the time it can read the
+        // transaction, the successor may already be the one answering, and
+        // a baseline taken from the first readable poll would then be the
+        // successor's own pid — something that never "changes".
+        serverPid: process.pid,
         message: `Update transaction ${transactionId} accepted; the update keeps running even if this console stops.`,
         requiresRestart: false,
         nextAction: 'This page tracks the running update. Do not start another update until it finishes.',
@@ -261,10 +276,24 @@ export async function handleUpdateRoute(
   } else {
     try {
       mod = await import('create-principles-disciple/update-console');
-      authority = mod.createReleaseManagerAuthority({
+      // Awaited: the readiness gate re-hashes the deployed executor tree, and
+      // awaiting it lets this server keep serving other requests while the
+      // tree is read.
+      const seam: AuthoritySeam = mod;
+      const createAuthority = seam.createReleaseManagerAuthorityAsync ?? seam.createReleaseManagerAuthority;
+      authority = await createAuthority({
         pdHome: getPdHome().pdHome,
         metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
       });
+      // The transport does not cancel what it times out: `asyncHandler` answers
+      // 504 at its budget while this route is still awaiting the gate above.
+      // Carrying on from there would START an update the page was told had
+      // failed — detached, and tracked by nobody. A request that was already
+      // answered, or whose caller is gone, is over: nothing below runs for it.
+      if (res.writableEnded || res.destroyed) {
+        console.error(`[update] ${subPath} abandoned: the request was already answered while the readiness gate ran`);
+        return;
+      }
       const readiness = authority.kinds[subPath === '/check' ? 'check' : 'apply-full'];
       if (!readiness.ready || authority.installStatus === null) {
         failure = { ...failure, reason: readiness.reasons.join(',') || 'install_state_corrupt', message: 'The installation is not ready for a signed release update.' };

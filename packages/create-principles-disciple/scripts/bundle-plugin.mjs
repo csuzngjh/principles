@@ -158,6 +158,8 @@ const CONSOLE_REQUIRED = [
   'dist',
   'dist/server.js',
   'dist/server/index.js',
+  // The release handover starts this one by path, like the entry above it.
+  'dist/server/successor.js',
   'dist/web/index.html',
   'package.json',
 ];

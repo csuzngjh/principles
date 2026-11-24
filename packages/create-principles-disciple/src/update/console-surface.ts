@@ -15,6 +15,7 @@
 
 export {
   createReleaseManagerAuthority,
+  createReleaseManagerAuthorityAsync,
   mapReleaseManagerError,
   type ReleaseManagerAuthority,
   type ReleaseManagerAuthorityOptions,
@@ -46,3 +47,12 @@ export {
   isReleaseManagerTransactionId,
   ReleaseManagerError,
 } from './release-manager.js';
+
+// Observational companion to the journal above: how far along the stage the
+// journal last announced. Derived and best-effort — a deployed release-manager
+// built before it existed simply has no such export, which the Console treats
+// as "no progress known" (ERR-207: components are replaced one at a time).
+export {
+  readTransactionProgress,
+  type TransactionProgress,
+} from './transaction-progress.js';
