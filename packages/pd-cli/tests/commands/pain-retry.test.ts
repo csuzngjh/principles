@@ -88,7 +88,12 @@ const { mockRecoverFailedTask, mockPersistPainDiagnosis } = vi.hoisted(() => {
 
 const { MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
   function MockPrincipleTreeLedgerAdapter(this: any) {
-    return {};
+    return {
+      withCandidateCoordination: async <T>(_candidateId: string, operation: () => Promise<T>): Promise<T> => operation(),
+      resolveCandidatePrincipleIdentity: (candidateId: string) => ({
+        status: 'resolved', candidateId, principleId: 'test-principle', basis: 'derived_candidate', checkedAt: '2026-11-24T00:00:00.000Z',
+      }),
+    };
   }
   MockPrincipleTreeLedgerAdapter.prototype = {};
   return { MockPrincipleTreeLedgerAdapter };
@@ -734,7 +739,7 @@ describe('pd pain retry — success paths', () => {
   it('RETRY-06: retry_wait + last_error → succeeded — JSON output with previousTaskStatus and previousLastError', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ]);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
@@ -767,8 +772,8 @@ describe('pd pain retry — success paths', () => {
   it('RETRY-06b (P2-4): parked candidate surfaces review guidance and is EXCLUDED from internalize nextAction', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
-      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
+      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ]);
     mockIntake
       .mockResolvedValueOnce({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-ok', title: 'OK', status: 'probation' } })
@@ -891,7 +896,7 @@ describe('pd pain retry — success paths', () => {
   it('RETRY-10: nextAction mentions internalization is NOT automatic', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ]);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
@@ -948,7 +953,7 @@ describe('pd pain retry — success paths', () => {
   it('RETRY-12: intake failure — JSON output with intake_failed + nextAction', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-fail', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-fail', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ]);
     mockIntake.mockImplementation(() => { throw new Error('Ledger write failed'); });
 
@@ -1033,7 +1038,7 @@ describe('pd pain retry — human-readable output', () => {
   it('RETRY-14: success — human-readable output shows previous status and nextAction', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ]);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
@@ -1652,7 +1657,7 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
       },
     });
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockGetRunsByTask.mockResolvedValue([{

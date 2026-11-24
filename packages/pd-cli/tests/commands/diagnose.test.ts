@@ -96,7 +96,12 @@ const { mockIntake, MockCandidateIntakeService } = vi.hoisted(() => {
 
 const { MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
   function MockPrincipleTreeLedgerAdapter(this: any) {
-    return {};
+    return {
+      withCandidateCoordination: async <T>(_candidateId: string, operation: () => Promise<T>): Promise<T> => operation(),
+      resolveCandidatePrincipleIdentity: (candidateId: string) => ({
+        status: 'resolved', candidateId, principleId: 'test-principle', basis: 'derived_candidate', checkedAt: '2026-11-24T00:00:00.000Z',
+      }),
+    };
   }
   MockPrincipleTreeLedgerAdapter.prototype = {};
   return { MockPrincipleTreeLedgerAdapter };
@@ -902,7 +907,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-05: intake failure human-readable output shows nextAction', async () => {
     const candidates = [
-      { candidateId: 'cand-fail', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-fail', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockImplementation(() => { throw new Error('Ledger write failed'); });
@@ -928,7 +933,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-06: does not bypass ledger — consumed only set after intake succeeds', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockImplementation(() => { throw new Error('Ledger write failed'); });
@@ -952,7 +957,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-07: already-consumed candidate — intake called but updateCandidateStatus skipped', async () => {
     const candidates = [
-      { candidateId: 'cand-consumed', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'consumed' },
+      { candidateId: 'cand-consumed', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'consumed', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: false, entry: { id: 'ledger-existing', title: 'Existing', status: 'probation' } });
@@ -1017,7 +1022,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-09: successful diagnose + intake — human-readable output shows consumed candidates', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
@@ -1069,7 +1074,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-11: --json intake failure nextAction contains executable command with workspace', async () => {
     const candidates = [
-      { candidateId: 'cand-err', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-err', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockImplementation(() => { throw new Error('DB locked'); });

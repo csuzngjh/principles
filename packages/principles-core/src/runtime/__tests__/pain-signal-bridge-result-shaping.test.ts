@@ -136,6 +136,7 @@ function makeMockDeps(overrides: {
     createTask: createTaskMock,
     updateTask: async () => undefined,
     getCandidatesByTaskId: async () => overrides.candidates ?? [],
+    getCandidate: async (candidateId: string) => (overrides.candidates ?? []).find((item) => item.candidateId === candidateId) ?? null,
     getRunsByTask: async () => [{ runId: RUN_ID, taskId: TASK_ID, status: 'succeeded' }],
     getRun: async (runId: string) => {
       const candidate = (overrides.candidates ?? []).find((item) => item.sourceRunId === runId);

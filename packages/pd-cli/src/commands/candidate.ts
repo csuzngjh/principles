@@ -576,7 +576,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
           };
         }
         const rawKind = validateRecommendationKind(current.rawRecommendationKind);
-        if (rawKind !== null && rawKind !== current.recommendationKind) {
+        if (rawKind !== null && (rawKind !== current.recommendationKind || rawKind !== recommendation.kind)) {
           return {
             kind: 'refused',
             headline: `Refusing to internalize candidate ${opts.candidateId}: persisted RAW kind does not match the normalized route kind.`,
@@ -665,7 +665,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         const currentEvaluation = gateAdmissionDoc.document?.evaluations.find(
           (evaluation) => evaluation.evaluationId === gateAdmissionDoc.document?.currentEvaluationId,
         );
-        if (currentEvaluation === undefined || currentEvaluation.decision !== 'admitted') {
+        if ((currentEvaluation === undefined && opts.dryRun !== true) || (currentEvaluation !== undefined && currentEvaluation.decision !== 'admitted')) {
           return {
             kind: 'refused',
             headline: `Admission changed while candidate ${opts.candidateId} was being internalized.`,

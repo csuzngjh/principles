@@ -317,7 +317,9 @@ describe('D4 — pd candidate internalize authority gate matrix', () => {
     const lines = consoleLogSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.trim().startsWith('{'));
     const result = JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
     expect(result.status).toBe('refused');
-    expect(result.reason).toBe('ledger_identity_ledger_corrupt');
+    // Malformed JSON is unreadable under the current ledger availability contract.
+    // In particular, this must never be reported as a missing candidate identity.
+    expect(result.reason).toBe('ledger_identity_ledger_unavailable');
     expect(await listDreamerTasks(tmpDir)).toEqual([]);
   });
 

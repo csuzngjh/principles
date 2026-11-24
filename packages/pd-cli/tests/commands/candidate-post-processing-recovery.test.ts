@@ -26,8 +26,8 @@ const { fakeState, fakeLedger, MockRuntimeStateManager, MockPrincipleTreeLedgerA
   return {
     fakeState,
     fakeLedger,
-    MockRuntimeStateManager: vi.fn().mockImplementation(() => fakeState),
-    MockPrincipleTreeLedgerAdapter: vi.fn().mockImplementation(() => fakeLedger),
+    MockRuntimeStateManager: vi.fn().mockImplementation(function () { return fakeState; }),
+    MockPrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function () { return fakeLedger; }),
   };
 });
 

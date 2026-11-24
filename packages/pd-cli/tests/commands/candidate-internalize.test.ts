@@ -14,7 +14,14 @@ const { mockStateManager, MockRuntimeStateManager } = vi.hoisted(() => {
     // SPEC-PD-PIPELINE-SPINE-001 D4: the authority gate reads the admission
     // document (fail-closed on ok:false). Default = a readable document with
     // no processing history, matching a normally-intaked candidate.
-    getAdmissionDocument: vi.fn().mockResolvedValue({ ok: true, document: null }),
+    getAdmissionDocument: vi.fn().mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{ evaluationId: 'ae-test', decision: 'admitted' }],
+        currentEvaluationId: 'ae-test',
+      },
+    }),
   };
 
   function MockRuntimeStateManager(this: any) {

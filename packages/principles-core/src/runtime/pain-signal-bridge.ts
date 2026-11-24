@@ -1577,9 +1577,8 @@ export class PainSignalBridge {
    * narrow test doubles may omit it and exercise the same state-store path.
    */
   private async withCandidateCoordination<T>(candidateId: string, operation: () => Promise<T>): Promise<T> {
-    const coordinate = this.ledgerAdapter.withCandidateCoordination;
-    if (typeof coordinate === 'function') {
-      return coordinate(candidateId, operation);
+    if (typeof this.ledgerAdapter.withCandidateCoordination === 'function') {
+      return this.ledgerAdapter.withCandidateCoordination(candidateId, operation);
     }
     return operation();
   }
@@ -1989,7 +1988,8 @@ export class PainSignalBridge {
           const processing = admissionDoc.document?.processing;
           if (processing?.state === 'awaiting_owner'
             && typeof processing.blockedReason === 'string'
-            && processing.blockedReason.startsWith('candidate_kind_invalid')) {
+            && processing.blockedReason.startsWith('candidate_kind_invalid')
+            && validateRecommendationKind(currentCandidate.rawRecommendationKind) !== null) {
             seedRefusedByCandidate.set(candidate.candidateId, {
               reason: 'candidate_kind_recovery_required',
               nextAction: `After repairing the persisted RAW kind, run pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${this.workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
@@ -2009,7 +2009,12 @@ export class PainSignalBridge {
           if (rawKind === null) {
             const refusal = seedRefusalFor(currentCandidate, this.workspaceDir);
             seedRefusedByCandidate.set(candidate.candidateId, refusal);
-            const persisted = await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+            // Intake may already have persisted the same invalid-kind park.
+            // Do not replace the original blocker timestamp on replay.
+            const alreadyParked = processing?.state === 'awaiting_owner'
+              && typeof processing.blockedReason === 'string'
+              && processing.blockedReason.startsWith('candidate_kind_invalid');
+            const persisted = alreadyParked || await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
               state: 'awaiting_owner',
               attempts: processing?.attempts ?? 0,
               lastFailure: { reason: refusal.reason, nextAction: refusal.nextAction, at: new Date().toISOString() },
@@ -2037,7 +2042,7 @@ export class PainSignalBridge {
             return;
           }
 
-          let seedSuppression: DreamerSeedSuppression = { suppress: false };
+          let seedSuppression: DreamerSeedSuppression;
           try {
             const resolveIdentity = this.ledgerAdapter.resolveCandidatePrincipleIdentity;
             if (typeof resolveIdentity === 'function') {
@@ -2046,6 +2051,12 @@ export class PainSignalBridge {
                 candidate.candidateId,
                 currentCandidate.rawRecommendationKind,
               );
+              seedSuppression = evaluateDreamerSeedSuppression({ identity, processing });
+              // A persisted Owner park takes precedence over identity availability.
+              if (seedSuppression.suppress) {
+                seedSuppressedByCandidate.set(candidate.candidateId, seedSuppression);
+                return;
+              }
               const identityOptional = identity.status !== 'resolved'
                 && identity.reason === 'missing'
                 && rawKind !== 'principle';
@@ -2087,7 +2098,6 @@ export class PainSignalBridge {
                 });
                 return;
               }
-              seedSuppression = evaluateDreamerSeedSuppression({ identity, processing });
             } else {
               // Test doubles may omit the optional identity capability. The
               // production file-backed adapter implements it; pending Owner

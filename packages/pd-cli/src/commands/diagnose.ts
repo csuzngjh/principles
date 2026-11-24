@@ -894,7 +894,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // nextAction/exit-code signaling below (partial failure still exits non-zero).
     if (opts.intake !== false) {
       for (const candidate of candidates) {
-        const intakeResult = intakeResults.find((result) => result.candidateId === candidate.candidateId);
+        const intakeResult = intakeResults.find((record) => record.candidateId === candidate.candidateId);
         if (!intakeResult || intakeResult.status !== 'consumed') continue;
 
         // Re-read and seed under the same candidate coordination lock used by
