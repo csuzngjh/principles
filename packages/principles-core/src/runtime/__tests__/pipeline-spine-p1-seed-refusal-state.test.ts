@@ -85,6 +85,27 @@ async function restartWorker(world: World): Promise<void> {
   world.bridge = createBridgeForWorld(world, stateManager);
 }
 
+async function createWorld(): Promise<World> {
+  const root = mkdtempSync(join(tmpdir(), 'pri-1291-seed-refusal-'));
+  const workspaceDir = join(root, 'workspace');
+  mkdirSync(workspaceDir, { recursive: true });
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+  await stateManager.initialize();
+  const telemetry: Record<string, unknown>[] = [];
+  const options = { failTelemetry: false };
+  const world: World = {
+    root,
+    workspaceDir,
+    stateManager,
+    bridge: undefined as unknown as PainSignalBridge,
+    telemetry,
+    options,
+  };
+  world.bridge = createBridgeForWorld(world, stateManager);
+  worlds.push(world);
+  return world;
+}
+
 function diagnosticJson(painId: string): string {
   return JSON.stringify({
     sourcePainId: painId,
@@ -363,7 +384,10 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
     expect(resumed.processedCandidateIds).toEqual([candidate.candidateId]);
     expect((await candidateOf(world, candidate.candidateId)).status).toBe('consumed');
     expect((await processingOf(world, candidate.candidateId))?.state).toBe('complete');
-    expect((await world.stateManager.getAdmissionDocument(candidate.candidateId)).ok && (await world.stateManager.getAdmissionDocument(candidate.candidateId) as {ok:true;document:any}).document?.postProcessingRecoveries).toHaveLength(1);
+    const recoveryAudit = await world.stateManager.getAdmissionDocument(candidate.candidateId);
+    expect(recoveryAudit.ok).toBe(true);
+    if (!recoveryAudit.ok) throw new Error(recoveryAudit.reason);
+    expect(recoveryAudit.document?.postProcessingRecoveries).toHaveLength(1);
     expect(await dreamerTasksFor(world, candidate.candidateId)).toHaveLength(1);
 
     const replay = await world.bridge.resumeSucceededDiagnosisPostProcessing({ taskId });
@@ -395,11 +419,10 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
     await runPostProcessing(world, { taskId, output }, 'pain-owner-park');
     setPersistedKind(world, candidate.candidateId, 'principle');
 
-    const processing = await processingOf(world, candidate.candidateId);
-    if (!processing) throw new Error('missing processing record');
     const reusePark = await world.stateManager.updateAdmissionProcessing(candidate.candidateId, {
-      ...(processing as { state: 'awaiting_owner'; attempts: number; lastFailure?: { reason: string; nextAction: string; at: string }; blockedReason?: string }),
       state: 'awaiting_owner',
+      attempts: 0,
+      lastFailure: { reason: 'reuse_pending_owner', nextAction: 'Wait for Owner review', at: new Date().toISOString() },
       blockedReason: 'reuse_pending_owner',
     });
     expect(reusePark).toBe(true);
