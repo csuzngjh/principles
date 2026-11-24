@@ -283,7 +283,8 @@ function workspaceKey(workspaceDir: string): string {
   const resolved = path.resolve(workspaceDir);
   let real: string;
   try {
-    real = realpathSync.native(resolved);
+    const candidate = realpathSync.native(resolved);
+    real = typeof candidate === 'string' && candidate.length > 0 ? candidate : resolved;
   } catch {
     real = resolved;
   }
@@ -4945,7 +4946,8 @@ function sameWorkspaceTarget(left: string, right: string): boolean {
     const resolved = path.resolve(value);
     let real: string;
     try {
-      real = realpathSync.native(resolved);
+      const candidate = realpathSync.native(resolved);
+      real = typeof candidate === 'string' && candidate.length > 0 ? candidate : resolved;
     } catch {
       real = resolved;
     }

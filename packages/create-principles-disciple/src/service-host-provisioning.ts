@@ -119,7 +119,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function stableWorkspacePath(value: string): string {
   const resolved = path.resolve(value);
   try {
-    return fs.realpathSync.native(resolved);
+    const real = fs.realpathSync.native(resolved);
+    // rc-1: a shimmed/mocked fs may hand back a non-string. Fall back to the
+    // lexical path instead of letting an undefined leak into path operations.
+    return typeof real === 'string' && real.length > 0 ? real : resolved;
   } catch {
     return resolved;
   }

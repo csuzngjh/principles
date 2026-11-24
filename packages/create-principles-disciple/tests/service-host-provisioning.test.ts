@@ -10,7 +10,7 @@
  *  - a failed readiness probe leaves ownership untouched;
  *  - the auditable provisioning record is written.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -360,7 +360,7 @@ describe('provisionFreshInstallWorkspace', () => {
     expect(entry?.requestedWorkspaceDir).toBe(link);
 
     // Re-point the link: the recorded hint still targets project-a.
-    rmdirSync(link);
+    unlinkSync(link);
     symlinkSync(projectB, link, linkType);
     expect(readPendingProvisioningEvidence(pdHome, link)).toBeNull();
     expect(readPendingProvisioningEvidence(pdHome, projectB)).toBeNull();
