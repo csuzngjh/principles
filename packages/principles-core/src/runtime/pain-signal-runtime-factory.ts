@@ -1193,9 +1193,17 @@ export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: s
   // disposePainSignalBridgesForWorkspace uses — instead of enumerating key
   // components by hand.
   const effectiveKind = runtimeKind ?? 'pi-ai';
-  bridgeCache.delete(`${workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`);
+  const retire = (key: string): void => {
+    const bridge = bridgeCache.get(key);
+    if (bridge === undefined) return;
+    bridgeCache.delete(key);
+    // Invalidation removes discoverability immediately but preserves any
+    // outstanding factory borrow or operation until it is safe to close.
+    void bridge.disposeWhenIdle().catch(() => undefined);
+  };
+  retire(`${workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`);
   const kindPrefix = `${workspaceDir}:${effectiveKind}:`;
   for (const key of [...bridgeCache.keys()]) {
-    if (key.startsWith(kindPrefix)) bridgeCache.delete(key);
+    if (key.startsWith(kindPrefix)) retire(key);
   }
 }
