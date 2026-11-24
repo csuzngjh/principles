@@ -729,7 +729,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         // cli-6-output-next-action: refusal result carries admissionBlock.nextAction.
         // SPEC review round-3 P1: the FULL write gate (persisted disposition /
         // re-evaluation), not the confidence/kind-only partial check.
-        const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization })) ?? checkAdmissionGate(candidate);
+        const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization, coordination: ledgerAdapter })) ?? checkAdmissionGate(candidate);
         if (admissionBlock) {
           intakeFailed = true;
           intakeResults.push({
