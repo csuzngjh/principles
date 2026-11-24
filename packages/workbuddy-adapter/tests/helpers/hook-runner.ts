@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { AMBIENT_HOST_OVERRIDE_KEYS } from './workbench.js';
+import { AMBIENT_HOST_OVERRIDE_KEYS, assertInsideSandbox } from './workbench.js';
 
 /**
  * Shared real-process harness for the WorkBuddy adapter tests.
@@ -78,6 +78,10 @@ const WRAPPER = path.resolve(PACKAGE_ROOT, 'plugin', 'scripts', 'wrapper.cjs');
  * last so a test can still inject an override deliberately.
  */
 function homeEnv(homeDir: string, extra?: Record<string, string>): NodeJS.ProcessEnv {
+  // The child derives every write target from HOME/USERPROFILE — a homeDir
+  // outside the registered sandbox would make the spawned hook write real
+  // user dirs. Fail closed on the boundary BEFORE the child exists.
+  assertInsideSandbox(homeDir, '(hook child HOME)');
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of AMBIENT_HOST_OVERRIDE_KEYS) delete env[key];
   return {

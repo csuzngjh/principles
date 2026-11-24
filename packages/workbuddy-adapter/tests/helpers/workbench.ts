@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
+import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection, guardWorkspaceLeak } from '@principles/core/runtime';
 import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 import { canonicalizeDeepestExisting, getWorkbuddyWorkspaceDir, isPathWithinRoot } from '@principles/install-layout';
 
@@ -279,10 +279,11 @@ export async function activationArtifact(governance: string, input: ArtifactInpu
   // `new SqliteConnection(dir)` mkdirs `<dir>/.pd` and opens
   // `<dir>/.pd/state.db` — the boundary check must run on that REAL path
   // BEFORE the connection exists, because Database() would already have
-  // created (or written through) the file. resolveStateDbPath is the same
-  // resolver the connection uses, so the checked path and the opened path
-  // cannot drift apart.
-  const dbPath = resolveStateDbPath(governance);
+  // created (or written through) the file. The check mirrors the
+  // constructor's own resolution chain — guardWorkspaceLeak (mock-leak
+  // redirect under test env) then resolveStateDbPath — so the checked path
+  // and the opened path cannot drift apart.
+  const dbPath = resolveStateDbPath(guardWorkspaceLeak(governance));
   assertInsideSandbox(path.dirname(dbPath), '(activationArtifact .pd)');
   assertInsideSandbox(dbPath, '(activationArtifact state.db)');
   const connection = new SqliteConnection(governance);
