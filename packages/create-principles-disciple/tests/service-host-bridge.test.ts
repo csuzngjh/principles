@@ -176,7 +176,7 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
       status: { code: 0, stdout: '{"schemaVersion":"pd.service-status.v1","scheduler":{"registered":false}}' },
     }, calls);
     await reconcileServiceHostScheduler({
-      pdHome, registerServiceHost: false, enableServiceHost: false,
+      pdHome, intent: 'refresh_if_registered', freshInstall: false,
       warn: () => { throw new Error('no warnings expected'); },
       probes: { spawnFn },
     });
@@ -194,7 +194,7 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
     }, calls);
     const infos: string[] = [];
     await reconcileServiceHostScheduler({
-      pdHome, registerServiceHost: false, enableServiceHost: false,
+      pdHome, intent: 'refresh_if_registered', freshInstall: false,
       warn: () => { throw new Error('no warnings expected'); },
       info: (m) => infos.push(m),
       probes: { spawnFn },
@@ -215,7 +215,7 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
     }, calls);
     const infos: string[] = [];
     await reconcileServiceHostScheduler({
-      pdHome, registerServiceHost: false, enableServiceHost: false,
+      pdHome, intent: 'refresh_if_registered', freshInstall: false,
       warn: () => { throw new Error('no warnings expected'); },
       info: (m) => infos.push(m),
       probes: { spawnFn },
@@ -243,7 +243,7 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
     }, calls);
     const warnings: string[] = [];
     await reconcileServiceHostScheduler({
-      pdHome, registerServiceHost: false, enableServiceHost: false,
+      pdHome, intent: 'refresh_if_registered', freshInstall: false,
       warn: (m) => warnings.push(m),
       probes: { spawnFn },
     });
@@ -260,14 +260,35 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
       enable: { code: 1, stdout: '{"ok":false,"reason":"must_not_be_called"}' },
     }, calls);
     await reconcileServiceHostScheduler({
-      pdHome, registerServiceHost: true, enableServiceHost: false,
+      pdHome, intent: 'register_only', freshInstall: true,
       warn: () => { throw new Error('no warnings expected'); },
       probes: { spawnFn },
     });
     expect(calls.map((c) => c.args[2])).toEqual(['install']);
   });
 
-  it('--enable-service-host: install then enable; enable failure stays a WARNING (registration stays disabled)', async () => {
+  it('--enable-service-host: install then enable, then VERIFY through the OS status document', async () => {
+    const home = tempHome();
+    const pdHome = fakeInstalledCli(home);
+    const calls: RecordedCall[] = [];
+    const spawnFn = fakeSpawn({
+      install: { code: 0, stdout: '{"ok":true,"changed":true}' },
+      enable: { code: 0, stdout: '{"ok":true,"changed":true}' },
+      status: { code: 0, stdout: '{"schemaVersion":"pd.service-status.v1","scheduler":{"registered":true,"enabled":true,"triggerConfiguration":{"intervalMs":120000}}}' },
+    }, calls);
+    const infos: string[] = [];
+    const outcome = await reconcileServiceHostScheduler({
+      pdHome, intent: 'enable', source: 'recommended_default', freshInstall: true,
+      warn: (m) => { throw new Error(`no warnings expected: ${m}`); },
+      info: (m) => infos.push(m),
+      probes: { spawnFn },
+    });
+    expect(calls.map((c) => c.args[2])).toEqual(['install', 'enable', 'status']);
+    expect(outcome).toMatchObject({ state: 'enabled', registered: true, enabled: true, triggerIntervalMs: 120000 });
+    expect(infos.join(' ')).toContain('enabled');
+  });
+
+  it('--enable-service-host: enable failure stays a WARNING (registration exists but disabled) and never claims enabled', async () => {
     const home = tempHome();
     const pdHome = fakeInstalledCli(home);
     const calls: RecordedCall[] = [];
@@ -276,15 +297,56 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
       enable: { code: 1, stdout: '{"ok":false,"reason":"scheduler_query_failed:AccessDenied","nextAction":"inspect"}' },
     }, calls);
     const warnings: string[] = [];
-    await reconcileServiceHostScheduler({
-      pdHome, registerServiceHost: true, enableServiceHost: true,
+    const outcome = await reconcileServiceHostScheduler({
+      pdHome, intent: 'enable', freshInstall: true,
       warn: (m) => warnings.push(m),
       probes: { spawnFn },
     });
     expect(calls.map((c) => c.args[2])).toEqual(['install', 'enable']);
+    expect(outcome).toMatchObject({ state: 'registered_disabled', registered: true, enabled: false });
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('stays DISABLED');
     expect(warnings[0]).toContain('AccessDenied');
+  });
+
+  it('--enable-service-host: an unverified OS state is NOT success (no ownership handover)', async () => {
+    const home = tempHome();
+    const pdHome = fakeInstalledCli(home);
+    const spawnFn = fakeSpawn({
+      install: { code: 0, stdout: '{"ok":true,"changed":true}' },
+      enable: { code: 0, stdout: '{"ok":true,"changed":true}' },
+      // The OS reports the trigger still disabled — "enable exited 0" is not proof.
+      status: { code: 0, stdout: '{"schemaVersion":"pd.service-status.v1","scheduler":{"registered":true,"enabled":false}}' },
+    }, []);
+    const warnings: string[] = [];
+    const outcome = await reconcileServiceHostScheduler({
+      pdHome, intent: 'enable', freshInstall: true,
+      warn: (m) => warnings.push(m),
+      probes: { spawnFn },
+    });
+    expect(outcome.state).toBe('registered_disabled');
+    expect(warnings.join(' ')).toContain('does not report the trigger as enabled');
+  });
+
+  it('opt-out and consent-required never touch the OS scheduler', async () => {
+    const home = tempHome();
+    const pdHome = fakeInstalledCli(home);
+    const calls: RecordedCall[] = [];
+    const spawnFn = fakeSpawn({}, calls);
+    const optedOut = await reconcileServiceHostScheduler({
+      pdHome, intent: 'opt_out', freshInstall: true,
+      warn: () => { throw new Error('no warnings expected'); },
+      probes: { spawnFn },
+    });
+    expect(optedOut.state).toBe('opted_out');
+    const consentRequired = await reconcileServiceHostScheduler({
+      pdHome, intent: 'consent_required', freshInstall: true,
+      warn: () => { throw new Error('no warnings expected'); },
+      probes: { spawnFn },
+    });
+    expect(consentRequired.state).toBe('consent_required');
+    expect(consentRequired.nextAction).toContain('--enable-service-host');
+    expect(calls).toHaveLength(0);
   });
 
   it('the file probe: a MISSING platform dir is a clean false (fresh install); artifacts present is true (ENOENT regression)', async () => {
@@ -308,7 +370,7 @@ describe('reconcileServiceHostScheduler — consent gating + refresh (ERR-197)',
     }, []);
     const warnings: string[] = [];
     await reconcileServiceHostScheduler({
-      pdHome, registerServiceHost: false, enableServiceHost: false,
+      pdHome, intent: 'refresh_if_registered', freshInstall: false,
       warn: (m) => warnings.push(m),
       probes: { spawnFn },
     });

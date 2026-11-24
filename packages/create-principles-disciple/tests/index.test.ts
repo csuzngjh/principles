@@ -1,6 +1,11 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { isLanguage } from '../src/i18n.js';
-import { program } from '../src/index.js';
+import { program, resolvePrePromptInstallMode } from '../src/index.js';
+import { shouldProvisionOnInstall } from '../src/installer.js';
+import { inspectWorkspaceDir } from '../src/utils/env.js';
 
 describe('isLanguage type guard', () => {
   it('returns true for valid languages', () => {
@@ -69,5 +74,110 @@ describe('--stop-gateway flag registration (cli-7, real program)', () => {
     // flags has no <value>/[value] suffix => Commander sets opts.stopGateway
     // (camelCase) to true when present, defaultValue when absent.
     expect(opt?.flags).toBe('--stop-gateway');
+  });
+});
+
+describe('resolvePrePromptInstallMode — interactive mode is resolved AFTER host/workspace', () => {
+  it('interactive without flags never pre-fills force (a chosen workspace with files must stay smart)', () => {
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: false, nonInteractive: false, workspaceInfo: { isFirstInstall: true },
+    })).toBeUndefined();
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: false, nonInteractive: false, workspaceInfo: { isFirstInstall: false },
+    })).toBeUndefined();
+  });
+
+  it('explicit flags win in every mode', () => {
+    expect(resolvePrePromptInstallMode({
+      force: true, smart: false, nonInteractive: false, workspaceInfo: { isFirstInstall: false },
+    })).toBe('force');
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: true, nonInteractive: true, workspaceInfo: { isFirstInstall: true },
+    })).toBe('smart');
+  });
+
+  it('non-interactive still resolves a default', () => {
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: false, nonInteractive: true, workspaceInfo: { isFirstInstall: true },
+    })).toBe('force');
+    expect(resolvePrePromptInstallMode({
+      force: false, smart: false, nonInteractive: true, workspaceInfo: { isFirstInstall: false },
+    })).toBe('smart');
+  });
+});
+
+describe('shouldProvisionOnInstall — deferred provisioning never weakens upgrades', () => {
+  const base = {
+    freshInstall: false,
+    consentIntent: 'enable',
+    consentSource: 'explicit_flag',
+    schedulerState: 'enabled',
+    hasPendingMarker: true,
+  };
+
+  it('a fresh install always records the attempt', () => {
+    expect(shouldProvisionOnInstall({ ...base, freshInstall: true, hasPendingMarker: false })).toBe(true);
+  });
+
+  it('an existing install resumes ONLY with explicit enable + a matching pending marker', () => {
+    expect(shouldProvisionOnInstall(base)).toBe(true);
+    expect(shouldProvisionOnInstall({ ...base, hasPendingMarker: false })).toBe(false);
+    expect(shouldProvisionOnInstall({ ...base, consentSource: 'recommended_default' })).toBe(false);
+    expect(shouldProvisionOnInstall({ ...base, consentIntent: 'refresh_if_registered' })).toBe(false);
+    expect(shouldProvisionOnInstall({ ...base, schedulerState: 'registered_disabled' })).toBe(false);
+  });
+});
+
+describe('explicit --workspace: the mode follows the FINAL directory', () => {
+  it('a directory that already holds user files is never recommended `force`', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'pd-mode-final-'));
+    try {
+      writeFileSync(path.join(dir, 'AGENTS.md'), '# owner customizations\n', 'utf8');
+      const info = inspectWorkspaceDir(dir);
+      expect(info.isFirstInstall).toBe(false);
+      expect(info.coreFiles).toContain('AGENTS.md');
+      expect(resolvePrePromptInstallMode({
+        force: false, smart: false, nonInteractive: true, workspaceInfo: info,
+      })).toBe('smart');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('an empty directory (or one that does not exist yet) is a first install', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'pd-mode-empty-'));
+    try {
+      expect(inspectWorkspaceDir(dir).isFirstInstall).toBe(true);
+      expect(inspectWorkspaceDir(path.join(dir, 'missing')).isFirstInstall).toBe(true);
+      mkdirSync(path.join(dir, 'missing'), { recursive: true });
+      expect(inspectWorkspaceDir(path.join(dir, 'missing')).isFirstInstall).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// PRI-1278 Phase 5: host integration and the background life cycle are two
+// independent dimensions. `--host` must NOT silently default to OpenClaw, and
+// the scheduler must expose an explicit opt-out plus the consent flags.
+describe('PRI-1278 Phase 5 install flag registration (cli-7, real program)', () => {
+  const installCmd = program.commands.find((c) => c.name() === 'install');
+
+  it('--host has NO default (omitting it must never install OpenClaw)', () => {
+    const opt = installCmd!.options.find((o) => o.long === '--host');
+    expect(opt).toBeDefined();
+    expect(opt?.defaultValue).toBeUndefined();
+  });
+
+  it('exposes the explicit scheduler opt-out', () => {
+    const opt = installCmd!.options.find((o) => o.long === '--no-service-host');
+    expect(opt).toBeDefined();
+  });
+
+  it('keeps the explicit register/enable consent flags', () => {
+    const register = installCmd!.options.find((o) => o.long === '--register-service-host');
+    const enable = installCmd!.options.find((o) => o.long === '--enable-service-host');
+    expect(register?.defaultValue).toBe(false);
+    expect(enable?.defaultValue).toBe(false);
   });
 });

@@ -121,7 +121,7 @@ function getGlobalNpmRoot(): string | undefined {
   // just like the PD_ALLOW_LEGACY_NPM_INSTALL recovery path).
   if (!isNpmDependencyResolutionEnabled()) return undefined;
   try {
-    const root = execSync('npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const root = execSync('npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim();
     return root.length > 0 ? root : undefined;
   } catch {
     return undefined;

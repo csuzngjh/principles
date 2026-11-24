@@ -16,47 +16,50 @@ function scanEnvironment(wctx: WorkspaceContext): any {
   // PRI-798: every probe is bounded (timeout 2000ms) — an unbounded spawn on
   // a slow/odd PATH entry blocks this synchronous command and its unit test
   // (CI coverage run timed out with the default test budget).
+  // windowsHide: the plugin runs inside the host (gateway) process, which on
+  // Windows may have no console at all; a probe started without it opens a
+  // visible terminal window for each missing-or-present tool.
   const recordVersion = (name: string, version?: string): void => {
     tools[name] = { available: true, version: version?.trim() };
   };
 
   try {
-    const lines = execFileSync('rg', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).toString().split('\n');
+    const lines = execFileSync('rg', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, windowsHide: true }).toString().split('\n');
     recordVersion('rg', lines[0]);
   } catch {
     tools['rg'] = { available: false };
   }
 
   try {
-    const lines = execFileSync('sg', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).toString().split('\n');
+    const lines = execFileSync('sg', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, windowsHide: true }).toString().split('\n');
     recordVersion('sg', lines[0]);
   } catch {
     tools['sg'] = { available: false };
   }
 
   try {
-    const lines = execFileSync('fd', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).toString().split('\n');
+    const lines = execFileSync('fd', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, windowsHide: true }).toString().split('\n');
     recordVersion('fd', lines[0]);
   } catch {
     tools['fd'] = { available: false };
   }
 
   try {
-    const lines = execFileSync('qmd', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).toString().split('\n');
+    const lines = execFileSync('qmd', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, windowsHide: true }).toString().split('\n');
     recordVersion('qmd', lines[0]);
   } catch {
     tools['qmd'] = { available: false };
   }
 
   try {
-    const lines = execFileSync('ast-grep', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).toString().split('\n');
+    const lines = execFileSync('ast-grep', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, windowsHide: true }).toString().split('\n');
     recordVersion('ast-grep', lines[0]);
   } catch {
     tools['ast-grep'] = { available: false };
   }
 
   try {
-    const lines = execFileSync('shellcheck', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).toString().split('\n');
+    const lines = execFileSync('shellcheck', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, windowsHide: true }).toString().split('\n');
     recordVersion('shellcheck', lines[0]);
   } catch {
     tools['shellcheck'] = { available: false };
