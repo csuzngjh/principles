@@ -760,6 +760,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
               candidateId: candidate.candidateId,
               status: 'refused',
               reason: invalidKind ? 'candidate_kind_invalid' : 'candidate_kind_recovery_required',
+              error: `${invalidKind ? 'candidate_kind_invalid' : 'candidate_kind_recovery_required'}: ${intakeResult.message}`,
               nextAction: `After restoring the intended RAW kind, obtain explicit Owner authorization: pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
             });
             continue;
@@ -932,6 +933,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
                 candidateId: candidate.candidateId,
                 status: 'refused',
                 reason: 'candidate_kind_invalid',
+                error: `candidate_kind_invalid: ${raw === 'missing' ? 'missing' : raw}`,
                 nextAction,
               });
               return;
@@ -958,6 +960,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
                 candidateId: candidate.candidateId,
                 status: 'refused',
                 reason: 'candidate_kind_recovery_required',
+                error: 'candidate_kind_recovery_required: persisted RAW kind is repaired but Owner authorization is still required',
                 nextAction: `After repairing the persisted RAW kind, run pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
               });
               return;
@@ -1052,7 +1055,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             candidateId: candidate.candidateId,
             status: 'intake_failed',
             error: coordinationErr instanceof Error ? coordinationErr.message : String(coordinationErr),
-            nextAction: 'Wait for the other candidate operation to finish, then retry diagnosis; no unlocked seed fallback was attempted.',
+            nextAction: `Resolve the candidate coordination error, then retry internalization with pd candidate internalize --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}"; the diagnosis itself already succeeded and will not be rerun.`,
           });
         }
       }
