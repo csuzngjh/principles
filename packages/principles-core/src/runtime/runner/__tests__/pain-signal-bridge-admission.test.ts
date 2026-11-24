@@ -392,6 +392,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
     candidates: CandidateRecord[];
     createTaskFn?: (input: any) => Promise<any>;
     getTaskFn?: (taskId: string) => Promise<any>;
+    identityReason?: string;
   }) {
     const telemetryEvents: Record<string, unknown>[] = [];
     const createTaskCalls: any[] = [];
@@ -402,6 +403,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
     };
     const getTaskMock = overrides.getTaskFn ?? (async () => null);
     const updateCandidateStatusCalls: { candidateId: string; patch: any }[] = [];
+    const processingUpdates: { candidateId: string; processing: any }[] = [];
     const updateCandidateStatusMock = async (candidateId: string, patch: any) => {
       updateCandidateStatusCalls.push({ candidateId, patch });
     };
@@ -424,7 +426,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
       updateCandidateStatus: updateCandidateStatusMock,
       getAdmissionDocument: async () => ({ ok: true, document: null }),
       appendAdmissionEvaluation: async () => ({ status: 'appended' as const, document: { schemaVersion: 1 as const, evaluations: [], currentEvaluationId: null } }),
-      updateAdmissionProcessing: async () => true,
+      updateAdmissionProcessing: async (candidateId: string, processing: any) => { processingUpdates.push({ candidateId, processing }); return true; },
     } as unknown as RuntimeStateManager;
 
     const runner = {
@@ -442,6 +444,14 @@ describe('PainSignalBridge dreamer task seeding', () => {
 
     const ledgerAdapter: LedgerAdapter = {
       existsForCandidate: (candidateId: string) => makeLedgerEntry(candidateId),
+      ...(overrides.identityReason ? {
+        resolveCandidatePrincipleIdentity: () => ({
+          status: 'unresolved' as const,
+          reason: overrides.identityReason,
+          nextAction: 'Repair the candidate binding before retrying.',
+        }),
+      } : {}),
+      withCandidateCoordination: async (_candidateId: string, operation: () => Promise<unknown>) => operation(),
     } as unknown as LedgerAdapter;
 
     const eventEmitter = {
@@ -459,6 +469,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
       telemetryEvents,
       createTaskCalls,
       updateCandidateStatusCalls,
+      processingUpdates,
     };
   }
 
@@ -495,6 +506,41 @@ describe('PainSignalBridge dreamer task seeding', () => {
     expect(seededEvent).toBeDefined();
     expect((seededEvent as any).payload.taskId).toContain('dreamer-c-seed1');
     expect((seededEvent as any).payload.channel).toBe('prompt');
+  });
+
+  it('persists a manual ledger-identity refusal so it cannot monopolize worker backlog scans', async () => {
+    const deps = makeDreamerDeps({
+      candidates: [makeDreamerCandidate('c-revoked', 'principle')],
+      identityReason: 'binding_revoked',
+    });
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: 'pain-revoked-001',
+      painType: 'tool_failure',
+      source: 'openclaw',
+      reason: 'Revoked candidate binding',
+      sessionId: 'session-revoked',
+      provenance: 'host_context_bound',
+      evidence: [{ sourceRef: 'revoked-src', note: 'test evidence' }],
+    });
+
+    expect(result.candidateOutcomes?.find((item) => item.candidateId === 'c-revoked')?.reason)
+      .toBe('candidate_seed_authority_unavailable');
+    expect(deps.processingUpdates).toContainEqual(expect.objectContaining({
+      candidateId: 'c-revoked',
+      processing: expect.objectContaining({
+        state: 'awaiting_owner',
+        blockedReason: 'candidate_identity_binding_revoked',
+      }),
+    }));
+    expect(deps.createTaskCalls.some((call) => call?.taskKind === 'dreamer')).toBe(false);
   });
 
   it('non-MVP channel candidate does not create dreamer task', async () => {
