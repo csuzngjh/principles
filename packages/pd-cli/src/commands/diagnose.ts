@@ -973,7 +973,6 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
               suppression = evaluateDreamerSeedSuppression({
                 identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidate.candidateId, currentCandidate.rawRecommendationKind),
                 processing: admissionDoc.document?.processing,
-                ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
               });
             } catch {
               intakeFailed = true;
