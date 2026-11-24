@@ -2748,7 +2748,7 @@
     {
       "entry": "./runtime/pain-recall",
       "source": "src/runtime/pain-recall-read-model.ts",
-      "count": 20,
+      "count": 21,
       "symbols": [
         "AssociationType",
         "CorrectionEvidenceView",
@@ -2769,7 +2769,8 @@
         "RecallLineageHop",
         "SourceAvailability",
         "UnresolvedAssociation",
-        "recallPains"
+        "recallPains",
+        "stageWalSnapshot"
       ]
     },
     {

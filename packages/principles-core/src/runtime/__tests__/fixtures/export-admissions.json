@@ -454,6 +454,18 @@
     },
     {
       "entry": "./runtime/pain-recall",
+      "symbol": "stageWalSnapshot",
+      "kind": "value",
+      "addedIn": "PRI-1290",
+      "expiresAt": "2027-11-24",
+      "consumers": [
+        "scripts/dev/pipeline-funnel-snapshot.mjs"
+      ],
+      "whyNotInternal": "The Phase 0 funnel baseline script is plain Node JS outside any TS package; it must reuse the single WAL-safe, fingerprint-verified snapshot mechanism instead of re-implementing a bare copyFile that can tear under concurrent writers.",
+      "alternativeConsidered": "Importing the built dist file by relative path was rejected: a deep import into core internals bypasses the package export contract; copying the snapshot logic into the script was rejected: two snapshot implementations would drift, and only one has the race-injection test suite."
+    },
+    {
+      "entry": "./runtime/pain-recall",
       "symbol": "PainRecallOptions",
       "kind": "type",
       "consumers": [

@@ -11,7 +11,7 @@
  *        __tests__-only test scan). Everything else is PRODUCTION-domain.
  *        Every scanned file lands in exactly one domain; counts are asserted.
  *        Production rule: only pain-recall-capability.ts may reference the
- *        read model. Test rule: only the three authorized test files may.
+ *        read model. Test rule: only the four authorized test files may.
  *        Reference detection covers static import, side-effect import,
  *        export-from re-export, dynamic import(), and require().
  *
@@ -19,6 +19,21 @@
  *        are pinned exactly, `painRecallSnapshotTestHooks` appears in NEITHER
  *        (nor in any package.json exports target), and the package exports
  *        map carries exactly the two dedicated subpath keys.
+ *
+ * PRI-1290 (SPEC-PD-PIPELINE-SPINE-001 v0.9 §6 Phase 0) widened BOTH exact
+ * lists by exactly one entry, deliberately and on the record:
+ *   - G-1 test whitelist: `stage-wal-snapshot-interface.test.ts` pins the
+ *     controlled `stageWalSnapshot` interface (success shape, WAL replay,
+ *     own-root-only dispose, T1 drift fail-closed);
+ *   - G-2 read-model export face: `stageWalSnapshot`, the WAL-safe staged
+ *     snapshot primitive, exposed for the repository-internal read-only
+ *     funnel script (`scripts/dev/pipeline-funnel-snapshot.mjs`), which
+ *     lives outside the package and can only reach it through the subpath.
+ *     Its export admission (`export-admissions.json`, addedIn PRI-1290)
+ *     carries the consumer proof and an expiry date.
+ * The general-purpose deleter `removeStagingRoot` stays module-private
+ * (asserted below): consumers only ever receive a `dispose()` closure bound
+ * to the one staging root they created.
  *
  * G-3 — pd-cli reference face: zero capability-subpath references in pd-cli,
  *        the read-model subpath referenced only by the command shell, and
@@ -158,7 +173,10 @@ export function evaluateReferenceRule(entries: readonly { relPath: string; sourc
     } else if (domain === 'test') {
       const authorized = relPath.endsWith('/__tests__/pain-recall-readonly.test.ts')
         || relPath.endsWith('/__tests__/pain-recall-service.test.ts')
-        || relPath.endsWith('/__tests__/pain-recall-capability.test.ts');
+        || relPath.endsWith('/__tests__/pain-recall-capability.test.ts')
+        // PRI-1290: pins the controlled stageWalSnapshot interface (see the
+        // file header). One named file — NOT a pattern.
+        || relPath.endsWith('/__tests__/stage-wal-snapshot-interface.test.ts');
       if (!authorized) {
         violations.push(`test file not authorized to reference the read model: ${relPath} (${refs.length} ref)`);
       }
@@ -205,7 +223,7 @@ describe('G-1: Read Model reference whitelist (domain-partitioned scan)', () => 
     ).toEqual(['runtime/pain-recall-capability.ts']);
   });
 
-  it('test domain: only the three authorized test files reference the read model (guard file included in the scan)', () => {
+  it('test domain: only the four authorized test files reference the read model (guard file included in the scan)', () => {
     // NO carve-out (review round 2, P1-1): the AST-based detector reads real
     // import declarations only, so this guard file's own fixture strings are
     // data, not references — the file scans clean and participates in the
@@ -222,6 +240,9 @@ describe('G-1: Read Model reference whitelist (domain-partitioned scan)', () => 
       'runtime/__tests__/pain-recall-capability.test.ts',
       'runtime/__tests__/pain-recall-readonly.test.ts',
       'runtime/__tests__/pain-recall-service.test.ts',
+      // PRI-1290: the controlled stageWalSnapshot interface test (exact
+      // file name, listed on purpose — see the file header).
+      'runtime/__tests__/stage-wal-snapshot-interface.test.ts',
     ]);
   });
 
@@ -270,11 +291,17 @@ describe('G-1: Read Model reference whitelist (domain-partitioned scan)', () => 
       'runtime/__tests__/pain-recall-readonly.test.ts',
       'runtime/__tests__/pain-recall-service.test.ts',
       'runtime/__tests__/pain-recall-capability.test.ts',
+      'runtime/__tests__/stage-wal-snapshot-interface.test.ts',
     ]) {
       expect(evaluateReferenceRule([
         { relPath, source: fixture(FIX_RM_UP, 'named') },
       ])).toEqual([]);
     }
+    // The PRI-1290 addition is exact: a sibling whose name merely shares the
+    // prefix is still unauthorized (no accidental prefix/pattern widening).
+    expect(evaluateReferenceRule([
+      { relPath: 'runtime/__tests__/stage-wal-snapshot-interface.extra.test.ts', source: fixture(FIX_RM_UP, 'named') },
+    ])).toHaveLength(1);
   });
 
   it('rule evaluator: non-authorized PRODUCTION reference fails (self-test 3)', () => {
@@ -383,16 +410,24 @@ describe('G-2: subpath export faces (runtime export sets pinned exactly)', () =>
   const capabilitySource = fsSync.readFileSync(pathSync.resolve(__dirname, '..', 'pain-recall-capability.ts'), 'utf-8');
   const hooksSource = fsSync.readFileSync(pathSync.resolve(__dirname, '..', 'pain-recall-snapshot-hooks.ts'), 'utf-8');
 
-  it('read-model subpath exports exactly the contract surface (no snapshot hooks)', () => {
+  it('read-model subpath exports exactly the contract surface (no snapshot hooks, no general-purpose deleter)', () => {
     expect(extractExportNames(readModelSource)).toEqual([
       'PAIN_RECALL_DEFAULT_LIMIT',
       'PAIN_RECALL_MAX_LIMIT',
       'PAIN_RECALL_MIN_LIMIT',
       'PAIN_RECALL_SCHEMA_VERSION',
       'recallPains',
+      // PRI-1290: the only addition — the WAL-safe staged snapshot primitive
+      // consumed by scripts/dev/pipeline-funnel-snapshot.mjs through this
+      // subpath (export admission on record, expires 2027-11-24).
+      'stageWalSnapshot',
     ]);
     expect(readModelSource.includes('painRecallSnapshotTestHooks')).toBe(true); // consumed via the internal hooks module
     expect(/export\s+(?:const|function|\{[^}]*)\s*\S*painRecallSnapshotTestHooks/.test(readModelSource)).toBe(false); // but never re-exported
+    // SPEC-PD-PIPELINE-SPINE-001 §6 Phase 0: cleanup is ONLY the per-snapshot
+    // `dispose()` closure; the arbitrary-path deleter stays module-private.
+    expect(readModelSource.includes('function removeStagingRoot(')).toBe(true); // it exists …
+    expect(/export\s+(?:const|function|\{[^}]*)\s*\S*removeStagingRoot/.test(readModelSource)).toBe(false); // … but is never exported
   });
 
   it('capability subpath exports exactly the facade surface', () => {
