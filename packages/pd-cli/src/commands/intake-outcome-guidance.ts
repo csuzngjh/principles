@@ -1,0 +1,220 @@
+/**
+ * Operator guidance for the candidates of one `pd diagnose run` — ONE
+ * classification of every candidate into an outcome class, shared by the
+ * JSON output (`nextAction` + `intake.outcomeClasses`) and the TTY output
+ * (SPEC-PD-PIPELINE-SPINE-001 D4, review round 2 P2-2).
+ *
+ * Why one classification: the two output paths used to derive their guidance
+ * separately through an if/else chain over intake-record statuses. A run with
+ * two different refusals (one seed-refused, one admission-refused) matched
+ * neither "all refused" branch and fell through to "No candidates were
+ * generated"; `--no-intake` recorded no seed result at all, so an invalid
+ * kind was still offered `pd candidate internalize`.
+ *
+ * Rules:
+ *   - every candidate lands in EXACTLY ONE class (first match wins), so a
+ *     mixed run reports every class it actually contains — never "all parked"
+ *     because one candidate is parked;
+ *   - a command is only suggested when it is a valid next step for the
+ *     candidate's RAW kind and current state (see `nextStepFor`): no command
+ *     that the same gates would refuse again;
+ *   - the raw-kind eligibility is computed from the candidate row itself, so
+ *     it also applies to `--no-intake`, where no seed result exists;
+ *   - pure: no I/O, no printing — the callers own output and exit codes.
+ */
+import { validateRecommendationKind } from '@principles/core/runtime';
+
+export type IntakeOutcomeClass =
+  /** A Dreamer task was created by this run. */
+  | 'seeded'
+  /** Seeding threw; the record carries the retry guidance. */
+  | 'seed_failed'
+  /** Reuse review pending the Owner (`pd candidate review`). */
+  | 'parked'
+  /** Durably resolved onto an existing principle / Owner decision pending — no independent chain by design. */
+  | 'suppressed'
+  /** The admission write gate refused the candidate. */
+  | 'admission_refused'
+  /** Invalid or missing RAW recommendation kind — must not be intaken or internalized. */
+  | 'seed_refused'
+  /** Intake storage failure (NOT an admission refusal). */
+  | 'intake_failed'
+  /** Not started; `pd candidate internalize` is a valid next step. */
+  | 'internalizable'
+  /** `--no-intake` principle candidate: not in the ledger yet, so `pd candidate intake` is the valid first step. */
+  | 'intake_first'
+  /** No internalization route in the current stage (implementation / defer). */
+  | 'no_route';
+
+export const INTAKE_OUTCOME_CLASSES: readonly IntakeOutcomeClass[] = [
+  'seeded',
+  'seed_failed',
+  'parked',
+  'suppressed',
+  'admission_refused',
+  'seed_refused',
+  'intake_failed',
+  'internalizable',
+  'intake_first',
+  'no_route',
+];
+
+/** The per-candidate intake record as the diagnose seed loop produces it. */
+export interface IntakeOutcomeRecord {
+  readonly candidateId: string;
+  readonly status: string;
+  readonly nextAction?: string;
+  readonly admissionRefused?: boolean;
+}
+
+export interface GuidanceCandidate {
+  readonly candidateId: string;
+  /** The RAW persisted kind (`principle_candidates.recommendation_kind`). */
+  readonly rawRecommendationKind?: string | null;
+}
+
+export interface IntakeOutcomeGuidance {
+  /** Candidate ids per outcome class; each candidate appears in exactly one list. */
+  readonly byClass: Record<IntakeOutcomeClass, readonly string[]>;
+  /** The operator guidance: every class that is present, each with its own next step. */
+  readonly nextAction: string;
+  /** TTY: the manual commands to print, grouped by the step they belong to. */
+  readonly manualSteps: readonly { readonly title: string; readonly commands: readonly string[] }[];
+  /** TTY: one line per class that needs no command but must be visible. */
+  readonly notes: readonly string[];
+}
+
+const quote = (value: string): string => `"${value}"`;
+
+const intakeCommand = (candidateId: string, workspaceDir: string): string =>
+  `pd candidate intake --candidate-id ${candidateId} --workspace ${quote(workspaceDir)}`;
+const internalizeCommand = (candidateId: string, workspaceDir: string): string =>
+  `pd candidate internalize --candidate-id ${candidateId} --workspace ${quote(workspaceDir)}`;
+const reviewCommand = (candidateId: string): string =>
+  `pd candidate review --candidate-id ${candidateId} --decide reuse|create`;
+
+/**
+ * The valid manual next step for a candidate that has NOT started
+ * internalization, by RAW kind and intake state.
+ *
+ *   principle       — needs a ledger identity before a Dreamer seed; only
+ *                     `pd candidate intake` writes it. After a successful
+ *                     intake the identity exists and `internalize` is valid;
+ *                     with `--no-intake` the candidate is still outside the
+ *                     ledger, so intake is the FIRST step (internalize would
+ *                     answer `candidate_not_in_ledger`).
+ *   rule / prompt   — never enter the ledger through intake (intake answers
+ *                     `non_principle_kind`), so internalize is the valid step.
+ *   implementation  — its channel ('skill') is MVP-disabled: neither command
+ *                     does anything useful.
+ *   defer           — deferred by design: no action.
+ *   anything else   — invalid RAW kind: both commands refuse it.
+ */
+function nextStepFor(
+  rawKind: string | null,
+  intakeEnabled: boolean,
+): 'intake_first' | 'internalizable' | 'no_route' | 'seed_refused' {
+  if (rawKind === null) return 'seed_refused';
+  if (rawKind === 'implementation' || rawKind === 'defer') return 'no_route';
+  if (!intakeEnabled && rawKind === 'principle') return 'intake_first';
+  return 'internalizable';
+}
+
+/** Classify ONE candidate. Exported for direct unit testing of the order. */
+export function classifyIntakeOutcome(
+  candidate: GuidanceCandidate,
+  records: readonly IntakeOutcomeRecord[],
+  intakeEnabled: boolean,
+): IntakeOutcomeClass {
+  const own = records.filter((record) => record.candidateId === candidate.candidateId);
+  const hasStatus = (status: string): boolean => own.some((record) => record.status === status);
+  // Ordered by the strength of the recorded fact: an Owner-facing outcome
+  // (parked / suppressed / admission-refused) outranks the seed result.
+  if (hasStatus('review_required')) return 'parked';
+  if (hasStatus('dreamer_seed_suppressed')) return 'suppressed';
+  if (own.some((record) => record.admissionRefused === true)) return 'admission_refused';
+  if (hasStatus('dreamer_seeded')) return 'seeded';
+  if (hasStatus('dreamer_seed_failed')) return 'seed_failed';
+  if (hasStatus('intake_failed')) return 'intake_failed';
+  if (hasStatus('refused')) return 'seed_refused';
+  const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
+  return nextStepFor(rawKind, intakeEnabled);
+}
+
+export function buildIntakeOutcomeGuidance(args: {
+  readonly candidates: readonly GuidanceCandidate[];
+  readonly intakeResults: readonly IntakeOutcomeRecord[];
+  readonly intakeEnabled: boolean;
+  readonly workspaceDir: string;
+}): IntakeOutcomeGuidance {
+  const { candidates, intakeResults, intakeEnabled, workspaceDir } = args;
+  const byClass = Object.fromEntries(INTAKE_OUTCOME_CLASSES.map((cls) => [cls, [] as string[]])) as Record<IntakeOutcomeClass, string[]>;
+  for (const candidate of candidates) {
+    byClass[classifyIntakeOutcome(candidate, intakeResults, intakeEnabled)].push(candidate.candidateId);
+  }
+  const ids = (cls: IntakeOutcomeClass): string[] => byClass[cls];
+  const count = (cls: IntakeOutcomeClass): number => byClass[cls].length;
+
+  const sections: string[] = [];
+  const manualSteps: { title: string; commands: string[] }[] = [];
+  const notes: string[] = [];
+
+  if (count('seeded') > 0) {
+    const failedNote = count('seed_failed') > 0
+      ? ` (${count('seed_failed')} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)`
+      : '';
+    sections.push(`Dreamer tasks seeded automatically for ${count('seeded')} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${failedNote}`);
+  } else if (count('seed_failed') > 0) {
+    sections.push(`${count('seed_failed')} candidate(s) failed Dreamer seeding — see intake.candidates[] for retry guidance.`);
+  }
+  if (count('internalizable') > 0) {
+    const commands = ids('internalizable').map((id) => internalizeCommand(id, workspaceDir));
+    const lead = count('seeded') > 0
+      ? `${count('internalizable')} candidate(s) were NOT seeded automatically. To begin their internalization, run:\n  `
+      : `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  `;
+    sections.push(`${lead}${commands.join('\n  ')}`);
+    manualSteps.push({ title: 'To begin internalization:', commands });
+  }
+  if (count('intake_first') > 0) {
+    const commands = ids('intake_first').map((id) => intakeCommand(id, workspaceDir));
+    sections.push(`--no-intake was set: ${count('intake_first')} principle candidate(s) are not in the ledger yet. To intake first (internalization follows the intake), run:\n  ${commands.join('\n  ')}`);
+    manualSteps.push({ title: 'To intake first (internalization follows the intake):', commands });
+  }
+  if (count('parked') > 0) {
+    sections.push(`${count('parked')} candidate(s) parked for reuse review (suspected duplicates) — decide before internalizing: ${ids('parked').map(reviewCommand).join('; ')}`);
+    manualSteps.push({ title: 'Reuse Review Required (suspected duplicates parked for Owner decision):', commands: ids('parked').map(reviewCommand) });
+  }
+  if (count('suppressed') > 0) {
+    sections.push(`${count('suppressed')} candidate(s) had their Dreamer seed SUPPRESSED (durably resolved onto an existing principle or awaiting the Owner — no independent chain by design).`);
+    notes.push(`${count('suppressed')} candidate(s): Dreamer seed SUPPRESSED by design (durably resolved onto an existing principle or awaiting the Owner).`);
+  }
+  if (count('admission_refused') > 0) {
+    const nextActions = [...new Set(intakeResults
+      .filter((record) => record.admissionRefused === true)
+      .map((record) => record.nextAction ?? 'provide additional evidence or request manual review'))];
+    sections.push(`${count('admission_refused')} candidate(s) were REFUSED by the admission gate (e.g. confidence below threshold or insufficient evidence) — do NOT internalize them; supplement evidence or use manual review: ${nextActions.join(' / ')}`);
+    notes.push(`${count('admission_refused')} candidate(s) were REFUSED by the admission gate — do NOT intake or internalize them.`);
+  }
+  if (count('intake_failed') > 0) {
+    const commands = ids('intake_failed').map((id) => intakeCommand(id, workspaceDir));
+    sections.push(`${count('intake_failed')} candidate(s) failed intake (storage) — retry: ${commands.join('; ')}`);
+    manualSteps.push({ title: 'Intake failed (storage) — retry:', commands });
+  }
+  if (count('seed_refused') > 0) {
+    sections.push(`${count('seed_refused')} candidate(s) were REFUSED (candidate_kind_invalid — the persisted recommendation_kind is not a valid kind; no task was created, and they must not be intaken or internalized): ${ids('seed_refused').join(', ')}`);
+    notes.push(`${count('seed_refused')} candidate(s): DREAMER SEED REFUSED (candidate_kind_invalid) — do NOT intake or internalize: ${ids('seed_refused').join(', ')}`);
+  }
+  if (count('no_route') > 0) {
+    sections.push(`${count('no_route')} candidate(s) have no internalization route in the current stage (implementation: the 'skill' channel is MVP-disabled; defer: deferred by design) — no action.`);
+    notes.push(`${count('no_route')} candidate(s) have no internalization route in the current stage (implementation / defer) — no action.`);
+  }
+
+  return {
+    byClass,
+    nextAction: sections.length > 0
+      ? sections.join(' ')
+      : 'No candidates were generated from this diagnosis.',
+    manualSteps,
+    notes,
+  };
+}

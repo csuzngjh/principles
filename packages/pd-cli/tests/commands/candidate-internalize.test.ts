@@ -44,6 +44,11 @@ vi.mock('@principles/core/runtime', async (importOriginal) => {
           basis: 'derived_candidate',
           checkedAt: '2026-11-23T00:00:00.000Z',
         }),
+        // Review round 2 (P1-3): the gate runs inside the per-candidate
+        // coordination lock. These wiring tests stay lock-agnostic through a
+        // passthrough; the serialization itself is proven with the REAL
+        // adapter and lock in candidate-internalize-pipeline-spine.test.ts.
+        withCandidateCoordination: async <T>(_candidateId: string, fn: () => Promise<T>) => fn(),
       };
     }),
   };
@@ -63,10 +68,15 @@ vi.mock('../../src/services/admission-write-gate.js', () => ({
 import { decideInternalizationRoute } from '@principles/core/runtime';
 import { enforceFullAdmissionForWrite } from '../../src/services/admission-write-gate.js';
 
+// `principle_candidates.recommendation_kind` is NOT NULL in production, so a
+// real candidate row always carries its raw kind. The D4 gate validates that
+// raw value (SPEC-PD-PIPELINE-SPINE-001), hence the explicit default here and
+// the `rawKind` override for the non-principle case.
 const mockCandidate = (overrides: Partial<{
   candidateId: string;
   sourceRecommendationJson: string;
   description: string;
+  rawKind: string;
 }> = {}) => ({
   candidateId: overrides.candidateId ?? 'cand-001',
   artifactId: 'art-001',
@@ -77,6 +87,8 @@ const mockCandidate = (overrides: Partial<{
   confidence: 0.85,
   status: 'active',
   createdAt: new Date().toISOString(),
+  recommendationKind: overrides.rawKind ?? 'principle',
+  rawRecommendationKind: overrides.rawKind ?? 'principle',
   sourceRecommendationJson: overrides.sourceRecommendationJson ?? JSON.stringify({
     kind: 'principle',
     description: 'Test principle',
@@ -291,6 +303,7 @@ describe('handleCandidateInternalize (PRI-89)', () => {
 
   it('recommendation kind maps to correct channel', async () => {
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate({
+      rawKind: 'rule',
       sourceRecommendationJson: JSON.stringify({ kind: 'rule', description: 'Test rule', triggerPattern: 'test', action: 'do-thing' }),
     }));
     (decideInternalizationRoute as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -324,6 +337,8 @@ describe('handleCandidateInternalize (PRI-89)', () => {
       confidence: 0.7,
       status: 'active',
       createdAt: new Date().toISOString(),
+      recommendationKind: 'principle',
+      rawRecommendationKind: 'principle',
       sourceRecommendationJson: undefined,
     });
 

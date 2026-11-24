@@ -511,200 +511,287 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
 
     const { channel } = seed;
 
-// SPEC-PD-PIPELINE-SPINE-001 D4 (v0.4 order): existing-task dedup runs
-    // BEFORE the identity gate — a candidate whose ledger identity changed
-    // after its Dreamer task was created must report the EXISTING task, not a
-    // retrospective refusal.
-    // PRI-720 C6: candidate-level dedup (demotion may change the derived
-    // channel suffix vs a pre-existing chain).
-    const existingTask = await findExistingDreamerTask((id) => stateManager.getTask(id), opts.candidateId);
-    if (existingTask) {
-      const result: CandidateInternalizeResult = {
-        candidateId: opts.candidateId,
-        route: decision.route,
-        taskId: existingTask.taskId,
-        channel: seed.channel,
-        status: 'existing',
-        reason: 'Task already exists for this candidate (any channel variant)',
-      };
-      if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
-      } else {
-        console.log(`\nCandidate Internalize: ${opts.candidateId}\n`);
-        console.log(`  Route:    ${decision.route}`);
-        console.log(`  Channel:  ${channel}`);
-        console.log(`  Task:     ${existingTask.taskId} (existing)`);
-        console.log('');
-      }
-      return;
-    }
+    // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.4 order) + review round 2 (P1-3):
+    // the read-decide-write sequence below — existing-task dedup → ledger
+    // identity → admission document → Owner decision → seed suppression →
+    // createTask — runs under ONE per-candidate coordination lock: the same
+    // cross-process primitive the Owner reuse path holds around its decision
+    // sections (reuse-park-release.ts). Serialized, an Owner reuse completion
+    // can no longer land between the identity read and the admission read and
+    // leave a stale `derived_candidate` identity beside a cleared park — the
+    // torn state that let an independent Dreamer task be created for a
+    // candidate the Owner had just resolved onto an existing principle.
+    // Lock discipline (adapter contract): candidate lock → ledger lock, never
+    // the reverse; bounded SQLite/file I/O only — no LLM, no network. Every
+    // outcome is RETURNED and reported after the lock is released: nothing
+    // inside the critical section prints or exits.
+    type CriticalOutcome =
+      | { kind: 'existing' | 'dry_run' | 'created'; result: CandidateInternalizeResult }
+      | { kind: 'refused' | 'write_failed'; result: CandidateInternalizeResult; headline: string; reasonLine?: string };
 
-    // SPEC-PD-PIPELINE-SPINE-001 D4: authority identity + seed-suppression
-    // gate. Single-snapshot reuse of the SAME mechanisms the automatic
-    // entries (PainSignalBridge / diagnose seed loop) use — never a second
-    // identity authority. The RAW persisted kind drives every decision: the
-    // normalized `recommendationKind` folds invalid values to 'principle'
-    // (candidate-store contract: DO NOT use for write-boundary decisions).
-    const gateLedgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-    const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
-    const identity = gateLedgerAdapter.resolveCandidatePrincipleIdentity(opts.candidateId, candidate.rawRecommendationKind);
-    const gateAdmissionDoc = await stateManager.getAdmissionDocument(opts.candidateId);
-    if (!gateAdmissionDoc.ok) {
-      // candidate-store contract: { ok: false } is a damaged/unreadable
-      // document — NEVER folded into "no document". Fail closed.
-      const result: CandidateInternalizeResult = {
-        candidateId: opts.candidateId,
-        route: decision.route,
-        status: 'refused',
-        reason: 'admission_document_unreadable',
-        nextAction: 'Inspect principle_candidates.admission_json for this candidate; repair the document or re-run the diagnosis',
-      };
-      if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
-      } else {
-        console.error(`Admission document unreadable for candidate ${opts.candidateId}; refusing to internalize.`);
-        console.error(`  Next Action: ${result.nextAction}`);
-      }
-      process.exit(1);
-      return;
-    }
-    const gatePending = pendingOwnerDecision(gateAdmissionDoc.document ?? null);
-    const suppression = evaluateDreamerSeedSuppression({
-      identity,
-      processing: gateAdmissionDoc.document?.processing,
-      ...(gatePending !== null ? { pendingOwnerDecision: { decision: gatePending.decision } } : {}),
-    });
-    if (suppression.suppress) {
-      const suppressionReason = suppression.reason === 'reuse_resolved_to_existing_principle'
-        ? `dreamer_seed_suppressed: candidate is durably resolved onto existing principle ${suppression.principleId} (reuseEvidence)`
-        : `dreamer_seed_suppressed: ${suppression.reason}`;
-      const suppressionNextAction = suppression.reason === 'owner_decision_pending'
-        ? `pd candidate review --candidate-id ${opts.candidateId} --decide reuse|create --reason "..." (re-run the SAME verdict if it was interrupted)`
-        : suppression.reason === 'reuse_resolved_to_existing_principle'
-          ? 'No independent Dreamer chain by design; the candidate is durably resolved onto the existing principle.'
-          : `pd candidate review --candidate-id ${opts.candidateId} --decide reuse|create --reason "..."`;
-      const result: CandidateInternalizeResult = {
-        candidateId: opts.candidateId,
-        route: decision.route,
-        status: 'refused',
-        reason: suppressionReason,
-        nextAction: suppressionNextAction,
-      };
-      if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
-      } else {
-        console.error(`Dreamer seed suppressed for candidate ${opts.candidateId}: ${suppressionReason}`);
-        console.error(`  Next Action: ${suppressionNextAction}`);
-      }
-      process.exit(1);
-      return;
-    }
-    if (identity.status !== 'resolved') {
-      // A new rule candidate legitimately has no ledger identity yet
-      // (CandidateIntakeService never writes rule candidates): its Owner
-      // binding happens at the ScribeRunner preflight (awaiting_owner_binding)
-      // — the SAME window PainSignalBridge and the diagnose seed loop allow.
-      const allowUnboundRuleSeed = rawKind === 'rule' && identity.reason === 'missing';
-      if (!allowUnboundRuleSeed) {
-        const identityReason = identity.reason === 'missing'
-          ? 'candidate_not_in_ledger'
-          : `ledger_identity_${identity.reason}`;
-        const identityNextAction = identity.reason === 'missing'
-          ? `pd candidate intake --candidate-id ${opts.candidateId} --workspace "${workspaceDir}"`
-          : identity.nextAction;
-        const result: CandidateInternalizeResult = {
-          candidateId: opts.candidateId,
-          route: decision.route,
-          status: 'refused',
-          reason: identityReason,
-          nextAction: identityNextAction,
-        };
-        if (opts.json) {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          console.error(`Refusing to internalize candidate ${opts.candidateId}: ${identityReason}`);
-          console.error(`  Next Action: ${identityNextAction}`);
-        }
-        process.exit(1);
-        return;
-      }
-    }
-
-    if (opts.dryRun) {
-      const result: CandidateInternalizeResult = {
-        candidateId: opts.candidateId,
-        route: decision.route,
-        channel: seed.channel,
-        status: 'dry_run',
-        reason: 'Dry-run mode — no task created',
-      };
-      if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
-      } else {
-        console.log(`\nCandidate Internalize (dry-run): ${opts.candidateId}\n`);
-        console.log(`  Route:    ${decision.route}`);
-        console.log(`  Channel:  ${channel}`);
-        console.log(`  Would create: dreamer PI task`);
-        console.log('');
-      }
-      return;
-    }
-
-    // PRI-1268: the Dreamer-task enqueue is a store write that can fail for
-    // environmental reasons (readonly state.db, locked store, disk). A bare
-    // SqliteError stack on stderr with EMPTY --json stdout is not an operator
-    // result. cli-1-strict-json / cli-6-output-next-action: --json emits ONE
-    // structured object with a stable reason code + nextAction and the process
-    // exits non-zero; the candidate status and task count are unchanged
-    // (cli-5-failure-no-mutation — createTask itself is atomic per row).
-    let task: Awaited<ReturnType<RuntimeStateManager['createTask']>>;
+    const coordinationLedgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+    let outcome: CriticalOutcome;
     try {
-      task = await stateManager.createTask({
-        taskId: seed.taskId,
-        taskKind: seed.taskKind,
-        status: seed.status,
-        attemptCount: seed.attemptCount,
-        maxAttempts: seed.maxAttempts,
-        diagnosticJson: seed.diagnosticJson,
+      outcome = await coordinationLedgerAdapter.withCandidateCoordination(opts.candidateId, async (): Promise<CriticalOutcome> => {
+        // (1) The RAW persisted kind is re-read INSIDE the lock — it drives
+        // the identity decision below (candidate-store contract: the
+        // normalized `recommendationKind` folds invalid values to 'principle';
+        // never use it for a write-boundary decision).
+        const current = await stateManager.getCandidate(opts.candidateId);
+        if (!current) {
+          return {
+            kind: 'refused',
+            headline: `Candidate not found: ${opts.candidateId}`,
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              status: 'refused',
+              reason: 'candidate_unreadable',
+              nextAction: 'Verify candidate ID and run pd candidate show <id> to check existence',
+            },
+          };
+        }
+        // the route decision and the seed above were derived from the row read
+        // before the lock: a kind that changed in between invalidates them
+        if (current.rawRecommendationKind !== candidate.rawRecommendationKind) {
+          return {
+            kind: 'refused',
+            headline: `Candidate ${opts.candidateId} changed while it was being internalized`,
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              status: 'refused',
+              reason: 'candidate_changed_during_internalize',
+              nextAction: 'The candidate row was modified by another writer; re-run pd candidate internalize to decide on the current row',
+            },
+          };
+        }
+        const rawKind = validateRecommendationKind(current.rawRecommendationKind);
+
+        // (2) existing-task dedup runs BEFORE the identity gate — a candidate
+        // whose ledger identity changed after its Dreamer task was created
+        // must report the EXISTING task, not a retrospective refusal.
+        // PRI-720 C6: candidate-level dedup (demotion may change the derived
+        // channel suffix vs a pre-existing chain).
+        const existingTask = await findExistingDreamerTask((id) => stateManager.getTask(id), opts.candidateId);
+        if (existingTask) {
+          return {
+            kind: 'existing',
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              taskId: existingTask.taskId,
+              channel: seed.channel,
+              status: 'existing',
+              reason: 'Task already exists for this candidate (any channel variant)',
+            },
+          };
+        }
+        if (rawKind === null) {
+          // An invalid or missing RAW kind is a type violation of the identity
+          // authority (`candidate_kind_invalid`): nothing may be seeded, and
+          // no command is suggested that would be refused for the same reason.
+          return {
+            kind: 'refused',
+            headline: `Refusing to internalize candidate ${opts.candidateId}: candidate_kind_invalid`,
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              status: 'refused',
+              reason: 'candidate_kind_invalid',
+              nextAction: 'The persisted recommendation_kind is not a valid kind; no task was created. Re-run the diagnosis or repair the candidate row before internalizing.',
+            },
+          };
+        }
+
+        // (3) Authority identity + seed suppression — single-snapshot reuse
+        // of the SAME mechanisms the automatic entries (PainSignalBridge /
+        // diagnose seed loop) use; never a second identity authority.
+        const identity = coordinationLedgerAdapter.resolveCandidatePrincipleIdentity(opts.candidateId, current.rawRecommendationKind);
+        const gateAdmissionDoc = await stateManager.getAdmissionDocument(opts.candidateId);
+        if (!gateAdmissionDoc.ok) {
+          // candidate-store contract: { ok: false } is a damaged/unreadable
+          // document — NEVER folded into "no document". Fail closed.
+          return {
+            kind: 'refused',
+            headline: `Admission document unreadable for candidate ${opts.candidateId}; refusing to internalize.`,
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              status: 'refused',
+              reason: 'admission_document_unreadable',
+              nextAction: 'Inspect principle_candidates.admission_json for this candidate; repair the document or re-run the diagnosis',
+            },
+          };
+        }
+        const gatePending = pendingOwnerDecision(gateAdmissionDoc.document ?? null);
+        const suppression = evaluateDreamerSeedSuppression({
+          identity,
+          processing: gateAdmissionDoc.document?.processing,
+          ...(gatePending !== null ? { pendingOwnerDecision: { decision: gatePending.decision } } : {}),
+        });
+        if (suppression.suppress) {
+          const suppressionReason = suppression.reason === 'reuse_resolved_to_existing_principle'
+            ? `dreamer_seed_suppressed: candidate is durably resolved onto existing principle ${suppression.principleId} (reuseEvidence)`
+            : `dreamer_seed_suppressed: ${suppression.reason}`;
+          const suppressionNextAction = suppression.reason === 'owner_decision_pending'
+            ? `pd candidate review --candidate-id ${opts.candidateId} --decide reuse|create --reason "..." (re-run the SAME verdict if it was interrupted)`
+            : suppression.reason === 'reuse_resolved_to_existing_principle'
+              ? 'No independent Dreamer chain by design; the candidate is durably resolved onto the existing principle.'
+              : `pd candidate review --candidate-id ${opts.candidateId} --decide reuse|create --reason "..."`;
+          return {
+            kind: 'refused',
+            headline: `Dreamer seed suppressed for candidate ${opts.candidateId}: ${suppressionReason}`,
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              status: 'refused',
+              reason: suppressionReason,
+              nextAction: suppressionNextAction,
+            },
+          };
+        }
+        if (identity.status !== 'resolved') {
+          // Only a PRINCIPLE candidate needs a ledger identity before a
+          // Dreamer seed: it is the one kind `pd candidate intake` writes
+          // into the ledger. For a rule or prompt candidate an ABSENT
+          // identity is the normal pre-binding state — a new rule candidate
+          // gets its Owner binding at the ScribeRunner preflight
+          // (awaiting_owner_binding), the SAME window PainSignalBridge and
+          // the diagnose seed loop allow, and prompt candidates never enter
+          // the ledger. Refusing them with `pd candidate intake` as the way
+          // out recommended a command that answers `non_principle_kind`
+          // (review round 2, P2-1). Every OTHER unresolved reason —
+          // unreadable / corrupt / ambiguous ledger, revoked binding,
+          // ineligible target — still fails closed for every kind.
+          const identityOptional = identity.reason === 'missing' && rawKind !== 'principle';
+          if (!identityOptional) {
+            const identityReason = identity.reason === 'missing'
+              ? 'candidate_not_in_ledger'
+              : `ledger_identity_${identity.reason}`;
+            const identityNextAction = identity.reason === 'missing'
+              ? `pd candidate intake --candidate-id ${opts.candidateId} --workspace "${workspaceDir}"`
+              : identity.nextAction;
+            return {
+              kind: 'refused',
+              headline: `Refusing to internalize candidate ${opts.candidateId}: ${identityReason}`,
+              result: {
+                candidateId: opts.candidateId,
+                route: decision.route,
+                status: 'refused',
+                reason: identityReason,
+                nextAction: identityNextAction,
+              },
+            };
+          }
+        }
+
+        if (opts.dryRun) {
+          return {
+            kind: 'dry_run',
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              channel: seed.channel,
+              status: 'dry_run',
+              reason: 'Dry-run mode — no task created',
+            },
+          };
+        }
+
+        // PRI-1268: the Dreamer-task enqueue is a store write that can fail for
+        // environmental reasons (readonly state.db, locked store, disk). A bare
+        // SqliteError stack on stderr with EMPTY --json stdout is not an operator
+        // result. cli-1-strict-json / cli-6-output-next-action: --json emits ONE
+        // structured object with a stable reason code + nextAction and the process
+        // exits non-zero; the candidate status and task count are unchanged
+        // (cli-5-failure-no-mutation — createTask itself is atomic per row).
+        try {
+          const task = await stateManager.createTask({
+            taskId: seed.taskId,
+            taskKind: seed.taskKind,
+            status: seed.status,
+            attemptCount: seed.attemptCount,
+            maxAttempts: seed.maxAttempts,
+            diagnosticJson: seed.diagnosticJson,
+          });
+          return {
+            kind: 'created',
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              taskId: task.taskId,
+              channel: seed.channel,
+              status: 'created',
+            },
+          };
+        } catch (err: unknown) {
+          // rc-8-safe-serialization: bounded, single-line, control chars stripped —
+          // the raw store error never reaches logs verbatim.
+          const detail = boundedStoreErrorDetail(err);
+          return {
+            kind: 'write_failed',
+            headline: `Candidate Internalize FAILED for ${opts.candidateId}: task enqueue write failed.`,
+            reasonLine: `Reason:      internalize_task_write_failed:${detail}`,
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              channel: seed.channel,
+              status: 'write_failed',
+              reason: `internalize_task_write_failed:${detail}`,
+              nextAction: `The Dreamer task was NOT created and the candidate is unchanged. Fix the underlying state store failure (unlock .pd/state.db / check disk permissions), verify with "pd task show ${seed.taskId} --workspace <workspace>", then re-run pd candidate internalize (idempotent).`,
+            },
+          };
+        }
       });
     } catch (err: unknown) {
-      // rc-8-safe-serialization: bounded, single-line, control chars stripped —
-      // the raw store error never reaches logs verbatim.
-      const detail = boundedStoreErrorDetail(err);
-      const result: CandidateInternalizeResult = {
-        candidateId: opts.candidateId,
-        route: decision.route,
-        channel: seed.channel,
-        status: 'write_failed',
-        reason: `internalize_task_write_failed:${detail}`,
-        nextAction: `The Dreamer task was NOT created and the candidate is unchanged. Fix the underlying state store failure (unlock .pd/state.db / check disk permissions), verify with "pd task show ${seed.taskId} --workspace <workspace>", then re-run pd candidate internalize (idempotent).`,
-      };
-      if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
+      // The coordination lock fails LOUD after its bounded retry budget
+      // (adapter contract: a contender never bypasses it) — another process
+      // is still operating on this candidate. A structured refusal, never a
+      // bare stack with an empty --json stdout (cli-1-strict-json /
+      // cli-6-output-next-action).
+      if (err instanceof Error && err.name === 'LockAcquisitionError') {
+        outcome = {
+          kind: 'refused',
+          headline: `Candidate ${opts.candidateId} is busy; refusing to internalize.`,
+          result: {
+            candidateId: opts.candidateId,
+            route: decision.route,
+            status: 'refused',
+            reason: 'candidate_coordination_lock_timeout',
+            nextAction: `Another pd command is still operating on candidate ${opts.candidateId}; wait for it to finish, then re-run pd candidate internalize (idempotent).`,
+          },
+        };
       } else {
-        console.error(`Candidate Internalize FAILED for ${opts.candidateId}: task enqueue write failed.`);
-        console.error(`  Reason:      ${result.reason}`);
-        console.error(`  Next Action: ${result.nextAction}`);
+        throw err;
       }
-      process.exit(1);
-      return;
     }
 
-    const result: CandidateInternalizeResult = {
-      candidateId: opts.candidateId,
-      route: decision.route,
-      taskId: task.taskId,
-      channel: seed.channel,
-      status: 'created',
-    };
+    // ── report AFTER the lock is released (the critical section never prints
+    //    and never exits, so a refusal cannot leave the lock held) ──
     if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
+      console.log(JSON.stringify(outcome.result, null, 2));
+    } else if (outcome.kind === 'refused' || outcome.kind === 'write_failed') {
+      console.error(outcome.headline);
+      if (outcome.reasonLine !== undefined) {
+        console.error(`  ${outcome.reasonLine}`);
+      }
+      console.error(`  Next Action: ${outcome.result.nextAction}`);
+    } else if (outcome.kind === 'created' || outcome.kind === 'existing') {
       console.log(`\nCandidate Internalize: ${opts.candidateId}\n`);
       console.log(`  Route:    ${decision.route}`);
       console.log(`  Channel:  ${channel}`);
-      console.log(`  Task:     ${task.taskId} (created)`);
+      console.log(`  Task:     ${outcome.result.taskId} (${outcome.kind === 'created' ? 'created' : 'existing'})`);
       console.log('');
+    } else {
+      console.log(`\nCandidate Internalize (dry-run): ${opts.candidateId}\n`);
+      console.log(`  Route:    ${decision.route}`);
+      console.log(`  Channel:  ${channel}`);
+      console.log(`  Would create: dreamer PI task`);
+      console.log('');
+    }
+    if (outcome.kind === 'refused' || outcome.kind === 'write_failed') {
+      process.exit(1);
     }
   } finally {
     await stateManager.close();
@@ -1326,10 +1413,13 @@ async function seedDreamerForConsumedCandidate(deps: {
     const admissionDoc = await deps.stateManager.getAdmissionDocument(deps.candidateId);
     const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
     suppression = evaluateDreamerSeedSuppression({
-      // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.8): the RAW persisted kind — the
-      // normalized view folds invalid values to 'principle' and would bypass
-      // candidate_kind_invalid on this suppression call too.
-      identity: deps.ledgerAdapter.resolveCandidatePrincipleIdentity(deps.candidateId, candidate.rawRecommendationKind),
+      // The suppression verdict reads the candidate's LEDGER LINEAGE, which
+      // does not depend on the delivery kind: it is resolved with the
+      // NORMALIZED kind, so a candidate whose RAW kind is invalid but which
+      // the ledger records as reuse-resolved (or reuse-parked) is still
+      // suppressed here. The raw-kind refusal is decided separately below —
+      // an invalid kind never re-opens seeding (review round 2).
+      identity: deps.ledgerAdapter.resolveCandidatePrincipleIdentity(deps.candidateId, candidate.recommendationKind),
       processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
       ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
     });
@@ -1355,6 +1445,18 @@ async function seedDreamerForConsumedCandidate(deps: {
       status: 'not_seeded',
       reason: 'dreamer_seed_suppressed: reuse park is pending the Owner decision',
       nextAction: `pd candidate review --candidate-id ${deps.candidateId} --decide reuse|create --reason "..."`,
+    };
+  }
+
+  // SPEC-PD-PIPELINE-SPINE-001 D4: an invalid or missing RAW kind never
+  // seeds. Decided AFTER the Owner park / reuse checks above, so those still
+  // win — the recorded Owner decision is the stronger fact — but an invalid
+  // kind can never re-open the seeding they would otherwise have closed.
+  if (validateRecommendationKind(candidate.rawRecommendationKind) === null) {
+    return {
+      status: 'not_seeded',
+      reason: 'candidate_kind_invalid: the persisted recommendation_kind is not a valid kind; no Dreamer task was created',
+      nextAction: 'Repair the candidate row or re-run the diagnosis; do not internalize this candidate.',
     };
   }
 

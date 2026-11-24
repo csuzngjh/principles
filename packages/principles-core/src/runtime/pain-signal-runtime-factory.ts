@@ -561,6 +561,83 @@ export function resolveRuntimeConfigFromPdConfig(
 // left with ADR-0029: pi-ai has no mode, so a bridge is keyed by workspace+kind.
 const bridgeCache = new Map<string, PainSignalBridge>();
 
+// SPEC-PD-PIPELINE-SPINE-001 review round 2 (P1-1): collaborator identity.
+//
+// Audit of what a bridge CAPTURES at construction, and what therefore belongs
+// to its cache identity:
+//
+//   collaborator                          | captured by            | in the key
+//   -------------------------------------- | ---------------------- | -----------
+//   intentDocReader                        | Stage A runner         | identity
+//   trajectoryTurnReader                   | context assembler      | identity
+//   sourceMaterialAuthorization            | assembler + stage runners | identity
+//   isAutoPainSubmissionAuthorized (probe) | bridge                 | identity
+//   telemetrySink                          | bridge / runners       | identity
+//   autoIntakeEnabled                      | bridge + intake        | value
+//   workspace, runtime kind, feature toggles, reuse-gate config          | value
+//   ledgerAdapter                          | bridge + intake        | NOT keyed:
+//     the ledger authority of the workspace — every call site constructs an
+//     equivalent instance per call and the existing cache contract reuses a
+//     bridge across those calls (pain-signal-factory-intent-reader-wiring).
+//
+// The key used to encode only whether an intent reader was PRESENT, so a
+// second entry calling with its OWN reader / authorization for the same
+// workspace got the first entry's bridge and silently ran with the first
+// entry's collaborators (e.g. the OpenClaw command's session reader replaced
+// by the background auto-run's governance reader, or a sync entry's
+// authorization replaced by deny-all).
+//
+// Identity is OBJECT identity — never presence, which cannot tell two
+// different readers apart. The key carries only a process-local counter per
+// object: no authorization content, consent state or secret ever reaches it.
+// Object identity keeps the Owner's revocation immediate: the consent-ledger
+// authorization and the governance reader re-read consent on every call, so a
+// cached bridge built with the SAME objects already reflects a revocation.
+//
+// Bounded: a workspace slot keeps at most COLLABORATOR_VARIANTS_PER_SLOT
+// variants (least-recently-used first). A superseded bridge is retired
+// idle-safely — it finishes an operation that is already running and then
+// releases its SQLite handles — so alternating entries can neither grow the
+// cache nor leak handles, and are never interrupted mid-diagnosis.
+//
+// Cost note: call sites that construct fresh collaborator objects per call
+// (the workspace workers, the auto-run) no longer hit the cache across
+// calls; a bridge is built per diagnosis — milliseconds against the model
+// calls a diagnosis itself takes. Collapsing those per-call constructions
+// into stable per-workspace collaborators is the Phase 2A assembly work
+// (PRI-1292 `resolveWorkspacePipelineHostDeps`), which restores the hits.
+const collaboratorIdentities = new WeakMap<object, number>();
+let nextCollaboratorIdentity = 1;
+
+function collaboratorToken(value: object | undefined): string {
+  if (value === undefined) return 'none';
+  let identity = collaboratorIdentities.get(value);
+  if (identity === undefined) {
+    identity = nextCollaboratorIdentity;
+    nextCollaboratorIdentity += 1;
+    collaboratorIdentities.set(value, identity);
+  }
+  return `k${identity}`;
+}
+
+const COLLABORATOR_VARIANTS_PER_SLOT = 2;
+
+/** Retire the least-recently-used collaborator variants of `slotKey` beyond
+ * the per-slot bound (the cache's iteration order is insertion/recency). */
+function evictSupersededCollaboratorVariants(slotKey: string, keepKey: string): void {
+  const prefix = `${slotKey}:`;
+  const siblings = [...bridgeCache.keys()].filter((key) => key !== keepKey && key.startsWith(prefix));
+  while (siblings.length > COLLABORATOR_VARIANTS_PER_SLOT - 1) {
+    const evictedKey = siblings.shift();
+    if (evictedKey === undefined) break;
+    const evicted = bridgeCache.get(evictedKey);
+    bridgeCache.delete(evictedKey);
+    if (evicted !== undefined) {
+      void evicted.disposeWhenIdle().catch(() => undefined);
+    }
+  }
+}
+
 interface DisabledDiagnosticianRunnerOptions {
   /** Human-readable reason. Defaults to the canonical Owner-disable message. */
   readonly failureReason?: string;
@@ -1051,9 +1128,26 @@ export async function createPainSignalBridge(
       Object.entries(profile ?? {}).sort(([a], [b]) => a.localeCompare(b)),
     ])).digest('hex');
   }
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${intentAnchoringEnabled ? 'ia' : 'noia'}:${opts.intentDocReader !== undefined ? 'r' : 'nor'}:${reuseCacheKey}`;
+  // `slotKey` = everything a bridge depends on apart from its per-entry
+  // collaborators (workspace, runtime kind, the toggles below, the reuse
+  // gate, automatic intake). The collaborator tokens extend it into the
+  // full cache key (see "collaborator identity" next to the cache).
+  const slotKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${intentAnchoringEnabled ? 'ia' : 'noia'}:${reuseCacheKey}:${opts.autoIntakeEnabled === false ? 'noai' : 'ai'}`;
+  const cacheKey = [
+    slotKey,
+    collaboratorToken(opts.intentDocReader),
+    collaboratorToken(opts.trajectoryTurnReader),
+    collaboratorToken(opts.sourceMaterialAuthorization),
+    collaboratorToken(opts.telemetrySink),
+    collaboratorToken(opts.isAutoPainSubmissionAuthorized),
+  ].join(':');
   const cached = bridgeCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    // recency refresh for the per-slot bound
+    bridgeCache.delete(cacheKey);
+    bridgeCache.set(cacheKey, cached);
+    return cached;
+  }
 
   const bridge = await constructBridge(opts, runtimeConfig, {
     diagnosisPersistenceEnabled,
@@ -1068,6 +1162,7 @@ export async function createPainSignalBridge(
     return winner;
   }
   bridgeCache.set(cacheKey, bridge);
+  evictSupersededCollaboratorVariants(slotKey, cacheKey);
   return bridge;
 }
 

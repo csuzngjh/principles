@@ -29,10 +29,10 @@ import {
 
 let tmpDir = '';
 
+/** Exclusive temp directory: mkdtemp creates it atomically with an
+ * unguessable suffix (never a predictable Date.now/Math.random name). */
 function makeTmpDir(): string {
-  const dir = path.join(os.tmpdir(), `pd-pri435-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri435-'));
 }
 
 function diagnosticianDiagnosticJson(painId: string): string {

@@ -172,7 +172,7 @@ describe('D4 — automatic seed entry refuses invalid RAW kinds with zero Dreame
       inputEvidenceCount: 1,
     });
     expect(harness.createTaskCalls).toHaveLength(1);
-    expect(String(harness.createTaskCalls[0].taskId)).toContain('c-rule');
+    expect(String(harness.createTaskCalls[0]?.taskId)).toContain('c-rule');
   });
 
   it('legal raw prompt kind keeps seeding (route unchanged, negative control)', async () => {
@@ -185,6 +185,6 @@ describe('D4 — automatic seed entry refuses invalid RAW kinds with zero Dreame
       inputEvidenceCount: 1,
     });
     expect(harness.createTaskCalls).toHaveLength(1);
-    expect(String(harness.createTaskCalls[0].taskId)).toContain('c-prompt');
+    expect(String(harness.createTaskCalls[0]?.taskId)).toContain('c-prompt');
   });
 });

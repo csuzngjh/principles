@@ -52,6 +52,7 @@ import { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from '../servi
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';
 import { checkAdmissionGate } from './admission-gate.js';
+import { buildIntakeOutcomeGuidance } from './intake-outcome-guidance.js';
 import { resolveSourcePainIdFromDiagnostician } from './candidate.js';
 import * as path from 'path';
 
@@ -955,65 +956,20 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     }
 
+    // SPEC-PD-PIPELINE-SPINE-001 D4 / review round 2 (P2-2): ONE
+    // classification of every candidate into an outcome class drives both
+    // output paths — a mixed run (seed-refused + parked + admission-refused
+    // + internalizable) reports every class it contains with its own next
+    // step, and `--no-intake` computes the raw-kind eligibility from the
+    // candidate rows themselves (no seed result exists on that path).
+    const guidance = buildIntakeOutcomeGuidance({
+      candidates,
+      intakeResults,
+      intakeEnabled: opts.intake !== false,
+      workspaceDir,
+    });
+
     if (opts.json) {
-      const candidateIds = candidates.map((c) => c.candidateId);
-      // CodeRabbit review fix: reflect dreamer seed status in nextAction so
-      // the owner knows whether internalization has already started or still
-      // needs manual candidate internalize. Previously the message always
-      // said "NOT started automatically" even when dreamer tasks were seeded.
-      const dreamerSeededCount = intakeResults.filter((r) => r.status === 'dreamer_seeded').length;
-      const dreamerSeedFailedCount = intakeResults.filter((r) => r.status === 'dreamer_seed_failed').length;
-      // PRI-917 v0.3.3 review fix (P2-4): parked candidates must NOT be told to
-      // internalize — the Owner decides via `pd candidate review` first.
-      const reviewRequiredIds = intakeResults
-        .filter((r) => r.status === 'review_required')
-        .map((r) => r.candidateId);
-      // Phase 7.2 B2.5 (CodeRabbit): seed-SUPPRESSED candidates are resolved
-      // onto an existing principle (or still parked) — an independent chain is
-      // suppressed by design, so they must not be offered `pd candidate
-      // internalize` either.
-      const seedSuppressedIds = intakeResults
-        .filter((r) => r.status === 'dreamer_seed_suppressed')
-        .map((r) => r.candidateId);
-      // PRI-1263: admission-refused candidates must NOT be offered
-      // `pd candidate internalize` — the write gate refuses them again. Point
-      // the operator at the ACTUAL next action (evidence supplementation or
-      // manual review) recorded on the intake result instead.
-      const admissionRefusedResults = intakeResults.filter((r) => r.admissionRefused === true);
-      const admissionRefusedIds = admissionRefusedResults.map((r) => r.candidateId);
-      // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.8): seed-REFUSED candidates (invalid
-      // raw kind) must not appear in internalizableCandidateIds or receive a
-      // `pd candidate internalize` instruction on any output path.
-      const seedRefusedIds = intakeResults
-        .filter((r) => r.status === 'refused')
-        .map((r) => r.candidateId);
-      const seedRefusedNote = seedRefusedIds.length > 0
-        ? ` ${seedRefusedIds.length} candidate(s) were REFUSED at Dreamer seeding (candidate_kind_invalid — the persisted recommendation_kind is not a valid kind; no task was created).`
-        : '';
-      const reviewRequiredNote = reviewRequiredIds.length > 0
-        ? ` ${reviewRequiredIds.length} candidate(s) parked for reuse review (suspected duplicates) — decide before internalizing: pd candidate review --candidate-id <id> --decide reuse|create`
-        : '';
-      const suppressedNote = seedSuppressedIds.length > 0
-        ? ` ${seedSuppressedIds.length} candidate(s) had their Dreamer seed SUPPRESSED (durably resolved onto an existing principle or awaiting the Owner — no independent chain by design).`
-        : '';
-      const admissionRefusedNote = admissionRefusedResults.length > 0
-        ? ` ${admissionRefusedResults.length} candidate(s) were REFUSED by the admission gate (e.g. confidence below threshold or insufficient evidence) — do NOT internalize them; supplement evidence or use manual review: ${[...new Set(admissionRefusedResults.map((r) => r.nextAction ?? 'provide additional evidence or request manual review'))].join(' / ')}`
-        : '';
-      const internalizableCandidateIds = candidateIds
-        .filter((id) => !reviewRequiredIds.includes(id) && !seedSuppressedIds.includes(id) && !admissionRefusedIds.includes(id) && !seedRefusedIds.includes(id));
-      const internalizeNextAction = dreamerSeededCount > 0
-        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}${reviewRequiredNote}${suppressedNote}${admissionRefusedNote}${seedRefusedNote}`
-        : internalizableCandidateIds.length > 0
-          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}${suppressedNote}${admissionRefusedNote}${seedRefusedNote}`
-          : reviewRequiredIds.length > 0
-            ? `All candidates are parked for reuse review (suspected duplicates). To decide each, run:\n  ${reviewRequiredIds.map((id) => `pd candidate review --candidate-id ${id} --decide reuse|create`).join('\n  ')}`
-            : admissionRefusedIds.length > 0 && admissionRefusedIds.length === candidateIds.length
-              ? `All candidates were refused by the admission gate — internalization is correctly blocked. Per candidate: ${[...new Set(admissionRefusedResults.map((r) => r.nextAction ?? 'provide additional evidence or request manual review'))].join(' / ')}`
-              : seedSuppressedIds.length > 0
-                ? `All candidates are durably resolved (Dreamer seeds suppressed by design — no independent chain).${suppressedNote}`
-              : seedRefusedIds.length > 0 && seedRefusedIds.length === candidateIds.length
-                ? `All candidates were REFUSED at Dreamer seeding (candidate_kind_invalid): the persisted recommendation_kind values are not valid kinds, so no task was created. Repair the candidate rows or re-run the diagnosis.`
-                : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
         // PRI-1222: explicit diagnosis-chain outcome, decoupled from candidate
@@ -1027,8 +983,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         intake: {
           enabled: opts.intake !== false,
           candidates: intakeResults,
+          // every candidate in exactly one outcome class (machine-readable):
+          // no caller has to re-derive mixed outcomes from record statuses.
+          outcomeClasses: guidance.byClass,
         },
-        nextAction: internalizeNextAction,
+        nextAction: guidance.nextAction,
       };
       console.log(JSON.stringify(jsonOutput, null, 2));
       // PRI-1222 exit-code contract (unchanged for backward compatibility):
@@ -1120,35 +1079,22 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     }
 
-    if (opts.intake === false && candidates.length > 0) {
-      console.log(`\n  Note: --no-intake was set. Candidates remain at 'pending'.`);
-      console.log(`  To intake manually:`);
-      for (const c of candidates) {
-        console.log(`    pd candidate intake --candidate-id ${c.candidateId} --workspace "${workspaceDir}"`);
-      }
-    }
-
+    // The TTY guidance comes from the SAME classification as the JSON
+    // nextAction (review round 2, P2-2): only a class with a valid manual step
+    // gets a command block, and every refusal that needs no command stays
+    // visible as a note. `--no-intake` no longer offers `pd candidate intake`
+    // to a candidate whose kind intake would refuse.
     if (candidates.length > 0) {
-      // PRI-917 v0.3.3 review fix (P2-4): parked candidates get review
-      // guidance instead of an internalize command that would bypass the
-      // Owner decision.
-      const parkedResults = intakeResults.filter((ir) => ir.status === 'review_required');
-      if (parkedResults.length > 0) {
-        console.log(`\n  Reuse Review Required (suspected duplicates parked for Owner decision):`);
-        for (const ir of parkedResults) {
-          console.log(`    pd candidate review --candidate-id ${ir.candidateId} --decide reuse|create`);
-        }
+      if (opts.intake === false) {
+        console.log(`\n  Note: --no-intake was set. Candidates remain at 'pending'.`);
       }
-      // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.8): refused candidates must not be
-      // offered `pd candidate internalize` on the TTY path either.
-      const seedRefusedIdSet = new Set(intakeResults.filter((ir) => ir.status === 'refused').map((ir) => ir.candidateId));
-      const internalizable = candidates.filter((c) => !parkedResults.some((ir) => ir.candidateId === c.candidateId) && !seedRefusedIdSet.has(c.candidateId));
-      if (internalizable.length > 0) {
-        console.log(`\n  Next Action:`);
-        console.log(`  Candidates generated but internalization has NOT started automatically.`);
-        console.log(`  To begin internalization:`);
-        for (const c of internalizable) {
-          console.log(`    pd candidate internalize --candidate-id ${c.candidateId} --workspace "${workspaceDir}"`);
+      for (const note of guidance.notes) {
+        console.log(`\n  Note: ${note}`);
+      }
+      for (const step of guidance.manualSteps) {
+        console.log(`\n  ${step.title}`);
+        for (const command of step.commands) {
+          console.log(`    ${command}`);
         }
       }
     }

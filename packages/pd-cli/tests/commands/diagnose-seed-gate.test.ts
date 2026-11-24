@@ -21,11 +21,19 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { MockRuntimeStateManager, rearmGateSeams, mockGetCandidatesByTaskId, mockCreateTask, mockGetTask } = vi.hoisted(() => {
+const {
+  MockRuntimeStateManager, rearmGateSeams, mockGetCandidatesByTaskId, mockCreateTask, mockGetTask,
+  // review round 2 (P2-2): seams the mixed-outcome tests reconfigure
+  mockGetAdmissionDocument, identityResolution,
+} = vi.hoisted(() => {
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
   const mockUpdateCandidateStatus = vi.fn().mockResolvedValue(undefined);
   const mockCreateTask = vi.fn().mockResolvedValue(undefined);
   const mockGetAdmissionDocument = vi.fn();
+  // Ledger identity seam: default = no ledger identity (never intaken).
+  const identityResolution: { value: unknown } = {
+    value: { status: 'unresolved', reason: 'missing', nextAction: 'none' },
+  };
   const mockAppendAdmissionEvaluation = vi.fn();
   const mockGetRunsByTask = vi.fn();
   const mockGetRun = vi.fn();
@@ -84,8 +92,16 @@ const { MockRuntimeStateManager, rearmGateSeams, mockGetCandidatesByTaskId, mock
     piArtifactStore = {};
     getRetryPolicy = vi.fn().mockReturnValue({ shouldRetry: () => true, calculateBackoff: () => 10 });
   }
-  return { MockRuntimeStateManager, rearmGateSeams, mockGetCandidatesByTaskId, mockCreateTask, mockGetTask };
-});
+  return {
+    MockRuntimeStateManager,
+    rearmGateSeams,
+    mockGetCandidatesByTaskId,
+    mockCreateTask,
+    mockGetTask,
+    mockGetAdmissionDocument,
+    identityResolution,
+  };
+}, { validateType: true });
 
 const { mockIntake, MockCandidateIntakeService } = vi.hoisted(() => {
   const mockIntake = vi.fn();
@@ -97,8 +113,11 @@ const { mockIntake, MockCandidateIntakeService } = vi.hoisted(() => {
 
 const { MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
   function MockPrincipleTreeLedgerAdapter(this: unknown) {
+    // `identityResolution` (hoisted above) is the mutable seam: by default the
+    // candidate has no ledger identity; suppression tests point it at a
+    // reuse-resolved identity.
     return {
-      resolveCandidatePrincipleIdentity: () => ({ status: 'unresolved', reason: 'missing', nextAction: 'none' }),
+      resolveCandidatePrincipleIdentity: () => identityResolution.value,
     };
   }
   return { MockPrincipleTreeLedgerAdapter };
@@ -313,12 +332,19 @@ describe('D4 — pd diagnose seed gate refuses invalid RAW kinds', () => {
     // BOTH records coexist: consumed(+ledgerWriteRefused) is not overwritten
     expect(invalidRecords.some((r) => r.status === 'consumed' && r.ledgerWriteRefused === 'candidate_kind_invalid')).toBe(true);
     expect(invalidRecords.some((r) => r.status === 'refused' && r.reason === 'candidate_kind_invalid')).toBe(true);
-    // the refused candidate never receives an internalize instruction
+    // the refused candidate never receives an intake or internalize
+    // instruction — and IS named in the refusal notice, so the operator
+    // knows which candidate is invalid (review round 2, P2-2).
     const nextAction = String(output.nextAction ?? '');
-    expect(nextAction).not.toContain('c-invalid-kind');
-    const internalizable = output.internalizableCandidateIds as string[] | undefined;
-    if (internalizable !== undefined) {
-      expect(internalizable).not.toContain('c-invalid-kind');
+    expect(nextAction).not.toContain('pd candidate internalize --candidate-id c-invalid-kind');
+    expect(nextAction).not.toContain('pd candidate intake --candidate-id c-invalid-kind');
+    expect(nextAction).toMatch(/REFUSED \(candidate_kind_invalid[^)]*\): c-invalid-kind/);
+    // every candidate in exactly one outcome class (machine-readable)
+    const intakeWithClasses = output.intake as { outcomeClasses?: Record<string, string[]> } | undefined;
+    expect(intakeWithClasses?.outcomeClasses?.seed_refused).toEqual(['c-invalid-kind']);
+    expect(intakeWithClasses?.outcomeClasses?.seeded).toEqual(['c-valid-prompt']);
+    for (const [cls, ids] of Object.entries(intakeWithClasses?.outcomeClasses ?? {})) {
+      if (cls !== 'seed_refused' && cls !== 'seeded') expect(ids, cls).toEqual([]);
     }
   });
 
@@ -389,5 +415,288 @@ describe('D4 — pd diagnose seed gate refuses invalid RAW kinds', () => {
     const nextAction = String(output.nextAction ?? '');
     expect(nextAction).not.toBe('No candidates were generated from this diagnosis.');
     expect(nextAction).toMatch(/candidate_kind_invalid|refus/i);
+  });
+});
+
+/**
+ * Review round 2 (P2-2): mixed outcomes and the `--no-intake` path.
+ *
+ * Every candidate lands in exactly ONE outcome class; the guidance reports
+ * every class a run actually contains with its own next step, and only ever
+ * suggests a command that is valid for the candidate's RAW kind and state.
+ */
+describe('P2-2 — diagnose guidance classifies every candidate and suggests only valid commands', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  const NO_IDENTITY = { status: 'unresolved', reason: 'missing', nextAction: 'none' };
+  const REUSE_RESOLVED = {
+    status: 'resolved',
+    candidateId: 'c-reuse',
+    principleId: '11111111-2222-4111-8111-111111111111',
+    basis: 'principle_reuse',
+    checkedAt: '2026-11-24T00:00:00.000Z',
+  };
+
+  function needsEvidenceDocument(candidateId: string): Record<string, unknown> {
+    return {
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: `ae-${candidateId}`,
+          decision: 'needs_evidence',
+          reason: 'confidence_below_threshold:0.45<0.50',
+          nextAction: 'provide_additional_evidence_or_manual_review',
+          evaluatedAt: '2026-10-14T00:00:00.000Z',
+          policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace',
+          inputEvidenceCount: 2,
+          ownerStatementPresent: false,
+          recommendationKind: 'principle',
+          confidence: 0.45,
+          materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: `ae-${candidateId}`,
+      },
+    };
+  }
+
+  /** The admission gate refuses exactly `refusedId`; everyone else stays admitted. */
+  async function refuseAtAdmissionGate(refusedId: string): Promise<void> {
+    const admitted = await mockGetAdmissionDocument('any');
+    mockGetAdmissionDocument.mockImplementation(async (candidateId: string) =>
+      (candidateId === refusedId ? needsEvidenceDocument(candidateId) : admitted));
+  }
+
+  async function run(opts: { json: boolean; intake?: boolean }): Promise<{ output: Record<string, unknown>; tty: string }> {
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      ...opts,
+    } as DiagnoseRunOptions);
+    return { output: opts.json ? readJsonOutput(logSpy) : {}, tty: logSpy.mock.calls.map((c) => c.join(' ')).join('\n') };
+  }
+
+  function classesOf(output: Record<string, unknown>): Record<string, string[]> {
+    const intake = output.intake as { outcomeClasses?: Record<string, string[]> } | undefined;
+    expect(intake?.outcomeClasses).toBeDefined();
+    return intake?.outcomeClasses ?? {};
+  }
+
+  /** Every candidate in exactly one class, and nothing outside the known classes. */
+  function expectPartition(classes: Record<string, string[]>, expected: Record<string, string[]>): void {
+    expect(classes).toEqual(expected);
+    const all = Object.values(classes).flat();
+    expect(new Set(all).size).toBe(all.length);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    identityResolution.value = NO_IDENTITY;
+    rearmGateSeams();
+    mockGetTask.mockResolvedValue({
+      taskId: 'test-task-1', status: 'pending', attemptCount: 0, maxAttempts: 3, lastError: null,
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain-test', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
+    });
+    mockIntake.mockReset();
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  const EMPTY = {
+    seeded: [], seed_failed: [], parked: [], suppressed: [], admission_refused: [],
+    seed_refused: [], intake_failed: [], internalizable: [], intake_first: [], no_route: [],
+  };
+  const withClasses = (overrides: Record<string, string[]>): Record<string, string[]> => ({ ...EMPTY, ...overrides });
+
+  it('mixed run: invalid kind + parked + admission-refused + seeded — each class reported with its own step (JSON)', async () => {
+    await refuseAtAdmissionGate('c-admission');
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      makeCandidate('c-invalid', 'wizardry', 'principle'),
+      makeCandidate('c-parked', 'principle', 'principle'),
+      makeCandidate('c-admission', 'principle', 'principle'),
+      makeCandidate('c-ok', 'principle', 'principle'),
+    ]);
+    mockIntake.mockImplementation(async (candidateId: string) => {
+      if (candidateId === 'c-invalid') {
+        return { outcome: 'refused', reason: 'candidate_kind_invalid', candidateId, rawRecommendationKind: 'wizardry', message: 'invalid kind' };
+      }
+      if (candidateId === 'c-parked') {
+        return {
+          outcome: 'refused', reason: 'reuse_pending_owner', candidateId, rawRecommendationKind: 'principle', message: 'parked',
+          reuseRecommendation: { status: 'recommended', recommendation: 'reuse', selectedPrincipleId: 'existing-p1', rationale: 'same', confidence: 0.9 },
+        };
+      }
+      return { outcome: 'ledger_entry', written: true, entry: { id: `ledger-${candidateId}` }, candidateId };
+    });
+
+    const { output } = await run({ json: true });
+    expectPartition(classesOf(output), withClasses({
+      seeded: ['c-ok'],
+      parked: ['c-parked'],
+      admission_refused: ['c-admission'],
+      seed_refused: ['c-invalid'],
+    }));
+
+    const nextAction = String(output.nextAction);
+    // C keeps flowing: it was seeded and the guidance says so
+    expect(dreamerCreationsFor('c-ok')).toHaveLength(1);
+    expect(nextAction).toContain('Dreamer tasks seeded automatically for 1 candidate(s)');
+    // B: parked → review, and the run is NOT reported as "all parked"
+    expect(nextAction).toContain('pd candidate review --candidate-id c-parked --decide reuse|create');
+    expect(nextAction).not.toContain('All candidates are parked');
+    // A: named in the refusal, never offered a command
+    expect(nextAction).toMatch(/REFUSED \(candidate_kind_invalid[^)]*\): c-invalid/);
+    // admission refusal carries its own next step
+    expect(nextAction).toContain('REFUSED by the admission gate');
+    expect(nextAction).toContain('provide_additional_evidence_or_manual_review');
+    for (const refused of ['c-invalid', 'c-parked', 'c-admission']) {
+      expect(nextAction).not.toContain(`pd candidate internalize --candidate-id ${refused}`);
+      expect(nextAction).not.toContain(`pd candidate intake --candidate-id ${refused}`);
+    }
+    expect(nextAction).not.toContain('No candidates were generated');
+    // an admission refusal keeps the PRI-1222 exit-code contract
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('mixed REFUSALS only (seed-refused + admission-refused, nothing internalizable) — never "No candidates were generated"', async () => {
+    await refuseAtAdmissionGate('c-admission');
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      makeCandidate('c-invalid', 'wizardry', 'principle'),
+      makeCandidate('c-admission', 'principle', 'principle'),
+    ]);
+    mockIntake.mockImplementation(async (candidateId: string) => ({
+      outcome: 'refused', reason: 'candidate_kind_invalid', candidateId, rawRecommendationKind: 'wizardry', message: 'invalid kind',
+    }));
+
+    const { output } = await run({ json: true });
+    expectPartition(classesOf(output), withClasses({ admission_refused: ['c-admission'], seed_refused: ['c-invalid'] }));
+    const nextAction = String(output.nextAction);
+    expect(nextAction).not.toContain('No candidates were generated');
+    expect(nextAction).not.toContain('pd candidate internalize');
+    expect(nextAction).toMatch(/1 candidate\(s\) were REFUSED \(candidate_kind_invalid[^)]*\): c-invalid/);
+    expect(nextAction).toMatch(/1 candidate\(s\) were REFUSED by the admission gate/);
+  });
+
+  it('all parked: review guidance for each, no internalize command, not "no candidates"', async () => {
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      makeCandidate('c-park-1', 'principle', 'principle'),
+      makeCandidate('c-park-2', 'principle', 'principle'),
+    ]);
+    mockIntake.mockImplementation(async (candidateId: string) => ({
+      outcome: 'refused', reason: 'reuse_pending_owner', candidateId, rawRecommendationKind: 'principle', message: 'parked',
+    }));
+    const { output } = await run({ json: true });
+    expectPartition(classesOf(output), withClasses({ parked: ['c-park-1', 'c-park-2'] }));
+    const nextAction = String(output.nextAction);
+    expect(nextAction).toContain('pd candidate review --candidate-id c-park-1 --decide reuse|create');
+    expect(nextAction).toContain('pd candidate review --candidate-id c-park-2 --decide reuse|create');
+    expect(nextAction).not.toContain('pd candidate internalize');
+    expect(nextAction).not.toContain('No candidates were generated');
+    // a park is not an intake failure
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+  });
+
+  it('all suppressed (reuse-resolved): reported as suppressed by design, no command, not "no candidates"', async () => {
+    identityResolution.value = REUSE_RESOLVED;
+    mockGetCandidatesByTaskId.mockResolvedValue([makeCandidate('c-reuse', 'principle', 'principle')]);
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1' } });
+
+    const { output } = await run({ json: true });
+    expectPartition(classesOf(output), withClasses({ suppressed: ['c-reuse'] }));
+    expect(dreamerCreationsFor('c-reuse')).toEqual([]);
+    const nextAction = String(output.nextAction);
+    expect(nextAction).toContain('Dreamer seed SUPPRESSED');
+    expect(nextAction).not.toContain('pd candidate internalize');
+    expect(nextAction).not.toContain('No candidates were generated');
+  });
+
+  it('--no-intake (JSON): the suggested command follows the RAW kind; an invalid kind gets none', async () => {
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      makeCandidate('c-invalid', 'wizardry', 'principle'),
+      makeCandidate('c-principle', 'principle', 'principle'),
+      makeCandidate('c-rule', 'rule', 'rule'),
+      makeCandidate('c-impl', 'implementation', 'implementation'),
+    ]);
+
+    const { output } = await run({ json: true, intake: false });
+    expect(mockIntake).not.toHaveBeenCalled();
+    expect(dreamerCreationsFor('')).toEqual([]);
+    expectPartition(classesOf(output), withClasses({
+      seed_refused: ['c-invalid'],
+      intake_first: ['c-principle'],
+      internalizable: ['c-rule'],
+      no_route: ['c-impl'],
+    }));
+
+    const nextAction = String(output.nextAction);
+    // a principle candidate is outside the ledger under --no-intake: intake FIRST
+    expect(nextAction).toContain('pd candidate intake --candidate-id c-principle --workspace "/tmp/fake-workspace"');
+    expect(nextAction).not.toContain('pd candidate internalize --candidate-id c-principle');
+    // intake answers non_principle_kind for a rule candidate: internalize is the valid step
+    expect(nextAction).toContain('pd candidate internalize --candidate-id c-rule --workspace "/tmp/fake-workspace"');
+    expect(nextAction).not.toContain('pd candidate intake --candidate-id c-rule');
+    // implementation has no enabled route
+    expect(nextAction).not.toContain('--candidate-id c-impl');
+    // the invalid kind is refused on the --no-intake path too (no seed result exists there)
+    expect(nextAction).not.toContain('pd candidate intake --candidate-id c-invalid');
+    expect(nextAction).not.toContain('pd candidate internalize --candidate-id c-invalid');
+    expect(nextAction).toMatch(/REFUSED \(candidate_kind_invalid[^)]*\): c-invalid/);
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+  });
+
+  it('--no-intake (TTY): prints the same steps and never a command for the invalid kind', async () => {
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      makeCandidate('c-invalid', 'wizardry', 'principle'),
+      makeCandidate('c-principle', 'principle', 'principle'),
+      makeCandidate('c-rule', 'rule', 'rule'),
+    ]);
+
+    const { tty } = await run({ json: false, intake: false });
+    expect(tty).toContain('--no-intake');
+    expect(tty).toContain('pd candidate intake --candidate-id c-principle --workspace "/tmp/fake-workspace"');
+    expect(tty).toContain('pd candidate internalize --candidate-id c-rule --workspace "/tmp/fake-workspace"');
+    expect(tty).not.toContain('pd candidate intake --candidate-id c-invalid');
+    expect(tty).not.toContain('pd candidate internalize --candidate-id c-invalid');
+    expect(tty).not.toContain('pd candidate intake --candidate-id c-rule');
+    // the refusal is still visible, with the candidate named
+    expect(tty).toMatch(/DREAMER SEED REFUSED \(candidate_kind_invalid\) — do NOT intake or internalize: c-invalid/);
+  });
+
+  it('TTY (intake on): mixed run prints review + refusal notes and an internalize block only for the class that needs it', async () => {
+    await refuseAtAdmissionGate('c-admission');
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      makeCandidate('c-invalid', 'wizardry', 'principle'),
+      makeCandidate('c-parked', 'principle', 'principle'),
+      makeCandidate('c-admission', 'principle', 'principle'),
+      makeCandidate('c-ok', 'principle', 'principle'),
+    ]);
+    mockIntake.mockImplementation(async (candidateId: string) => {
+      if (candidateId === 'c-invalid') {
+        return { outcome: 'refused', reason: 'candidate_kind_invalid', candidateId, rawRecommendationKind: 'wizardry', message: 'invalid kind' };
+      }
+      if (candidateId === 'c-parked') {
+        return { outcome: 'refused', reason: 'reuse_pending_owner', candidateId, rawRecommendationKind: 'principle', message: 'parked' };
+      }
+      return { outcome: 'ledger_entry', written: true, entry: { id: `ledger-${candidateId}` }, candidateId };
+    });
+
+    const { tty } = await run({ json: false });
+    expect(tty).toContain('DREAMER SEED REFUSED — candidate_kind_invalid');
+    expect(tty).toContain('pd candidate review --candidate-id c-parked --decide reuse|create');
+    expect(tty).not.toContain('pd candidate internalize --candidate-id c-invalid');
+    expect(tty).not.toContain('pd candidate internalize --candidate-id c-parked');
+    expect(tty).not.toContain('pd candidate internalize --candidate-id c-admission');
+    // c-ok was seeded: nothing left to start manually, so no "NOT started" claim
+    expect(tty).toContain('dreamer seeded');
+    expect(tty).not.toContain('has NOT started automatically');
   });
 });

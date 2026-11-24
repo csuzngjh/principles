@@ -169,6 +169,46 @@ export interface NotInternalizableCandidate {
 }
 
 /**
+ * SPEC-PD-PIPELINE-SPINE-001 D4 (review round 2, P1-2) — the structured
+ * disposition of a candidate refused at the automatic seed gate because its
+ * RAW persisted recommendation kind is invalid or missing.
+ *
+ *   reason        — the stable refusal code (outcome + telemetry + lastFailure)
+ *   blockedReason — the bounded blocker persisted with the saved
+ *                   `awaiting_owner` processing state
+ *   nextAction    — the real recovery path (no invented command)
+ */
+export interface SeedRefusal {
+  readonly reason: 'candidate_kind_invalid';
+  readonly blockedReason: string;
+  readonly nextAction: string;
+}
+
+/**
+ * The refusal for one candidate. The persisted raw kind is untrusted data:
+ * only a bounded copy of it reaches the blocker, never free-form content.
+ */
+export function seedRefusalFor(
+  candidate: Pick<CandidateRecord, 'candidateId' | 'rawRecommendationKind'>,
+  workspaceDir?: string,
+): SeedRefusal {
+  const raw = typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : '';
+  const shown = raw.trim().length === 0 ? 'missing' : raw.slice(0, 40);
+  const workspaceArg = workspaceDir === undefined ? '<workspace>' : `"${workspaceDir}"`;
+  return {
+    reason: 'candidate_kind_invalid',
+    blockedReason: `candidate_kind_invalid:${shown}`,
+    nextAction:
+      `The persisted recommendation_kind of candidate ${candidate.candidateId} is not a valid kind (${shown}); `
+      + 'no Dreamer task was created and the candidate waits for a manual repair. '
+      + 'Repair the candidate row to a valid kind (principle | rule | prompt | implementation | defer) or re-run the diagnosis, then run '
+      + `pd candidate intake --candidate-id ${candidate.candidateId} --workspace ${workspaceArg} (principle) or `
+      + `pd candidate internalize --candidate-id ${candidate.candidateId} --workspace ${workspaceArg} (rule / prompt); `
+      + 'the workspace worker also resumes a repaired candidate by itself.',
+  };
+}
+
+/**
  * PRI-642 SPEC §10: aggregate progress. `furthestStage` means AT LEAST ONE
  * item reached that stage — never that all candidates did; per-candidate
  * dispositions live in `candidateOutcomes`.
@@ -937,6 +977,10 @@ export class PainSignalBridge {
   private readonly workspaceDir: string | undefined;
   private readonly eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
   private readonly ownedResources: readonly { close: () => void | Promise<void> }[];
+  /** Bridge-level operations in flight (see trackOperation / disposeWhenIdle). */
+  private activeOperations = 0;
+  private disposeRequested = false;
+  private disposed = false;
   private readonly capabilityDisabled: PainSignalBridgeOptions['capabilityDisabled'];
   private readonly isAutoPainSubmissionAuthorized: PainSignalBridgeOptions['isAutoPainSubmissionAuthorized'];
 
@@ -950,7 +994,22 @@ export class PainSignalBridge {
     this.diagnosisPersistenceEnabled = opts.diagnosisPersistenceEnabled ?? false;
     this.fullPipelinePromptSeeds = opts.fullPipelinePromptSeeds ?? false;
     this.workspaceDir = opts.workspaceDir;
-    this.eventEmitter = opts.eventEmitter;
+    // Telemetry is an observer (SPEC-PD-PIPELINE-SPINE-001 review round 2,
+    // P1-2): a throwing sink must never abort post-processing. Uncontained,
+    // the throw left a seeded task unconsumed and the rest of the batch
+    // unprocessed. Normal emissions are unchanged; only the throw is
+    // contained, at the single point where the emitter enters the bridge.
+    this.eventEmitter = opts.eventEmitter === undefined
+      ? undefined
+      : {
+          emitTelemetry: (event: Parameters<NonNullable<PainSignalBridgeOptions['eventEmitter']>['emitTelemetry']>[0]) => {
+            try {
+              opts.eventEmitter?.emitTelemetry(event);
+            } catch {
+              // the sink is broken; the core state writes stay authoritative
+            }
+          },
+        };
     this.ownedResources = opts.ownedResources ?? [];
     this.capabilityDisabled = opts.capabilityDisabled;
     this.isAutoPainSubmissionAuthorized = opts.isAutoPainSubmissionAuthorized;
@@ -1007,7 +1066,7 @@ export class PainSignalBridge {
    *     awaiting_owner / exhausted — are skipped and reported, not rescanned);
    *   - read/CLI paths never call this; only the worker continuation does.
    */
-  async resumeSucceededDiagnosisPostProcessing(input: { taskId: string }): Promise<{
+  private async resumeSucceededDiagnosisPostProcessingInner(input: { taskId: string }): Promise<{
     status: 'resumed' | 'not_applicable' | 'blocked';
     reason?: string;
     nextAction?: string;
@@ -1105,8 +1164,19 @@ export class PainSignalBridge {
       }
       const processingState = admission.document?.processing?.state;
       if (processingState === 'complete' || processingState === 'awaiting_owner' || processingState === 'exhausted') {
-        skipped.push({ candidateId: candidate.candidateId, reason: `processing_${processingState}` });
-        continue;
+        // D4 (review round 2, P1-2): a saved `candidate_kind_invalid` blocker
+        // is a DATA defect, not an Owner verdict. Once the persisted raw kind
+        // is valid again the blocker no longer applies, and the repaired
+        // candidate resumes through this continuation.
+        const blockedReason = admission.document?.processing?.blockedReason;
+        const blockerCured = processingState === 'awaiting_owner'
+          && typeof blockedReason === 'string'
+          && blockedReason.startsWith('candidate_kind_invalid')
+          && validateRecommendationKind(candidate.rawRecommendationKind) !== null;
+        if (!blockerCured) {
+          skipped.push({ candidateId: candidate.candidateId, reason: `processing_${processingState}` });
+          continue;
+        }
       }
       eligible.push(candidate);
     }
@@ -1132,10 +1202,66 @@ export class PainSignalBridge {
   }
 
   async dispose(): Promise<void> {
+    // Idempotent: an eviction may request the disposal twice (once deferred
+    // by disposeWhenIdle, once by an explicit caller).
+    if (this.disposed) return;
+    this.disposed = true;
     for (const resource of this.ownedResources) {
       try { await resource.close(); } catch { /* best-effort cleanup */ }
     }
     await this.stateManager.close();
+  }
+
+  // ── operation tracking + idle-safe disposal (SPEC-PD-PIPELINE-SPINE-001
+  //    review round 2, P1-1) ────────────────────────────────────────────────
+  //
+  // The factory caches bridges per (workspace slot × collaborator identity)
+  // and evicts a superseded variant. An evicted bridge must release its
+  // SQLite handles — but never while it is still executing a diagnosis. Every
+  // bridge-level operation is counted; `disposeWhenIdle` defers the disposal
+  // to the moment the last running operation finishes.
+
+  /** Run one bridge-level operation (nested operations count once each). */
+  private async trackOperation<T>(operation: () => Promise<T>): Promise<T> {
+    this.activeOperations += 1;
+    try {
+      return await operation();
+    } finally {
+      this.activeOperations -= 1;
+      if (this.activeOperations === 0 && this.disposeRequested) {
+        this.disposeRequested = false;
+        await this.dispose().catch(() => undefined);
+      }
+    }
+  }
+
+  /**
+   * Dispose as soon as the bridge is idle. Resolves `true` when the disposal
+   * happened immediately, `false` when it was deferred to the end of the
+   * running operation (that operation's own completion performs it).
+   */
+  async disposeWhenIdle(): Promise<boolean> {
+    if (this.activeOperations > 0) {
+      this.disposeRequested = true;
+      return false;
+    }
+    await this.dispose();
+    return true;
+  }
+
+  async resumeSucceededDiagnosisPostProcessing(input: { taskId: string }): ReturnType<PainSignalBridge['resumeSucceededDiagnosisPostProcessingInner']> {
+    return this.trackOperation(() => this.resumeSucceededDiagnosisPostProcessingInner(input));
+  }
+
+  async onPainDetected(data: PainDetectedData): Promise<PainSignalBridgeResult> {
+    return this.trackOperation(() => this.onPainDetectedInner(data));
+  }
+
+  async executePendingDiagnosis(input: {
+    taskId: string;
+    provenance?: PainProvenance;
+  }): Promise<PainSignalBridgeResult> {
+    return this.trackOperation(() => this.executePendingDiagnosisInner(input));
   }
 
   private emitAdmissionEvent(
@@ -1161,7 +1287,7 @@ export class PainSignalBridge {
     return persistPendingPainSignal(this.stateManager, data, this.workspaceDir);
   }
 
-  async onPainDetected(data: PainDetectedData): Promise<PainSignalBridgeResult> {
+  private async onPainDetectedInner(data: PainDetectedData): Promise<PainSignalBridgeResult> {
     const { painId } = data;
     const taskId = data.taskId ?? createDiagnosticianTaskId(painId);
     const provenance = data.provenance ?? inferProvenance(data);
@@ -1306,7 +1432,7 @@ export class PainSignalBridge {
    * 'needs_human_review' are skipped: terminal states need explicit
    * Owner/manual action, never silent worker retries.
    */
-  async executePendingDiagnosis(input: {
+  private async executePendingDiagnosisInner(input: {
     taskId: string;
     /**
      * @deprecated PRI-642 SPEC §9: re-entry reads the provenance from the
@@ -1622,6 +1748,11 @@ export class PainSignalBridge {
     // decision — kept OUT of seeding/consumption/completion; the decision
     // lifecycle (Phase B/C re-run) owns their terminal state.
     const ownerDecisionPendingByCandidate = new Set<string>();
+    // SPEC-PD-PIPELINE-SPINE-001 D4 (review round 2, P1-2): candidates whose
+    // RAW persisted kind is invalid or missing — refused at the seed gate
+    // with a SAVED state (see seedRefusalFor); kept OUT of seeding, consumption
+    // and completion.
+    const seedRefusedByCandidate = new Map<string, SeedRefusal>();
     // PRI-939 Option A: auto-path hook outcomes for CREATE dispositions —
     // `unavailable` must reach the Owner's output, not die at the gate.
     const reuseRecommendationByCandidate = new Map<string, ReuseRecommendationOutcome>();
@@ -1764,13 +1895,31 @@ export class PainSignalBridge {
         // missing raw kind → ZERO seeding + a structured telemetry event.
         const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
         if (rawKind === null) {
+          // Saved FIRST and awaited — the persisted state is the authority;
+          // telemetry below is only an observer of it.
+          const refusal = seedRefusalFor(candidate, this.workspaceDir);
+          seedRefusedByCandidate.set(candidate.candidateId, refusal);
+          try {
+            await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+              state: 'awaiting_owner',
+              attempts: 0,
+              lastFailure: { reason: refusal.reason, nextAction: refusal.nextAction, at: new Date().toISOString() },
+              blockedReason: refusal.blockedReason,
+            });
+          } catch {
+            // the saved state itself could not be persisted → the candidate
+            // stays scannable and the next round retries this bookkeeping
+          }
+          // the bridge's emitter already contains a failing sink; the state
+          // above was persisted first and stays authoritative
           this.eventEmitter?.emitTelemetry({
             eventType: 'candidate_seed_refused',
             traceId: candidate.candidateId,
             timestamp: new Date().toISOString(),
             payload: {
               candidateId: candidate.candidateId,
-              reason: 'candidate_kind_invalid',
+              reason: refusal.reason,
+              nextAction: refusal.nextAction,
               rawRecommendationKind: typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
             },
           });
@@ -1976,6 +2125,11 @@ export class PainSignalBridge {
       // Phase 7.2 P1-01: a pending Owner decision keeps its own lifecycle
       // state — Phase C (not this loop) completes the candidate.
       if (ownerDecisionPendingByCandidate.has(candidate.candidateId)) continue;
+      // D4 (review round 2, P1-2): a seed-refused candidate keeps its saved
+      // `awaiting_owner` state. Marking it `complete` claimed a finished
+      // post-processing that never happened, and the worker then skipped the
+      // candidate forever while it still read as pending.
+      if (seedRefusedByCandidate.has(candidate.candidateId)) continue;
       this.safeUpdateAdmissionProcessing(candidate.candidateId, {
         state: 'complete',
         attempts: 0,
@@ -2019,6 +2173,16 @@ export class PainSignalBridge {
           outcome.reason = 'dreamer_seed_failed';
           outcome.nextAction = 'Inspect state.db and telemetry; re-run intake.';
         }
+      }
+      // D4 (review round 2, P1-2): the seed refusal is the candidate's outcome
+      // — not the admission's. Without this override the caller saw the
+      // admission's `admitted` + reason and could not tell that the candidate
+      // was refused at the seed gate (rc-9 / EP-03: structured reason + next
+      // action for every refusal).
+      const seedRefused = seedRefusedByCandidate.get(candidate.candidateId);
+      if (seedRefused !== undefined) {
+        outcome.reason = seedRefused.reason;
+        outcome.nextAction = seedRefused.nextAction;
       }
       // PRI-917 v0.3.3 — park override LAST: a Reuse-Review-Gate candidate is
       // neither seed-failed nor not-internalizable; it is deliberately awaiting
