@@ -888,9 +888,10 @@ export function classifyConsumedWithoutDreamer({ rawKind, hasReuseEvidence, admi
 }
 
 /** Split a set of candidate rows by raw kind, status and admission outcome.
- * `awaitingOwner` follows the admission state machine
- * (`AdmissionProcessingState`): `awaiting_owner`, or an Owner decision
- * recorded on the document; `exhausted` is the machine's failed terminal. */
+ * `awaitingOwner` counts only candidates with an explicit
+ * `ownerDecisions.executionStatus === 'pending'` record. The processing
+ * state `awaiting_owner` alone is insufficient because it also represents
+ * non-decision blockers; `exhausted` is the machine's failed terminal. */
 function summarizeCandidateRows(rows) {
   const byRawKind = {};
   const byStatus = {};
