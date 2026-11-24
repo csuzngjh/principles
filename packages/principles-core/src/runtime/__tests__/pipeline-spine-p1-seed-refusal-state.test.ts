@@ -477,16 +477,23 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
     const [invalid, sibling] = candidates;
     if (!invalid || !sibling) throw new Error('expected two candidates');
 
+    // Persist a real pending Owner decision for the sibling before the
+    // diagnosis continuation runs; it must never receive an independent seed.
+    const siblingIntent = buildOwnerDecisionIntent({
+      candidateId: sibling.candidateId,
+      decision: 'create',
+      ownerId: 'owner-recovery-test',
+      identitySource: 'file',
+      reason: 'Keep this sibling parked while the first candidate is repaired',
+    });
+    const siblingDecision = await world.stateManager.recordOwnerDecision(sibling.candidateId, siblingIntent);
+    expect(siblingDecision.status).toBe('appended');
+
     setPersistedKind(world, invalid.candidateId, 'wizardry');
     await runPostProcessing(world, { taskId, output }, 'pain-mixed-recovery');
     await expectSavedRefusal(world, invalid.candidateId, 'candidate_kind_invalid:wizardry');
 
-    // Make the second candidate a genuine reuse/Owner park. It shares the
-    // same succeeded diagnosis task but must not be swept into the recovery
-    // of the first candidate.
-    world.stateManager.connection.getDb()
-      .prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ?')
-      .run('pending', sibling.candidateId);
+    // Keep the second candidate parked in the same succeeded diagnosis task.
     const siblingParked = await world.stateManager.updateAdmissionProcessing(sibling.candidateId, {
       state: 'awaiting_owner',
       attempts: 0,
