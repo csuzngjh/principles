@@ -817,6 +817,17 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             });
             continue;
           }
+          if (intakeResult.outcome === 'refused' && intakeResult.reason === 'candidate_changed_during_intake') {
+            intakeFailed = true;
+            intakeResults.push({
+              candidateId: candidate.candidateId,
+              status: 'refused',
+              reason: intakeResult.reason,
+              error: intakeResult.message,
+              nextAction: 'Inspect the current candidate state; no task was created. Retry candidate processing against the current row.',
+            });
+            continue;
+          }
           // Non-principle routing/defer refusals retain the historical
           // consumed disposition. Invalid-kind, unreadable-admission and
           // pending-Owner cases have already continued above without mutation.

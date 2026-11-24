@@ -1963,6 +1963,15 @@ export class PainSignalBridge {
           continue;
         }
 
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'candidate_changed_during_intake') {
+          seedRefusedByCandidate.set(candidate.candidateId, {
+            reason: 'candidate_seed_authority_unavailable',
+            nextAction: 'Candidate changed during intake. No Dreamer task was created. Inspect the current persisted candidate and retry post-processing.',
+          });
+          await this.recordPostProcessingFailure(candidate.candidateId, 'candidate_changed_during_intake');
+          continue;
+        }
+
         // Final seed authorization, identity and task creation share the
         // candidate coordination lock used by Owner reuse and CLI
         // internalization. Only bounded SQLite/ledger work is performed here;

@@ -220,8 +220,12 @@ export function buildIntakeOutcomeGuidance(args: {
     }
   }
   if (count('seed_refused') > 0) {
-    sections.push(`${count('seed_refused')} candidate(s) were REFUSED (candidate_kind_invalid — the persisted recommendation_kind is not a valid kind; no task was created, and they must not be intaken or internalized): ${ids('seed_refused').join(', ')}`);
-    notes.push(`${count('seed_refused')} candidate(s): DREAMER SEED REFUSED (candidate_kind_invalid) — do NOT intake or internalize: ${ids('seed_refused').join(', ')}`);
+    const refusedIds = ids('seed_refused');
+    const refusalActions = intakeResults
+      .filter((record) => record.status === 'refused' && refusedIds.includes(record.candidateId) && record.nextAction)
+      .map((record) => `${record.candidateId}: ${record.nextAction}`);
+    sections.push(`${count('seed_refused')} candidate(s) were REFUSED — no task was created; do NOT intake or internalize before resolving the saved blocker: ${refusedIds.join(', ')}. ${refusalActions.join('; ')}`);
+    notes.push(`${count('seed_refused')} candidate(s): DREAMER SEED REFUSED — do NOT intake or internalize: ${refusedIds.join(', ')}. ${refusalActions.join('; ')}`);
   }
   if (count('no_route') > 0) {
     sections.push(`${count('no_route')} candidate(s) have no internalization route in the current stage (implementation: the 'skill' channel is MVP-disabled; defer: deferred by design) — no action.`);

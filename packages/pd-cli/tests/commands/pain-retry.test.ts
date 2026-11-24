@@ -805,7 +805,7 @@ describe('pd pain retry — success paths', () => {
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.intake.candidates[1].status).toBe('review_required');
     expect(output.intake.candidates[1].reusedPrincipleId).toBe('existing-p1');
-    expect(output.intake.candidates[1].nextAction).toContain('pd candidate review --candidate-id cand-parked --decide reuse|create');
+    expect(output.intake.candidates[1].nextAction).toContain('pd candidate review --candidate-id cand-parked --workspace "/tmp/fake-workspace" --decide reuse --principle-id existing-p1');
     // The parked candidate is NOT told to internalize (P2-4).
     expect(output.nextAction).toContain('pd candidate internalize --candidate-id cand-ok');
     expect(output.nextAction).not.toContain('internalize --candidate-id cand-parked');
@@ -814,6 +814,31 @@ describe('pd pain retry — success paths', () => {
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+
+  it('RETRY-06c: repaired kind awaiting recovery never receives an internalize command', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      { candidateId: 'cand-blocked', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', rawRecommendationKind: 'principle' },
+    ]);
+    mockIntake.mockResolvedValue({
+      outcome: 'refused', reason: 'candidate_kind_recovery_required', candidateId: 'cand-blocked',
+      rawRecommendationKind: 'principle', message: 'Explicit Owner recovery required',
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+    try {
+      await handlePainRetry({ painId: 'test-pain-1', workspace: '/tmp/fake-workspace', runtime: 'test-double', json: true });
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.intake.candidates[0].status).toBe('refused');
+      expect(output.nextAction).toContain('pd candidate resume-post-processing --candidate-id cand-blocked');
+      expect(output.nextAction).not.toContain('pd candidate internalize');
+      expect(mockUpdateCandidateStatus).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
   });
 
   it('RETRY-07: failed task → succeeded — JSON output', async () => {
