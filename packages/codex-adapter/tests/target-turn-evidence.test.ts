@@ -166,6 +166,22 @@ describe('readCodexTargetTurnEvidence — the EXACT turn only', () => {
     expect(readCodexTargetTurnEvidence(ws, SESSION, TARGET_TURN)).toEqual({ status: 'not_found' });
   });
 
+  it('a live/transcript body conflict leaves the row partial — the turn stays an honest not_found, never consumable as evidence', () => {
+    const ws = workspace(true);
+    // The live hook wrote the complete user_turn for the target turn…
+    seed(ws, [observation({ source: 'live_hook' })]);
+    // …then the catch-up transcript replays the same logical record with a
+    // conflicting body: the store keeps the first write, flags the row
+    // partial, and aborts the batch — so the turn's only row is not
+    // formally complete and must not reach the Diagnostician.
+    const conflicted = ingestGovernanceObservations({
+      workspaceDir: ws,
+      observations: [{ ...observation(), visibleText: 'CONFLICTING transcript body', transcriptRecordKey: `codex|${SESSION}|8` }] as never,
+    });
+    expect(conflicted.ok).toBe(false);
+    expect(readCodexTargetTurnEvidence(ws, SESSION, TARGET_TURN)).toEqual({ status: 'not_found' });
+  });
+
   it('a workspace with no trajectory database at all degrades to read_failed, never throws', () => {
     const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-target-bare-'));
     dirs.push(ws);

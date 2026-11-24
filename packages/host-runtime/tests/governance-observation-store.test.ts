@@ -889,4 +889,31 @@ describe('PRI-1273 (devin BUG_0002) — listGovernanceConversationTextsForHostTu
     if (!result.ok) return;
     expect(result.rows.map((row) => row.visibleText)).toEqual(['assistant snippet 2', 'assistant snippet 3', 'assistant snippet 4']);
   });
+
+  it('a live/transcript body conflict flags the row partial — and a partial row never enters the target-turn evidence read', () => {
+    // The live hook wrote the complete user_turn for the turn…
+    expect(ingest({ observations: [observation({ kind: 'user_turn', hostTurnId: 'turn-conflict', logicalObservationKey: 'codex|rollout-uuid-1|turn-conflict|user', visibleText: 'the words the live hook saw', source: 'live_hook' })] })).toMatchObject({ ok: true, inserted: 1 });
+    // …then the catch-up transcript replays the SAME logical record with a
+    // conflicting body: the store keeps the first committed content, marks
+    // the row partial and aborts the batch at the conflict.
+    const conflicted = ingest({
+      observations: [observation({ kind: 'user_turn', hostTurnId: 'turn-conflict', logicalObservationKey: 'codex|rollout-uuid-1|turn-conflict|user', visibleText: 'DIFFERENT words from the transcript', transcriptRecordKey: 'codex|rollout-uuid-1|8' })],
+    });
+    expect(conflicted.ok).toBe(false);
+    expect(conflicted.reason).toBe('logical_key_content_conflict');
+    const listed = listGovernanceObservations({ workspaceDir });
+    if (!listed.ok) throw new Error('list failed');
+    expect(listed.observations.find((row) => row.logicalKey === 'codex|rollout-uuid-1|turn-conflict|user')?.completeness).toBe('partial');
+
+    // The conflicted row is not formally complete — the turn contributes NO
+    // evidence row at all until a complete record exists (the Diagnostician
+    // never consumes a body two sources disagree on).
+    const partialOnly = listGovernanceConversationTextsForHostTurn({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1', hostTurnId: 'turn-conflict' });
+    expect(partialOnly).toEqual({ ok: true, rows: [] });
+
+    // A normal complete record of the same turn still qualifies.
+    expect(ingest({ observations: [observation({ kind: 'assistant_turn', hostTurnId: 'turn-conflict', logicalObservationKey: 'codex|rollout-uuid-1|turn-conflict|assistant', visibleText: 'the complete assistant answer' })] })).toMatchObject({ ok: true });
+    const after = listGovernanceConversationTextsForHostTurn({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1', hostTurnId: 'turn-conflict' });
+    expect(after.ok && after.rows.map((row) => row.logicalKey)).toEqual(['codex|rollout-uuid-1|turn-conflict|assistant']);
+  });
 });

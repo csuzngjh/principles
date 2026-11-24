@@ -24,7 +24,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { pickDiagnosticianCandidate } from '../diagnostician-candidate.js';
-import { reconcileWaitingTargetEvidenceTasks, type TargetTurnEvidenceRead } from '../pain-target-evidence-reconcile.js';
+import { reconcileWaitingTargetEvidenceTasks, TARGET_EVIDENCE_RECONCILE_SCOPE, type TargetTurnEvidenceRead } from '../pain-target-evidence-reconcile.js';
 import { submitPainCapability } from '../pain-submit-capability.js';
 import { createDiagnosticianTaskId } from '../pain-signal-bridge.js';
 import { PainSignalBridge } from '../pain-signal-bridge.js';
@@ -586,6 +586,82 @@ describe('r2b (0002) — the waiting reconcile rotates; the oldest five cannot s
     const second = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
     expect(second.checked).toBe(1);
     expect(second.flipped).toBe(1);
+  });
+
+  it('exactly `limit` waiting tasks: a stale full-page tail cursor wraps to the first page in the SAME pass (no permanent stall)', async () => {
+    // Exactly TARGET_EVIDENCE_RECONCILE_LIMIT (5) waiting tasks — the first
+    // pass fills the whole page, so the persisted resume cursor points at
+    // the set's tail. Before the fix, every later pass resumed past that
+    // tail, got an empty page and — since only a non-empty page rewrites
+    // the cursor — never reset it: the five tasks were never re-examined.
+    const taskIds: string[] = [];
+    for (let index = 1; index <= 5; index += 1) {
+      const painId = `mcp_170000000100${index}_b000010${index}`;
+      const receipt = await submitPainCapability(
+        {
+          workspaceDir: tmpDir,
+          stateDir: path.join(tmpDir, '.state'),
+          painId,
+          taskId: createDiagnosticianTaskId(painId),
+          hostKind: 'codex',
+          verifyHostSession: () => ({ status: 'verified', sessionId: `rollout-wrap-${index}`, targetTurnId: `turn-w0${index}` }),
+        },
+        {
+          reason: 'Anchor: agent instruction. Observed: behavior. Deviation: mismatch.',
+          anchorType: 'agent_instruction',
+          anchorRef: 'AGENTS.md#safety',
+          painType: 'user_frustration',
+        },
+      );
+      expect(receipt.status).toBe('submitted');
+      taskIds.push(createDiagnosticianTaskId(painId));
+    }
+
+    let textAvailable = false;
+    const probe = (sessionId: string, turnId: string): TargetTurnEvidenceRead =>
+      textAvailable
+        ? { status: 'available', entries: [{ sourceRef: `governance_observation:codex|${sessionId}|${turnId}|user_turn`, note: `body of ${turnId}` }] }
+        : { status: 'not_found' };
+
+    // Pass 1: a FULL page — all five examined, none flipped; the resume
+    // cursor advanced to the set's tail (the last task of the page).
+    const first = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
+    expect(first).toMatchObject({ checked: 5, flipped: 0, stillWaiting: 5 });
+    const waitingPage = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', recoveryState: 'waiting_for_target_evidence', orderBy: 'updated_at_asc', limit: 5 });
+    const tail = waitingPage[waitingPage.length - 1];
+    expect(await stateManager.getDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE))
+      .toEqual({ lastUpdatedAt: tail?.updatedAt, lastTaskId: tail?.taskId });
+
+    // Pass 2: every target text has arrived. Resuming past the tail returns
+    // an empty page — the reconcile must wrap to the first page in the SAME
+    // pass and flip all five, backfilling the SAME original tasks.
+    textAvailable = true;
+    const second = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
+    expect(second).toMatchObject({ checked: 5, flipped: 5, backfilled: 5, stillWaiting: 0 });
+    // No new task was created — the five original tasks carry the evidence.
+    const allTasks = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', limit: 50 });
+    expect(allTasks.map((task) => task.taskId).sort()).toEqual([...taskIds].sort());
+    for (const taskId of taskIds) {
+      const diagnostic = await readDiagnostic(taskId);
+      const recovery = diagnostic.recovery as Record<string, unknown>;
+      expect(recovery.state).toBe('ready_for_diagnosis');
+      expect(recovery.attemptCount).toBe(2);
+      expect((diagnostic.evidence as unknown[]).length).toBe(1);
+      expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'available', entryCount: 1 });
+    }
+
+    // Pass 3: the flipped tasks left the waiting set — a repeated pass is a
+    // strict no-op (nothing re-checks, no evidence is written twice) and the
+    // drained set leaves a clean cursor for the next rotation.
+    const third = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
+    expect(third).toMatchObject({ checked: 0, flipped: 0, backfilled: 0, blocked: 0 });
+    expect(await stateManager.getDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE))
+      .toEqual({ lastUpdatedAt: '', lastTaskId: '' });
+    for (const taskId of taskIds) {
+      const diagnostic = await readDiagnostic(taskId);
+      expect((diagnostic.recovery as Record<string, unknown>).attemptCount).toBe(2);
+      expect((diagnostic.evidence as unknown[]).length).toBe(1);
+    }
   });
 });
 

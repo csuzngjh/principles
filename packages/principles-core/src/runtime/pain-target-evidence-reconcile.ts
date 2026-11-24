@@ -331,7 +331,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
   const resumeAfter = cursor !== null && cursor.lastUpdatedAt.length > 0
     ? { updatedAt: cursor.lastUpdatedAt, taskId: cursor.lastTaskId }
     : undefined;
-  const waiting = await input.stateManager.listTasks({
+  let waiting = await input.stateManager.listTasks({
     taskKind: 'diagnostician',
     status: 'pending',
     recoveryState: 'waiting_for_target_evidence',
@@ -339,6 +339,22 @@ export async function reconcileWaitingTargetEvidenceTasks(
     ...(resumeAfter !== undefined ? { afterCursor: resumeAfter } : {}),
     limit,
   });
+  if (resumeAfter !== undefined && waiting.length === 0) {
+    // The persisted resume point sits at/past the waiting set's tail (the
+    // previous page came back FULL — e.g. exactly `limit` waiting tasks —
+    // so everything still waiting sorts at-or-before it). Resuming from it
+    // returns an empty page on every pass and, because a stale cursor is
+    // only ever rewritten when a page is non-empty, the set would stall
+    // permanently. Wrap to the first page IN THE SAME PASS so the cycle's
+    // bounded examination still happens instead of wasting a worker cycle.
+    waiting = await input.stateManager.listTasks({
+      taskKind: 'diagnostician',
+      status: 'pending',
+      recoveryState: 'waiting_for_target_evidence',
+      orderBy: 'updated_at_asc',
+      limit,
+    });
+  }
   if (waiting.length > 0) {
     const last = waiting[waiting.length - 1];
     if (last === undefined) throw new Error('unreachable: non-empty page has a last element');
@@ -347,6 +363,11 @@ export async function reconcileWaitingTargetEvidenceTasks(
       ? { lastUpdatedAt: last.updatedAt, lastTaskId: last.taskId }
       : { lastUpdatedAt: '', lastTaskId: '' };
     await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE, nextCursor);
+  } else if (resumeAfter !== undefined) {
+    // The stale resume point yielded nothing even after the wrap — the
+    // waiting set drained. Clear the cursor so the next pass scans cleanly
+    // from the start rather than resuming past a dead position forever.
+    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE, { lastUpdatedAt: '', lastTaskId: '' });
   }
 
   for (const task of waiting) {

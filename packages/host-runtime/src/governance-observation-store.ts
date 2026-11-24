@@ -1275,6 +1275,7 @@ export function listGovernanceConversationTextsForHostTurn(
       'SELECT id, kind, logical_key, visible_text, observed_at FROM governance_observations',
       'WHERE host_kind = ? AND rollout_identity = ? AND host_turn_id = ?',
       "AND kind IN ('user_turn','assistant_turn')",
+      "AND completeness = 'complete'",
       "AND retention_class IN ('operational','promoted')",
       "AND visible_text IS NOT NULL AND TRIM(visible_text) <> ''",
       'ORDER BY id DESC LIMIT ?',
