@@ -32,8 +32,41 @@ function registerSandboxRoot(dir: string): void {
   sandboxRoots.add(real);
 }
 
+/**
+ * True when a link (symlink/junction/reparse point) sits on the MISSING TAIL
+ * below the deepest realpath-able ancestor of `candidate` — e.g. a dangling
+ * link that `canonicalizeDeepestExisting` re-appends verbatim. Such a path
+ * cannot be proven safe (the target may spring into existence outside the
+ * sandbox), so the boundary must fail closed.
+ */
+function linkOnMissingTail(candidate: string): string | null {
+  let current = path.resolve(candidate);
+  for (;;) {
+    try {
+      fs.realpathSync.native(current);
+      return null; // realpath-able: canonicalize already judged it
+    } catch {
+      // Missing — or a link whose target does not exist yet.
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) return current;
+      } catch {
+        // Truly missing tail segment: keep walking up.
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
 /** Fail loud instead of writing outside a disposable sandbox. */
 export function assertInsideSandbox(candidate: string, hint = ''): void {
+  const danglingLink = linkOnMissingTail(candidate);
+  if (danglingLink !== null) {
+    throw new Error(
+      `Refusing to seed through an unresolvable link on the path: "${danglingLink}" ${hint}`.trimEnd(),
+    );
+  }
   const real = canonicalizeDeepestExisting(candidate);
   if (real === null) {
     throw new Error(`Refusing to seed an unresolvable path: "${path.resolve(candidate)}" ${hint}`.trim());

@@ -136,6 +136,12 @@ function workbuddyGovernanceTargets(): string[] {
   for (const configRoot of [...configRoots].sort()) {
     const workspace = path.join(configRoot, 'pd-workspace');
     targets.push(
+      // Directory listings (recursive in describePath) catch writes the file
+      // digests cannot see: a NEW sibling like `<configRoot>/settings.json`
+      // or an unexpected dir under the workspace — the exact shape of the
+      // 2026-11-22 incident's collateral writes.
+      configRoot,
+      workspace,
       path.join(workspace, '.pd', 'config.yaml'),
       path.join(workspace, '.state', 'trajectory.db'),
       path.join(workspace, '.state', 'state.db'),
@@ -186,7 +192,9 @@ function describePath(target: string): string {
     contentFailure = code;
   }
   try {
-    const names = fs.readdirSync(target).sort();
+    // Recursive listing: a fixture nested below a watched dir still changes
+    // the digest. Symlinks/junctions are listed as entries, not traversed.
+    const names = fs.readdirSync(target, { recursive: true }).map(String).sort();
     const digest = createHash('sha256').update(names.join('\n')).digest('hex').slice(0, 16);
     return `dir:${names.length}:${digest}`;
   } catch (error) {

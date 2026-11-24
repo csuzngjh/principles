@@ -183,4 +183,69 @@ describe('resolveWorkbuddyWorkspace', () => {
     expect(a).toEqual(b);
     expect(a.workspaceDir).toBe(path.join(path.resolve(home), '.workbuddy', 'pd-workspace'));
   });
+
+  // ── Malicious ambient env regression (2026-11-24 remediation) ──────────
+
+  it('ignores a poisoned ambient WORKBUDDY_CONFIG_DIR when resolving with an isolated env', () => {
+    const home = tempHome();
+    const decoy = tempHome();
+    const previous = process.env.WORKBUDDY_CONFIG_DIR;
+    process.env.WORKBUDDY_CONFIG_DIR = path.join(decoy, '.workbuddy');
+    try {
+      // The ambient var is exactly what a WorkBuddy-launched shell injects;
+      // the isolated env must make it inert for resolution AND for writes.
+      const governance = writeConfig(home);
+      const resolution = resolveWorkbuddyWorkspace(home, isolatedEnv(home));
+      expect(resolution).toEqual({ status: 'ok', workspaceDir: governance });
+      assertInsideSandbox(governance, '(ambient WORKBUDDY_CONFIG_DIR)');
+      expect(fs.readdirSync(decoy)).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.WORKBUDDY_CONFIG_DIR;
+      else process.env.WORKBUDDY_CONFIG_DIR = previous;
+    }
+  });
+
+  it('resolves under the explicit home even when HOME and USERPROFILE disagree', () => {
+    const home = tempHome();
+    const otherAuthority = tempHome();
+    const governance = writeConfig(home);
+    const env = isolatedEnv(home, { USERPROFILE: otherAuthority });
+    const resolution = resolveWorkbuddyWorkspace(home, env);
+    expect(resolution.status).toBe('ok');
+    expect(resolution.workspaceDir).toBe(governance);
+    // The mismatched authority must not become a second workspace root.
+    expect(fs.existsSync(path.join(otherAuthority, '.workbuddy'))).toBe(false);
+  });
+
+  it('accepts a config dir that is a link into a real directory inside the home', () => {
+    const home = tempHome();
+    const realConfig = path.join(home, 'wb-config-real');
+    fs.mkdirSync(realConfig, { recursive: true });
+    fs.symlinkSync(realConfig, path.join(home, '.workbuddy'), process.platform === 'win32' ? 'junction' : 'dir');
+    const governance = path.join(realConfig, 'pd-workspace');
+    fs.mkdirSync(path.join(governance, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(governance, '.pd', 'config.yaml'), 'features: {}');
+    const resolution = resolveWorkbuddyWorkspace(home, isolatedEnv(home));
+    expect(resolution.status).toBe('ok');
+    // All writes happened inside the sandbox; the link is sandbox-internal.
+    assertInsideSandbox(governance, '(linked config dir)');
+  });
+
+  it('unreadable config: DEGRADED, never silently re-initialized', () => {
+    if (process.platform === 'win32') return; // chmod has no POSIX effect there
+    const home = tempHome();
+    const governance = writeConfig(home);
+    // statSync(config.yaml) must EACCES: lock the directory, not the file
+    // (stat on a chmod-0 file still succeeds).
+    fs.chmodSync(path.join(governance, '.pd'), 0o000);
+    try {
+      const resolution = resolveWorkbuddyWorkspace(home, isolatedEnv(home));
+      expect(resolution.status).toBe('degraded');
+      if (resolution.status !== 'degraded') throw new Error('unreachable');
+      expect(resolution.reason).toBe('workbuddy_workspace_config_unreadable');
+      expect(resolution.workspaceDir).toBe(governance); // no silent switch
+    } finally {
+      fs.chmodSync(path.join(governance, '.pd'), 0o755);
+    }
+  });
 });
