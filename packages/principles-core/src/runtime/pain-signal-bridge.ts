@@ -26,7 +26,7 @@ import {
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
 import { evaluateDreamerSeedSuppression } from './candidate-seed-suppression.js';
 import type { DreamerSeedSuppression } from './candidate-seed-suppression.js';
-import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE, MVP_ENABLED_CHANNELS } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
 import { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
@@ -2042,7 +2042,7 @@ export class PainSignalBridge {
               const route = CANDIDATE_KIND_TO_ROUTE[rawKind];
               if (route) {
                 const channel = ROUTE_CHANNEL_MAP[route];
-                const ready = !!channel;
+                const ready = !!channel && MVP_ENABLED_CHANNELS.has(channel);
                 const seed = buildDreamerSeedFromCandidate(currentCandidate, {
                   route,
                   ready,
