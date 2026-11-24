@@ -563,6 +563,11 @@ export const TelemetryEventType = Type.Union([
   // exclusively in Principle.reuseEvidence[]; this event is never decision
   // storage and never influences outcomes by itself.
   Type.Literal('reuse_gate_triggered'),
+  // SPEC-PD-PIPELINE-SPINE-001 D4 (PRI-1291): the automatic seed gate refused
+  // a candidate whose RAW persisted recommendation kind is invalid or missing
+  // — observation only; the durable refusal lives in the candidate's admission
+  // processing record (awaiting_owner + blockedReason candidate_kind_invalid).
+  Type.Literal('candidate_seed_refused'),
   // PRI-1146 (G6 / rc-9): the bridge's replay intake review skipped a
   // candidate because its persisted source payload was unparseable or a
   // retired non-V2 shape — the skip is recorded, never silent.

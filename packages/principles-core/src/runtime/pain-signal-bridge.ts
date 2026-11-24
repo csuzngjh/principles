@@ -176,9 +176,10 @@ export interface NotInternalizableCandidate {
  *   reason        — the stable refusal code (outcome + telemetry + lastFailure)
  *   blockedReason — the bounded blocker persisted with the saved
  *                   `awaiting_owner` processing state
- *   nextAction    — the real recovery path (no invented command)
+ * Module-private on purpose: the runtime barrel surface is frozen
+ * (PRI-775), and nothing outside this module needs the refusal shape.
  */
-export interface SeedRefusal {
+interface SeedRefusal {
   readonly reason: 'candidate_kind_invalid';
   readonly blockedReason: string;
   readonly nextAction: string;
@@ -188,7 +189,7 @@ export interface SeedRefusal {
  * The refusal for one candidate. The persisted raw kind is untrusted data:
  * only a bounded copy of it reaches the blocker, never free-form content.
  */
-export function seedRefusalFor(
+function seedRefusalFor(
   candidate: Pick<CandidateRecord, 'candidateId' | 'rawRecommendationKind'>,
   workspaceDir?: string,
 ): SeedRefusal {
