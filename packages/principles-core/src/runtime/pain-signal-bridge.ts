@@ -1165,19 +1165,11 @@ export class PainSignalBridge {
       }
       const processingState = admission.document?.processing?.state;
       if (processingState === 'complete' || processingState === 'awaiting_owner' || processingState === 'exhausted') {
-        // D4 (review round 2, P1-2): a saved `candidate_kind_invalid` blocker
-        // is a DATA defect, not an Owner verdict. Once the persisted raw kind
-        // is valid again the blocker no longer applies, and the repaired
-        // candidate resumes through this continuation.
-        const blockedReason = admission.document?.processing?.blockedReason;
-        const blockerCured = processingState === 'awaiting_owner'
-          && typeof blockedReason === 'string'
-          && blockedReason.startsWith('candidate_kind_invalid')
-          && validateRecommendationKind(candidate.rawRecommendationKind) !== null;
-        if (!blockerCured) {
-          skipped.push({ candidateId: candidate.candidateId, reason: `processing_${processingState}` });
-          continue;
-        }
+        // A raw-kind repair is not itself Owner authorization to resume. Only
+        // the explicit audited recovery transition may move this row from
+        // awaiting_owner to the existing in_progress worker backlog.
+        skipped.push({ candidateId: candidate.candidateId, reason: `processing_${processingState}` });
+        continue;
       }
       eligible.push(candidate);
     }

@@ -575,6 +575,9 @@ export type {
   AdmissionProcessingRecord,
   AdmissionProcessingState,
   CandidateAdmissionDocument,
+  CandidatePostProcessingRecoveryRecord,
+  CandidatePostProcessingRecoveryInput,
+  CandidatePostProcessingRecoveryResult,
   OwnerDecisionRecord,
 } from './store/candidate/admission-document.js';
 

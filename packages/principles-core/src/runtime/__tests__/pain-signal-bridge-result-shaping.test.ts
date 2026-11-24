@@ -923,4 +923,21 @@ describe('PRI-1146 G6: replay review source-invalid skips are observable', () =>
     expect(mapped?.eventType).toBe('replay_review_source_invalid');
     if (mapped) expect(validateTelemetryEvent(mapped).valid).toBe(true);
   });
+  it('passes candidate_seed_refused through without relabeling it as degradation', () => {
+    const mapped = mapBridgeTelemetryToStoreEvent({
+      eventType: 'candidate_seed_refused',
+      traceId: 'candidate-canary',
+      timestamp: '2026-11-24T00:00:00.000Z',
+      payload: {
+        candidateId: 'candidate-canary',
+        reason: 'candidate_kind_invalid',
+        nextAction: 'repair the persisted raw recommendation_kind, then request explicit Owner recovery',
+        rawRecommendationKind: 'wizardry',
+      },
+    });
+    expect(mapped).not.toBeNull();
+    expect(mapped?.eventType).toBe('candidate_seed_refused');
+    if (mapped) expect(validateTelemetryEvent(mapped).valid).toBe(true);
+  });
+
 });

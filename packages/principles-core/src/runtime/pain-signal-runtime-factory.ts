@@ -728,6 +728,10 @@ const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set([
   // its persisted owning payload was unparseable or a retired non-V2 shape —
   // the skip must reach the durable workspace sink, never vanish in mapping.
   'replay_review_source_invalid',
+  // SPEC-PD-PIPELINE-SPINE-001 D4: the durable invalid-raw-kind refusal is
+  // operator-visible audit telemetry, not a degradation event and must not
+  // disappear at the bridge→workspace sink boundary.
+  'candidate_seed_refused',
 ]);
 
 export function mapBridgeTelemetryToStoreEvent(event: {
