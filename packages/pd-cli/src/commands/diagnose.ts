@@ -747,14 +747,45 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         }
         try {
           const intakeResult = await intakeService.intake(candidate.candidateId);
-          // PRI-917 v0.3.3: a parked candidate stays PENDING — no consumed
-          // marking, no dreamer seeding. The Owner resolves it via
-          // `pd candidate review --decide`. Phase 7.2 B2: the intake service
-          // itself persists the park on the candidate's admission processing
-          // (the business truth source), so a later automatic re-intake
-          // replays the park instead of re-rolling the evaluation; the
-          // telemetry below stays observability-only.
-          if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
+          // Invalid RAW kinds, their unreleased recovery parks, and pending
+          // Owner decisions are all non-terminal governance states. None may
+          // be consumed or seeded by this automatic path.
+          if (intakeResult.outcome === 'refused' && (
+            intakeResult.reason === 'unknown_kind'
+            || intakeResult.reason === 'candidate_kind_recovery_required'
+          )) {
+            intakeFailed = true;
+            const invalidKind = intakeResult.reason === 'unknown_kind';
+            intakeResults.push({
+              candidateId: candidate.candidateId,
+              status: 'refused',
+              reason: invalidKind ? 'candidate_kind_invalid' : 'candidate_kind_recovery_required',
+              nextAction: `After restoring the intended RAW kind, obtain explicit Owner authorization: pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
+            });
+            continue;
+          }
+          if (intakeResult.outcome === 'refused' && intakeResult.reason === 'admission_document_unreadable') {
+            intakeFailed = true;
+            intakeResults.push({
+              candidateId: candidate.candidateId,
+              status: 'intake_failed',
+              error: intakeResult.message,
+              nextAction: 'Inspect and repair the persisted admission_json; automatic intake failed closed and did not consume this candidate.',
+            });
+            continue;
+          }
+          if (intakeResult.outcome === 'refused' && intakeResult.reason === 'owner_decision_pending') {
+            const decision = intakeResult.message.includes('--decide reuse') ? 'reuse' : 'create';
+            intakeResults.push({
+              candidateId: candidate.candidateId,
+              status: 'review_required',
+              reason: 'owner_decision_pending',
+              nextAction: `Resume the SAME persisted Owner verdict: pd candidate review --candidate-id ${candidate.candidateId} --decide ${decision} --reason "...".`,
+            });
+            continue;
+          }
+          // A reuse-parked candidate also stays PENDING; the Owner resolves it
+          // through the existing review channel.
             const recommended =
               intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
             // PRI-939 review fix (CodeRabbit): the park observation reaches the
@@ -779,11 +810,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             });
             continue;
           }
-          // Phase 1 / PR1: candidate status handling is deliberately UNCHANGED
-          // (SPEC v2.1 Step 2 "保持现有 candidate persistence / routing / defer
-          // 行为"). Only the Principle Ledger write is gated, so a refused
-          // candidate is still consumed and remains eligible for the kind-aware
-          // dreamer seed loop below.
+          // Non-principle routing/defer refusals retain the historical
+          // consumed disposition. Invalid-kind, unreadable-admission and
+          // pending-Owner cases have already continued above without mutation.
           if (candidate.status !== 'consumed') {
             await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
           }
@@ -858,105 +887,168 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // nextAction/exit-code signaling below (partial failure still exits non-zero).
     if (opts.intake !== false) {
       for (const candidate of candidates) {
-        // SPEC-PD-PIPELINE-SPINE-001 D4 (v0.6): validate the RAW persisted
-        // kind BEFORE anything else. `recommendationKind` is the fail-open
-        // read view (invalid values fold to 'principle'), which is how a
-        // candidate Intake already refused for `candidate_kind_invalid`
-        // could still be seeded here. Invalid/missing raw kind → an
-        // ADDITIONAL structured refusal record; the existing 'consumed' +
-        // ledgerWriteRefused record is preserved untouched.
-        const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
-        if (rawKind === null) {
-          intakeResults.push({
-            candidateId: candidate.candidateId,
-            status: 'refused',
-            reason: 'candidate_kind_invalid',
-            nextAction: 'No task was created. The persisted recommendation_kind is not a valid kind; re-run the diagnosis or repair the candidate row before internalizing.',
-          });
-          continue;
-        }
-        const kind = rawKind;
-        if (kind === 'defer' || kind === 'implementation') continue;
-        const intakeResult = intakeResults.find((r) => r.candidateId === candidate.candidateId);
+        const intakeResult = intakeResults.find((result) => result.candidateId === candidate.candidateId);
         if (!intakeResult || intakeResult.status !== 'consumed') continue;
-        // Phase 7.2 B2.5 — Dreamer seed suppression. A candidate already
-        // resolved onto an existing principle (reuse decision / INV-R07 replay
-        // / B1 exact-duplicate guard — identity basis 'principle_reuse') or
-        // still reuse-parked has no information gain from an independent
-        // exploration chain. The verdict comes from PERSISTENT facts (ledger
-        // identity + admission processing), so it holds for restarts, rescans
-        // and candidates consumed in earlier runs — not just this run's
-        // in-memory intake result. Fail-open on an unexpected read failure
-        // (same posture as the bridge): the suppression is a chain-budget
-        // guard, not a learning gate — an unreadable fact must not block the
-        // seed, only make the check not run.
-        let suppression: DreamerSeedSuppression = { suppress: false };
+
+        // Re-read and seed under the same candidate coordination lock used by
+        // Owner reuse and pd candidate internalize. The critical section is
+        // bounded SQLite/ledger I/O only; no LLM or network calls occur here.
         try {
-          const admissionDoc = await stateManager.getAdmissionDocument(candidate.candidateId);
-          const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
-          suppression = evaluateDreamerSeedSuppression({
-            identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidate.candidateId, candidate.rawRecommendationKind),
-            processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
-            ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
+          await ledgerAdapter.withCandidateCoordination(candidate.candidateId, async () => {
+            const currentCandidate = await stateManager.getCandidate(candidate.candidateId);
+            if (currentCandidate === null) {
+              intakeFailed = true;
+              intakeResults.push({
+                candidateId: candidate.candidateId,
+                status: 'intake_failed',
+                error: 'candidate_disappeared_before_dreamer_seed',
+                nextAction: 'Re-run diagnosis after verifying the candidate row and its task lineage.',
+              });
+              return;
+            }
+
+            const rawKind = validateRecommendationKind(currentCandidate.rawRecommendationKind);
+            if (rawKind === null) {
+              const raw = typeof currentCandidate.rawRecommendationKind === 'string' ? currentCandidate.rawRecommendationKind : 'missing';
+              const shown = JSON.stringify(raw).slice(1, -1).slice(0, 40);
+              const nextAction = `Restore the intended RAW kind, then obtain explicit Owner authorization: pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm.`;
+              const admission = await stateManager.getAdmissionDocument(candidate.candidateId);
+              if (admission.ok) {
+                await stateManager.updateAdmissionProcessing(candidate.candidateId, {
+                  state: 'awaiting_owner',
+                  attempts: admission.document?.processing?.attempts ?? 0,
+                  lastFailure: { reason: 'candidate_kind_invalid', nextAction, at: new Date().toISOString() },
+                  blockedReason: `candidate_kind_invalid:${shown}`,
+                });
+              }
+              intakeFailed = true;
+              intakeResults.push({
+                candidateId: candidate.candidateId,
+                status: 'refused',
+                reason: 'candidate_kind_invalid',
+                nextAction,
+              });
+              return;
+            }
+            if (rawKind === 'defer' || rawKind === 'implementation') return;
+
+            const admissionDoc = await stateManager.getAdmissionDocument(candidate.candidateId);
+            if (!admissionDoc.ok) {
+              intakeFailed = true;
+              intakeResults.push({
+                candidateId: candidate.candidateId,
+                status: 'intake_failed',
+                error: 'admission_document_unreadable_before_dreamer_seed',
+                nextAction: 'Inspect and repair admission_json. No Dreamer task was created.',
+              });
+              return;
+            }
+            const processing = admissionDoc.document?.processing;
+            if (processing?.state === 'awaiting_owner'
+              && typeof processing.blockedReason === 'string'
+              && processing.blockedReason.startsWith('candidate_kind_invalid')) {
+              intakeFailed = true;
+              intakeResults.push({
+                candidateId: candidate.candidateId,
+                status: 'refused',
+                reason: 'candidate_kind_recovery_required',
+                nextAction: `After repairing the persisted RAW kind, run pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
+              });
+              return;
+            }
+            const pending = pendingOwnerDecision(admissionDoc.document ?? null);
+            if (pending !== null) {
+              intakeResults.push({
+                candidateId: candidate.candidateId,
+                status: 'review_required',
+                reason: 'owner_decision_pending',
+                nextAction: `Resume the SAME persisted Owner verdict with pd candidate review --candidate-id ${candidate.candidateId} --decide ${pending.decision} --reason "...".`,
+              });
+              return;
+            }
+
+            let suppression: DreamerSeedSuppression;
+            try {
+              suppression = evaluateDreamerSeedSuppression({
+                identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidate.candidateId, currentCandidate.rawRecommendationKind),
+                processing: admissionDoc.document?.processing,
+                ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
+              });
+            } catch {
+              intakeFailed = true;
+              intakeResults.push({
+                candidateId: candidate.candidateId,
+                status: 'intake_failed',
+                error: 'candidate_seed_authority_read_failed',
+                nextAction: 'Inspect the Principle Ledger identity and admission document; fail-closed prevented Dreamer creation.',
+              });
+              return;
+            }
+            if (suppression.suppress) {
+              intakeResults.push({
+                candidateId: candidate.candidateId,
+                status: 'dreamer_seed_suppressed',
+                reusedPrincipleId: suppression.reason === 'reuse_resolved_to_existing_principle'
+                  ? suppression.principleId
+                  : intakeResult.reusedPrincipleId,
+                nextAction: suppression.reason === 'reuse_resolved_to_existing_principle'
+                  ? 'No independent Dreamer chain: this candidate is durably resolved onto the existing principle (reuseEvidence).'
+                  : `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "...".`,
+              });
+              return;
+            }
+
+            try {
+              const route = CANDIDATE_KIND_TO_ROUTE[rawKind];
+              if (!route) return;
+              const channel = ROUTE_CHANNEL_MAP[route];
+              const ready = !!channel && MVP_ENABLED_CHANNELS.has(channel);
+              const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, currentCandidate);
+              const seed = buildDreamerSeedFromCandidate(currentCandidate, {
+                route,
+                ready,
+                sourcePainId: sourcePainId ?? undefined,
+                pipelineMode: seedPipelineMode,
+              });
+              // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
+              if ('decision' in seed) return;
+              const existingTask = await findExistingDreamerTask((id) => stateManager.getTask(id), candidate.candidateId);
+              if (!existingTask) {
+                await stateManager.createTask({
+                  taskId: seed.taskId,
+                  taskKind: seed.taskKind,
+                  inputRef: '',
+                  status: seed.status,
+                  attemptCount: seed.attemptCount,
+                  maxAttempts: seed.maxAttempts,
+                  diagnosticJson: seed.diagnosticJson,
+                });
+                intakeResults.push({
+                  candidateId: candidate.candidateId,
+                  status: 'dreamer_seeded',
+                  nextAction: `pd task show ${seed.taskId} | pd dreamer run --task-id ${seed.taskId}`,
+                });
+              }
+            } catch (seedErr: unknown) {
+              intakeResults.push({
+                candidateId: candidate.candidateId,
+                status: 'dreamer_seed_failed',
+                error: seedErr instanceof Error ? seedErr.message : String(seedErr),
+                nextAction: `pd candidate internalize --candidate-id ${candidate.candidateId}`,
+              });
+            }
           });
-        } catch {
-          suppression = { suppress: false };
-        }
-        if (suppression.suppress) {
+        } catch (coordinationErr: unknown) {
+          intakeFailed = true;
           intakeResults.push({
             candidateId: candidate.candidateId,
-            status: 'dreamer_seed_suppressed',
-            reusedPrincipleId: suppression.reason === 'reuse_resolved_to_existing_principle' ? suppression.principleId : intakeResult.reusedPrincipleId,
-            nextAction: suppression.reason === 'reuse_resolved_to_existing_principle'
-              ? 'No independent Dreamer chain: this candidate is durably resolved onto the existing principle (reuseEvidence).'
-              : `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`,
-          });
-          continue;
-        }
-        try {
-          const route = CANDIDATE_KIND_TO_ROUTE[kind ?? ''];
-          if (!route) continue;
-          const channel = ROUTE_CHANNEL_MAP[route];
-          const ready = !!channel && MVP_ENABLED_CHANNELS.has(channel);
-          // BUG-2 (PRI-442): resolve sourcePainId from the diagnostician task
-          // chain (rc-6 lineage consistency). The candidate itself doesn't carry
-          // sourcePainId; it must be resolved from the diagnostician task's
-          // diagnosticJson. ERR-004: never invent lineage.
-          const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, candidate);
-          const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: sourcePainId ?? undefined, pipelineMode: seedPipelineMode });
-          // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
-          if ('decision' in seed) continue; // not_internalizable or invalid — skip
-          // PRI-720 C6: candidate-level dedup (demotion may change the
-          // derived channel suffix vs a pre-existing chain).
-          const existingTask = await findExistingDreamerTask((id) => stateManager.getTask(id), candidate.candidateId);
-          if (!existingTask) {
-            await stateManager.createTask({
-              taskId: seed.taskId,
-              taskKind: seed.taskKind,
-              inputRef: '',
-              status: seed.status,
-              attemptCount: seed.attemptCount,
-              maxAttempts: seed.maxAttempts,
-              diagnosticJson: seed.diagnosticJson,
-            });
-            intakeResults.push({
-              candidateId: candidate.candidateId,
-              status: 'dreamer_seeded',
-              nextAction: `pd task show ${seed.taskId} | pd dreamer run --task-id ${seed.taskId}`,
-            });
-          }
-        } catch (seedErr) {
-          intakeResults.push({
-            candidateId: candidate.candidateId,
-            status: 'dreamer_seed_failed',
-            error: seedErr instanceof Error ? seedErr.message : String(seedErr),
-            nextAction: `pd candidate internalize --candidate-id ${candidate.candidateId}`,
+            status: 'intake_failed',
+            error: coordinationErr instanceof Error ? coordinationErr.message : String(coordinationErr),
+            nextAction: 'Wait for the other candidate operation to finish, then retry diagnosis; no unlocked seed fallback was attempted.',
           });
         }
       }
     }
-
-    // SPEC-PD-PIPELINE-SPINE-001 D4 / review round 2 (P2-2): ONE
     // classification of every candidate into an outcome class drives both
     // output paths — a mixed run (seed-refused + parked + admission-refused
     // + internalizable) reports every class it contains with its own next

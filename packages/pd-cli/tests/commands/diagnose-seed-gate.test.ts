@@ -23,6 +23,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const {
   MockRuntimeStateManager, rearmGateSeams, mockGetCandidatesByTaskId, mockCreateTask, mockGetTask,
+  mockUpdateCandidateStatus,
   // review round 2 (P2-2): seams the mixed-outcome tests reconfigure
   mockGetAdmissionDocument, identityResolution,
 } = vi.hoisted(() => {
@@ -100,6 +101,7 @@ const {
     mockGetTask,
     mockGetAdmissionDocument,
     identityResolution,
+    mockUpdateCandidateStatus,
   };
 }, { validateType: true });
 
@@ -117,6 +119,7 @@ const { MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
     // candidate has no ledger identity; suppression tests point it at a
     // reuse-resolved identity.
     return {
+      withCandidateCoordination: async (_candidateId: string, operation: () => Promise<unknown>) => operation(),
       resolveCandidatePrincipleIdentity: () => identityResolution.value,
     };
   }
@@ -296,7 +299,7 @@ describe('D4 — pd diagnose seed gate refuses invalid RAW kinds', () => {
     exitSpy.mockRestore();
   });
 
-  it('invalid raw kind: zero dreamer seeding, consumed+refused records coexist, no internalize instruction', async () => {
+  it('invalid raw kind: zero dreamer seeding, candidate remains pending, no internalize instruction', async () => {
     mockGetCandidatesByTaskId.mockResolvedValue([
       makeCandidate('c-invalid-kind', 'wizardry', 'principle'),
       makeCandidate('c-valid-prompt', 'prompt', 'prompt'),
@@ -305,7 +308,7 @@ describe('D4 — pd diagnose seed gate refuses invalid RAW kinds', () => {
       if (candidateId === 'c-invalid-kind') {
         return {
           outcome: 'refused',
-          reason: 'candidate_kind_invalid',
+          reason: 'unknown_kind',
           candidateId,
           rawRecommendationKind: 'wizardry',
           message: 'recommendation_kind is not a valid kind',
@@ -329,9 +332,11 @@ describe('D4 — pd diagnose seed gate refuses invalid RAW kinds', () => {
     const intake = output.intake as { candidates?: Array<Record<string, unknown>> } | undefined;
     const intakeResults = intake?.candidates ?? [];
     const invalidRecords = intakeResults.filter((r) => r.candidateId === 'c-invalid-kind');
-    // BOTH records coexist: consumed(+ledgerWriteRefused) is not overwritten
-    expect(invalidRecords.some((r) => r.status === 'consumed' && r.ledgerWriteRefused === 'candidate_kind_invalid')).toBe(true);
-    expect(invalidRecords.some((r) => r.status === 'refused' && r.reason === 'candidate_kind_invalid')).toBe(true);
+    // The invalid candidate has exactly one refusal record and is never
+    // consumed; a valid sibling can still seed independently.
+    expect(invalidRecords).toHaveLength(1);
+    expect(invalidRecords[0]).toMatchObject({ status: 'refused', reason: 'candidate_kind_invalid' });
+    expect(mockUpdateCandidateStatus.mock.calls.some(([id]) => id === 'c-invalid-kind')).toBe(false);
     // the refused candidate never receives an intake or internalize
     // instruction — and IS named in the refusal notice, so the operator
     // knows which candidate is invalid (review round 2, P2-2).
@@ -354,7 +359,7 @@ describe('D4 — pd diagnose seed gate refuses invalid RAW kinds', () => {
     ]);
     mockIntake.mockImplementation(async (candidateId: string) => ({
       outcome: 'refused',
-      reason: 'candidate_kind_invalid',
+      reason: 'unknown_kind',
       candidateId,
       message: 'missing kind',
     }));
@@ -375,7 +380,7 @@ describe('D4 — pd diagnose seed gate refuses invalid RAW kinds', () => {
     ]);
     mockIntake.mockImplementation(async (candidateId: string) => ({
       outcome: 'refused',
-      reason: 'candidate_kind_invalid',
+      reason: 'unknown_kind',
       candidateId,
       message: 'invalid kind',
     }));
@@ -399,7 +404,7 @@ describe('D4 — pd diagnose seed gate refuses invalid RAW kinds', () => {
     ]);
     mockIntake.mockImplementation(async (candidateId: string) => ({
       outcome: 'refused',
-      reason: 'candidate_kind_invalid',
+      reason: 'unknown_kind',
       candidateId,
       message: 'invalid kind',
     }));
@@ -527,7 +532,7 @@ describe('P2-2 — diagnose guidance classifies every candidate and suggests onl
     ]);
     mockIntake.mockImplementation(async (candidateId: string) => {
       if (candidateId === 'c-invalid') {
-        return { outcome: 'refused', reason: 'candidate_kind_invalid', candidateId, rawRecommendationKind: 'wizardry', message: 'invalid kind' };
+        return { outcome: 'refused', reason: 'unknown_kind', candidateId, rawRecommendationKind: 'wizardry', message: 'invalid kind' };
       }
       if (candidateId === 'c-parked') {
         return {
@@ -575,7 +580,7 @@ describe('P2-2 — diagnose guidance classifies every candidate and suggests onl
       makeCandidate('c-admission', 'principle', 'principle'),
     ]);
     mockIntake.mockImplementation(async (candidateId: string) => ({
-      outcome: 'refused', reason: 'candidate_kind_invalid', candidateId, rawRecommendationKind: 'wizardry', message: 'invalid kind',
+      outcome: 'refused', reason: 'unknown_kind', candidateId, rawRecommendationKind: 'wizardry', message: 'invalid kind',
     }));
 
     const { output } = await run({ json: true });
@@ -685,7 +690,7 @@ describe('P2-2 — diagnose guidance classifies every candidate and suggests onl
     ]);
     mockIntake.mockImplementation(async (candidateId: string) => {
       if (candidateId === 'c-invalid') {
-        return { outcome: 'refused', reason: 'candidate_kind_invalid', candidateId, rawRecommendationKind: 'wizardry', message: 'invalid kind' };
+        return { outcome: 'refused', reason: 'unknown_kind', candidateId, rawRecommendationKind: 'wizardry', message: 'invalid kind' };
       }
       if (candidateId === 'c-parked') {
         return { outcome: 'refused', reason: 'reuse_pending_owner', candidateId, rawRecommendationKind: 'principle', message: 'parked' };
