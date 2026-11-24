@@ -115,15 +115,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function canonicalIdentity(value: string): string {
+/** The real directory a workspace pointer resolves to (symlinks/junctions resolved). */
+function stableWorkspacePath(value: string): string {
   const resolved = path.resolve(value);
-  let real: string | undefined;
   try {
-    real = fs.realpathSync.native(resolved);
+    return fs.realpathSync.native(resolved);
   } catch {
-    real = undefined;
+    return resolved;
   }
-  const form = real ?? resolved;
+}
+
+function canonicalIdentity(value: string): string {
+  const form = stableWorkspacePath(value);
   return process.platform === 'win32' ? form.toLowerCase() : form;
 }
 
@@ -289,7 +292,10 @@ function writeEvidence(pdHome: string, evidence: ProvisioningEvidence): string {
 const PENDING_HOSTS: readonly HostSelection[] = ['none', 'openclaw', 'codex', 'workbuddy', 'all'];
 
 interface PendingRegistryEntry {
+  /** The REAL resolved directory this entry owns. */
   readonly workspaceDir: string;
+  /** The operator's original pointer, when it differed (display only). */
+  readonly requestedWorkspaceDir?: string;
   readonly host: HostSelection;
   readonly recordedAt: string;
   readonly reason?: string;
@@ -336,19 +342,38 @@ function readPendingRegistry(pdHome: string): PendingRegistryRead {
     return { entries: [], warning: `pending provisioning registry has an unsupported shape (${file}).` };
   }
   const entries: PendingRegistryEntry[] = [];
+  let invalid = 0;
   for (const entry of parsed.entries) {
-    if (!isRecord(entry)) continue;
-    if (typeof entry.workspaceDir !== 'string' || entry.workspaceDir.length === 0) continue;
-    if (!isPendingHost(entry.host)) continue;
-    if (typeof entry.recordedAt !== 'string') continue;
+    if (!isRecord(entry)) {
+      invalid += 1;
+      continue;
+    }
+    if (typeof entry.workspaceDir !== 'string' || entry.workspaceDir.length === 0) {
+      invalid += 1;
+      continue;
+    }
+    if (!isPendingHost(entry.host)) {
+      invalid += 1;
+      continue;
+    }
+    if (typeof entry.recordedAt !== 'string') {
+      invalid += 1;
+      continue;
+    }
     entries.push({
       workspaceDir: entry.workspaceDir,
       host: entry.host,
       recordedAt: entry.recordedAt,
+      ...(typeof entry.requestedWorkspaceDir === 'string' ? { requestedWorkspaceDir: entry.requestedWorkspaceDir } : {}),
       ...(typeof entry.reason === 'string' ? { reason: entry.reason } : {}),
     });
   }
-  return { entries };
+  return {
+    entries,
+    ...(invalid > 0
+      ? { warning: `pending provisioning registry contains ${invalid} invalid entr${invalid === 1 ? 'y' : 'ies'} (${file}); they were ignored.` }
+      : {}),
+  };
 }
 
 function writePendingRegistry(pdHome: string, entries: readonly PendingRegistryEntry[]): void {
@@ -368,9 +393,17 @@ function upsertPending(
   try {
     const { entries, warning } = readPendingRegistry(pdHome);
     if (warning !== undefined) warn(`${warning} Recording a fresh pending entry for ${entry.workspaceDir}.`);
-    const identity = canonicalIdentity(entry.workspaceDir);
+    // Persist the REAL directory the operator's pointer resolved to NOW. A
+    // later resume must own that directory even if a symlink/junction has been
+    // re-pointed since; the requested path is kept for display only.
+    const stable = stableWorkspacePath(entry.workspaceDir);
+    const identity = canonicalIdentity(stable);
     const merged = entries.filter((candidate) => canonicalIdentity(candidate.workspaceDir) !== identity);
-    merged.push(entry);
+    merged.push({
+      ...entry,
+      workspaceDir: stable,
+      ...(stable !== entry.workspaceDir ? { requestedWorkspaceDir: entry.workspaceDir } : {}),
+    });
     writePendingRegistry(pdHome, merged);
   } catch (error) {
     warn(`Pending provisioning record could not be written (${error instanceof Error ? error.message : String(error)}).`);
@@ -680,7 +713,10 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
 
 /** Durable hint that a NEW workspace was committed without Service Host ownership. */
 export interface PendingProvisioningMarker {
+  /** The REAL resolved directory ownership will be written for. */
   readonly workspaceDir: string;
+  /** The operator's original pointer, when it differed (display only). */
+  readonly requestedWorkspaceDir?: string;
   /** The host adapter that was being provisioned when the hand-over was deferred. */
   readonly host: HostSelection;
   readonly recordedAt: string;
@@ -706,6 +742,7 @@ export function readAllPendingProvisioning(pdHome: string): {
       workspaceDir: entry.workspaceDir,
       host: entry.host,
       recordedAt: entry.recordedAt,
+      ...(entry.requestedWorkspaceDir !== undefined ? { requestedWorkspaceDir: entry.requestedWorkspaceDir } : {}),
       ...(entry.reason !== undefined ? { reason: entry.reason } : {}),
     })),
     ...(warning !== undefined ? { warning } : {}),
@@ -728,6 +765,7 @@ export function readPendingProvisioningEvidence(pdHome: string, workspaceDir: st
         workspaceDir: found.workspaceDir,
         host: found.host,
         recordedAt: found.recordedAt,
+        ...(found.requestedWorkspaceDir !== undefined ? { requestedWorkspaceDir: found.requestedWorkspaceDir } : {}),
         ...(found.reason !== undefined ? { reason: found.reason } : {}),
       };
 }

@@ -10,7 +10,7 @@
  *  - a failed readiness probe leaves ownership untouched;
  *  - the auditable provisioning record is written.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -327,6 +327,45 @@ describe('provisionFreshInstallWorkspace', () => {
     expect(readPendingProvisioningEvidence(pdHome, second)).toMatchObject({
       reason: 'scheduler_consent_required',
       host: 'none',
+    });
+  });
+
+  it('persists the REAL directory, so a re-pointed link cannot claim a new target on resume', async () => {
+    const { home, pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    seedManifest(pdHome, workspaceDir);
+    const projectA = path.join(home, 'project-a');
+    const projectB = path.join(home, 'project-b');
+    mkdirSync(projectA, { recursive: true });
+    mkdirSync(projectB, { recursive: true });
+    const link = path.join(home, 'current');
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+    try {
+      symlinkSync(projectA, link, linkType);
+    } catch {
+      // Symlink creation can be policy-restricted; the behavior is covered on
+      // platforms where it is permitted (CI Windows creates junctions).
+      return;
+    }
+    await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir: link,
+      host: 'none',
+      scheduler: { ...ENABLED_SCHEDULER, state: 'consent_required', enabled: null },
+      warn: () => undefined,
+      probes: { spawnFn: fakeSpawn({}, []) },
+    });
+    const entry = readAllPendingProvisioning(pdHome).entries[0];
+    expect(entry?.workspaceDir).toBe(realpathSync.native(projectA));
+    expect(entry?.requestedWorkspaceDir).toBe(link);
+
+    // Re-point the link: the recorded hint still targets project-a.
+    rmdirSync(link);
+    symlinkSync(projectB, link, linkType);
+    expect(readPendingProvisioningEvidence(pdHome, link)).toBeNull();
+    expect(readPendingProvisioningEvidence(pdHome, projectB)).toBeNull();
+    expect(readPendingProvisioningEvidence(pdHome, projectA)).toMatchObject({
+      workspaceDir: realpathSync.native(projectA),
     });
   });
 

@@ -135,6 +135,7 @@
 | 交互安装默认覆盖已有工作区文件（`index.ts`） | 部分属实：评审举例的 Codex 默认工作区已在 round 2 按最终宿主重检测；但 mode 仍在最终工作区确定前推导，自定义路径 / 显式 `--workspace` 会沿用另一个目录的 `force` | `runPrompts` 先选工作区再推荐 mode；新增 `inspectWorkspaceDir`，`index.ts` 对显式 `--workspace` 用最终目录推导非交互默认。新增用户文件保留回归测试 |
 | 常规升级跳过已绑定 Codex（`installer.ts`） | 属实：扫描了 `PLUGIN_DATA/runtime/<ver>/`（只放运行时依赖），真实绑定在 plugin data 根与 payload 本地副本 | 新增 `readHostWorkspaceBinding`：persistent binding → payload cache 绑定；`runtime/` 不再当作绑定位置。测试改为真实布局，并覆盖 payload 回退与损坏绑定 |
 | 多宿主 pending 记录互相覆盖（`service-host-provisioning.ts`） | 属实：单一 `install-provisioning.json` 原子覆盖 | 新增按 canonical workspace 合并的 `<pdHome>/service/pending-provisioning.json`；每个目标独立登记/清除，成功只清除自己 |
+| pending 保存链接路径，改指后恢复会接管新目录（Devin round 3 新发现） | 属实：登记保存操作者输入路径，链接改指后同一路径指向另一个目录 | 登记时持久化当时解析出的**真实目录**（原路径仅作显示）；恢复、去重、清除均以真实目录为准。回归测试覆盖链接改指后仍只恢复原目标 |
 | 延后启用跳过已绑定宿主的就绪检查（`installer.ts`） | 属实：resume 按本轮 `--host`（缺省 `none`）直接进入 waiting 并翻转 | 恢复时读取该 Workspace 的**当前真实绑定**（OpenClaw/Codex/WorkBuddy）并以该宿主执行 readiness；只有确认无绑定时才允许 waiting；绑定不可验证 → `binding_unverifiable` 且不翻转 |
 | 延后启用未等旧消费者停稳（`installer.ts`） | 属实：首次安装后 Gateway 可能在 pending 期间消费 `legacy_owned` Workspace | resume 且绑定 OpenClaw 时检查 Gateway；运行中 → `legacy_consumer_running`，要求 `pd service handover`（quiesce ack）或停止 Gateway 后重跑；仅在证明无旧消费者时直接初始化 |
 | 首次周期证据混入其他工作区（`service-host-provisioning.ts`） | 属实：`run-once` 是全局周期，计数未按 Workspace 过滤 | `countExecutions` 按 `canonicalDir` 过滤，只统计当前目标的执行/进展/等待 |

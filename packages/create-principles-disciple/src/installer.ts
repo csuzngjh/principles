@@ -278,10 +278,16 @@ export interface ServiceHostProvisioningReport {
   readonly nextAction: string;
 }
 
-/** Stable identity for a workspace directory (Windows is case-insensitive). */
+/** Stable identity for a workspace directory (real path, case-insensitive on Windows). */
 function workspaceKey(workspaceDir: string): string {
   const resolved = path.resolve(workspaceDir);
-  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  let real: string;
+  try {
+    real = realpathSync.native(resolved);
+  } catch {
+    real = resolved;
+  }
+  return process.platform === 'win32' ? real.toLowerCase() : real;
 }
 
 /**

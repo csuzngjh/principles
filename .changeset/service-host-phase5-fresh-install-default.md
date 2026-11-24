@@ -21,9 +21,11 @@ background lifecycle owner.
   CAS → first real managed cycle → `<pdHome>/service/install-provisioning.json`
   evidence). A failed/deferred attempt records a PER-WORKSPACE pending entry
   (`<pdHome>/service/pending-provisioning.json`), so `--host all` keeps every
-  deferred workspace resumable; a later explicit `--enable-service-host`
-  install verifies each workspace's CURRENT host binding, probes that host, and
-  refuses to flip while a legacy OpenClaw Gateway may still consume it.
+  deferred workspace resumable; each entry persists the REAL resolved directory
+  (a re-pointed symlink cannot claim a new target later); a later explicit
+  `--enable-service-host` install verifies each workspace's CURRENT host
+  binding, probes that host, and refuses to flip while a legacy OpenClaw
+  Gateway may still consume it.
   Historical installs never wrote a pending entry and are never resumed
   implicitly. `--yes` accepts the recommended default, `--json`/
   `--non-interactive` without consent reports `consent_required` instead of
