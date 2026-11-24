@@ -1579,7 +1579,7 @@ export class PainSignalBridge {
   private async withCandidateCoordination<T>(candidateId: string, operation: () => Promise<T>): Promise<T> {
     const coordinate = this.ledgerAdapter.withCandidateCoordination;
     if (typeof coordinate === 'function') {
-      return coordinate.call(this.ledgerAdapter, candidateId, operation);
+      return coordinate(candidateId, operation);
     }
     return operation();
   }
