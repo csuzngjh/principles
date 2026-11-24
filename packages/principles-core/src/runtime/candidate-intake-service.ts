@@ -844,6 +844,11 @@ export class CandidateIntakeService {
             { candidateId },
           );
         }
+        // The saved Owner park outranks a concurrent kind repair. Re-read
+        // governance under the lock before deciding that the row changed.
+        const context = await this.#readAdmissionContext(candidateId);
+        const existingRefusal = automaticGateRefusal(candidateId, context);
+        if (existingRefusal !== null) return existingRefusal;
         // A concurrent repair between the fast read and this lock is not an
         // implicit recovery. Ask the caller to retry against the new row.
         if (validateRecommendationKind(current.rawRecommendationKind) !== null) {
@@ -855,9 +860,6 @@ export class CandidateIntakeService {
             message: `Candidate ${candidateId} changed while intake was validating its RAW kind. No ledger write occurred; re-run the command against the current candidate state.`,
           };
         }
-        const context = await this.#readAdmissionContext(candidateId);
-        const existingRefusal = automaticGateRefusal(candidateId, context);
-        if (existingRefusal !== null) return existingRefusal;
 
         const admission = await this.#stateManager.getAdmissionDocument(candidateId);
         if (!admission.ok) {

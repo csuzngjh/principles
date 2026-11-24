@@ -984,12 +984,13 @@ export class PainSignalBridge {
   private readonly ownedResources: readonly { close: () => void | Promise<void> }[];
   /** Bridge-level operations in flight (see trackOperation / disposeWhenIdle). */
   private activeOperations = 0;
-  // A factory return is a short-lived borrower lease until the caller starts
-  // its first bridge operation. Eviction must not close the state manager in
-  // the gap between createPainSignalBridge() resolving and that call.
+  // Each scoped factory caller owns its own idempotent release closure.
   private outstandingFactoryBorrows = 0;
   private disposeRequested = false;
   private disposed = false;
+  private closePromise: Promise<void> | undefined;
+  private retirementPromise: Promise<boolean> | undefined;
+  private notifyIdle: (() => void) | undefined;
   private readonly capabilityDisabled: PainSignalBridgeOptions['capabilityDisabled'];
   private readonly isAutoPainSubmissionAuthorized: PainSignalBridgeOptions['isAutoPainSubmissionAuthorized'];
 
@@ -1206,67 +1207,64 @@ export class PainSignalBridge {
   }
 
   async dispose(): Promise<void> {
-    // Idempotent: an eviction may request the disposal twice (once deferred
-    // by disposeWhenIdle, once by an explicit caller).
-    if (this.disposed) return;
-    this.disposed = true;
-    for (const resource of this.ownedResources) {
-      try { await resource.close(); } catch { /* best-effort cleanup */ }
-    }
-    await this.stateManager.close();
+    // Direct owners use dispose; the factory retires shared bridges via
+    // disposeWhenIdle. Concurrent close callers share the actual close.
+    this.closePromise ??= (async () => {
+      this.disposed = true;
+      for (const resource of this.ownedResources) {
+        try { await resource.close(); } catch { /* best-effort cleanup */ }
+      }
+      await this.stateManager.close();
+    })();
+    return this.closePromise;
   }
 
-  // ── operation tracking + idle-safe disposal (SPEC-PD-PIPELINE-SPINE-001
-  //    review round 2, P1-1) ────────────────────────────────────────────────
-  //
-  // The factory caches bridges per (workspace slot × collaborator identity)
-  // and evicts a superseded variant. An evicted bridge must release its
-  // SQLite handles — but never while it is still executing a diagnosis. Every
-  // bridge-level operation is counted; `disposeWhenIdle` defers the disposal
-  // to the moment the last running operation finishes.
-
-  /**
-   * Register one caller that has just received this cached bridge. The lease
-   * is consumed atomically when that caller starts its first operation.
-   */
-  retainFactoryBorrow(): void {
-    if (this.disposed) throw new Error('Cannot borrow a disposed PainSignalBridge');
+  /** Acquire a distinct factory borrow; only its owner can release it. */
+  retainFactoryBorrow(): () => Promise<void> {
+    if (this.disposed || this.disposeRequested) throw new Error('Cannot borrow a retired PainSignalBridge');
     this.outstandingFactoryBorrows += 1;
+    let released = false;
+    return async () => {
+      if (released) return;
+      released = true;
+      this.outstandingFactoryBorrows -= 1;
+      await this.notifyRetirementIfIdle();
+    };
   }
 
-  /** Consume one factory-return lease when the caller starts using the bridge. */
-  private releaseFactoryBorrow(): void {
-    if (this.outstandingFactoryBorrows > 0) this.outstandingFactoryBorrows -= 1;
+  private async notifyRetirementIfIdle(): Promise<void> {
+    if (this.activeOperations === 0 && this.outstandingFactoryBorrows === 0 && this.disposeRequested) {
+      const notify = this.notifyIdle;
+      this.notifyIdle = undefined;
+      notify?.();
+      await this.retirementPromise?.catch(() => undefined);
+    }
   }
 
-  /** Run one bridge-level operation (nested operations count once each). */
   private async trackOperation<T>(operation: () => Promise<T>): Promise<T> {
     if (this.disposed) throw new Error('PainSignalBridge has been disposed');
-    this.releaseFactoryBorrow();
     this.activeOperations += 1;
     try {
       return await operation();
     } finally {
       this.activeOperations -= 1;
-      if (this.activeOperations === 0 && this.outstandingFactoryBorrows === 0 && this.disposeRequested) {
-        this.disposeRequested = false;
-        await this.dispose().catch(() => undefined);
-      }
+      await this.notifyRetirementIfIdle();
     }
   }
 
-  /**
-   * Dispose as soon as the bridge is idle. Resolves `true` when the disposal
-   * happened immediately, `false` when it was deferred to the end of the
-   * running operation (that operation's own completion performs it).
-   */
+  /** Retire once; resolve only after every borrower and operation has drained. */
   async disposeWhenIdle(): Promise<boolean> {
-    if (this.activeOperations > 0 || this.outstandingFactoryBorrows > 0) {
+    if (this.retirementPromise === undefined) {
       this.disposeRequested = true;
-      return false;
+      this.retirementPromise = (async () => {
+        if (this.activeOperations > 0 || this.outstandingFactoryBorrows > 0) {
+          await new Promise<void>((resolve) => { this.notifyIdle = resolve; });
+        }
+        await this.dispose();
+        return true;
+      })();
     }
-    await this.dispose();
-    return true;
+    return this.retirementPromise;
   }
 
   async resumeSucceededDiagnosisPostProcessing(input: { taskId: string }): ReturnType<PainSignalBridge['resumeSucceededDiagnosisPostProcessingInner']> {
@@ -1304,7 +1302,7 @@ export class PainSignalBridge {
    * PRI-369: async pain-record CLI — fire-and-forget submission.
    */
   async submitPainSignal(data: PainDetectedData): Promise<{ taskId: string }> {
-    return persistPendingPainSignal(this.stateManager, data, this.workspaceDir);
+    return this.trackOperation(() => persistPendingPainSignal(this.stateManager, data, this.workspaceDir));
   }
 
   private async onPainDetectedInner(data: PainDetectedData): Promise<PainSignalBridgeResult> {
@@ -1601,9 +1599,20 @@ export class PainSignalBridge {
    */
   private async recordPostProcessingFailure(candidateId: string, rawReason: string): Promise<void> {
     try {
+      await this.withCandidateCoordination(candidateId, () => this.recordPostProcessingFailureUnderLock(candidateId, rawReason));
+    } catch {
+      // A competing Owner operation or failed lock must not cause an unlocked write.
+    }
+  }
+
+  /** Caller already owns the candidate coordination lock. Never re-enter it. */
+  private async recordPostProcessingFailureUnderLock(candidateId: string, rawReason: string): Promise<void> {
+    try {
       const read = await this.stateManager.getAdmissionDocument(candidateId);
       if (!read.ok) return;
       const current = read.document?.processing;
+      if (current?.state === 'awaiting_owner' || current?.state === 'complete' || current?.state === 'exhausted'
+        || pendingOwnerDecision(read.document ?? null) !== null) return;
       const attempts = (current?.attempts ?? 0) + 1;
       const nowIso = new Date().toISOString();
       const reason = rawReason.slice(0, 300);
@@ -1859,7 +1868,8 @@ export class PainSignalBridge {
           // CR-05 (SPEC §9.1): the succeeded diagnosis with an unfinished
           // intake is an orphan the worker continuation must pick up — record
           // the attempt in the independent processing domain.
-          void this.recordPostProcessingFailure(candidate.candidateId, `intake_failed:${intakeErr instanceof Error ? intakeErr.message : String(intakeErr)}`).catch(() => undefined);
+          await this.recordPostProcessingFailure(candidate.candidateId, `intake_failed:${intakeErr instanceof Error ? intakeErr.message : String(intakeErr)}`);
+          admissionPersistBlocked.add(candidate.candidateId);
           continue;
         }
         // Phase 1 / PR1 (Principle Ledger write boundary): the intake service only
@@ -2079,7 +2089,7 @@ export class PainSignalBridge {
                   // A temporarily unavailable ledger is retryable: persist
                   // bounded backoff so an old candidate cannot monopolize the
                   // worker's oldest-first backlog page.
-                  await this.recordPostProcessingFailure(candidate.candidateId, 'candidate_seed_authority_unavailable:ledger_unavailable');
+                  await this.recordPostProcessingFailureUnderLock(candidate.candidateId, 'candidate_seed_authority_unavailable:ledger_unavailable');
                 } else {
                   // Ambiguous, revoked, corrupt, missing or ineligible
                   // identities require a human repair. Persist an explicit
@@ -2096,7 +2106,7 @@ export class PainSignalBridge {
                     blockedReason: `candidate_identity_${identity.reason}`,
                   });
                   if (!persisted) {
-                    await this.recordPostProcessingFailure(candidate.candidateId, 'candidate_seed_authority_refusal_persistence_failed');
+                    await this.recordPostProcessingFailureUnderLock(candidate.candidateId, 'candidate_seed_authority_refusal_persistence_failed');
                   }
                 }
                 this.eventEmitter?.emitTelemetry({
@@ -2204,7 +2214,7 @@ export class PainSignalBridge {
                   timestamp: new Date().toISOString(),
                   payload: { error: String(seedErr) },
                 });
-                void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
+                await this.recordPostProcessingFailureUnderLock(candidate.candidateId, `seed_failed:${String(seedErr)}`);
               }
             }
           }

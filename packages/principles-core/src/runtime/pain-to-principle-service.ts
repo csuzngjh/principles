@@ -297,70 +297,76 @@ export class PainToPrincipleService {
         };
       }
 
-      const bridge = await createPainSignalBridge({
-        workspaceDir: this.opts.workspaceDir,
-        stateDir: this.opts.stateDir,
-        ledgerAdapter: this.opts.ledgerAdapter,
-        owner: this.opts.owner,
-        autoIntakeEnabled: this.opts.autoIntakeEnabled,
-        effectiveConfig: this.opts.effectiveConfig,
-        getEnvVar: this.opts.getEnvVar,
-        intentDocReader: this.opts.intentDocReader,
-        trajectoryTurnReader: this.opts.trajectoryTurnReader,
-        // SPEC-PD-PIPELINE-SPINE-001 D1: forward the sync entry's
-        // authorization so authorized governance material survives the
-        // bridge's latest-consent gate instead of silently falling back to
-        // deny-all.
-        sourceMaterialAuthorization: this.opts.sourceMaterialAuthorization,
-        // PRI-939 Option A: workspace-scoped persistence for allowlisted events.
-        ...(this.opts.telemetrySink ? { telemetrySink: this.opts.telemetrySink } : {}),
-        isAutoPainSubmissionAuthorized: this.opts.isAutoPainSubmissionAuthorized,
-      });
-
-      const bridgeResult = await bridge.onPainDetected(painData);
-
-      let observabilityWarnings: string[] = [];
-      if (input.recordObservability !== false) {
-        const obs = recordPainSignalObservability({
+      let releaseBridge: (() => Promise<void>) | undefined;
+      try {
+        const bridge = await createPainSignalBridge({
           workspaceDir: this.opts.workspaceDir,
           stateDir: this.opts.stateDir,
-          data: painData,
-          canonicalPainId: painId,
-          runtimeTaskId: taskId,
-        });
-        observabilityWarnings = obs.warnings;
+          ledgerAdapter: this.opts.ledgerAdapter,
+          owner: this.opts.owner,
+          autoIntakeEnabled: this.opts.autoIntakeEnabled,
+          effectiveConfig: this.opts.effectiveConfig,
+          getEnvVar: this.opts.getEnvVar,
+          intentDocReader: this.opts.intentDocReader,
+          trajectoryTurnReader: this.opts.trajectoryTurnReader,
+          // SPEC-PD-PIPELINE-SPINE-001 D1: forward the sync entry's
+          // authorization so authorized governance material survives the
+          // bridge's latest-consent gate instead of silently falling back to
+          // deny-all.
+          sourceMaterialAuthorization: this.opts.sourceMaterialAuthorization,
+          // PRI-939 Option A: workspace-scoped persistence for allowlisted events.
+          ...(this.opts.telemetrySink ? { telemetrySink: this.opts.telemetrySink } : {}),
+          isAutoPainSubmissionAuthorized: this.opts.isAutoPainSubmissionAuthorized,
+        }, (release) => { releaseBridge = release; });
+
+        const bridgeResult = await bridge.onPainDetected(painData);
+
+        let observabilityWarnings: string[] = [];
+        if (input.recordObservability !== false) {
+          const obs = recordPainSignalObservability({
+            workspaceDir: this.opts.workspaceDir,
+            stateDir: this.opts.stateDir,
+            data: painData,
+            canonicalPainId: painId,
+            runtimeTaskId: taskId,
+          });
+          observabilityWarnings = obs.warnings;
+        }
+
+        const latencyMs = Date.now() - startTime;
+
+        return {
+          status: bridgeResult.status,
+          painId: bridgeResult.painId,
+          taskId: bridgeResult.taskId,
+          runId: bridgeResult.runId,
+          artifactId: bridgeResult.artifactId,
+          candidateIds: bridgeResult.candidateIds,
+          ledgerEntryIds: bridgeResult.ledgerEntryIds,
+          admissionResults: bridgeResult.admissionResults,
+          progress: bridgeResult.progress,
+          candidateOutcomes: bridgeResult.candidateOutcomes,
+          message: bridgeResult.message,
+          // PRI-939 Option A: bridge-shaped degradation notes (semantic reuse
+          // evaluation unavailable on a CREATE path) merge ahead of the
+          // observability-write warnings — both are rc-9 signals for the Owner.
+          observabilityWarnings: [
+            ...(bridgeResult.observabilityWarnings ?? []),
+            ...observabilityWarnings,
+          ],
+          // PRI-638 P1-D: classification comes from the bridge result itself —
+          // `capability_disabled` only when DisabledDiagnosticianRunner returned
+          // (errorCategory capability_missing + nextAction). A real persistence /
+          // runtime exception below must keep its own category; the capability
+          // state is context, never an exception-classification override.
+          failureCategory: classifyFromBridge(bridgeResult),
+          ...(bridgeResult.nextAction !== undefined ? { nextAction: bridgeResult.nextAction } : {}),
+          latencyMs,
+        };
+      } finally {
+        await releaseBridge?.();
       }
 
-      const latencyMs = Date.now() - startTime;
-
-      return {
-        status: bridgeResult.status,
-        painId: bridgeResult.painId,
-        taskId: bridgeResult.taskId,
-        runId: bridgeResult.runId,
-        artifactId: bridgeResult.artifactId,
-        candidateIds: bridgeResult.candidateIds,
-        ledgerEntryIds: bridgeResult.ledgerEntryIds,
-        admissionResults: bridgeResult.admissionResults,
-        progress: bridgeResult.progress,
-        candidateOutcomes: bridgeResult.candidateOutcomes,
-        message: bridgeResult.message,
-        // PRI-939 Option A: bridge-shaped degradation notes (semantic reuse
-        // evaluation unavailable on a CREATE path) merge ahead of the
-        // observability-write warnings — both are rc-9 signals for the Owner.
-        observabilityWarnings: [
-          ...(bridgeResult.observabilityWarnings ?? []),
-          ...observabilityWarnings,
-        ],
-        // PRI-638 P1-D: classification comes from the bridge result itself —
-        // `capability_disabled` only when DisabledDiagnosticianRunner returned
-        // (errorCategory capability_missing + nextAction). A real persistence /
-        // runtime exception below must keep its own category; the capability
-        // state is context, never an exception-classification override.
-        failureCategory: classifyFromBridge(bridgeResult),
-        ...(bridgeResult.nextAction !== undefined ? { nextAction: bridgeResult.nextAction } : {}),
-        latencyMs,
-      };
     } catch (err: unknown) {
       const latencyMs = Date.now() - startTime;
       return {

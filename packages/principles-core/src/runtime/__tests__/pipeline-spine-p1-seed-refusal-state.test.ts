@@ -19,7 +19,7 @@
  * CandidateIntakeService, PrincipleTreeLedgerAdapter); only the runner (the
  * LLM boundary) is a stub. Every assertion reads the DATABASE.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -245,6 +245,37 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
     const refused = world.telemetry.filter((event) => event.eventType === 'candidate_seed_refused');
     expect(refused).toHaveLength(1);
     expect((refused[0]?.payload as Record<string, unknown>).candidateId).toBe(invalid.candidateId);
+  });
+
+  it('stale automatic failure cannot replace a saved invalid-kind Owner park after RAW repair', async () => {
+    const world = await createWorld();
+    const diagnosis = await commitDiagnosis(world, 'pain-concurrent-recovery', ['principle']);
+    const [candidate] = diagnosis.candidates;
+    if (candidate === undefined) throw new Error('no candidate');
+    setPersistedKind(world, candidate.candidateId, 'wizardry');
+    await runPostProcessing(world, diagnosis, 'pain-concurrent-recovery');
+    const before = await processingOf(world, candidate.candidateId);
+    expect(before?.state).toBe('awaiting_owner');
+    setPersistedKind(world, candidate.candidateId, 'principle');
+
+    // Inject a stale intake result from before the RAW repair. All state
+    // transitions and persistence below still use real SQLite.
+    const stale = vi.spyOn(CandidateIntakeService.prototype, 'intake').mockResolvedValueOnce({
+      outcome: 'refused',
+      reason: 'candidate_changed_during_intake',
+      candidateId: candidate.candidateId,
+      rawRecommendationKind: 'principle',
+      message: 'concurrent RAW kind repair',
+    });
+    try {
+      await runPostProcessing(world, diagnosis, 'pain-concurrent-recovery');
+      expect(stale).toHaveBeenCalledTimes(1);
+    } finally {
+      stale.mockRestore();
+    }
+    expect(await processingOf(world, candidate.candidateId)).toEqual(before);
+    expect((await candidateOf(world, candidate.candidateId)).status).toBe('pending');
+    expect(await dreamerTasksFor(world, candidate.candidateId)).toEqual([]);
   });
 
   it('missing raw kind (empty persisted value): same saved refusal, blocker says missing', async () => {

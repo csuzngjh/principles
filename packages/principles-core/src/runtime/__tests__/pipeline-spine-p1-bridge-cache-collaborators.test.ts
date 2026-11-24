@@ -168,7 +168,7 @@ function makeVariant(): Collaborators {
 /** One factory call. Everything NOT part of the cache identity is recreated
  * per call on purpose (fresh ledger adapter, env accessor) — exactly what the
  * production call sites do — to prove none of it defeats the reuse. */
-function call(workspaceDir: string, collaborators: Partial<Collaborators> = {}): Promise<PainSignalBridge> {
+function call(workspaceDir: string, collaborators: Partial<Collaborators> = {}, registerBorrow?: (release: () => Promise<void>) => void): Promise<PainSignalBridge> {
   return createPainSignalBridge({
     workspaceDir,
     stateDir: join(workspaceDir, '.state'),
@@ -177,7 +177,7 @@ function call(workspaceDir: string, collaborators: Partial<Collaborators> = {}):
     effectiveConfig: makeEffectiveConfig(),
     getEnvVar: (name: string) => (name === ENV_KEY ? 'sentinel' : undefined),
     ...collaborators,
-  } as FactoryOptions);
+  } as FactoryOptions, registerBorrow);
 }
 
 interface AssemblerOptions {
@@ -306,8 +306,7 @@ describe('P1-1 — bridge cache identity follows the captured collaborators (obj
       const variantC = makeVariant();
       const bridgeA = await call(workspaceDir, variantA);
       const bridgeB = await call(workspaceDir, variantB);
-      // Consume each factory-return borrow before testing idle eviction. A
-      // factory return that has not started an operation remains protected.
+      // Unleased inspection lookups do not keep the cache alive.
       await bridgeB.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-before-eviction-1' });
       // touch B, then A: the slot's recency order is now [B (older), A (newer)]
       expect(await call(workspaceDir, variantB)).toBe(bridgeB);
@@ -334,7 +333,8 @@ describe('P1-1 — bridge cache identity follows the captured collaborators (obj
   it('factory borrow protects a returned bridge until its first operation starts', async () => {
     await withWorkspace(async (workspaceDir) => {
       const variantA = makeVariant();
-      const bridgeA = await call(workspaceDir, variantA);
+      let releaseBorrow: (() => Promise<void>) | undefined;
+      const bridgeA = await call(workspaceDir, variantA, (release) => { releaseBorrow = release; });
       const disposeASpy = vi.spyOn(bridgeA, 'dispose');
 
       // Two other variants evict A before its caller starts using it.
@@ -343,11 +343,43 @@ describe('P1-1 — bridge cache identity follows the captured collaborators (obj
       await new Promise<void>((resolve) => setTimeout(resolve, 30));
       expect(disposeASpy).not.toHaveBeenCalled();
 
-      // Starting the first operation consumes the borrow. The deferred
-      // retirement then runs after that operation releases its active count.
-      const result = await bridgeA.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-after-eviction' });
-      expect(result.status).toBe('not_applicable');
+      try {
+        const result = await bridgeA.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-after-eviction' });
+        expect(result.status).toBe('not_applicable');
+        expect(disposeASpy).not.toHaveBeenCalled();
+      } finally {
+        await releaseBorrow?.();
+      }
       await vi.waitFor(() => expect(disposeASpy).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  it('each caller owns its release: repeated operations and unused borrows survive eviction and workspace cleanup', async () => {
+    await withWorkspace(async (workspaceDir) => {
+      const stable = makeVariant();
+      let releaseA: (() => Promise<void>) | undefined;
+      let releaseB: (() => Promise<void>) | undefined;
+      const a = await call(workspaceDir, stable, (release) => { releaseA = release; });
+      const b = await call(workspaceDir, stable, (release) => { releaseB = release; });
+      expect(a).toBe(b);
+      const disposeSpy = vi.spyOn(a, 'dispose');
+      let cleanup: Promise<void> | undefined;
+      try {
+        await call(workspaceDir, makeVariant());
+        await call(workspaceDir, makeVariant());
+        await a.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-1' });
+        await a.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-2' });
+        await releaseA?.();
+        await releaseA?.();
+        cleanup = disposePainSignalBridgesForWorkspace(workspaceDir);
+        await expect(call(workspaceDir, stable)).rejects.toThrow('cleanup is in progress');
+        expect(disposeSpy).not.toHaveBeenCalled();
+      } finally {
+        await releaseA?.();
+        await releaseB?.();
+        await cleanup;
+      }
+      expect(disposeSpy).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -560,6 +560,37 @@ export function resolveRuntimeConfigFromPdConfig(
 // Key format: `${workspaceDir}:${runtimeKind}:...` (D-03). The openclawMode slot
 // left with ADR-0029: pi-ai has no mode, so a bridge is keyed by workspace+kind.
 const bridgeCache = new Map<string, PainSignalBridge>();
+// Retired instances remain discoverable by workspace cleanup until their
+// actual close completes, even after removal from the bounded cache.
+const retiredBridges = new Map<string, Set<Promise<boolean>>>();
+const pendingAcquisitions = new Map<string, Set<Promise<PainSignalBridge>>>();
+const closingWorkspaces = new Map<string, Promise<void>>();
+
+type RegisterBridgeBorrow = (release: () => Promise<void>) => void;
+
+function borrowBridge(bridge: PainSignalBridge, registerBorrow?: RegisterBridgeBorrow): PainSignalBridge {
+  if (registerBorrow !== undefined) {
+    const release = bridge.retainFactoryBorrow();
+    try {
+      registerBorrow(release);
+    } catch (error) {
+      void release();
+      throw error;
+    }
+  }
+  return bridge;
+}
+
+function retireBridge(workspaceDir: string, bridge: PainSignalBridge): void {
+  const pending = bridge.disposeWhenIdle();
+  const retired = retiredBridges.get(workspaceDir) ?? new Set<Promise<boolean>>();
+  retiredBridges.set(workspaceDir, retired);
+  retired.add(pending);
+  void pending.catch(() => undefined).finally(() => {
+    retired.delete(pending);
+    if (retired.size === 0 && retiredBridges.get(workspaceDir) === retired) retiredBridges.delete(workspaceDir);
+  });
+}
 
 // SPEC-PD-PIPELINE-SPINE-001 review round 2 (P1-1): collaborator identity.
 //
@@ -624,7 +655,7 @@ const COLLABORATOR_VARIANTS_PER_SLOT = 2;
 
 /** Retire the least-recently-used collaborator variants of `slotKey` beyond
  * the per-slot bound (the cache's iteration order is insertion/recency). */
-function evictSupersededCollaboratorVariants(slotKey: string, keepKey: string): void {
+function evictSupersededCollaboratorVariants(workspaceDir: string, slotKey: string, keepKey: string): void {
   const prefix = `${slotKey}:`;
   const siblings = [...bridgeCache.keys()].filter((key) => key !== keepKey && key.startsWith(prefix));
   while (siblings.length > COLLABORATOR_VARIANTS_PER_SLOT - 1) {
@@ -633,7 +664,7 @@ function evictSupersededCollaboratorVariants(slotKey: string, keepKey: string): 
     const evicted = bridgeCache.get(evictedKey);
     bridgeCache.delete(evictedKey);
     if (evicted !== undefined) {
-      void evicted.disposeWhenIdle().catch(() => undefined);
+      retireBridge(workspaceDir, evicted);
     }
   }
 }
@@ -973,16 +1004,24 @@ async function constructBridge(
  * this after execution; long-lived hosts that reuse the cached bridge do not.
  */
 export async function disposePainSignalBridgesForWorkspace(workspaceDir: string): Promise<void> {
-  const prefix = `${workspaceDir}:`;
-  const doomed: PainSignalBridge[] = [];
-  for (const [key, bridge] of bridgeCache) {
-    if (key.startsWith(prefix)) {
-      doomed.push(bridge);
-      bridgeCache.delete(key);
+  const existing = closingWorkspaces.get(workspaceDir);
+  if (existing !== undefined) return existing;
+  const cleanup = (async () => {
+    await Promise.allSettled([...(pendingAcquisitions.get(workspaceDir) ?? [])]);
+    const prefix = `${workspaceDir}:`;
+    for (const [key, bridge] of bridgeCache) {
+      if (key.startsWith(prefix)) {
+        bridgeCache.delete(key);
+        retireBridge(workspaceDir, bridge);
+      }
     }
-  }
-  for (const bridge of doomed) {
-    try { await bridge.dispose(); } catch { /* best-effort cleanup */ }
+    await Promise.allSettled([...(retiredBridges.get(workspaceDir) ?? [])]);
+  })();
+  closingWorkspaces.set(workspaceDir, cleanup);
+  try {
+    await cleanup;
+  } finally {
+    if (closingWorkspaces.get(workspaceDir) === cleanup) closingWorkspaces.delete(workspaceDir);
   }
 }
 
@@ -1002,12 +1041,12 @@ export async function disposePainSignalBridgesForWorkspace(workspaceDir: string)
 async function createDisabledBridge(
   opts: PainSignalRuntimeFactoryOptions,
   capability: Extract<DiagnosticianCapability, { available: false }>,
+  registerBorrow?: RegisterBridgeBorrow,
 ): Promise<PainSignalBridge> {
   const disabledCacheKey = `${opts.workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`;
   const cached = bridgeCache.get(disabledCacheKey);
   if (cached) {
-    cached.retainFactoryBorrow();
-    return cached;
+    return borrowBridge(cached, registerBorrow);
   }
 
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
@@ -1042,19 +1081,44 @@ async function createDisabledBridge(
 
   const winner = bridgeCache.get(disabledCacheKey);
   if (winner !== undefined && winner !== bridge) {
+    // Borrow the winner before awaiting disposal of the losing constructor.
+    const borrowed = borrowBridge(winner, registerBorrow);
     await bridge.dispose().catch(() => undefined);
-    winner.retainFactoryBorrow();
-    return winner;
+    return borrowed;
   }
   bridgeCache.set(disabledCacheKey, bridge);
-  bridge.retainFactoryBorrow();
-  return bridge;
+  return borrowBridge(bridge, registerBorrow);
 }
 
 
 
+/**
+ * Supply registerBorrow for use across await or concurrent cleanup/eviction.
+ * Release the registered lease in finally, even if no operation is started.
+ * The legacy one-argument form is an unleased lookup for callers which
+ * externally coordinate the workspace lifetime (including inspection tests).
+ */
 export async function createPainSignalBridge(
   opts: PainSignalRuntimeFactoryOptions,
+  registerBorrow?: RegisterBridgeBorrow,
+): Promise<PainSignalBridge> {
+  const workspaceDir = opts.workspaceDir;
+  if (closingWorkspaces.has(workspaceDir)) throw new Error('PainSignalBridge workspace cleanup is in progress');
+  const acquisition = createPainSignalBridgeInner(opts, registerBorrow);
+  const pending = pendingAcquisitions.get(workspaceDir) ?? new Set<Promise<PainSignalBridge>>();
+  pendingAcquisitions.set(workspaceDir, pending);
+  pending.add(acquisition);
+  try {
+    return await acquisition;
+  } finally {
+    pending.delete(acquisition);
+    if (pending.size === 0 && pendingAcquisitions.get(workspaceDir) === pending) pendingAcquisitions.delete(workspaceDir);
+  }
+}
+
+async function createPainSignalBridgeInner(
+  opts: PainSignalRuntimeFactoryOptions,
+  registerBorrow?: RegisterBridgeBorrow,
 ): Promise<PainSignalBridge> {
   // PRI-638: the capability decision comes FIRST and from ONE authority.
   //
@@ -1069,7 +1133,7 @@ export async function createPainSignalBridge(
   // provider calls, so re-enabling the agent is enough to resume.
   const capability = resolveDiagnosticianCapability(opts.effectiveConfig);
   if (!capability.available) {
-    return createDisabledBridge(opts, capability);
+    return createDisabledBridge(opts, capability, registerBorrow);
   }
 
   // PRI-306: Prefer config-driven binding when effectiveConfig is provided
@@ -1155,8 +1219,7 @@ export async function createPainSignalBridge(
     // recency refresh for the per-slot bound
     bridgeCache.delete(cacheKey);
     bridgeCache.set(cacheKey, cached);
-    cached.retainFactoryBorrow();
-    return cached;
+    return borrowBridge(cached, registerBorrow);
   }
 
   const bridge = await constructBridge(opts, runtimeConfig, {
@@ -1168,14 +1231,15 @@ export async function createPainSignalBridge(
   // were building — the loser self-disposes so its handles never leak.
   const winner = bridgeCache.get(cacheKey);
   if (winner !== undefined && winner !== bridge) {
+    // Borrow the winner before awaiting disposal of the losing constructor.
+    const borrowed = borrowBridge(winner, registerBorrow);
     await bridge.dispose().catch(() => undefined);
-    winner.retainFactoryBorrow();
-    return winner;
+    return borrowed;
   }
   bridgeCache.set(cacheKey, bridge);
-  evictSupersededCollaboratorVariants(slotKey, cacheKey);
-  bridge.retainFactoryBorrow();
-  return bridge;
+  const borrowed = borrowBridge(bridge, registerBorrow);
+  evictSupersededCollaboratorVariants(opts.workspaceDir, slotKey, cacheKey);
+  return borrowed;
 }
 
 /**
@@ -1199,7 +1263,7 @@ export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: s
     bridgeCache.delete(key);
     // Invalidation removes discoverability immediately but preserves any
     // outstanding factory borrow or operation until it is safe to close.
-    void bridge.disposeWhenIdle().catch(() => undefined);
+    retireBridge(workspaceDir, bridge);
   };
   retire(`${workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`);
   const kindPrefix = `${workspaceDir}:${effectiveKind}:`;
