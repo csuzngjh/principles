@@ -265,7 +265,13 @@ describe('P1-3 — pd candidate internalize under concurrency (real lock, real S
 
     const internalize = handleCandidateInternalize({ candidateId, workspace, json: true });
     try {
-      await reachedPromise;
+      const pauseOrExit = await Promise.race([
+        reachedPromise.then(() => 'reached' as const),
+        internalize.then(() => 'completed' as const),
+      ]);
+      if (pauseOrExit !== 'reached') {
+        throw new Error('internalize completed before reaching the in-lock admission pause');
+      }
 
       // While internalize is inside its critical section, the Owner's reuse
       // decision runs to completion on the real production path — as ONE
@@ -274,6 +280,13 @@ describe('P1-3 — pd candidate internalize under concurrency (real lock, real S
       // lock inside the intake service) and Phase C finalizes the decision
       // (under the same lock).
       let ownerCompletionSettled = false;
+      let signalPhaseBAttempted: () => void = () => undefined;
+      const phaseBAttempted = new Promise<void>((resolve) => { signalPhaseBAttempted = resolve; });
+      const originalCoordination = ledgerAdapter.withCandidateCoordination.bind(ledgerAdapter);
+      ledgerAdapter.withCandidateCoordination = async (id, operation) => {
+        if (id === candidateId) signalPhaseBAttempted();
+        return originalCoordination(id, operation);
+      };
       const ownerCompletion = (async (): Promise<{ phaseB: string; phaseC: string }> => {
         // the reuse evidence needs the Pain that re-validated the principle:
         // this fixture has no pain_diagnoses row, so the authoritative pain
@@ -296,12 +309,16 @@ describe('P1-3 — pd candidate internalize under concurrency (real lock, real S
         return { phaseB: phaseB.reason, phaseC: phaseC.status };
       })();
 
-      // Serialized: NEITHER phase of the Owner completion can pass while
-      // internalize holds the lock — internalize's identity read and
-      // admission read can never be split by the completion. (Before the
-      // lock the completion ran straight through this window.)
-      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      // The Owner Phase B has actually attempted the same candidate lock and
+      // is waiting behind internalize. Before release, it must not have
+      // written reuse evidence or completed either phase.
+      await phaseBAttempted;
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
       expect(ownerCompletionSettled).toBe(false);
+      const ledgerBeforeRelease = JSON.parse(fs.readFileSync(path.join(stateDir, 'principle_training_state.json'), 'utf8')) as {
+        _tree: { principles: Record<string, { reuseEvidence?: unknown[] }> };
+      };
+      expect(ledgerBeforeRelease._tree.principles[EXISTING_PRINCIPLE_ID]?.reuseEvidence ?? []).toEqual([]);
 
       release();
       const [, ownerOutcome] = await Promise.all([internalize, ownerCompletion]);
