@@ -1109,8 +1109,9 @@ export class PainSignalBridge {
       const blockedAt = new Date().toISOString();
       for (const candidate of candidates) {
         try {
-          await this.withCandidateCoordination(candidate.candidateId, () =>
-            this.stateManager.appendAdmissionEvaluation(candidate.candidateId, {
+          await this.withCandidateCoordination(candidate.candidateId, async () => {
+            if (await this.automaticProcessingProtected(candidate.candidateId, true)) return;
+            const appended = await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, {
               evaluationId: `ae_blocked_${fingerprintMaterial([candidate.candidateId, reentry.errorCode]).slice(0, 16)}`,
               decision: 'needs_evidence',
               reason: `diagnostic_material_unusable:${reentry.errorCode}`,
@@ -1124,12 +1125,13 @@ export class PainSignalBridge {
               confidence: null,
               materialFingerprint: fingerprintMaterial(['unusable', reentry.errorCode]),
               materialSummary: { inputEvidenceCount: 0, outputEvidenceCount: 0, ownerStatementPresent: false },
-            }),
-          );
-          await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
-            state: 'exhausted',
-            attempts: MAX_POST_PROCESSING_ATTEMPTS,
-            blockedReason: `diagnostic_material_unusable:${reentry.errorCode}`,
+            });
+            if (appended.status === 'refused') return;
+            await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+              state: 'exhausted',
+              attempts: MAX_POST_PROCESSING_ATTEMPTS,
+              blockedReason: `diagnostic_material_unusable:${reentry.errorCode}`,
+            });
           });
         } catch {
           // persistence of the terminal state itself failed → stay scannable
@@ -1581,13 +1583,41 @@ export class PainSignalBridge {
     return operation();
   }
 
-  private safeUpdateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): void {
-    try {
-      void this.stateManager.updateAdmissionProcessing(candidateId, processing).catch(() => undefined);
-    } catch {
-      // partial state-manager seams (test doubles) may not implement the
-      // processing domain; the primary outcome path stays authoritative
+  /** Check durable governance inside the same lock as any automatic write. */
+  private async automaticProcessingProtected(candidateId: string, protectAllOwnerParks = false): Promise<boolean> {
+    if (typeof this.stateManager.getAdmissionDocument !== 'function') {
+      // Only narrow legacy test doubles lack the production read seam.
+      return typeof this.ledgerAdapter.withCandidateCoordination === 'function';
     }
+    const read = await this.stateManager.getAdmissionDocument(candidateId);
+    if (!read.ok) return true;
+    const processing = read.document?.processing;
+    const blocker = processing?.blockedReason ?? '';
+    return pendingOwnerDecision(read.document ?? null) !== null
+      || processing?.state === 'complete'
+      || processing?.state === 'exhausted'
+      || (processing?.state === 'awaiting_owner' && (
+        protectAllOwnerParks || blocker === 'reuse_pending_owner'
+        || blocker.startsWith('candidate_kind_invalid') || blocker.startsWith('candidate_identity_')
+      ));
+  }
+
+  private async safeUpdateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<void> {
+    try {
+      await this.withCandidateCoordination(candidateId, async () => {
+        if (await this.automaticProcessingProtected(candidateId)) return;
+        await this.stateManager.updateAdmissionProcessing(candidateId, processing);
+      });
+    } catch {
+      // Failed coordination or persistence never falls back to an unlocked write.
+    }
+  }
+
+  private async consumeCandidateIfUnblocked(candidateId: string): Promise<void> {
+    await this.withCandidateCoordination(candidateId, async () => {
+      if (await this.automaticProcessingProtected(candidateId)) return;
+      await this.stateManager.updateCandidateStatus(candidateId, { status: 'consumed' });
+    });
   }
 
   /**
@@ -1655,6 +1685,10 @@ export class PainSignalBridge {
     /** SPEC-CODEX-PAIN-CLOSURE-001 CR-02: the pain's correction evidence, when one was submitted. */
     correctionEvidence?: PainCorrectionEvidence;
   }): Promise<PainSignalBridgeResult> {
+    return this.trackOperation(() => this.onDiagnosisCompleteInner(opts));
+  }
+
+  private async onDiagnosisCompleteInner(opts: Parameters<PainSignalBridge['onDiagnosisComplete']>[0]): Promise<PainSignalBridgeResult> {
     const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0, correctionEvidence } = opts;
     const ownerStatementPresent = isOwnerStatementEvidence(correctionEvidence);
     const statementFingerprint = ownerStatementPresent && correctionEvidence ? fingerprintStatement(correctionEvidence.text) : undefined;
@@ -1820,7 +1854,7 @@ export class PainSignalBridge {
           this.emitAdmissionEvent(candidate.candidateId, admission.admission);
           // CR-03: a non-admitted disposition is a saved, explainable terminal
           // state for this material — the worker must not keep rescanning it.
-          this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+          await this.safeUpdateAdmissionProcessing(candidate.candidateId, {
             state: 'awaiting_owner',
             attempts: 0,
             blockedReason: `${admission.admission.decision}:${admission.admission.reason}`,
@@ -1916,7 +1950,7 @@ export class PainSignalBridge {
           });
           // CR-05: waiting for the Owner's reuse decision is a saved
           // awaiting-owner state, not a technical retry.
-          this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+          await this.safeUpdateAdmissionProcessing(candidate.candidateId, {
             state: 'awaiting_owner',
             attempts: 0,
             blockedReason: 'reuse_pending_owner',
@@ -2005,6 +2039,10 @@ export class PainSignalBridge {
             return;
           }
           const processing = admissionDoc.document?.processing;
+          if (processing?.state === 'awaiting_owner' && processing.blockedReason === 'reuse_pending_owner') {
+            seedSuppressedByCandidate.set(candidate.candidateId, { suppress: true, reason: 'reuse_park_pending_owner' });
+            return;
+          }
           if (processing?.state === 'awaiting_owner'
             && typeof processing.blockedReason === 'string'
             && processing.blockedReason.startsWith('candidate_kind_invalid')
@@ -2253,8 +2291,8 @@ export class PainSignalBridge {
         // terminal: consume + complete as usual.
         const suppression = seedSuppressedByCandidate.get(candidate.candidateId);
         const parkedSuppressed = suppression?.suppress === true && suppression.reason === 'reuse_park_pending_owner';
-        if (!parkedSuppressed && candidate.status !== 'consumed') {
-          await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
+        if (!parkedSuppressed && candidate.status !== 'consumed' && !seedFailureCandidateIds.includes(candidate.candidateId)) {
+          await this.consumeCandidateIfUnblocked(candidate.candidateId);
         }
       }
     }
@@ -2281,7 +2319,7 @@ export class PainSignalBridge {
       // post-processing that never happened, and the worker then skipped the
       // candidate forever while it still read as pending.
       if (seedRefusedByCandidate.has(candidate.candidateId)) continue;
-      this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+      await this.safeUpdateAdmissionProcessing(candidate.candidateId, {
         state: 'complete',
         attempts: 0,
         completedAt: new Date().toISOString(),
@@ -2498,7 +2536,7 @@ export class PainSignalBridge {
         const ledgerEntry = this.ledgerAdapter.existsForCandidate(candidate.candidateId);
         if (ledgerEntry) ledgerEntryIds.push(ledgerEntry.id);
         if (candidate.status !== 'consumed' && ledgerEntry) {
-          await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
+          await this.consumeCandidateIfUnblocked(candidate.candidateId);
         }
         if (candidate.status === 'pending' && !ledgerEntry && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind) && this.intakeService?.reuseReviewEnabled) {
           try {

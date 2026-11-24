@@ -330,20 +330,19 @@ describe('P1-1 — bridge cache identity follows the captured collaborators (obj
     });
   });
 
-  it('factory borrow protects a returned bridge until its first operation starts', async () => {
+  it('factory borrow protects a returned bridge through its first operation until explicit release', async () => {
     await withWorkspace(async (workspaceDir) => {
       const variantA = makeVariant();
       let releaseBorrow: (() => Promise<void>) | undefined;
       const bridgeA = await call(workspaceDir, variantA, (release) => { releaseBorrow = release; });
       const disposeASpy = vi.spyOn(bridgeA, 'dispose');
 
-      // Two other variants evict A before its caller starts using it.
-      await call(workspaceDir, makeVariant());
-      await call(workspaceDir, makeVariant());
-      await new Promise<void>((resolve) => setTimeout(resolve, 30));
-      expect(disposeASpy).not.toHaveBeenCalled();
-
       try {
+        // Two other variants evict A before its caller starts using it.
+        await call(workspaceDir, makeVariant());
+        await call(workspaceDir, makeVariant());
+        expect(disposeASpy).not.toHaveBeenCalled();
+
         const result = await bridgeA.resumeSucceededDiagnosisPostProcessing({ taskId: 'missing-after-eviction' });
         expect(result.status).toBe('not_applicable');
         expect(disposeASpy).not.toHaveBeenCalled();
