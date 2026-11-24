@@ -57,7 +57,7 @@ import {
   createAdapterConfigFromProfile,
   INTERNAL_AGENT_NAMES,
 } from '@principles/core/runtime';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
+import { canonicalizeDeepestExisting, getWorkbuddyWorkspaceDir, isPathWithinRoot } from '@principles/install-layout';
 import { execFile } from 'node:child_process';
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -156,6 +156,47 @@ interface Lab {
   projectConfigPath: string;
 }
 
+/**
+ * Host-directory overrides `resolvePdHome()` honours AHEAD of an explicit
+ * `homeDir` (round-2 remediation): a WorkBuddy-launched test run inherits
+ * WORKBUDDY_CONFIG_DIR, and an inherited value silently resolves the REAL
+ * user config root instead of the sandbox (the 2026-11-22 data-loss vector).
+ * The harness never depends on the ambient env being clean.
+ */
+const AMBIENT_HOST_OVERRIDE_KEYS = [
+  'WORKBUDDY_CONFIG_DIR',
+  'CODEBUDDY_CONFIG_DIR',
+  'CODEX_HOME',
+  'OPENCLAW_HOME',
+  'OPENCLAW_STATE_DIR',
+  'PD_EXPERIMENT_ROOT',
+] as const;
+
+/** A controlled env for sandbox resolution and spawned children. */
+function sandboxEnvFor(sandbox: string, extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of AMBIENT_HOST_OVERRIDE_KEYS) delete env[key];
+  env.HOME = sandbox;
+  env.USERPROFILE = sandbox;
+  return { ...env, ...(extra ?? {}) };
+}
+
+/**
+ * REAL-path boundary check (round-2 P2): canonicalize the deepest existing
+ * ancestor so a junction/symlink/reparse point on the path cannot fake
+ * containment — a `startsWith` string check can. Fail loud before any write.
+ */
+function assertInsideSandbox(sandbox: string, candidate: string): void {
+  const rootReal = canonicalizeDeepestExisting(sandbox) ?? path.resolve(sandbox);
+  const candidateReal = canonicalizeDeepestExisting(candidate);
+  if (candidateReal === null || !isPathWithinRoot(rootReal, candidateReal)) {
+    throw new Error(
+      `Refusing to operate outside the test sandbox: "${candidateReal ?? path.resolve(candidate)}" escapes "${rootReal}". ` +
+      'A host directory override (WORKBUDDY_CONFIG_DIR / CODEX_HOME / OPENCLAW_HOME) leaked into the test process.',
+    );
+  }
+}
+
 function makeLab(): Lab {
   const sandbox = fs.realpathSync(fs.mkdtempSync(path.join(TMP, 'pd-wb-profile-')));
   const workspaceDir = path.join(sandbox, 'project-workspace');
@@ -190,12 +231,19 @@ function makeLab(): Lab {
 
   fs.mkdirSync(workspaceDir, { recursive: true });
 
+  // Hermetic from creation (round-2 P0): the governance paths are resolved
+  // through an EXPLICIT sandbox configDirOverride and a controlled env, so
+  // they belong to the sandbox even when ambient WORKBUDDY_CONFIG_DIR is
+  // present at makeLab() time (beforeEach pins it only AFTER this runs).
+  const governanceDir = getWorkbuddyWorkspaceDir(sandbox, path.join(sandbox, '.workbuddy'), sandboxEnvFor(sandbox));
+  assertInsideSandbox(sandbox, governanceDir);
+
   return {
     sandbox,
     workspaceDir,
     payloadDir,
-    governanceDir: getWorkbuddyWorkspaceDir(sandbox),
-    governanceConfigPath: path.join(getWorkbuddyWorkspaceDir(sandbox), '.pd', 'config.yaml'),
+    governanceDir,
+    governanceConfigPath: path.join(governanceDir, '.pd', 'config.yaml'),
     projectConfigPath: path.join(workspaceDir, '.pd', 'config.yaml'),
   };
 }
@@ -293,9 +341,19 @@ function readGovernanceConfig(lab: Lab): GovernanceRawConfig {
  * production initializer the host installer invokes), then apply a simulated
  * OWNER customization on top. */
 function seedGovernanceWorkspace(lab: Lab, customize?: (config: GovernanceRawConfig) => void): void {
+  // The REAL `pd runtime init` child runs ONLY against the sandbox: its env
+  // is built fresh with every ambient host override stripped and both home
+  // authorities + the host config root pinned inside lab.sandbox — an
+  // inherited WORKBUDDY_CONFIG_DIR can never steer the write to a real user
+  // workspace.
+  assertInsideSandbox(lab.sandbox, lab.governanceDir);
   realChildProcess.execFileSync(process.execPath, [REAL_PD_CLI_ENTRY, 'runtime', 'init', '--confirm', '--workspace', lab.governanceDir], {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 120_000,
+    env: sandboxEnvFor(lab.sandbox, {
+      WORKBUDDY_CONFIG_DIR: path.join(lab.sandbox, '.workbuddy'),
+      CODEBUDDY_CONFIG_DIR: path.join(lab.sandbox, '.codebuddy-unused'),
+    }),
   });
   // Open the file once and do the read/rewrite through that single handle:
   // a path-based existence check followed by a path-based write would race
@@ -534,6 +592,36 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
     } finally {
       fs.chmodSync(path.dirname(lab.governanceConfigPath), 0o755);
       fs.chmodSync(lab.governanceConfigPath, 0o644);
+    }
+  });
+});
+
+// ─── Round-2 remediation regression: harness hermeticity ────────────────────
+//
+// The exact 2026-11-22 leak shape: a WorkBuddy-launched run inherits
+// WORKBUDDY_CONFIG_DIR pointing at the REAL user config root, and any harness
+// path resolved through the ambient env lands its fixtures there instead of
+// the sandbox. makeLab()/seedGovernanceWorkspace() must stay sandbox-bound
+// even when the decoy override is in place BEFORE the lab is created.
+describe('round-2 regression: the harness never resolves outside its sandbox', () => {
+  it('makeLab + seedGovernanceWorkspace stay sandbox-bound while ambient WORKBUDDY_CONFIG_DIR points at an independent decoy', () => {
+    const decoy = fs.realpathSync(fs.mkdtempSync(path.join(TMP, 'pd-wb-profile-decoy-')));
+    let decoyLab: Lab | undefined;
+    try {
+      process.env.WORKBUDDY_CONFIG_DIR = path.join(decoy, '.workbuddy');
+
+      decoyLab = makeLab(); // resolved AFTER the decoy override is in place
+      expect(decoyLab.governanceDir).toBe(path.join(decoyLab.sandbox, '.workbuddy', 'pd-workspace'));
+      expect(decoyLab.governanceConfigPath.startsWith(decoyLab.sandbox)).toBe(true);
+
+      seedGovernanceWorkspace(decoyLab); // the REAL `pd runtime init` child
+      expect(fs.existsSync(decoyLab.governanceConfigPath)).toBe(true);
+
+      // Nothing may have landed on the decoy tree.
+      expect(fs.existsSync(path.join(decoy, '.workbuddy'))).toBe(false);
+    } finally {
+      if (decoyLab) fs.rmSync(decoyLab.sandbox, { recursive: true, force: true });
+      fs.rmSync(decoy, { recursive: true, force: true });
     }
   });
 });

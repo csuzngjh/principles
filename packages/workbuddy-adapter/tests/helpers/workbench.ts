@@ -3,8 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
+import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection, guardWorkspaceLeak } from '@principles/core/runtime';
+import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
+import { canonicalizeDeepestExisting, getWorkbuddyWorkspaceDir, isPathWithinRoot } from '@principles/install-layout';
 
 /**
  * Shared workbench builders for the entry/production suites: a FAKE home (so
@@ -17,7 +18,145 @@ import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 const EVENTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'host-contract', 'events');
 
 const tempDirs: string[] = [];
+
+/**
+ * Sandbox boundary registry (2026-11-24 remediation): every tracked temp dir
+ * is a write-allowed root. `assertInsideSandbox()` validates a path against
+ * these roots with REAL-path semantics — canonicalizeDeepestExisting resolves
+ * the deepest existing ancestor, so a junction/symlink/reparse point sitting
+ * on the path cannot fake containment the way a `startsWith` string check can.
+ */
+const sandboxRoots = new Set<string>();
+
+/**
+ * Pure-string Windows UNC / device-namespace classification. It MUST run
+ * before ANY filesystem call: under Windows, statting/realpathing a
+ * `\\host\share` path can reach an SMB server (integrated-auth leak) and
+ * `\\?\` / `\\.\` escape into the device namespace. The judgment is made on
+ * the raw candidate — Windows UNC semantics do not depend on the host OS, so
+ * `path.resolve()` (POSIX on this runner) is never trusted to recognise them.
+ * Two or more leading separators (`\\`, `//`, `\/`, `/\`) are treated as
+ * remote/device and fail closed; a description is returned, else null.
+ */
+function windowsRemoteOrDevicePath(candidate: string): string | null {
+  let separators = 0;
+  while (separators < candidate.length && (candidate[separators] === '\\' || candidate[separators] === '/')) {
+    separators += 1;
+  }
+  if (separators < 2) return null;
+  const tail = candidate.slice(separators);
+  // `\\?\` extended-length (incl. \\?\UNC\host\share) and `\\.\` device
+  // namespaces: `?` or `.` immediately after the leading separators.
+  if (/^[?.][\\/]/.test(tail)) {
+    return `Windows device-namespace path "${candidate}"`;
+  }
+  return `UNC/network path "${candidate}"`;
+}
+
+function registerSandboxRoot(dir: string): void {
+  const remote = windowsRemoteOrDevicePath(dir);
+  if (remote !== null) {
+    throw new Error(`Refusing to register a ${remote} as a sandbox root — it can never be local.`);
+  }
+  const real = canonicalizeDeepestExisting(dir) ?? path.resolve(dir);
+  sandboxRoots.add(real);
+}
+
+/**
+ * True when a link (symlink/junction/reparse point) sits on the MISSING TAIL
+ * below the deepest realpath-able ancestor of `candidate` — e.g. a dangling
+ * link that `canonicalizeDeepestExisting` re-appends verbatim. Such a path
+ * cannot be proven safe (the target may spring into existence outside the
+ * sandbox), so the boundary must fail closed.
+ */
+function linkOnMissingTail(candidate: string): string | null {
+  let current = path.resolve(candidate);
+  for (;;) {
+    try {
+      fs.realpathSync.native(current);
+      return null; // realpath-able: canonicalize already judged it
+    } catch {
+      // Missing — or a link whose target does not exist yet.
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) return current;
+      } catch {
+        // Truly missing tail segment: keep walking up.
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+/**
+ * Fail loud instead of writing outside a disposable sandbox.
+ *
+ * Residual risk (documented, not eliminated): the guard is a point-in-time
+ * judgment. A concurrently-mutating actor could still swap a checked
+ * directory for a link between the check and the subsequent write (in-process
+ * TOCTOU). It closes pre-existing junction/symlink escapes and ambient-env
+ * leaks; it does not defend against an active adversary racing the writer.
+ */
+export function assertInsideSandbox(candidate: string, hint = ''): void {
+  // Remote/device paths are refused on the STRING before linkOnMissingTail or
+  // canonicalizeDeepestExisting can touch the filesystem: on Windows a stat of
+  // a UNC path may reach an SMB host before any boundary verdict exists.
+  const remote = windowsRemoteOrDevicePath(candidate);
+  if (remote !== null) {
+    throw new Error(`Refusing to seed through a ${remote} — it can never be inside a local test sandbox ${hint}`.trimEnd());
+  }
+  const danglingLink = linkOnMissingTail(candidate);
+  if (danglingLink !== null) {
+    throw new Error(
+      `Refusing to seed through an unresolvable link on the path: "${danglingLink}" ${hint}`.trimEnd(),
+    );
+  }
+  const real = canonicalizeDeepestExisting(candidate);
+  if (real === null) {
+    throw new Error(`Refusing to seed an unresolvable path: "${path.resolve(candidate)}" ${hint}`.trim());
+  }
+  for (const root of sandboxRoots) {
+    if (isPathWithinRoot(root, real)) return;
+  }
+  throw new Error(
+    `Refusing to seed outside the test sandbox: "${real}" escapes every registered sandbox root ${hint}`.trimEnd() +
+    ' — a host directory override (WORKBUDDY_CONFIG_DIR / CODEX_HOME / OPENCLAW_HOME) may have leaked into the test process.',
+  );
+}
+
+/**
+ * Host-directory overrides that `resolvePdHome()` honours AHEAD of an
+ * explicitly passed `homeDir`. A test helper that inherits any of them from
+ * the ambient host process (WorkBuddy sets WORKBUDDY_CONFIG_DIR in every child
+ * shell) silently resolves the REAL user directories instead of the sandbox.
+ */
+export const AMBIENT_HOST_OVERRIDE_KEYS = [
+  'WORKBUDDY_CONFIG_DIR',
+  'CODEBUDDY_CONFIG_DIR',
+  'CODEX_HOME',
+  'OPENCLAW_HOME',
+  'OPENCLAW_STATE_DIR',
+  'PD_EXPERIMENT_ROOT',
+] as const;
+
+/**
+ * A controlled env for sandbox resolution/spawning: the ambient host
+ * overrides are stripped and BOTH home authorities are pinned to the sandbox,
+ * so the result never depends on the caller having cleaned process.env first.
+ */
+export function sandboxEnv(home: string, extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of AMBIENT_HOST_OVERRIDE_KEYS) delete env[key];
+  env.HOME = home;
+  env.USERPROFILE = home;
+  return { ...env, ...(extra ?? {}) };
+}
+
 export function trackTempDir(dir: string): string {
+  // Register BEFORE tracking: a refused remote/device root must never reach
+  // cleanupTempDirs, whose rmSync would touch the very path we just rejected.
+  registerSandboxRoot(dir);
   tempDirs.push(dir);
   return dir;
 }
@@ -69,10 +208,27 @@ export const WB_READY_PROFILE_ID = 'pd.default';
 export const WB_READY_API_KEY_ENV = 'PD_WB_TEST_API_KEY';
 
 export function makeGovernance(home: string, options: GovernanceOptions = {}): string {
-  const governance = getWorkbuddyWorkspaceDir(home);
-  fs.mkdirSync(path.join(governance, '.pd'), { recursive: true });
+  // Hermetic resolution (2026-11-24 remediation): the governance dir is
+  // derived through an EXPLICIT configDirOverride inside the sandbox and a
+  // controlled env with the ambient host overrides stripped — it can never
+  // resolve to the real WorkBuddy config root even when the caller forgot to
+  // clean process.env (the 2026-11-22 real data-loss vector).
+  const governance = getWorkbuddyWorkspaceDir(home, path.join(path.resolve(home), '.workbuddy'), sandboxEnv(path.resolve(home)));
+  assertInsideSandbox(governance, `(makeGovernance home=${home})`);
+  // The boundary check must cover the ACTUAL write targets, not just their
+  // parent: `.pd` may be a junction/symlink planted inside the sandbox that
+  // resolves outside it, and `config.yaml` itself may be a link. Check the
+  // dir before creating it (a pre-existing escape must never be written
+  // through), re-check after mkdir (fail closed if the dir we just resolved
+  // no longer proves inside), then check the resolved file target.
+  const pdDir = path.join(governance, '.pd');
+  assertInsideSandbox(pdDir, '(makeGovernance .pd)');
+  fs.mkdirSync(pdDir, { recursive: true });
+  assertInsideSandbox(pdDir, '(makeGovernance .pd post-mkdir)');
+  const configPath = path.join(pdDir, 'config.yaml');
+  assertInsideSandbox(configPath, '(makeGovernance config.yaml)');
   if (options.malformed) {
-    fs.writeFileSync(path.join(governance, '.pd', 'config.yaml'), '{ this is: not: valid yaml ][');
+    fs.writeFileSync(configPath, '{ this is: not: valid yaml ][');
     return governance;
   }
   const config = getDefaultPdConfig();
@@ -91,7 +247,7 @@ export function makeGovernance(home: string, options: GovernanceOptions = {}): s
     // Hook paths run in child processes that inherit this env.
     process.env[WB_READY_API_KEY_ENV] = 'test-key';
   }
-  fs.writeFileSync(path.join(governance, '.pd', 'config.yaml'), JSON.stringify(config));
+  fs.writeFileSync(configPath, JSON.stringify(config));
   return governance;
 }
 
@@ -119,6 +275,17 @@ export interface ArtifactInput {
 
 /** Production store path: pi_artifacts row + SqliteActivationStateStore.recordActivation. */
 export async function activationArtifact(governance: string, input: ArtifactInput): Promise<void> {
+  assertInsideSandbox(governance, '(activationArtifact)');
+  // `new SqliteConnection(dir)` mkdirs `<dir>/.pd` and opens
+  // `<dir>/.pd/state.db` — the boundary check must run on that REAL path
+  // BEFORE the connection exists, because Database() would already have
+  // created (or written through) the file. The check mirrors the
+  // constructor's own resolution chain — guardWorkspaceLeak (mock-leak
+  // redirect under test env) then resolveStateDbPath — so the checked path
+  // and the opened path cannot drift apart.
+  const dbPath = resolveStateDbPath(guardWorkspaceLeak(governance));
+  assertInsideSandbox(path.dirname(dbPath), '(activationArtifact .pd)');
+  assertInsideSandbox(dbPath, '(activationArtifact state.db)');
   const connection = new SqliteConnection(governance);
   try {
     const now = new Date().toISOString();
@@ -143,8 +310,20 @@ export async function activationArtifact(governance: string, input: ArtifactInpu
 
 /** Create the canonical trajectory schema the shared pain evidence path writes into. */
 export function makeTrajectory(governance: string): void {
-  fs.mkdirSync(path.join(governance, '.state'), { recursive: true });
-  const db = new Database(path.join(governance, '.state', 'trajectory.db'));
+  // Sandbox boundary validation: a governance dir resolved through an
+  // ambient host override (or hand-joined to a real user dir) fails here,
+  // before any bytes are written.
+  assertInsideSandbox(governance, '(makeTrajectory)');
+  // Same write-target discipline as makeGovernance: check `.state` before and
+  // after mkdir, then check the resolved trajectory.db itself — a junction or
+  // file link landing outside the sandbox must refuse BEFORE SQLite opens it.
+  const stateDir = path.join(governance, '.state');
+  assertInsideSandbox(stateDir, '(makeTrajectory .state)');
+  fs.mkdirSync(stateDir, { recursive: true });
+  assertInsideSandbox(stateDir, '(makeTrajectory .state post-mkdir)');
+  const dbPath = resolveTrajectoryDbPath(governance);
+  assertInsideSandbox(dbPath, '(makeTrajectory trajectory.db)');
+  const db = new Database(dbPath);
   db.exec(`
     CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL);

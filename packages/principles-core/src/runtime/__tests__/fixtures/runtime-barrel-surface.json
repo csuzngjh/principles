@@ -1463,6 +1463,7 @@
     "TRAJECTORY_TABLES",
     "TRUSTED_HOST_CONTEXT_WINDOW_SOURCES",
     "TargetEvidenceReconcileReport",
+    "TargetTurnEvidenceRead",
     "TaskActionabilityResult",
     "TaskClassificationInput",
     "TaskFact",

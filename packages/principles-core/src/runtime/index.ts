@@ -515,8 +515,11 @@ export type { PainReceiptRecoveryOutcome } from './pain-receipt-recovery.js';
 // PRI-1274 (B1 / P1-3): the workspace worker's bounded reconcile for tasks
 // waiting on their named target turn's text (the only exit from
 // `waiting_for_target_evidence`).
+// PRI-1273 (A2): the flip also backfills the target-turn evidence + its
+// evidenceClass in the SAME CAS; TargetTurnEvidenceRead is the shared read
+// vocabulary (the pd-mcp-server submit path imports it for its enrichment).
 export { reconcileWaitingTargetEvidenceTasks } from './pain-target-evidence-reconcile.js';
-export type { TargetEvidenceReconcileReport } from './pain-target-evidence-reconcile.js';
+export type { TargetEvidenceReconcileReport, TargetTurnEvidenceRead } from './pain-target-evidence-reconcile.js';
 // PRI-642 SPEC §8: THE shared ingress semantic evaluator — one authority
 // for every adapter (OpenClaw funnel, pd-cli, Codex).
 export {

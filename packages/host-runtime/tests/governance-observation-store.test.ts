@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import {
   GOVERNANCE_RETENTION_MAX_TURNS,
   ingestGovernanceObservations,
+  listGovernanceConversationTextsForHostTurn,
   listGovernanceObservations,
   promoteGovernanceEvidence,
   readGovernanceCheckpoint,
@@ -822,5 +823,97 @@ describe('listGovernanceUncheckpointedSessions (PRI-1171 ticket ⑦ live_only da
   it('returns ok with zero sessions on an empty store', () => {
     const empty = listGovernanceUncheckpointedSessions({ workspaceDir, hostKind: 'codex' });
     expect(empty).toMatchObject({ ok: true, sessions: [], truncated: false });
+  });
+});
+
+describe('PRI-1273 (devin BUG_0002) — listGovernanceConversationTextsForHostTurn', () => {
+  it('a long turn whose final answer sits behind 70 tool/reasoning rows still surfaces it (LAST conversational rows, not an early window)', () => {
+    const rows: GovernanceObservationInput[] = [
+      observation({ hostTurnId: 'turn-long', kind: 'user_turn', logicalObservationKey: 'codex|rollout-uuid-1|turn-long|user', visibleText: 'user instruction for the long turn' }),
+    ];
+    for (let i = 0; i < 70; i += 1) {
+      rows.push(observation({
+        hostTurnId: 'turn-long', kind: i % 2 === 0 ? 'tool_call' : 'reasoning',
+        logicalObservationKey: `codex|rollout-uuid-1|turn-long|noise-${i}`,
+        visibleText: undefined, toolFacts: { i },
+      }));
+    }
+    rows.push(observation({ hostTurnId: 'turn-long', kind: 'assistant_turn', logicalObservationKey: 'codex|rollout-uuid-1|turn-long|final', visibleText: 'THE FINAL ANSWER after the tool storm' }));
+    const seeded = ingest({ observations: rows });
+    expect(seeded.ok).toBe(true);
+
+    const result = listGovernanceConversationTextsForHostTurn({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1', hostTurnId: 'turn-long' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The generic list would return the FIRST 64 rows by id — the user text
+    // plus tool noise, cutting the final answer. The focused query filters
+    // kind + readability in SQL and keeps the turn's LAST conversational
+    // rows, in capture order.
+    expect(result.rows.map((row) => row.kind)).toEqual(['user_turn', 'assistant_turn']);
+    expect(result.rows[1]?.visibleText).toBe('THE FINAL ANSWER after the tool storm');
+
+    // The generic early-window behavior this replaces (regression context):
+    const generic = listGovernanceObservations({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1', hostTurnId: 'turn-long', limit: 64 });
+    if (generic.ok) {
+      const genericTexts = generic.observations.filter((row) => typeof row.visibleText === 'string' && row.visibleText.trim() !== '');
+      expect(genericTexts.some((row) => row.visibleText === 'THE FINAL ANSWER after the tool storm')).toBe(false);
+    }
+  });
+
+  it('expired rows, empty text, other sessions/turns and other hosts never qualify', () => {
+    const seeded = ingest({
+      observations: [
+        observation({ hostTurnId: 'turn-x', kind: 'user_turn', logicalObservationKey: 'codex|rollout-uuid-1|turn-x|user', visibleText: 'x body' }),
+        observation({ hostTurnId: 'turn-x', kind: 'user_turn', logicalObservationKey: 'codex|rollout-uuid-1|turn-x|empty', visibleText: '   ' }),
+        observation({ hostTurnId: 'turn-other', kind: 'user_turn', logicalObservationKey: 'codex|rollout-uuid-1|turn-other|user', visibleText: 'other turn' }),
+        observation({ hostKind: 'workbuddy' as never, hostTurnId: 'turn-x', kind: 'user_turn', logicalObservationKey: 'workbuddy|rollout-uuid-1|turn-x|user', visibleText: 'same key other host' }),
+        // Stale observedAt expires at ingest (retention age bound).
+        observation({ hostTurnId: 'turn-x', kind: 'assistant_turn', logicalObservationKey: 'codex|rollout-uuid-1|turn-x|stale', visibleText: 'stale', observedAt: new Date(NOW.getTime() - 8 * 24 * 60 * 60 * 1000).toISOString() }),
+      ],
+    });
+    expect(seeded.ok).toBe(true);
+    const result = listGovernanceConversationTextsForHostTurn({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1', hostTurnId: 'turn-x' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rows.map((row) => row.logicalKey)).toEqual(['codex|rollout-uuid-1|turn-x|user']);
+  });
+
+  it('respects the limit with the turn\'s LAST rows and reverses to capture order', () => {
+    const rows: GovernanceObservationInput[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      rows.push(observation({ hostTurnId: 'turn-five', kind: 'assistant_turn', logicalObservationKey: `codex|rollout-uuid-1|turn-five|a${i}`, visibleText: `assistant snippet ${i}` }));
+    }
+    expect(ingest({ observations: rows }).ok).toBe(true);
+    const result = listGovernanceConversationTextsForHostTurn({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1', hostTurnId: 'turn-five', limit: 3 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rows.map((row) => row.visibleText)).toEqual(['assistant snippet 2', 'assistant snippet 3', 'assistant snippet 4']);
+  });
+
+  it('a live/transcript body conflict flags the row partial — and a partial row never enters the target-turn evidence read', () => {
+    // The live hook wrote the complete user_turn for the turn…
+    expect(ingest({ observations: [observation({ kind: 'user_turn', hostTurnId: 'turn-conflict', logicalObservationKey: 'codex|rollout-uuid-1|turn-conflict|user', visibleText: 'the words the live hook saw', source: 'live_hook' })] })).toMatchObject({ ok: true, inserted: 1 });
+    // …then the catch-up transcript replays the SAME logical record with a
+    // conflicting body: the store keeps the first committed content, marks
+    // the row partial and aborts the batch at the conflict.
+    const conflicted = ingest({
+      observations: [observation({ kind: 'user_turn', hostTurnId: 'turn-conflict', logicalObservationKey: 'codex|rollout-uuid-1|turn-conflict|user', visibleText: 'DIFFERENT words from the transcript', transcriptRecordKey: 'codex|rollout-uuid-1|8' })],
+    });
+    expect(conflicted.ok).toBe(false);
+    expect(conflicted.reason).toBe('logical_key_content_conflict');
+    const listed = listGovernanceObservations({ workspaceDir });
+    if (!listed.ok) throw new Error('list failed');
+    expect(listed.observations.find((row) => row.logicalKey === 'codex|rollout-uuid-1|turn-conflict|user')?.completeness).toBe('partial');
+
+    // The conflicted row is not formally complete — the turn contributes NO
+    // evidence row at all until a complete record exists (the Diagnostician
+    // never consumes a body two sources disagree on).
+    const partialOnly = listGovernanceConversationTextsForHostTurn({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1', hostTurnId: 'turn-conflict' });
+    expect(partialOnly).toEqual({ ok: true, rows: [] });
+
+    // A normal complete record of the same turn still qualifies.
+    expect(ingest({ observations: [observation({ kind: 'assistant_turn', hostTurnId: 'turn-conflict', logicalObservationKey: 'codex|rollout-uuid-1|turn-conflict|assistant', visibleText: 'the complete assistant answer' })] })).toMatchObject({ ok: true });
+    const after = listGovernanceConversationTextsForHostTurn({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1', hostTurnId: 'turn-conflict' });
+    expect(after.ok && after.rows.map((row) => row.logicalKey)).toEqual(['codex|rollout-uuid-1|turn-conflict|assistant']);
   });
 });

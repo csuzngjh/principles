@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('create-principles-disciple/update-console', async (original) => ({
   ...await original<typeof import('create-principles-disciple/update-console')>(),
   createReleaseManagerAuthority: mocks.create,
+  createReleaseManagerAuthorityAsync: mocks.create,
 }));
 vi.mock('node:child_process', async (importOriginal) => ({
   ...await importOriginal<typeof import('node:child_process')>(),
