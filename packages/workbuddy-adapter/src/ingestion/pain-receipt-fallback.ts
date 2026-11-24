@@ -69,7 +69,7 @@ export function extractReceiptText(toolResponse: unknown): { ok: true; text: str
     if (type === 'text' && typeof text === 'string') textBlocks.push(text);
   }
   if (textBlocks.length === 0) return { ok: false, reasonCode: 'receipt_envelope_content_missing' };
-  const firstText = textBlocks[0];
+  const [firstText] = textBlocks;
   if (firstText === undefined) return { ok: false, reasonCode: 'receipt_envelope_content_missing' };
   if (textBlocks.length > 1) return { ok: false, reasonCode: 'receipt_envelope_ambiguous_content' };
   return { ok: true, text: firstText };
