@@ -4,20 +4,22 @@ import * as path from 'path';
 import * as url from 'url';
 import { createRequire } from 'module';
 import { realpathSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { banner, logger, setQuietMode } from './utils/logger.js';
-import { runPrompts, type InstallOptions } from './prompts.js';
+import { runPrompts, type InstallOptions, type ServiceHostConsent } from './prompts.js';
 import { install, resolveConsoleWorkspaceDir } from './installer.js';
 import { uninstall, checkInstallStatus } from './uninstaller.js';
-import { checkEnvironment, detectWorkspace } from './utils/env.js';
+import { checkEnvironment, detectWorkspace, inspectWorkspaceDir } from './utils/env.js';
 import {
   MVP_CHANNELS,
   buildFailureOutput,
   getHomeDir,
+  getInstallManifestPath,
   isValidHttpBaseUrl,
 } from './mvp-config.js';
 import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
 import { formatHostStateSummary, buildPostInstallGuidance, formatPostInstallGuidanceLines } from './install-summary.js';
-import { isHostTarget, type HostTarget, HOST_TARGETS } from './installers/index.js';
+import { isHostSelection, isHostTarget, HOST_TARGETS, type HostSelection, type HostTarget } from './installers/index.js';
 import { readWorkbuddyHostState } from './installers/workbuddy-host-installer.js';
 import {
   AGENT_SKILL_HOSTS,
@@ -89,12 +91,72 @@ export function toInstallJsonOutput(
           })),
         }
       : {}),
+    // PRI-1278 Phase 5: the background-execution outcome is part of the
+    // machine contract — `--json` silences the human summary, and a new user
+    // must be able to see scheduler state, workspace owner and the first
+    // cycle without guessing.
+    ...(result.serviceHost !== undefined ? { serviceHost: result.serviceHost } : {}),
+    ...(result.hostAdapter !== undefined ? { hostAdapter: result.hostAdapter } : {}),
     ...(result.success ? {} : {
       reason: result.reason,
       component: result.component,
       dependency: result.dependency,
     }),
   };
+}
+
+/**
+ * PRI-1278 Phase 5 review: in INTERACTIVE mode the install mode must be chosen
+ * AFTER the final host and workspace are known. Pre-filling it from the
+ * pre-prompt (host-neutral) workspace made a user-selected Codex / WorkBuddy
+ * workspace inherit `force` and overwrite existing files. Explicit flags still
+ * win; non-interactive still needs a resolved default here.
+ */
+export function resolvePrePromptInstallMode(input: {
+  force: boolean;
+  smart: boolean;
+  nonInteractive: boolean;
+  workspaceInfo: { isFirstInstall: boolean };
+}): 'smart' | 'force' | undefined {
+  if (input.force) return 'force';
+  if (input.smart) return 'smart';
+  if (!input.nonInteractive) return undefined;
+  return input.workspaceInfo.isFirstInstall ? 'force' : 'smart';
+}
+
+/**
+ * PRI-1278 Phase 5: the background-execution fact block. A new user must see
+ * the scheduler, the workspace owner and the first real cycle — "Install
+ * complete!" alone is not evidence of a working background.
+ */
+function printServiceHostSummary(serviceHost: NonNullable<Awaited<ReturnType<typeof install>>['serviceHost']>): void {
+  console.log();
+  console.log(t('background_execution_title'));
+  console.log(`  ${t('background_scheduler')} ...................... ${serviceHost.scheduler.state}${serviceHost.scheduler.registered === true ? ' (registered)' : ''}${serviceHost.scheduler.enabled === true ? ', enabled' : ''}`);
+  console.log(`  ${t('background_trigger_interval')} ............... ${serviceHost.scheduler.triggerIntervalMs ?? 'unknown'} ms`);
+  if (serviceHost.provisioning !== null) {
+    for (const target of serviceHost.provisioning.targets) {
+      const p = target.outcome;
+      console.log(`  ${t('background_workspace_owner')} ................ ${target.workspaceDir}`);
+      console.log(`    owner=${p.ownershipAfter}${p.generation !== null ? ` (generation ${p.generation})` : ''}; adapter=${target.host === 'none' ? 'none — waiting_for_host_binding' : target.host}; readiness=${p.readiness}`);
+      const cycle = p.firstCycle.attempted
+        ? (p.firstCycle.ok
+            ? `completed (executed=${p.firstCycle.executed}, progressed=${p.firstCycle.progressed})`
+            : `not completed (${p.firstCycle.reason ?? p.firstCycle.outcome ?? 'unknown'})`)
+        : t('background_not_attempted');
+      console.log(`    first cycle: ${cycle}${p.pendingProvisioning === true ? ' (PENDING provisioning)' : ''}`);
+      if (p.evidencePath !== undefined) console.log(`    evidence: ${p.evidencePath}`);
+    }
+  } else {
+    console.log(`  ${t('background_workspace_owner')} ................ ${serviceHost.freshInstall ? t('background_not_provisioned') : t('background_unchanged')}`);
+  }
+  for (const warning of serviceHost.scheduler.warnings) console.log(`  ! ${warning}`);
+  if (serviceHost.provisioning !== null) {
+    for (const target of serviceHost.provisioning.targets) {
+      for (const warning of target.outcome.warnings) console.log(`  ! ${warning}`);
+    }
+  }
+  console.log(`  ${t('background_next')} ........................... ${serviceHost.nextAction}`);
 }
 
 async function runInstall(options: Record<string, unknown>): Promise<void> {
@@ -116,22 +178,28 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 
   setLanguage(options.lang);
 
-  // ADR-0020 §2.3: Validate --host value. Default is 'openclaw' for backward compat.
-  const rawHost = typeof options.host === 'string' ? options.host : 'openclaw';
-  if (!isHostTarget(rawHost)) {
+  // PRI-1278 Phase 5: host ADAPTER selection is independent of the PD-owned
+  // background Service Host. There is NO OpenClaw default — omitting --host
+  // installs no host adapter (Service-Host-only) instead of silently attaching
+  // OpenClaw. Interactive mode prompts; non-interactive uses 'none'.
+  const rawHost = options.host;
+  if (rawHost !== undefined && !isHostSelection(rawHost)) {
     if (jsonMode) {
       console.log(JSON.stringify(buildFailureOutput(
         'invalid_host',
-        `--host must be one of: ${HOST_TARGETS.join(', ')}. Got: ${JSON.stringify(rawHost)}. Next: re-run with --host openclaw (or --host codex / --host all)`,
+        `--host must be one of: none, openclaw, codex, workbuddy, all. Got: ${JSON.stringify(rawHost)}. Next: re-run with --host codex (or --host none for a Service-Host-only install)`,
       ), null, 2));
     } else {
-      logger.error(`--host must be one of: ${HOST_TARGETS.join(', ')}. Got: ${JSON.stringify(rawHost)}`);
-      logger.info(`Next: re-run with --host openclaw (or --host codex / --host all)`);
+      logger.error(`--host must be one of: none, openclaw, codex, workbuddy, all. Got: ${JSON.stringify(rawHost)}`);
+      logger.info('Next: re-run with --host codex, --host workbuddy, --host openclaw, or --host none');
     }
     process.exit(1);
     return;
   }
-  const host: HostTarget = rawHost;
+  const requestedHost: HostSelection | undefined = rawHost;
+  // The pre-prompt detection must follow the requested host; an unspecified
+  // host is the neutral Service-Host-only context (never OpenClaw).
+  const host = requestedHost ?? 'none';
 
   if (jsonMode) {
     setQuietMode(true);
@@ -198,10 +266,14 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   if (!jsonMode && host === 'codex') {
     logger.info(`Host: Codex CLI (OpenClaw not required)`);
   }
-
-  if (jsonMode && !options.yes && !options.nonInteractive) {
-    options.yes = true;
+  if (!jsonMode && host === 'none') {
+    logger.info(`${t('install_host_adapter')}: ${t('install_host_none')}`);
   }
+
+  // PRI-1278 Phase 5: --json alone means "non-interactive", NOT "accept the
+  // recommended defaults". Accepting a persistent OS scheduler trigger requires
+  // an explicit consent source (--yes, --enable-service-host, or interactive).
+  const freshInstall = !existsSync(getInstallManifestPath());
 
   // PRI-1247: detection is host-aware. `--host codex` must not inherit the
   // OpenClaw-oriented environment/default workspace candidates.
@@ -210,20 +282,30 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   const cliOptions: Partial<InstallOptions> = {
     language: options.lang,
     workspaceDir: typeof options.workspace === 'string' ? options.workspace : undefined,
-    host,
+    // undefined keeps the interactive prompt; non-interactive resolves 'none'.
+    host: requestedHost,
     stopGateway: options.stopGateway === true,
-    // PRI-1281 Phase 3: explicit scheduler consent flags (task §6).
+    freshInstall,
+    // PRI-1281 Phase 3 / PRI-1278 Phase 5: explicit scheduler consent flags.
     registerServiceHost: options.enableServiceHost === true || options.registerServiceHost === true,
     enableServiceHost: options.enableServiceHost === true,
+    disableServiceHost: options.serviceHost === false,
   };
 
-  if (options.force) {
-    cliOptions.mode = 'force';
-  } else if (options.smart) {
-    cliOptions.mode = 'smart';
-  } else {
-    cliOptions.mode = workspaceInfo.isFirstInstall ? 'force' : 'smart';
-  }
+  const nonInteractive = options.nonInteractive === true || options.yes === true || jsonMode;
+
+  const prePromptMode = resolvePrePromptInstallMode({
+    force: options.force === true,
+    smart: options.smart === true,
+    nonInteractive,
+    // PRI-1278 Phase 5 review: an explicit --workspace is the directory the
+    // installer will actually write to. Deriving mode from the host's DETECTED
+    // default let that other directory's emptiness pick `force` for this one.
+    workspaceInfo: typeof options.workspace === 'string' && options.workspace.trim().length > 0
+      ? inspectWorkspaceDir(options.workspace)
+      : workspaceInfo,
+  });
+  if (prePromptMode !== undefined) cliOptions.mode = prePromptMode;
 
   if (!jsonMode && !options.nonInteractive && !options.yes) {
     if (workspaceInfo.isFirstInstall) {
@@ -236,8 +318,6 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     }
     console.log();
   }
-
-  const nonInteractive = options.nonInteractive || options.yes || jsonMode;
 
   // Fix-4 (P0-BUG-4): In non-interactive mode, collect runtime profile from
   // CLI flags (--provider/--api-key-env/--model) or env vars
@@ -350,6 +430,27 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     }
   }
 
+  // PRI-1278 Phase 5: resolve the background-execution consent for the
+  // NON-INTERACTIVE path. Precedence is deliberate:
+  //  - explicit --enable-service-host / --register-service-host win;
+  //  - --no-service-host is an explicit opt-out;
+  //  - --yes accepts the recommended fresh-install default (enable);
+  //  - --json / --non-interactive WITHOUT --yes is NOT consent — nothing is
+  //    registered and the structured result says consent_required.
+  const nonInteractiveServiceHost: ServiceHostConsent = options.enableServiceHost === true
+    ? { intent: 'enable', source: 'explicit_flag' }
+    : options.registerServiceHost === true
+      ? { intent: 'register_only', source: 'explicit_flag' }
+      : options.serviceHost === false
+        ? { intent: 'opt_out', source: 'policy' }
+        : options.yes === true
+          ? freshInstall
+            ? { intent: 'enable', source: 'recommended_default' }
+            : { intent: 'refresh_if_registered', source: 'policy' }
+          : freshInstall
+            ? { intent: 'consent_required', source: 'policy' }
+            : { intent: 'refresh_if_registered', source: 'policy' };
+
   const installOptions: InstallOptions | null = nonInteractive
     ? {
         language: cliOptions.language || getLanguage(),
@@ -360,13 +461,15 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         workspaceExplicit: cliOptions.workspaceDir !== undefined,
         channels: [...MVP_CHANNELS],
         overwriteConfig: false,
-        // ADR-0020 §2.3: propagate validated host target into install options.
-        host,
+        // PRI-1278 Phase 5: no host flag → Service-Host-only, never OpenClaw.
+        host: requestedHost ?? 'none',
         runtimeProfile: cliOptions.runtimeProfile,
         stopGateway: cliOptions.stopGateway === true,
-        // PRI-1281 Phase 3: explicit scheduler consent flags (task §6).
-        registerServiceHost: cliOptions.enableServiceHost === true || cliOptions.registerServiceHost === true,
-        enableServiceHost: cliOptions.enableServiceHost === true,
+        freshInstall,
+        enableServiceHost: nonInteractiveServiceHost.intent === 'enable',
+        registerServiceHost: nonInteractiveServiceHost.intent === 'register_only',
+        disableServiceHost: nonInteractiveServiceHost.intent === 'opt_out',
+        serviceHost: nonInteractiveServiceHost,
       }
     : await runPrompts(cliOptions, workspaceInfo);
 
@@ -433,7 +536,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       console.log(t('principles_disciple_setup'));
       console.log();
       console.log(t('detecting_environment'));
-      console.log(`  OpenClaw integration target .... ${env.hasOpenClaw ? t('openclaw_target_found') : t('openclaw_target_not_found')}`);
+      console.log(`  ${t('install_host_adapter')} ................... ${installOptions.host === 'none' ? t('install_host_none') : installOptions.host}`);
       console.log(`  Node.js ........................ ${t('node_found')} (${env.nodeVersion})`);
       console.log();
       console.log(t('installing_mvp_components'));
@@ -474,6 +577,10 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       // INDEPENDENT facts — the summary never infers one from another, and it
       // prints nothing when the install failed.
       for (const line of formatHostStateSummary(result.hostResults, result.success)) console.log(line);
+      // PRI-1278 Phase 5: the background-execution fact block.
+      if (result.serviceHost !== undefined) {
+        printServiceHostSummary(result.serviceHost);
+      }
       if (postInstallGuidance !== null) {
         for (const line of formatPostInstallGuidanceLines(postInstallGuidance, t('post_install_checklist'))) console.log(line);
       }
@@ -521,6 +628,9 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         console.log('  Already-installed hosts remain installed and usable. Complete the manual step, then re-run: npx create-principles-disciple install --host <target>');
         if (postInstallGuidance !== null) {
           for (const line of formatPostInstallGuidanceLines(postInstallGuidance, t('post_install_checklist'))) console.log(line);
+        }
+        if (result.serviceHost !== undefined) {
+          printServiceHostSummary(result.serviceHost);
         }
       }
       process.exit(1);
@@ -645,16 +755,19 @@ program
   .option('--api-key-env <name>', 'Environment variable name holding the LLM API key (e.g. OPENAI_API_KEY). Requires --provider.')
   .option('--model <model>', 'LLM model id (optional; keeps the existing configured model, else applies the per-provider default)')
   .option('--base-url <url>', 'OpenAI-compatible custom endpoint for pd.default (optional; present = call it directly, skip the provider model catalog). Env: PD_BASE_URL.')
-  // ADR-0020 §2.3: host target selector. Default 'openclaw' for backward compat.
-  .option('--host <host>', `Host platform (${HOST_TARGETS.join('/')})`, 'openclaw')
+  // ADR-0020 §2.3 / PRI-1278 Phase 5: host ADAPTER selector. There is NO
+  // default: omitting it means Service-Host-only ('none'). Never OpenClaw.
+  .option('--host <host>', 'Host adapter to install (none/openclaw/codex/workbuddy/all; default none = PD Service Host only)')
   // Gateway lock prevention: auto-stop a running OpenClaw gateway before
   // install (avoids EPERM on the backup rename) and restart it afterwards.
   .option('--stop-gateway', 'Stop the OpenClaw gateway before install if running, restart after', false)
-  // PRI-1281 Phase 3: EXPLICIT operator consent for the user-level OS
-  // scheduler (task §6: never enabled without consent). Register creates
-  // installed_disabled; enable arms the automatic managed runs.
+  // PRI-1281 Phase 3 / PRI-1278 Phase 5: scheduler consent. Register creates
+  // installed_disabled; enable arms the automatic managed runs. On a FRESH
+  // install --yes accepts enable as the recommended default; --json and
+  // --non-interactive alone never register anything.
   .option('--register-service-host', 'Register the user-level OS scheduler trigger after install (created DISABLED; consent required)', false)
   .option('--enable-service-host', 'Register AND enable the OS scheduler after install (implies --register-service-host; consent required)', false)
+  .option('--no-service-host', 'Do not register or enable the PD Service Host scheduler (explicit opt-out)')
   .action(async (options) => {
     await runInstall(options);
   });
