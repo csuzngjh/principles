@@ -61,7 +61,7 @@ import {
 } from '@principles/host-runtime';
 import { catchUpCodexIngestion, type CodexCatchUpResult } from '../ingestion/catch-up.js';
 import type { TranscriptPort } from '../ingestion/transcript-decoder.js';
-import { codexTargetTurnTextAvailable } from '../ingestion/pain-receipt-fallback.js';
+import { readCodexTargetTurnEvidence } from '../ingestion/pain-receipt-fallback.js';
 import { CODEX_TOOL_SEMANTIC_MAPPINGS, CODEX_TOOL_SEMANTICS } from '../tool-semantics.js';
 
 export type CodexWorkerMode = 'ready' | 'manual_action_required' | 'paused' | 'degraded';
@@ -413,12 +413,20 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
         // and the picker's SQL excludes anything still waiting. Bounded work
         // over the existing task rows + the shared authorized-store probe;
         // no new queue, no scheduler, no scanning of general history.
+        // PRI-1273 (A2): the probe is the consent-gated EXACT-turn read —
+        // the flip CAS backfills the arrived evidence + evidenceClass onto
+        // the SAME task, and a source-material denial reclassifies the task
+        // to blocked_by_source_material_consent instead of waiting.
+        // SPEC TD §2.2 ruling 4: the SAME consent ledger is read once more
+        // right before the evidence write (the existing PRI-1283 R2 port), so
+        // a revocation landing between the read and the write persists nothing.
         targetEvidenceReconcile = await reconcileWaitingTargetEvidenceTasks({
           stateManager: handle.stateManager,
-          targetTurnTextAvailable: (sessionId, turnId) => codexTargetTurnTextAvailable(path.resolve(workspaceDir), sessionId, turnId),
+          readTargetTurnEvidence: (sessionId, turnId) => readCodexTargetTurnEvidence(path.resolve(workspaceDir), sessionId, turnId),
+          sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(path.resolve(workspaceDir)),
           nowIso: new Date().toISOString(),
         });
-        if (targetEvidenceReconcile.flipped > 0 || targetEvidenceReconcile.errors.length > 0) {
+        if (targetEvidenceReconcile.flipped > 0 || targetEvidenceReconcile.blocked > 0 || targetEvidenceReconcile.errors.length > 0) {
           emitEvent('CODEX_WORKER_TARGET_EVIDENCE_RECONCILE', JSON.stringify(targetEvidenceReconcile));
         }
         const candidate = await pickDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT, new Date().toISOString());
