@@ -82,7 +82,7 @@ export class MemoryCandidateStore implements CandidateStore {
       return { status: 'refused', reason: rawKind === null ? 'candidate_kind_still_invalid' : 'candidate_kind_has_no_dreamer_route' };
     }
     const existing = this.admissions.get(candidateId) ?? null;
-    const result = authorizeInvalidKindPostProcessingRecoveryInDocument(existing, candidateId, rawKind, input);
+    const result = authorizeInvalidKindPostProcessingRecoveryInDocument(existing, { candidateId, rawRecommendationKind: rawKind, authorization: input });
     if (result.status === 'already_authorized') return result;
     if (candidate.status !== 'pending') return { status: 'refused', reason: 'candidate_not_pending' };
     if (result.status !== 'refused') this.admissions.set(candidateId, result.document);

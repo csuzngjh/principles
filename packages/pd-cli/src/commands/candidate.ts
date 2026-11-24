@@ -2277,7 +2277,11 @@ export async function handleCandidatePostProcessingRecovery(opts: CandidatePostP
     }, true);
     return;
   }
-  if (reason.length === 0 || reason.length > 500 || /[\u0000-\u001f\u007f]/.test(reason)) {
+  const containsControlCharacter = [...reason].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
+  if (reason.length === 0 || reason.length > 500 || containsControlCharacter) {
     output({
       candidateId: opts.candidateId,
       status: 'refused',
@@ -2299,7 +2303,10 @@ export async function handleCandidatePostProcessingRecovery(opts: CandidatePostP
     }, true);
     return;
   }
-  if ((identity.source !== 'env' && identity.source !== 'file') || !identity.ownerId || !identity.credentialId) {
+  const verifiedOwnerId = identity.ownerId;
+  if ((identity.source !== 'env' && identity.source !== 'file')
+    || typeof verifiedOwnerId !== 'string' || verifiedOwnerId.length === 0
+    || !identity.credentialId) {
     output({
       candidateId: opts.candidateId,
       status: 'refused',
@@ -2315,7 +2322,7 @@ export async function handleCandidatePostProcessingRecovery(opts: CandidatePostP
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     const recovery = await ledgerAdapter.withCandidateCoordination(opts.candidateId, async () =>
       stateManager.authorizeInvalidKindPostProcessingRecovery(opts.candidateId, {
-        ownerId: identity.ownerId!,
+        ownerId: verifiedOwnerId,
         identitySource: identity.source,
         reason,
         authorizedAt: new Date().toISOString(),

@@ -276,7 +276,7 @@ export class SqliteCandidateStore implements CandidateStore {
         outcome = { status: 'refused', reason: parsed.reason };
         return;
       }
-      const result = authorizeInvalidKindPostProcessingRecoveryInDocument(parsed.document, candidateId, rawKind, input);
+      const result = authorizeInvalidKindPostProcessingRecoveryInDocument(parsed.document, { candidateId, rawRecommendationKind: rawKind, authorization: input });
       // A completed/active recovery is an idempotent read even after the
       // worker has consumed the candidate. It must return the original audit
       // record without attempting another state write.
