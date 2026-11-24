@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection, resolveStateDbPath } from '@principles/core/runtime';
+import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
+import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 import { canonicalizeDeepestExisting, getWorkbuddyWorkspaceDir, isPathWithinRoot } from '@principles/install-layout';
 
 /**
@@ -319,7 +320,7 @@ export function makeTrajectory(governance: string): void {
   assertInsideSandbox(stateDir, '(makeTrajectory .state)');
   fs.mkdirSync(stateDir, { recursive: true });
   assertInsideSandbox(stateDir, '(makeTrajectory .state post-mkdir)');
-  const dbPath = path.join(stateDir, 'trajectory.db');
+  const dbPath = resolveTrajectoryDbPath(governance);
   assertInsideSandbox(dbPath, '(makeTrajectory trajectory.db)');
   const db = new Database(dbPath);
   db.exec(`

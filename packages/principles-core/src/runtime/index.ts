@@ -277,10 +277,6 @@ export { MemoryCommitStore } from './store/commit/memory-commit-store.js';
 export { MemoryCandidateStore } from './store/candidate/memory-candidate-store.js';
 export { MemoryArtifactStore } from './store/artifact/memory-artifact-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
-// The same resolver SqliteConnection uses to locate <workspace>/.pd/state.db —
-// exported so write-boundary guards can check the REAL database path before a
-// connection is constructed instead of re-deriving (and drifting from) it.
-export { resolveStateDbPath } from './store/storage-paths.js';
 export {
   SqliteReconciliationCursorStore,
   SUCCEEDED_TRANSITIONS_SCOPE,
