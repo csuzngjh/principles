@@ -284,6 +284,77 @@ PD 当前接入的 hook：
 
 详见：`DOMAIN_MODEL.md` §3、`PD_System_Dynamics_Model.md` §4
 
+### PD-Lab（行为实验基础设施）
+
+回答「设计是否真的**改变了 Agent 行为**、且改变方向符合预期」的实验路径，而不是「代码是否按设计执行」。单元测试只证明代码在跑；只要一个改动声称「让 Agent 做得更好 / 更安全 / 更符合意图」，其行为主张只能由 PD-Lab 的机械化证据支撑：预注册 + A/B 双臂 + 盲评 + 可复算证据。PD-Lab **复用**既有 Runner / Evaluator / Evidence / Report 能力，不自建第二套执行或证据系统。
+
+| 字段 | 标准 | 说明 |
+|-----|------|------|
+| 当前版本 | v0.3 | 设计权威为 SPEC / TECH / CONTRACT v0.3；使用纪律见使用指南 |
+| 判定词汇 | `REQUIRED / NOT_REQUIRED / BLOCKED` | PR 的 PD-Lab Impact 字段；「必须评估」≠「必须执行完整实验」 |
+| 结果词汇 | `PASS / PASS_WITH_LIMITATIONS / BLOCKED / NOT_RUN` | 四者不得混用；`BLOCKED` 不得描述为 `PASS` |
+| 命令入口 | `npm run lab:*` | 与根 `package.json` 脚本一一对应 |
+
+**禁止使用**：~~Evolution Loop~~、~~Auto Benchmark~~（把行为实验说成自动评分仪式）
+
+详见：[SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001 v0.3 §1–§2](../specs/SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)、[TECH v0.3](../specs/TECH-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)、[CONTRACT-PD-LAB-DATA-AND-SCORING-001 v0.3](../specs/CONTRACT-PD-LAB-DATA-AND-SCORING-001-v0.3.md)、使用指南 [PD-LAB-USAGE.md](../process/PD-LAB-USAGE.md)
+
+### 实验臂（Experiment Arm）
+
+A/B 双臂实验中的一臂：`baseline`（参照侧）与 `candidate`（被验证侧）。两臂**唯一允许的差异**必须能一句话说清；多于一个差异即实验设计缺陷。臂身份由实验配置显式声明，并贯穿 Metrics、盲评包、汇总与决策输入——**不得**按字母序、目录名或运行顺序推断基线。
+
+| 字段 | 标准 | 说明 |
+|-----|------|------|
+| 标准名 | arm | 单臂为 `arm`，两臂合称 A/B 双臂 |
+| 身份映射 | `blindmap` | `arm → 盲评标识` 的映射；只存在于非盲材料中 |
+| 执行入口 | `lab:run`（grid 驱动单臂 `ab-run`） | 不是自建执行器 |
+
+**禁止使用**：~~group~~、~~treatment/control~~（借用医学统计词汇，与臂身份映射语义冲突）
+
+详见：[SPEC v0.3 §12「两臂身份映射」](../specs/SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)、[PD-LAB-USAGE.md §6](../process/PD-LAB-USAGE.md)
+
+### 盲评包（Blind Pack）
+
+移除臂身份后的可比材料，供 Owner 盲评或裁判模型阅读；生成时复用 `ab-blindpack` 的泄露扫描，**泄露即拒绝**。臂身份只保存在 `blindmap` 中，绝不进入盲评材料本身；解盲只能发生在评分记录落盘之后。
+
+| 字段 | 标准 | 说明 |
+|-----|------|------|
+| 生成入口 | `npm run lab:blindpack` | 只读，无外部调用 |
+| 判官包 | `buildJudgePackage` / `swapJudgePackage` | 后者做 A/B 位置交换，`secretBinding` 携带 `displayOrder` 与 `identityMap` |
+| 抽查 | `owner-spotcheck-list.mjs` | 确定性抽取 ≥20% 盲包给 Owner 复核（须 D5） |
+
+**禁止使用**：~~anonymous sample~~、~~sealed set~~（都不表达「同一案例、仅去身份」这一语义）
+
+详见：[SPEC v0.3 §8](../specs/SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)、[PD-LAB-USAGE.md §6.1](../process/PD-LAB-USAGE.md)
+
+### 裁判协议（Judge Protocol，`jp-pd-lab@1`）
+
+冻结的**纯函数**协议模块（`judge-protocol.mjs`）：不调用模型、不碰网络/文件系统/时钟。它把盲包、位置交换绑定与裁判原始响应，组装成一条可校验的协议记录：原始响应严格解析为 `A_BETTER / TIE / B_BETTER / UNKNOWN`（非法输出拒绝，绝不降级为 `TIE`；`UNKNOWN` 必须带 reason），`comparisonInputDigest` 从盲包重算，身份绑定下才还原 candidate/reference 判定。
+
+| 字段 | 标准 | 说明 |
+|-----|------|------|
+| 协议版本 | `jp-pd-lab@1` | 与 `lab:eval`（旧版百分制评分器）不是同一证据 |
+| 校验入口 | `npm run lab:judge-validate` | 结构 / 绑定 / 篡改负控；不产生裁判响应 |
+| 聚合入口 | `npm run lab:card` | 冻结计划 + 裁判记录 → `decision-input.json` |
+
+**禁止使用**：~~AI 打分~~、~~auto judge~~（协议本身不调用任何模型，谁当裁判是协议外的执行决策）
+
+详见：[CONTRACT v0.3 §5.1](../specs/CONTRACT-PD-LAB-DATA-AND-SCORING-001-v0.3.md)、[TECH v0.3 §6.6](../specs/TECH-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)、[PD-LAB-USAGE.md §6.1](../process/PD-LAB-USAGE.md)
+
+### T6 资格判定（T6 Qualification）
+
+对 T6（回顾性历史管道实验）的证据输入做**机械判定**：输出三态 `CONFIRMATORY_READY / EXPLORATORY_ONLY / BLOCKED` 与 `t6Permissions`。判定是输入的纯函数，可机械复算，**不得人工改写**；`lab:qualify` 只复算 D2/D5/D6 三类审批绑定，不构成完整的 D2–D6 运行授权。T6 的结论只覆盖「当前 Intent 对历史案例重新诊断的影响」，不得解释为历史行为违反当时意图，也不得外推为真实宿主长期行为改善。
+
+| 字段 | 标准 | 说明 |
+|-----|------|------|
+| 输入 | `qualification-input.json` | 手工按 `validateQualificationInput` 组装，无自动生成器 |
+| 输出 | `qualification.json` | 三态结论 + `t6Permissions` + 审计记录 |
+| 前置 | `lab:probe` / `lab:preflight` | 预检通过**不等于**有运行资格 |
+
+**禁止使用**：~~qualification score~~、~~T6 pass rate~~（资格是三态判定，不是分数或通过率）
+
+详见：[SPEC v0.3 §11.2](../specs/SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)、[PD-LAB-USAGE.md §4–§5](../process/PD-LAB-USAGE.md)
+
 ---
 
 ## 4. 命名禁区
@@ -385,6 +456,11 @@ PD 内部用的 URI scheme（用作 `sourceRef` / `artifactRef` 等字段）：
 | Ledger | §2 |
 | Pipeline | §3 |
 | L1/L2/L3 | §3 |
+| PD-Lab / 行为实验 | §3, `docs/process/PD-LAB-USAGE.md` |
+| 实验臂 / arm / baseline / candidate | §3 |
+| 盲评包 / blindmap | §3 |
+| 裁判协议 / jp-pd-lab@1 | §3 |
+| T6 资格判定 / CONFIRMATORY_READY | §3 |
 | 禁用名 | §4 |
 | 弃用映射 | §5 |
 | ID 前缀 / URI scheme | §6 |
