@@ -2013,9 +2013,40 @@ export class PainSignalBridge {
                 && identity.reason === 'missing'
                 && rawKind !== 'principle';
               if (identity.status !== 'resolved' && !identityOptional) {
+                const nextAction = `Ledger identity is ${identity.reason}; inspect and repair the Principle Ledger or candidate binding before seeding. No Dreamer task was created.`;
                 seedRefusedByCandidate.set(candidate.candidateId, {
                   reason: 'candidate_seed_authority_unavailable',
-                  nextAction: `Ledger identity is ${identity.reason}; repair the Principle Ledger or candidate binding before seeding. No Dreamer task was created.`,
+                  nextAction,
+                });
+                if (identity.reason === 'ledger_unavailable') {
+                  // A temporarily unavailable ledger is retryable: persist
+                  // bounded backoff so an old candidate cannot monopolize the
+                  // worker's oldest-first backlog page.
+                  await this.recordPostProcessingFailure(candidate.candidateId, 'candidate_seed_authority_unavailable:ledger_unavailable');
+                } else {
+                  // Ambiguous, revoked, corrupt, missing or ineligible
+                  // identities require a human repair. Persist an explicit
+                  // Owner blocker; an in-memory refusal alone would leave the
+                  // candidate eligible at the head of every worker scan.
+                  const persisted = await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+                    state: 'awaiting_owner',
+                    attempts: processing?.attempts ?? 0,
+                    lastFailure: {
+                      reason: 'candidate_seed_authority_unavailable',
+                      nextAction,
+                      at: new Date().toISOString(),
+                    },
+                    blockedReason: `candidate_identity_${identity.reason}`,
+                  });
+                  if (!persisted) {
+                    await this.recordPostProcessingFailure(candidate.candidateId, 'candidate_seed_authority_refusal_persistence_failed');
+                  }
+                }
+                this.eventEmitter?.emitTelemetry({
+                  eventType: 'candidate_seed_refused',
+                  traceId: candidate.candidateId,
+                  timestamp: new Date().toISOString(),
+                  payload: { candidateId: candidate.candidateId, reason: 'candidate_seed_authority_unavailable', identityReason: identity.reason, nextAction },
                 });
                 return;
               }
