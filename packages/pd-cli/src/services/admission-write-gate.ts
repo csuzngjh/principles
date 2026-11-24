@@ -39,57 +39,64 @@ export async function enforceFullAdmissionForWrite(
     readonly persistReevaluation?: boolean;
     /** PRI-1283 R2: admission re-verification port; absent = fail-closed. */
     readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+    /** Serialize read/re-evaluate/append with Owner decisions and internalize. */
+    readonly coordination?: {
+      withCandidateCoordination<T>(candidateId: string, operation: () => Promise<T>): Promise<T>;
+    };
   } = {},
 ): Promise<AdmissionWriteGateRefusal | null> {
-  const admissionDocument = await stateManager.getAdmissionDocument(candidateId);
-  if (admissionDocument.ok && admissionDocument.document !== null) {
-    const { document } = admissionDocument;
-    const current = currentAdmissionEvaluation(document);
-    if (current === null) {
-      // Phase 7.2 P1-01: the Owner decision lifecycle (and the processing
-      // domain) can create a document that legitimately carries NO evaluation
-      // yet — a candidate that was never admission-evaluated but received an
-      // Owner decision record. An EMPTY evaluation history claims nothing, so
-      // nothing dangles: the write permission is simply still missing and the
-      // revalidation path below produces it. A NON-empty history without a
-      // resolvable current pointer IS dangling (the document claims a
-      // disposition that cannot be read back) and keeps failing closed.
-      if (document.evaluations.length > 0 || document.currentEvaluationId !== null) {
-        return {
-          decision: 'needs_evidence',
-          reason: 'admission_document_current_evaluation_dangling',
-          nextAction: 'repair or re-run the diagnosis to regenerate the admission disposition; the write is refused until a valid current evaluation exists',
-        };
+  const evaluate = async (): Promise<AdmissionWriteGateRefusal | null> => {
+    const admissionDocument = await stateManager.getAdmissionDocument(candidateId);
+    if (admissionDocument.ok && admissionDocument.document !== null) {
+      const { document } = admissionDocument;
+      const current = currentAdmissionEvaluation(document);
+      if (current === null) {
+        // Phase 7.2 P1-01: the Owner decision lifecycle (and processing
+        // domain) can create a document with NO evaluation yet. An EMPTY
+        // history claims nothing; a NON-empty history without a resolvable
+        // current pointer is dangling and remains fail-closed.
+        if (document.evaluations.length > 0 || document.currentEvaluationId !== null) {
+          return {
+            decision: 'needs_evidence',
+            reason: 'admission_document_current_evaluation_dangling',
+            nextAction: 'repair or re-run the diagnosis to regenerate the admission disposition; the write is refused until a valid current evaluation exists',
+          };
+        }
       }
+      if (current !== null && current.decision !== 'admitted') {
+        return { decision: current.decision, reason: current.reason, nextAction: current.nextAction };
+      }
+    } else if (!admissionDocument.ok) {
+      return {
+        decision: 'needs_evidence',
+        reason: `admission_document_unreadable:${admissionDocument.reason}`,
+        nextAction: 'inspect principle_candidates.admission_json for this candidate; repair or re-run the diagnosis before this write',
+      };
     }
-    if (current !== null && current.decision !== 'admitted') {
-      return { decision: current.decision, reason: current.reason, nextAction: current.nextAction };
+    const candidate = await stateManager.getCandidate(candidateId);
+    if (candidate === null) {
+      return { decision: 'needs_evidence', reason: 'candidate_not_found', nextAction: 'verify the candidate id' };
     }
-  } else if (!admissionDocument.ok) {
-    return {
-      decision: 'needs_evidence',
-      reason: `admission_document_unreadable:${admissionDocument.reason}`,
-      nextAction: 'inspect principle_candidates.admission_json for this candidate; repair or re-run the diagnosis before this write',
-    };
+    const revalidated = await evaluateAndPersistAdmissionFromStore(stateManager, [candidateId], {
+      taskId: candidate.taskId,
+      ...(options.persistReevaluation === false ? { persist: false } : {}),
+      ...(options.sourceMaterialAuthorization !== undefined ? { sourceMaterialAuthorization: options.sourceMaterialAuthorization } : {}),
+    });
+    if (!revalidated.ok) {
+      return { decision: 'needs_evidence', reason: `admission_revalidation_failed:${revalidated.reason}`, nextAction: revalidated.nextAction };
+    }
+    const fresh = revalidated.decisions.get(candidateId);
+    if (fresh === undefined) {
+      return { decision: 'needs_evidence', reason: 'candidate_not_in_diagnosis_chain', nextAction: 're-run the diagnosis; the candidate is not reachable from its diagnosis task' };
+    }
+    if (fresh.decision !== 'admitted') {
+      return { decision: fresh.decision, reason: `${fresh.reason} (revalidated against current material)`, nextAction: fresh.nextAction };
+    }
+    return null;
+  };
+
+  if (options.coordination !== undefined) {
+    return options.coordination.withCandidateCoordination(candidateId, evaluate);
   }
-  const candidate = await stateManager.getCandidate(candidateId);
-  if (candidate === null) {
-    return { decision: 'needs_evidence', reason: 'candidate_not_found', nextAction: 'verify the candidate id' };
-  }
-  const revalidated = await evaluateAndPersistAdmissionFromStore(stateManager, [candidateId], {
-    taskId: candidate.taskId,
-    ...(options.persistReevaluation === false ? { persist: false } : {}),
-    ...(options.sourceMaterialAuthorization !== undefined ? { sourceMaterialAuthorization: options.sourceMaterialAuthorization } : {}),
-  });
-  if (!revalidated.ok) {
-    return { decision: 'needs_evidence', reason: `admission_revalidation_failed:${revalidated.reason}`, nextAction: revalidated.nextAction };
-  }
-  const fresh = revalidated.decisions.get(candidateId);
-  if (fresh === undefined) {
-    return { decision: 'needs_evidence', reason: 'candidate_not_in_diagnosis_chain', nextAction: 're-run the diagnosis; the candidate is not reachable from its diagnosis task' };
-  }
-  if (fresh.decision !== 'admitted') {
-    return { decision: fresh.decision, reason: `${fresh.reason} (revalidated against current material)`, nextAction: fresh.nextAction };
-  }
-  return null;
+  return evaluate();
 }

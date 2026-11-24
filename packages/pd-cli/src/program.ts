@@ -46,7 +46,7 @@ import { handleRuntimeInternalizationRetry } from './commands/runtime-internaliz
 import { registerRuntimeInternalizationAuditArtificerEvidenceCommand } from './commands/runtime-internalization-audit-artificer-evidence.js';
 import { registerRuntimeInternalizationEvidenceCommand } from './commands/runtime-internalization-evidence.js';
 import { registerRunRuleHostCommand } from './commands/runtime-internalization-run-rulehost.js';
-import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateReview, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize, handleCandidateInternalizationBackfill } from './commands/candidate.js';
+import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateReview, handleCandidateAudit, handleCandidateRepair, handleCandidatePostProcessingRecovery, handleCandidateRoute, handleCandidateInternalize, handleCandidateInternalizationBackfill } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 import { handleRuntimeCanary } from './commands/runtime-canary.js';
 import { handleRuntimeSyntheticBaseline } from './commands/runtime-synthetic-baseline.js';
@@ -1395,6 +1395,18 @@ candidateCmd
   .option('--json', 'Output as JSON')
   .action(async (opts) => {
     await handleCandidateRepair(opts);
+  });
+
+candidateCmd
+  .command('resume-post-processing')
+  .description('Authorize recovery of an invalid-raw-kind candidate after the persisted kind has been repaired')
+  .requiredOption('--candidate-id <id>', 'Candidate ID to recover')
+  .requiredOption('--reason <text>', 'Owner reason for authorizing this recovery (max 500 chars)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--confirm', 'Apply the Owner-authorized recovery (required; without it this is a no-write preview)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleCandidatePostProcessingRecovery(opts);
   });
 
 candidateCmd

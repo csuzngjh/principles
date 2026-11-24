@@ -28,7 +28,7 @@ import {
   buildFullTraceTimeline,
   buildSourceRefs,
 } from '../../context-payload.js';
-import { parsePainAnchor, type HistoryQueryEntry } from '../../context-payload.js';
+import { deviationAnchorToPainAnchor, parsePainAnchor, type HistoryQueryEntry } from '../../context-payload.js';
 import type { TaskRecord, DiagnosticianTaskRecord } from '../../task-status.js';
 import type { RunRecord } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
@@ -660,12 +660,28 @@ export class SqliteContextAssembler implements ContextAssembler {
         if (isRecord(parsed)) {
           // SPEC §11 / TD §6.2: the anchor is only usable when it is a
           // well-formed {type, ref}; anything else is UNKNOWN, never coerced.
-          const rawAnchor = Object.hasOwn(parsed, 'anchor') ? parsed.anchor : undefined;
-          const anchor = parsePainAnchor(rawAnchor);
+          // SPEC-PD-PIPELINE-SPINE-001 D2 (read side): when the canonical
+          // `anchor` key is absent, a historical `deviationAnchor` pair is
+          // recovered through the SAME validation rule — a present-but-
+          // malformed legacy pair surfaces in ambiguityNotes instead of
+          // silently degrading to "unknown" (rc-9).
+          const hasCanonicalAnchor = Object.hasOwn(parsed, 'anchor');
+          const rawAnchor = hasCanonicalAnchor ? parsed.anchor : undefined;
+          let anchor = parsePainAnchor(rawAnchor);
           if (rawAnchor !== undefined && rawAnchor !== null && anchor === undefined) {
             ambiguityNotes.push(
               `diagnosticJson for task ${task.taskId} carries an unreadable anchor; the anchor is treated as unknown`,
             );
+          }
+          if (!hasCanonicalAnchor && Object.hasOwn(parsed, 'deviationAnchor')) {
+            const recovered = deviationAnchorToPainAnchor(parsed.deviationAnchor);
+            if (recovered !== undefined) {
+              anchor = recovered;
+            } else {
+              ambiguityNotes.push(
+                `diagnosticJson for task ${task.taskId} carries a deviationAnchor that is not a valid <principleId>@<principleVersion> pair; the anchor is treated as unknown`,
+              );
+            }
           }
           extra = {
             sourcePainId: SqliteContextAssembler.extractStringField(parsed, 'sourcePainId'),

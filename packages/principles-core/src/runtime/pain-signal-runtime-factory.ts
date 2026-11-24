@@ -560,6 +560,114 @@ export function resolveRuntimeConfigFromPdConfig(
 // Key format: `${workspaceDir}:${runtimeKind}:...` (D-03). The openclawMode slot
 // left with ADR-0029: pi-ai has no mode, so a bridge is keyed by workspace+kind.
 const bridgeCache = new Map<string, PainSignalBridge>();
+// Retired instances remain discoverable by workspace cleanup until their
+// actual close completes, even after removal from the bounded cache.
+const retiredBridges = new Map<string, Set<Promise<boolean>>>();
+const pendingAcquisitions = new Map<string, Set<Promise<PainSignalBridge>>>();
+const closingWorkspaces = new Map<string, Promise<void>>();
+
+type RegisterBridgeBorrow = (release: () => Promise<void>) => void;
+
+function borrowBridge(bridge: PainSignalBridge, registerBorrow?: RegisterBridgeBorrow): PainSignalBridge {
+  if (registerBorrow !== undefined) {
+    const release = bridge.retainFactoryBorrow();
+    try {
+      registerBorrow(release);
+    } catch (error) {
+      void release();
+      throw error;
+    }
+  }
+  return bridge;
+}
+
+function retireBridge(workspaceDir: string, bridge: PainSignalBridge): void {
+  const pending = bridge.disposeWhenIdle();
+  const retired = retiredBridges.get(workspaceDir) ?? new Set<Promise<boolean>>();
+  retiredBridges.set(workspaceDir, retired);
+  retired.add(pending);
+  void pending.catch(() => undefined).finally(() => {
+    retired.delete(pending);
+    if (retired.size === 0 && retiredBridges.get(workspaceDir) === retired) retiredBridges.delete(workspaceDir);
+  });
+}
+
+// SPEC-PD-PIPELINE-SPINE-001 review round 2 (P1-1): collaborator identity.
+//
+// Audit of what a bridge CAPTURES at construction, and what therefore belongs
+// to its cache identity:
+//
+//   collaborator                          | captured by            | in the key
+//   -------------------------------------- | ---------------------- | -----------
+//   intentDocReader                        | Stage A runner         | identity
+//   trajectoryTurnReader                   | context assembler      | identity
+//   sourceMaterialAuthorization            | assembler + stage runners | identity
+//   isAutoPainSubmissionAuthorized (probe) | bridge                 | identity
+//   telemetrySink                          | bridge / runners       | identity
+//   autoIntakeEnabled                      | bridge + intake        | value
+//   workspace, runtime kind, feature toggles, reuse-gate config          | value
+//   ledgerAdapter                          | bridge + intake        | NOT keyed:
+//     the ledger authority of the workspace — every call site constructs an
+//     equivalent instance per call and the existing cache contract reuses a
+//     bridge across those calls (pain-signal-factory-intent-reader-wiring).
+//
+// The key used to encode only whether an intent reader was PRESENT, so a
+// second entry calling with its OWN reader / authorization for the same
+// workspace got the first entry's bridge and silently ran with the first
+// entry's collaborators (e.g. the OpenClaw command's session reader replaced
+// by the background auto-run's governance reader, or a sync entry's
+// authorization replaced by deny-all).
+//
+// Identity is OBJECT identity — never presence, which cannot tell two
+// different readers apart. The key carries only a process-local counter per
+// object: no authorization content, consent state or secret ever reaches it.
+// Object identity keeps the Owner's revocation immediate: the consent-ledger
+// authorization and the governance reader re-read consent on every call, so a
+// cached bridge built with the SAME objects already reflects a revocation.
+//
+// Bounded: a workspace slot keeps at most COLLABORATOR_VARIANTS_PER_SLOT
+// variants (least-recently-used first). A superseded bridge is retired
+// idle-safely — it finishes an operation that is already running and then
+// releases its SQLite handles — so alternating entries can neither grow the
+// cache nor leak handles, and are never interrupted mid-diagnosis.
+//
+// Cost note: call sites that construct fresh collaborator objects per call
+// (the workspace workers, the auto-run) no longer hit the cache across
+// calls; a bridge is built per diagnosis — milliseconds against the model
+// calls a diagnosis itself takes. Collapsing those per-call constructions
+// into stable per-workspace collaborators is the Phase 2A assembly work
+// (PRI-1292 `resolveWorkspacePipelineHostDeps`), which restores the hits.
+const collaboratorIdentities = new WeakMap<object, number>();
+let nextCollaboratorIdentity = 1;
+
+function collaboratorToken(value: object | undefined): string {
+  if (value === undefined) return 'none';
+  let identity = collaboratorIdentities.get(value);
+  if (identity === undefined) {
+    identity = nextCollaboratorIdentity;
+    nextCollaboratorIdentity += 1;
+    collaboratorIdentities.set(value, identity);
+  }
+  return `k${identity}`;
+}
+
+const COLLABORATOR_VARIANTS_PER_SLOT = 2;
+
+/** Retire the least-recently-used collaborator variants of `slotKey` beyond
+ * the per-slot bound (the cache's iteration order is insertion/recency). */
+function evictSupersededCollaboratorVariants(workspaceDir: string, slotKey: string, keepKey: string): void {
+  const prefix = `${slotKey}:`;
+  const siblings = [...bridgeCache.keys()].filter((key) => key !== keepKey && key.startsWith(prefix));
+  while (siblings.length > COLLABORATOR_VARIANTS_PER_SLOT - 1) {
+    const evictedKey = siblings.shift();
+    if (evictedKey === undefined) break;
+    const evicted = bridgeCache.get(evictedKey);
+    bridgeCache.delete(evictedKey);
+    if (evicted !== undefined) {
+      retireBridge(workspaceDir, evicted);
+    }
+  }
+}
 
 interface DisabledDiagnosticianRunnerOptions {
   /** Human-readable reason. Defaults to the canonical Owner-disable message. */
@@ -651,6 +759,10 @@ const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set([
   // its persisted owning payload was unparseable or a retired non-V2 shape —
   // the skip must reach the durable workspace sink, never vanish in mapping.
   'replay_review_source_invalid',
+  // SPEC-PD-PIPELINE-SPINE-001 D4: the durable invalid-raw-kind refusal is
+  // operator-visible audit telemetry, not a degradation event and must not
+  // disappear at the bridge→workspace sink boundary.
+  'candidate_seed_refused',
 ]);
 
 export function mapBridgeTelemetryToStoreEvent(event: {
@@ -892,16 +1004,24 @@ async function constructBridge(
  * this after execution; long-lived hosts that reuse the cached bridge do not.
  */
 export async function disposePainSignalBridgesForWorkspace(workspaceDir: string): Promise<void> {
-  const prefix = `${workspaceDir}:`;
-  const doomed: PainSignalBridge[] = [];
-  for (const [key, bridge] of bridgeCache) {
-    if (key.startsWith(prefix)) {
-      doomed.push(bridge);
-      bridgeCache.delete(key);
+  const existing = closingWorkspaces.get(workspaceDir);
+  if (existing !== undefined) return existing;
+  const cleanup = (async () => {
+    await Promise.allSettled([...(pendingAcquisitions.get(workspaceDir) ?? [])]);
+    const prefix = `${workspaceDir}:`;
+    for (const [key, bridge] of bridgeCache) {
+      if (key.startsWith(prefix)) {
+        bridgeCache.delete(key);
+        retireBridge(workspaceDir, bridge);
+      }
     }
-  }
-  for (const bridge of doomed) {
-    try { await bridge.dispose(); } catch { /* best-effort cleanup */ }
+    await Promise.allSettled([...(retiredBridges.get(workspaceDir) ?? [])]);
+  })();
+  closingWorkspaces.set(workspaceDir, cleanup);
+  try {
+    await cleanup;
+  } finally {
+    if (closingWorkspaces.get(workspaceDir) === cleanup) closingWorkspaces.delete(workspaceDir);
   }
 }
 
@@ -921,10 +1041,13 @@ export async function disposePainSignalBridgesForWorkspace(workspaceDir: string)
 async function createDisabledBridge(
   opts: PainSignalRuntimeFactoryOptions,
   capability: Extract<DiagnosticianCapability, { available: false }>,
+  registerBorrow?: RegisterBridgeBorrow,
 ): Promise<PainSignalBridge> {
   const disabledCacheKey = `${opts.workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`;
   const cached = bridgeCache.get(disabledCacheKey);
-  if (cached) return cached;
+  if (cached) {
+    return borrowBridge(cached, registerBorrow);
+  }
 
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
   await stateManager.initialize();
@@ -958,17 +1081,20 @@ async function createDisabledBridge(
 
   const winner = bridgeCache.get(disabledCacheKey);
   if (winner !== undefined && winner !== bridge) {
+    // Borrow the winner before awaiting disposal of the losing constructor.
+    const borrowed = borrowBridge(winner, registerBorrow);
     await bridge.dispose().catch(() => undefined);
-    return winner;
+    return borrowed;
   }
   bridgeCache.set(disabledCacheKey, bridge);
-  return bridge;
+  return borrowBridge(bridge, registerBorrow);
 }
 
 
 
-export async function createPainSignalBridge(
+async function createPainSignalBridgeInner(
   opts: PainSignalRuntimeFactoryOptions,
+  registerBorrow?: RegisterBridgeBorrow,
 ): Promise<PainSignalBridge> {
   // PRI-638: the capability decision comes FIRST and from ONE authority.
   //
@@ -983,7 +1109,7 @@ export async function createPainSignalBridge(
   // provider calls, so re-enabling the agent is enough to resume.
   const capability = resolveDiagnosticianCapability(opts.effectiveConfig);
   if (!capability.available) {
-    return createDisabledBridge(opts, capability);
+    return createDisabledBridge(opts, capability, registerBorrow);
   }
 
   // PRI-306: Prefer config-driven binding when effectiveConfig is provided
@@ -1051,9 +1177,26 @@ export async function createPainSignalBridge(
       Object.entries(profile ?? {}).sort(([a], [b]) => a.localeCompare(b)),
     ])).digest('hex');
   }
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${intentAnchoringEnabled ? 'ia' : 'noia'}:${opts.intentDocReader !== undefined ? 'r' : 'nor'}:${reuseCacheKey}`;
+  // `slotKey` = everything a bridge depends on apart from its per-entry
+  // collaborators (workspace, runtime kind, the toggles below, the reuse
+  // gate, automatic intake). The collaborator tokens extend it into the
+  // full cache key (see "collaborator identity" next to the cache).
+  const slotKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${intentAnchoringEnabled ? 'ia' : 'noia'}:${reuseCacheKey}:${opts.autoIntakeEnabled === false ? 'noai' : 'ai'}`;
+  const cacheKey = [
+    slotKey,
+    collaboratorToken(opts.intentDocReader),
+    collaboratorToken(opts.trajectoryTurnReader),
+    collaboratorToken(opts.sourceMaterialAuthorization),
+    collaboratorToken(opts.telemetrySink),
+    collaboratorToken(opts.isAutoPainSubmissionAuthorized),
+  ].join(':');
   const cached = bridgeCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    // recency refresh for the per-slot bound
+    bridgeCache.delete(cacheKey);
+    bridgeCache.set(cacheKey, cached);
+    return borrowBridge(cached, registerBorrow);
+  }
 
   const bridge = await constructBridge(opts, runtimeConfig, {
     diagnosisPersistenceEnabled,
@@ -1064,11 +1207,15 @@ export async function createPainSignalBridge(
   // were building — the loser self-disposes so its handles never leak.
   const winner = bridgeCache.get(cacheKey);
   if (winner !== undefined && winner !== bridge) {
+    // Borrow the winner before awaiting disposal of the losing constructor.
+    const borrowed = borrowBridge(winner, registerBorrow);
     await bridge.dispose().catch(() => undefined);
-    return winner;
+    return borrowed;
   }
   bridgeCache.set(cacheKey, bridge);
-  return bridge;
+  const borrowed = borrowBridge(bridge, registerBorrow);
+  evictSupersededCollaboratorVariants(opts.workspaceDir, slotKey, cacheKey);
+  return borrowed;
 }
 
 /**
@@ -1086,9 +1233,42 @@ export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: s
   // disposePainSignalBridgesForWorkspace uses — instead of enumerating key
   // components by hand.
   const effectiveKind = runtimeKind ?? 'pi-ai';
-  bridgeCache.delete(`${workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`);
+  const retire = (key: string): void => {
+    const bridge = bridgeCache.get(key);
+    if (bridge === undefined) return;
+    bridgeCache.delete(key);
+    // Invalidation removes discoverability immediately but preserves any
+    // outstanding factory borrow or operation until it is safe to close.
+    retireBridge(workspaceDir, bridge);
+  };
+  retire(`${workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`);
   const kindPrefix = `${workspaceDir}:${effectiveKind}:`;
   for (const key of [...bridgeCache.keys()]) {
-    if (key.startsWith(kindPrefix)) bridgeCache.delete(key);
+    if (key.startsWith(kindPrefix)) retire(key);
   }
 }
+
+/**
+ * Supply registerBorrow for use across await or concurrent cleanup/eviction.
+ * Release the registered lease in finally, even if no operation is started.
+ * The legacy one-argument form is an unleased lookup for callers which
+ * externally coordinate the workspace lifetime (including inspection tests).
+ */
+export async function createPainSignalBridge(
+  opts: PainSignalRuntimeFactoryOptions,
+  registerBorrow?: RegisterBridgeBorrow,
+): Promise<PainSignalBridge> {
+  const { workspaceDir } = opts;
+  if (closingWorkspaces.has(workspaceDir)) throw new Error('PainSignalBridge workspace cleanup is in progress');
+  const acquisition = createPainSignalBridgeInner(opts, registerBorrow);
+  const pending = pendingAcquisitions.get(workspaceDir) ?? new Set<Promise<PainSignalBridge>>();
+  pendingAcquisitions.set(workspaceDir, pending);
+  pending.add(acquisition);
+  try {
+    return await acquisition;
+  } finally {
+    pending.delete(acquisition);
+    if (pending.size === 0 && pendingAcquisitions.get(workspaceDir) === pending) pendingAcquisitions.delete(workspaceDir);
+  }
+}
+

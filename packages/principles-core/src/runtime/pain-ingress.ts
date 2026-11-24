@@ -32,6 +32,8 @@ import type {
   PainDeviationAnchor,
 } from './pain-ingress-payload.js';
 import type { PainProvenance } from './admission-gate.js';
+import { deviationAnchorToPainAnchor } from './context-payload.js';
+import type { PainAnchor } from './context-payload.js';
 
 // Single public surface: re-export the shared parsers/invariants so
 // adapters can import the whole ingress family from this module.
@@ -73,6 +75,13 @@ export interface LegacyPainSubmission {
   painIngress: PainIngressV1Payload;
   /** SPEC v0.8 §5.6: principle reference carried by principle_deviation only. */
   deviationAnchor?: PainDeviationAnchor;
+  /**
+   * SPEC-PD-PIPELINE-SPINE-001 D2: the canonical structured anchor derived
+   * from a valid `deviationAnchor`. Written beside the legacy pair so the
+   * read side (`SqliteContextAssembler`) no longer depends on the legacy
+   * shape; the legacy pair stays for existing consumers.
+   */
+  anchor?: PainAnchor;
 }
 
 export type PainIngressDecision =
@@ -138,7 +147,13 @@ function buildLegacy(report: PainIngressReport, evidence: IngressEvidenceEntry[]
     evidence,
     painIngress: buildV1Payload(report),
   };
-  if (report.deviationAnchor !== undefined) legacy.deviationAnchor = report.deviationAnchor;
+  if (report.deviationAnchor !== undefined) {
+    legacy.deviationAnchor = report.deviationAnchor;
+    // D2 single-track: a verified deviation pair ALSO yields the canonical
+    // structured anchor; an invalid pair simply yields none (never fabricated).
+    const derivedAnchor = deviationAnchorToPainAnchor(report.deviationAnchor);
+    if (derivedAnchor !== undefined) legacy.anchor = derivedAnchor;
+  }
   if (report.correlation.status === 'bound') {
     legacy.hostKind = report.correlation.hostKind;
     if (report.correlation.hostKind === 'openclaw') {

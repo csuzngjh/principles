@@ -6,6 +6,8 @@ import type {
   AdmissionEvaluationRecord,
   AdmissionProcessingRecord,
   CandidateAdmissionDocument,
+  CandidatePostProcessingRecoveryInput,
+  CandidatePostProcessingRecoveryResult,
   OwnerDecisionRecord,
 } from './admission-document.js';
 
@@ -91,6 +93,9 @@ export interface CandidateStore {
    * evaluation history.
    */
   updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean>;
+
+  /** Atomically authorize and audit recovery of an invalid-raw-kind processing park. */
+  authorizeInvalidKindPostProcessingRecovery(candidateId: string, input: CandidatePostProcessingRecoveryInput): Promise<CandidatePostProcessingRecoveryResult>;
 
   /**
    * Phase 7.2 P1-01 Phase A — persist (or idempotently resume) a typed Owner

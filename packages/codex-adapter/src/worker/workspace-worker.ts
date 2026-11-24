@@ -432,44 +432,49 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
         const candidate = await pickDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT, new Date().toISOString());
         if (candidate !== null) {
           const stateDir = path.join(workspaceDir, '.state');
-          const bridge = await createPainSignalBridge({
-            workspaceDir,
-            stateDir,
-            ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
-            owner: WORKER_OWNER,
-            effectiveConfig: config.effective,
-            getEnvVar: (name: string) => process.env[name],
-            // PRI-1233 / SPEC §9.2: this worker is where Stage A actually runs
-            // for governance-admitted Codex pains — the neutral host reader
-            // must ride along (flag-off = zero filesystem access inside it).
-            intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
-            // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
-            // turns from the workspace's own consent-tiered governance store.
-            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
-            // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
-            sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
-            // SPEC §9.6: lazy probe — a revoked flag stops persisted
-            // automatic_hook tasks at the bridge's execution boundary.
-            isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
-          });
-          const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
-          // PRI-917 v0.3.3 review fix (P2-2): forward the parked-candidate
-          // dispositions so the Owner sees the pending items instead of a bare
-          // degraded status with no subject.
-          const reuseReviewRequired = (executed.candidateOutcomes ?? [])
-            .filter((outcome) => outcome.reason === 'reuse_review_required')
-            .map((outcome) => outcome.candidateId);
-          diagnostician = {
-            taskId: candidate.taskId,
-            status: executed.status,
-            ...(executed.message !== undefined ? { message: executed.message.slice(0, 200) } : {}),
-            ...(executed.errorCategory !== undefined ? { errorCategory: executed.errorCategory } : {}),
-            ...(reuseReviewRequired.length > 0 ? { reuseReviewRequiredCandidateIds: reuseReviewRequired } : {}),
-          };
-          // The bridge stays cached per workspace (bounded: one per workspace
-          // per worker process, exactly like the OpenClaw plugin host) — no
-          // per-cycle dispose, so a concurrent cycle can never hit a disposed
-          // bridge. The factory self-disposes losing concurrent constructions.
+          let releaseBridge: (() => Promise<void>) | undefined;
+          try {
+            const bridge = await createPainSignalBridge({
+              workspaceDir,
+              stateDir,
+              ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
+              owner: WORKER_OWNER,
+              effectiveConfig: config.effective,
+              getEnvVar: (name: string) => process.env[name],
+              // PRI-1233 / SPEC §9.2: this worker is where Stage A actually runs
+              // for governance-admitted Codex pains — the neutral host reader
+              // must ride along (flag-off = zero filesystem access inside it).
+              intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
+              // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
+              // turns from the workspace's own consent-tiered governance store.
+              trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
+              // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
+              sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+              // SPEC §9.6: lazy probe — a revoked flag stops persisted
+              // automatic_hook tasks at the bridge's execution boundary.
+              isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
+            }, (release) => { releaseBridge = release; });
+            const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
+            // PRI-917 v0.3.3 review fix (P2-2): forward the parked-candidate
+            // dispositions so the Owner sees the pending items instead of a bare
+            // degraded status with no subject.
+            const reuseReviewRequired = (executed.candidateOutcomes ?? [])
+              .filter((outcome) => outcome.reason === 'reuse_review_required')
+              .map((outcome) => outcome.candidateId);
+            diagnostician = {
+              taskId: candidate.taskId,
+              status: executed.status,
+              ...(executed.message !== undefined ? { message: executed.message.slice(0, 200) } : {}),
+              ...(executed.errorCategory !== undefined ? { errorCategory: executed.errorCategory } : {}),
+              ...(reuseReviewRequired.length > 0 ? { reuseReviewRequiredCandidateIds: reuseReviewRequired } : {}),
+            };
+            // The bridge stays cached per workspace (bounded: one per workspace
+            // per worker process, exactly like the OpenClaw plugin host) — no
+            // per-cycle dispose, so a concurrent cycle can never hit a disposed
+            // bridge. The factory self-disposes losing concurrent constructions.
+          } finally {
+            await releaseBridge?.();
+          }
         } else {
           // No eligible candidate, but a retry_wait task may still be inside
           // its backoff window — report it so the cycle is observable instead
@@ -525,30 +530,35 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
         const resumedTaskIds = new Set<string>();
         if (backlog.length > 0) {
           const stateDir = path.join(workspaceDir, '.state');
-          const bridge = await createPainSignalBridge({
-            workspaceDir,
-            stateDir,
-            ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
-            owner: WORKER_OWNER,
-            effectiveConfig: config.effective,
-            getEnvVar: (name: string) => process.env[name],
-            // PRI-1265: post-processing resumes see the same authorized
-            // trajectory context as the initial diagnosis run.
-            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
-            // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
-            sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
-            // SPEC §9.6: lazy probe — automatic_hook backlog resumes honor
-            // the Workspace authorization too.
-            isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
-          });
-          for (const item of backlog) {
-            const resumed = await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: item.taskId });
-            if (resumed.status === 'resumed') {
-              resumedTaskIds.add(item.taskId);
-            } else if (resumed.status === 'blocked') {
-              blocked.push({ candidateId: item.candidateId, reason: resumed.reason ?? 'blocked' });
+          let releaseBridge: (() => Promise<void>) | undefined;
+          try {
+            const bridge = await createPainSignalBridge({
+              workspaceDir,
+              stateDir,
+              ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
+              owner: WORKER_OWNER,
+              effectiveConfig: config.effective,
+              getEnvVar: (name: string) => process.env[name],
+              // PRI-1265: post-processing resumes see the same authorized
+              // trajectory context as the initial diagnosis run.
+              trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
+              // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
+              sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+              // SPEC §9.6: lazy probe — automatic_hook backlog resumes honor
+              // the Workspace authorization too.
+              isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
+            }, (release) => { releaseBridge = release; });
+            for (const item of backlog) {
+              const resumed = await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: item.taskId });
+              if (resumed.status === 'resumed') {
+                resumedTaskIds.add(item.taskId);
+              } else if (resumed.status === 'blocked') {
+                blocked.push({ candidateId: item.candidateId, reason: resumed.reason ?? 'blocked' });
+              }
+              for (const skip of resumed.skipped ?? []) blocked.push(skip);
             }
-            for (const skip of resumed.skipped ?? []) blocked.push(skip);
+          } finally {
+            await releaseBridge?.();
           }
         }
         postProcessing = {

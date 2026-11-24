@@ -11,7 +11,7 @@ import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { ingressDecisionForPluginPain } from '../hooks/pain-ingress-adapter.js';
 import type { PainEvidenceEntry } from '@principles/core/runtime';
-import { isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
+import { createConsentLedgerSourceMaterialAuthorization, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 
 /**
  * Creates a mini bar for daily trends
@@ -330,6 +330,14 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
     // PRI-306: Load .pd/config.yaml for config-driven runtime binding
     const configResult = loadPdConfigForPlugin(wctx.workspaceDir);
+    // SPEC-PD-PIPELINE-SPINE-001 D1: this entry is ALWAYS synchronous (no
+    // asyncMode), so both sync collaborators are mandatory — the in-process
+    // reader over WorkspaceContext.trajectory (same delegation the hook entry
+    // uses) and the workspace consent-ledger authorization.
+    const trajectoryTurnReader = {
+      listUserTurnsForSession: (sessionId: string) => wctx.trajectory.listUserTurnsForSession(sessionId),
+      listAssistantTurns: (sessionId: string) => wctx.trajectory.listAssistantTurns(sessionId),
+    };
     const service = new PainToPrincipleService({
       workspaceDir: wctx.workspaceDir,
       stateDir: wctx.stateDir,
@@ -339,6 +347,8 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
       effectiveConfig: configResult.effective,
       getEnvVar: (name: string) => process.env[name],
       intentDocReader: createIntentDocReader(wctx.workspaceDir, resolveIntentLang(wctx.workspaceDir)),
+      trajectoryTurnReader,
+      sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(wctx.workspaceDir),
       // SPEC §9.6: lazy Workspace authorization probe for automatic_hook
       // provenance; the manual `pd pain` command itself is owner_manual.
       isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(wctx.workspaceDir),

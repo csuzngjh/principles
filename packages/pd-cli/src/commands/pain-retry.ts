@@ -29,6 +29,8 @@ import {
   PDRuntimeError,
   isRuntimeConfigError,
   CandidateIntakeService,
+  pendingOwnerDecision,
+  validateRecommendationKind,
   run as diagnoseRun,
   SPLIT_PIPELINE_TOTAL_TIMEOUT_MS,
   resolveDiagnosticianCapability,
@@ -1102,7 +1104,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       // SPEC review round-3 P1: the FULL write gate (persisted disposition /
       // re-evaluation), not the confidence/kind-only partial check — a
       // corrupted or stale admission document can never be intaked here.
-      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization })) ?? checkAdmissionGate(candidate);
+      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId, { sourceMaterialAuthorization, coordination: ledgerAdapter })) ?? checkAdmissionGate(candidate);
       if (admissionBlock) {
         intakeFailed = true;
         intakeResults.push({
@@ -1141,13 +1143,69 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             candidateId: candidate.candidateId,
             status: 'review_required',
             reusedPrincipleId: recommended?.selectedPrincipleId,
-            nextAction: `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`,
+            nextAction: recommended?.selectedPrincipleId
+              ? `pd candidate review --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --decide reuse --principle-id ${recommended.selectedPrincipleId} --reason "..."`
+              : `pd candidate review --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --decide reuse|create --reason "..."`,
           });
           continue;
         }
-        // Phase 1 / PR1: candidate status handling is deliberately unchanged
-        // (SPEC v2.1 Step 2 "保持现有 candidate persistence 行为"). Only the
-        // Principle Ledger write is gated on a validated recommendation_kind.
+        // Invalid RAW kinds are durable Owner parks, not ordinary routing
+        // refusals. Keep the candidate pending so the explicit recovery
+        // command can validate and resume it after the source kind is repaired.
+        if (intakeResult.outcome === 'refused' && (
+          intakeResult.reason === 'unknown_kind'
+          || intakeResult.reason === 'candidate_kind_recovery_required'
+        )) {
+          intakeFailed = true;
+          const invalidKind = intakeResult.reason === 'unknown_kind';
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'refused',
+            error: invalidKind ? 'candidate_kind_invalid' : 'candidate_kind_recovery_required',
+            nextAction: `After restoring the intended RAW kind, obtain explicit Owner authorization: pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
+          });
+          continue;
+        }
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'admission_document_unreadable') {
+          intakeFailed = true;
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'intake_failed',
+            error: 'admission_document_unreadable',
+            nextAction: 'Inspect and repair the persisted admission_json; automatic intake failed closed and did not consume this candidate.',
+          });
+          continue;
+        }
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'owner_decision_pending') {
+          const admission = await stateManager.getAdmissionDocument(candidate.candidateId);
+          const pending = pendingOwnerDecision(admission.ok ? admission.document ?? null : null);
+          const decision = pending?.decision ?? (intakeResult.message.includes('--decide reuse') ? 'reuse' : 'create');
+          const missingReuseTarget = decision === 'reuse' && !pending?.selectedPrincipleId;
+          const principleArg = decision === 'reuse' && pending?.selectedPrincipleId
+            ? ` --principle-id ${pending.selectedPrincipleId}`
+            : '';
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'review_required',
+            ...(missingReuseTarget ? { error: 'owner_decision_missing_principle_id' } : {}),
+            nextAction: missingReuseTarget
+              ? 'The persisted reuse decision has no selectedPrincipleId. Inspect and repair admission_json; do not invent a target principle.'
+              : `Resume the SAME persisted Owner verdict: pd candidate review --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --decide ${decision}${principleArg} --reason "...".`,
+          });
+          continue;
+        }
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'candidate_changed_during_intake') {
+          intakeFailed = true;
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'refused',
+            error: intakeResult.reason,
+            nextAction: intakeResult.message,
+          });
+          continue;
+        }
+        // Phase 1 / PR1: only validated ledger entries and legal non-principle
+        // routing outcomes reach the legacy consumed-status transition.
         if (candidate.status !== 'consumed') {
           await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
@@ -1169,6 +1227,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             candidateId: candidate.candidateId,
             ledgerEntryId: intakeResult.entry.id,
             status: 'consumed',
+            ...(intakeResult.deduplicatedAgainst ? { reusedPrincipleId: intakeResult.deduplicatedAgainst } : {}),
             // PRI-939 Option A: surface the auto-path evaluation outcome so an
             // `unavailable` degradation is visible instead of a bare consumed.
             ...(intakeResult.reuseRecommendation !== undefined
@@ -1211,21 +1270,31 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       .filter((ir): ir is { candidateId: string; ledgerEntryId: string; status: string } => ir.status === 'consumed' && typeof ir.ledgerEntryId === 'string')
       .map((ir) => ir.ledgerEntryId);
 
-    // Build nextAction: candidates generated but internalization not automatic.
-    // PRI-917 v0.3.3 review fix (P2-4): parked candidates get review guidance,
-    // never an internalize command that would bypass the Owner decision.
-    const reviewRequiredIds = intakeResults
-      .filter((r) => r.status === 'review_required')
-      .map((r) => r.candidateId);
-    const reviewRequiredNote = reviewRequiredIds.length > 0
-      ? ` ${reviewRequiredIds.length} candidate(s) parked for reuse review (suspected duplicates) — decide before internalizing: pd candidate review --candidate-id <id> --decide reuse|create`
-      : '';
-    const internalizableCandidateIds = candidateIds.filter((id) => !reviewRequiredIds.includes(id));
-    const internalizeNextAction = internalizableCandidateIds.length > 0
-      ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}`
-      : reviewRequiredIds.length > 0
-        ? `All candidates are parked for reuse review (suspected duplicates). To decide each, run:\n  ${reviewRequiredIds.map((id) => `pd candidate review --candidate-id ${id} --decide reuse|create`).join('\n  ')}`
-        : 'No candidates were generated from this diagnosis.';
+    // Only a successfully consumed, seedable, independently actionable
+    // candidate can be offered internalization. Refused or parked candidates
+    // retain their actual recovery guidance in both JSON and TTY.
+    const internalizableCandidateIds = candidates.filter((candidate) => {
+      const record = intakeResults.find((item) => item.candidateId === candidate.candidateId);
+      const kind = validateRecommendationKind(candidate.rawRecommendationKind);
+      return record?.status === 'consumed' && !record.reusedPrincipleId
+        && (kind === 'principle' || kind === 'rule' || kind === 'prompt');
+    }).map((candidate) => candidate.candidateId);
+    const guidanceSections: string[] = [];
+    if (internalizableCandidateIds.length > 0) {
+      guidanceSections.push(`Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`);
+    }
+    for (const record of intakeResults) {
+      if (record.status !== 'consumed') {
+        guidanceSections.push(`${record.candidateId}: ${record.nextAction ?? record.error ?? 'Inspect the persisted candidate disposition before retrying.'}`);
+      } else if (record.reusedPrincipleId) {
+        guidanceSections.push(`${record.candidateId}: resolved onto existing Principle ${record.reusedPrincipleId}; no independent internalization is needed.`);
+      }
+    }
+    const internalizeNextAction = guidanceSections.length > 0
+      ? guidanceSections.join('\n\n')
+      : candidateIds.length === 0
+        ? 'No candidates were generated from this diagnosis.'
+        : 'No independent internalization route is available for these candidates.';
 
     if (opts.json) {
       // Strict single JSON object output
@@ -1288,6 +1357,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           if (ir.reuseRecommendation?.status === 'unavailable') {
             console.warn(`      ⚠️  semantic reuse evaluation unavailable: ${ir.reuseRecommendation.reason} — learning proceeded without duplicate protection (Rule 4)`);
           }
+        } else if (ir.status === 'refused') {
+          console.log(`    ${ir.candidateId}: REFUSED — ${ir.error}`);
+          console.log(`      Next action: ${ir.nextAction}`);
         } else if (ir.status === 'intake_failed') {
           console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);
           console.log(`      Next action: ${ir.nextAction}`);

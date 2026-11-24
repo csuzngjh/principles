@@ -1,8 +1,9 @@
 import type { SqliteConnection } from '../sqlite-connection.js';
 import type { CandidateRecord, CandidateStore } from './candidate-store.js';
-import { resolveRecommendationKind } from './recommendation-kind-resolver.js';
+import { resolveRecommendationKind, validateRecommendationKind } from './recommendation-kind-resolver.js';
 import {
   appendAdmissionEvaluation,
+  authorizeInvalidKindPostProcessingRecovery as authorizeInvalidKindPostProcessingRecoveryInDocument,
   completeOwnerDecision as completeOwnerDecisionInDocument,
   parseAdmissionDocument,
   recordOwnerDecision as recordOwnerDecisionInDocument,
@@ -11,6 +12,8 @@ import {
   type AdmissionEvaluationRecord,
   type AdmissionProcessingRecord,
   type CandidateAdmissionDocument,
+  type CandidatePostProcessingRecoveryInput,
+  type CandidatePostProcessingRecoveryResult,
   type OwnerDecisionRecord,
 } from './admission-document.js';
 
@@ -251,6 +254,64 @@ export class SqliteCandidateStore implements CandidateStore {
     });
     applyProcessing.immediate();
     return updated;
+  }
+
+  async authorizeInvalidKindPostProcessingRecovery(candidateId: string, input: CandidatePostProcessingRecoveryInput): Promise<CandidatePostProcessingRecoveryResult> {
+    const db = this.connection.getDb();
+    let outcome: CandidatePostProcessingRecoveryResult = { status: 'refused', reason: 'recovery_not_executed' };
+    const apply = db.transaction((): void => {
+      const row = db.prepare('SELECT recommendation_kind, status, admission_json FROM principle_candidates WHERE candidate_id = ?')
+        .get(candidateId) as { recommendation_kind: string; status: string; admission_json: string | null } | undefined;
+      if (row === undefined) {
+        outcome = { status: 'refused', reason: 'candidate_not_found' };
+        return;
+      }
+      const rawKind = validateRecommendationKind(row.recommendation_kind);
+      if (rawKind !== 'principle' && rawKind !== 'rule' && rawKind !== 'prompt') {
+        outcome = { status: 'refused', reason: rawKind === null ? 'candidate_kind_still_invalid' : 'candidate_kind_has_no_dreamer_route' };
+        return;
+      }
+      const parsed = parseAdmissionDocument(row.admission_json);
+      if (!parsed.ok) {
+        outcome = { status: 'refused', reason: parsed.reason };
+        return;
+      }
+      const result = authorizeInvalidKindPostProcessingRecoveryInDocument(parsed.document, { candidateId, rawRecommendationKind: rawKind, authorization: input });
+      // A completed/active recovery is an idempotent read even after the
+      // worker has consumed the candidate. It must return the original audit
+      // record without attempting another state write.
+      if (result.status === 'already_authorized') {
+        outcome = result;
+        return;
+      }
+      const processing = parsed.document?.processing;
+      const legacyConsumedInvalidKindPark = row.status === 'consumed'
+        && processing?.state === 'awaiting_owner'
+        && typeof processing.blockedReason === 'string'
+        && processing.blockedReason.startsWith('candidate_kind_invalid');
+      if (row.status !== 'pending' && !legacyConsumedInvalidKindPark) {
+        outcome = { status: 'refused', reason: 'candidate_not_pending' };
+        return;
+      }
+      if (result.status === 'refused') {
+        outcome = result;
+        return;
+      }
+      const serialized = serializeAdmissionDocument(result.document);
+      if (!serialized.ok) {
+        outcome = { status: 'refused', reason: serialized.reason };
+        return;
+      }
+      const info = db.prepare('UPDATE principle_candidates SET admission_json = ? WHERE candidate_id = ? AND status = ? AND recommendation_kind = ? AND admission_json IS ?')
+        .run(serialized.json, candidateId, row.status, row.recommendation_kind, row.admission_json);
+      if (info.changes !== 1) {
+        outcome = { status: 'refused', reason: 'candidate_changed_during_recovery' };
+        return;
+      }
+      outcome = result;
+    });
+    apply.immediate();
+    return outcome;
   }
 
   // Phase 7.2 P1-01 — typed Owner decision lifecycle. Both methods use the

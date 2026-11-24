@@ -156,6 +156,7 @@ function makeHarness(args: {
     },
     updateTask: async () => undefined,
     getCandidatesByTaskId: async () => args.candidates,
+    getCandidate: async (candidateId: string) => args.candidates.find((item) => item.candidateId === candidateId) ?? null,
     getRunsByTask: async () => [{ runId: RUN_ID, taskId: TASK_ID, status: 'succeeded' }],
     getRun: async (runId: string) => {
       const candidate = args.candidates.find((item) => item.sourceRunId === runId);
