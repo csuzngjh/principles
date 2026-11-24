@@ -513,12 +513,17 @@ function isRecord(value) {
  * only a pending intent is still executable; applied/superseded history is
  * retained for audit but never counted as waiting.
  */
+function isInvalidRawKindBlocker(blockedReason) {
+  return blockedReason === 'candidate_kind_invalid'
+    || (typeof blockedReason === 'string' && blockedReason.startsWith('candidate_kind_invalid:'));
+}
+
 function isAwaitingOwnerAction(admission) {
   if (admission?.kind !== 'present') return false;
   if (admission.pendingOwnerDecisions > 0) return true;
   if (admission.ownerDecisions > 0) return false;
   return admission.processingState === 'awaiting_owner'
-    && !String(admission.processingBlockedReason ?? '').startsWith('candidate_kind_invalid:');
+    && !isInvalidRawKindBlocker(admission.processingBlockedReason);
 }
 
 function collectLedgerStats(workspaceDir) {
@@ -906,7 +911,7 @@ export function classifyConsumedWithoutDreamer({
   const awaitingOwner = admissionPendingOwnerDecision
     || (admissionProcessingState === 'awaiting_owner'
       && admissionOwnerDecisionCount === 0
-      && !String(admissionProcessingBlockedReason ?? '').startsWith('candidate_kind_invalid:'));
+      && !isInvalidRawKindBlocker(admissionProcessingBlockedReason));
   if (awaitingOwner) {
     // A saved Owner park without a typed decision is still actionable unless
     // it is a known raw-kind data blocker; typed history counts only while pending.

@@ -815,7 +815,7 @@ describe('skew accounting', () => {
     expect(classifyConsumedWithoutDreamer({ rawKind: 'rule', hasReuseEvidence: false, admissionProcessingState: 'awaiting_owner' })).toBe(c.AWAITING_OWNER);
     // Typed Owner history is pending only while executionStatus is pending.
     expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', admissionPendingOwnerDecision: true, admissionOwnerDecisionCount: 1 })).toBe(c.AWAITING_OWNER);
-    expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', admissionProcessingState: 'awaiting_owner', admissionProcessingBlockedReason: 'candidate_kind_invalid:principle', admissionOwnerDecisionCount: 0 })).toBe(c.UNEXPLAINED);
+    expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', admissionProcessingState: 'awaiting_owner', admissionProcessingBlockedReason: 'candidate_kind_invalid', admissionOwnerDecisionCount: 0 })).toBe(c.UNEXPLAINED);
     expect(classifyConsumedWithoutDreamer({ rawKind: 'principle', admissionProcessingState: 'awaiting_owner', admissionOwnerDecisionCount: 1 })).toBe(c.UNEXPLAINED);
     // every other state (complete, exhausted, no document, …) is unexplained
     for (const state of ['complete', 'exhausted', 'not_started', 'in_progress', null, undefined]) {
@@ -1029,7 +1029,7 @@ describe('recent window', () => {
       insertCandidate(db, 'c-invalid-kind-awaiting', 'wizardry', 'pending', inside, JSON.stringify({
         evaluations: [],
         currentEvaluationId: null,
-        processing: { state: 'awaiting_owner', blockedReason: 'candidate_kind_invalid:wizardry' },
+        processing: { state: 'awaiting_owner', blockedReason: 'candidate_kind_invalid' },
         ownerDecisions: [],
       }));
       insertCandidate(db, 'c-exhausted', 'principle', 'pending', inside, JSON.stringify({
