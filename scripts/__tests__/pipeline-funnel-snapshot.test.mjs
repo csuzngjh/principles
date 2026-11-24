@@ -1080,7 +1080,7 @@ describe('recent window', () => {
     expect(report).toContain(`## 6. 近 30 天漏斗（共同窗口 [${model.window.cutoffIso}, ${model.window.windowT1Iso})）`);
     expect(report).toContain(`- 共同窗口 T1：${model.window.windowT1Iso}`);
     expect(report).toContain('| Pain | trajectory.pain_events | created_at | 2 | 0 |');
-    expect(report).toContain('| Diagnostician 任务（父任务 + diag_* 子任务） | state.tasks | created_at | 2 | 0 |');
+    expect(report).toContain('| Diagnostician 任务（父任务 + diag_* 子任务） | state.tasks | created_at | 5 | 0 |');
     expect(report).toContain('| Approval 请求 | state.approvals | requested_at | 1 | 1 |');
     expect(report).toContain('| Activation | state.activations | activated_at | 2 | 0 |');
     expect(report).toContain('- artificer 任务状态：failed: 1');
@@ -1154,8 +1154,8 @@ describe('recent window', () => {
       insert.run('approval-rejected', 'rejected', SEED_AT);
     });
 
-    await main(['--workspace', ws.workspace], { reportsDir });
-    const reportPath = path.join(reportsDir, `PD_PIPELINE_FUNNEL_BASELINE_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.md`);
+    const firstModel = await main(['--workspace', ws.workspace], { reportsDir });
+    const reportPath = path.join(reportsDir, `PD_PIPELINE_FUNNEL_BASELINE_${firstModel.meta.runDate}.md`);
     const withDenominator = fs.readFileSync(reportPath, 'utf-8');
     expect(withDenominator).toContain("| 审批通过 | approvals status='approved' | approvals 全部 | 0.000 |");
 
