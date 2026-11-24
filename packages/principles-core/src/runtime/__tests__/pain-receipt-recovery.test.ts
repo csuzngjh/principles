@@ -316,6 +316,100 @@ describe('recoverTaskIdentityFromReceipt — WorkBuddy fallback territory (PRI-1
   });
 });
 
+describe('recoverTaskIdentityFromReceipt — OpenClaw fallback territory (PRI-1276)', () => {
+  /** The OpenClaw unbound MCP ingress shape: on the installed OpenClaw
+   * 2026.11.5 runtime the materialized `tools/call` carries NO `_meta`
+   * producer (materializer calls `callTool(server, tool, args)` — audit
+   * PRI1276_OPENCLAW_HOST_IDENTITY_AUDIT_20261125 §2.2), so every normal-entry
+   * submission without a model claim persists exactly this shape and the
+   * `after_tool_call` receipt is the designated repair source. */
+  async function persistOpenclawUnboundPain(painId: string): Promise<string> {
+    const bridge = makeBridge();
+    const { taskId } = await bridge.submitPainSignal({
+      painId,
+      painType: 'principle_deviation',
+      source: 'mcp_agent_assisted',
+      reason: 'receipt fallback fixture (openclaw)',
+      provenance: 'agent_reported_owner_approved',
+      hostKind: 'openclaw',
+      evidence: [],
+      painIngress: unboundMcpIngress(0),
+    });
+    return taskId;
+  }
+
+  it('host_session_claim_empty IS repairable through the SAME CAS recovery (no turn id — OpenClaw exposes no proven submission turn)', async () => {
+    const painId = 'mcp_1700000000025_6d000025';
+    const taskId = await persistOpenclawUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(
+      receiptJson(painId, tmpDir, { sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' } }),
+      { workspaceDir: tmpDir },
+    );
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'openclaw', receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-1', toolCallId: 'oc-call-1' },
+      authorization: authorize(true),
+    });
+    expect(outcome.status).toBe('recovered');
+    if (outcome.status !== 'recovered') return;
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.sessionIdHint).toBe('oc-session-1');
+    const painIngress = diagnostic.painIngress as Record<string, unknown>;
+    expect(painIngress.verifiedHostSession).toEqual({ status: 'verified', sessionId: 'oc-session-1' });
+    // Idempotent replay of the SAME physical call folds.
+    const replay = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'openclaw', receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-1', toolCallId: 'oc-call-1' },
+      authorization: authorize(true),
+    });
+    expect(replay.status).toBe('already_bound');
+  });
+
+  it('a DIFFERENT toolCallId against an already-bound task is ambiguous (never a second identity write)', async () => {
+    const painId = 'mcp_1700000000026_7e000026';
+    await persistOpenclawUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(
+      receiptJson(painId, tmpDir, { sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' } }),
+      { workspaceDir: tmpDir },
+    );
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const first = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'openclaw', receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-2', toolCallId: 'oc-call-2a' },
+      authorization: authorize(true),
+    });
+    expect(first.status).toBe('recovered');
+    const second = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'openclaw', receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-2', toolCallId: 'oc-call-2b' },
+      authorization: authorize(true),
+    });
+    expect(second.status).toBe('rejected');
+    if (second.status !== 'rejected') return;
+    expect(second.reasonCode).toBe('ambiguous_receipt');
+  });
+
+  it('an OpenClaw event NEVER repairs another host\u2019s original task (hostKind owner check)', async () => {
+    const painId = 'mcp_1700000000027_8f000027';
+    // The original task belongs to codex; an OpenClaw completion event claims it.
+    await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(
+      receiptJson(painId, tmpDir, { sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' } }),
+      { workspaceDir: tmpDir },
+    );
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'openclaw', receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-3', toolCallId: 'oc-call-3' },
+      authorization: authorize(true),
+    });
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.reasonCode).toBe('task_host_kind_mismatch');
+  });
+});
+
 describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () => {
   it('recovers the SAME original task and keeps re-entry consistency', async () => {
     const painId = 'mcp_1700000000001_aa000001';

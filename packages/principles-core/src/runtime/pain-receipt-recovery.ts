@@ -84,9 +84,9 @@ const RECEIPT_ALLOWED_KEYS = [
  * caller supplied no claim of its own, so the completion event's own host
  * identity is the designated repair source:
  *  - `codex_host_metadata_missing` (Codex, PRI-1274);
- *  - `host_session_claim_empty` (non-Codex hosts, PRI-1275 WorkBuddy) — the
- *    unbound outcome when no `_meta` identity existed and NO claim was
- *    supplied at all.
+ *  - `host_session_claim_empty` (non-Codex hosts, PRI-1275 WorkBuddy and
+ *    PRI-1276 OpenClaw) — the unbound outcome when no `_meta` identity
+ *    existed and NO claim was supplied at all.
  * Every cause that records a REFUSAL of something the caller actually
  * supplied stays refused here — a specific claim existed and was rejected,
  * so the completion event must not overturn that recorded decision:
@@ -260,9 +260,10 @@ export interface ReceiptRecoveryAuthorization {
 export interface RecoverTaskIdentityFromReceiptOptions {
   readonly workspaceDir: string;
   /** The host whose completion event produced this receipt. PRI-1274 froze
-   * 'codex'; PRI-1275 admits the WorkBuddy adapter through the SAME CAS
-   * recovery (per-host producers, one shared recovery authority). */
-  readonly hostKind: 'codex' | 'workbuddy';
+   * 'codex'; PRI-1275 admits the WorkBuddy adapter and PRI-1276 the OpenClaw
+   * plugin through the SAME CAS recovery (per-host producers, one shared
+   * recovery authority). */
+  readonly hostKind: 'codex' | 'workbuddy' | 'openclaw';
   readonly receipt: ValidatedPainSubmitReceipt;
   readonly identity: ReceiptEventIdentity;
   readonly authorization: ReceiptRecoveryAuthorization;
@@ -368,7 +369,7 @@ function evaluateRecoveryPass(input: {
   nowIso: string;
   /** The host whose completion event produced this receipt (P1-2.7 owner
    * check — the original task must belong to the SAME host). */
-  hostKind: 'codex' | 'workbuddy';
+  hostKind: 'codex' | 'workbuddy' | 'openclaw';
 }): Evaluation {
   const { task, diagnostic, receipt, identity, authorized, targetTurnTextAvailable, nowIso, hostKind } = input;
   const preconditions: TaskCasPreconditions = {
