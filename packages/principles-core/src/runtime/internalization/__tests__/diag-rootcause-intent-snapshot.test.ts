@@ -81,6 +81,7 @@ Deprecate the intent loop.
 const HASH_A = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const HASH_B = 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const HASH_WINNER = 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+const HASH_UNRECOGNIZED = 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
 
 function makeEffectiveConfig(intentEngineering: boolean): EffectivePdConfig {
   const base = getDefaultPdConfig();
@@ -288,6 +289,17 @@ async function artifactContent(store: MemoryPIArtifactStore, taskId = TASK_ID): 
 
 function emittedEvents(emitter: Harness['eventEmitter']): string[] {
   return emitter.emitTelemetry.mock.calls.map((call) => (call[0] as { eventType?: string }).eventType ?? '');
+}
+
+/** Payloads of every emitted telemetry event of one type (PRI-1287). */
+function emittedPayloads(
+  emitter: Harness['eventEmitter'],
+  eventType: string,
+): Record<string, unknown>[] {
+  return emitter.emitTelemetry.mock.calls
+    .map((call) => call[0] as { eventType?: string; payload?: Record<string, unknown> })
+    .filter((event) => event.eventType === eventType)
+    .map((event) => event.payload ?? {});
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -849,3 +861,115 @@ describe('Stage A — no snapshot means no model-authored strategy (P0-2)', () =
   });
 });
 
+// ── PRI-1287: the degradation itself must be observable ─────────────────────
+//
+// Before this, `not_configured` was the whole story: a document whose headings
+// were never recognised and an untouched template produced the same verdict
+// with the same (misleading) nextAction, and the event that did exist was not
+// persisted in production. These tests pin the structured reason on both entry
+// paths and pin the normal path to emitting NO degradation record.
+describe('Stage A — Intent degradation carries a structured reason (PRI-1287)', () => {
+  const EVENT = 'diag_rootcause_intent_doc_template_only';
+  const INTENT_UNRECOGNIZED_HEADINGS = `# INTENT.md
+
+## 1. 为什么存在
+Owner trust is the long-term asset we are protecting.
+
+## 2. 期望结果
+Every principle is traceable to the strategic basis it came from.
+`;
+
+  it('a fresh template-only read reports placeholder_only with an actionable nextAction', async () => {
+    const harness = createHarness({
+      intentEngineering: true,
+      reader: {
+        readIntentDoc: () => ({
+          ok: true,
+          found: true,
+          flagEnabled: true,
+          doc: { raw: INTENT_TEMPLATE_ONLY, contentHash: HASH_TEMPLATE, path: '/ws/.principles/INTENT.en.md' },
+        }),
+      },
+      output: makeOutput({ intentTension: tensionFor(['why']) }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const payloads = emittedPayloads(harness.eventEmitter, EVENT);
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toMatchObject({
+      source: 'fresh_read',
+      reason: 'placeholder_only',
+      parsedSectionCount: 5,
+      contentHash: HASH_TEMPLATE,
+      docPath: '/ws/.principles/INTENT.en.md',
+    });
+    expect(String(payloads[0]?.nextAction)).toContain('template');
+  });
+
+  it('a document whose headings were never recognised reports no_parsed_section', async () => {
+    const harness = createHarness({
+      intentEngineering: true,
+      reader: {
+        readIntentDoc: () => ({
+          ok: true,
+          found: true,
+          flagEnabled: true,
+          doc: { raw: INTENT_UNRECOGNIZED_HEADINGS, contentHash: HASH_UNRECOGNIZED, path: '/ws/.principles/INTENT.zh-CN.md' },
+        }),
+      },
+      output: makeOutput({ intentTension: tensionFor(['why']) }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const payloads = emittedPayloads(harness.eventEmitter, EVENT);
+    expect(payloads).toHaveLength(1);
+    // The Owner wrote real content; telling them to "fill in a section" would be
+    // wrong — the failure is the heading vocabulary (the PRI-1284 class).
+    expect(payloads[0]).toMatchObject({ source: 'fresh_read', reason: 'no_parsed_section', parsedSectionCount: 0 });
+    expect(String(payloads[0]?.nextAction)).toContain('## 1. Why');
+    expect(harness.persistedSnapshot()).toBeUndefined();
+  });
+
+  it('a historical snapshot the trust boundary refuses reports its reason too', async () => {
+    const historical = buildIntentSnapshot({
+      raw: INTENT_TEMPLATE_ONLY,
+      contentHash: HASH_TEMPLATE,
+      capturedAt: '2026-11-14T08:00:00.000Z',
+      lang: 'en',
+    });
+    const harness = createHarness({
+      intentEngineering: true,
+      initialDiagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        intentSnapshot: historical,
+      }),
+      output: makeOutput({ intentTension: tensionFor(['why']) }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const payloads = emittedPayloads(harness.eventEmitter, EVENT);
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toMatchObject({ source: 'persisted_snapshot', reason: 'placeholder_only' });
+    expect(harness.reader.readIntentDoc).not.toHaveBeenCalled();
+  });
+
+  it('the normal path emits NO degradation record', async () => {
+    const harness = createHarness({ intentEngineering: true });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(emittedEvents(harness.eventEmitter)).not.toContain(EVENT);
+    expect(harness.persistedSnapshot()).toBeDefined();
+  });
+});

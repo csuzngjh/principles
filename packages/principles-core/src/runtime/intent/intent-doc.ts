@@ -295,3 +295,80 @@ export function deriveIntentDocState(
   if (authored === 0) return 'not_configured';
   return authored === SECTION_DEFS.length ? 'configured' : 'partially_configured';
 }
+
+// ── Structured degradation reason (PRI-1287, rc-9) ──────────────────────────
+//
+// `not_configured` is a VERDICT, not an explanation. Both ways to reach it look
+// identical downstream (`intentSnapshot` absent → relevance `not_configured`),
+// but they demand opposite Owner actions:
+//
+//   - no_parsed_section — the canonical headings were never recognised (wrong
+//     title, localized title, or empty bodies). The Owner may have written a
+//     full document that the whole chain still refuses to read. This is exactly
+//     the shape that hid for weeks in the 2026-11-22 intent ON/OFF pilot before
+//     the heading-suffix fix (PRI-1284).
+//   - placeholder_only — the five sections parsed, but they still carry the
+//     shipped template questions / TODO noise. Nothing is wrong with the file;
+//     the Owner simply has not answered yet.
+//
+// Telling an Owner who already wrote five sections to "fill in a section" is a
+// misleading nextAction, so the reason and the nextAction are derived together
+// and carried on the same record (the Stage A telemetry event).
+
+/** Canonical headings, in document order — the ONLY headings the parser accepts. */
+export const INTENT_DOC_CANONICAL_HEADINGS =
+  '## 1. Why / ## 2. Desired Outcome / ## 3. Non-negotiables / ## 4. Stop / Escalation / ## 5. Current Strategic Focus';
+
+/**
+ * Why a document carries no Owner-authored section.
+ *
+ * `no_authored_section` is a defensive fallback only: the classifier cannot
+ * reach it while `analyzeIntentDocSections` stays total, but a caller that
+ * already proved `hasAuthoredSnapshotSections=false` must never be handed
+ * `null` and left to invent wording.
+ */
+export type IntentDocDegradationReason =
+  | 'no_parsed_section'
+  | 'placeholder_only'
+  | 'no_authored_section';
+
+export interface IntentDocDegradation {
+  readonly reason: IntentDocDegradationReason;
+  /** How many of the five canonical headings were recognised AND carry text. */
+  readonly parsedSectionCount: number;
+  /** Owner-facing recovery step; always present, never a bare restatement. */
+  readonly nextAction: string;
+}
+
+/**
+ * Explain why a parsed document has no Owner-authored section, or return `null`
+ * when it has at least one (the normal path produces no degradation record).
+ *
+ * Deterministic and pure — same classification rules as
+ * `analyzeIntentDocSections`, so this explanation can never disagree with the
+ * trust boundary that dropped the snapshot.
+ */
+export function deriveIntentDocDegradation(
+  sections: IntentDocSections,
+  lang: IntentLang,
+): IntentDocDegradation | null {
+  const analyses = analyzeIntentDocSections(sections, lang);
+  const parsed = analyses.filter((analysis) => analysis.state !== 'missing');
+  if (analyses.some((analysis) => analysis.state === 'authored')) return null;
+
+  const parsedSectionCount = parsed.length;
+  if (parsedSectionCount === 0) {
+    return {
+      reason: 'no_parsed_section',
+      parsedSectionCount,
+      nextAction:
+        `INTENT.md carries no readable section body. Use the canonical headings exactly (${INTENT_DOC_CANONICAL_HEADINGS}) and put content under at least one of them; content under any other heading is never read as Owner intent.`,
+    };
+  }
+  return {
+    reason: 'placeholder_only',
+    parsedSectionCount,
+    nextAction:
+      'INTENT.md still carries only the shipped template questions or TODO noise. Replace at least one section with the Owner\'s own answer; template text is not treated as Owner intent.',
+  };
+}

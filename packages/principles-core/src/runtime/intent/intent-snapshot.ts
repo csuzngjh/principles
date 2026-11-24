@@ -166,6 +166,26 @@ export function deriveAuthoredSnapshotSectionKeys(
   return authored;
 }
 
+/**
+ * Project a snapshot back onto the parser's section model WITHOUT filtering.
+ *
+ * The inverse of `buildIntentSnapshot`'s section projection. Unlike
+ * `intentSnapshotSectionsToDoc` (which keeps authored sections only, because it
+ * feeds a prompt), this keeps every non-`missing` body — placeholder bodies
+ * included. That is the whole point: PRI-1287 needs to explain WHY the trust
+ * boundary refused a snapshot, so the rejected sections must survive long
+ * enough to be classified. `missing` sections are omitted because they carry no
+ * body and `parseIntentDocSections` reports them as absent too.
+ */
+export function intentSnapshotToUnfilteredDocSections(snapshot: IntentSnapshot): IntentDocSections {
+  const sections: IntentDocSections = {};
+  for (const section of snapshot.sections) {
+    if (section.missing === true) continue;
+    sections[KEY_TO_DOC_FIELD[section.key]] = section.text;
+  }
+  return sections;
+}
+
 /** True when the snapshot carries at least one Owner-authored section. */
 export function hasAuthoredSnapshotSections(snapshot: IntentSnapshot): boolean {
   return deriveAuthoredSnapshotSectionKeys(snapshot).size > 0;

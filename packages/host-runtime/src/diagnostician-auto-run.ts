@@ -24,8 +24,10 @@ import {
   createRuntimeStateHandle,
   pickDiagnosticianCandidate,
   resolveDiagnosticianCapability,
+  storeEmitter,
 } from '@principles/core/runtime';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from './pd-config.js';
+import { WorkspaceTelemetryEmitter } from './workspace-telemetry-emitter.js';
 import { isAutomaticPainSubmissionAuthorized } from './auto-pain-authorization.js';
 import { createHostIntentDocReader } from './intent-doc-reader.js';
 import { createGovernanceTrajectoryTurnReader } from './governance-trajectory-turn-reader.js';
@@ -167,6 +169,22 @@ export async function runPendingDiagnosticianOnce(
           // neutral host reader must ride along or admission would never capture
           // a snapshot on this path. Flag-off keeps zero filesystem access.
           intentDocReader: createHostIntentDocReader({ workspaceDir: options.workspaceDir, effectiveConfig: config.effective }),
+          // PRI-1287 (rc-9): the factory defaults runner telemetry to the
+          // process-wide storeEmitter, which has no production subscriber — an
+          // emitted degradation event was therefore unobservable. Bind the
+          // workspace-scoped sink (same construction as the consumer cycle and
+          // `pd diagnose`) so allowlisted critical events, including the Intent
+          // chain's degradation reason + nextAction, survive the process.
+          telemetrySink: new WorkspaceTelemetryEmitter(storeEmitter, options.workspaceDir, (detail) => {
+            // Non-fatal by contract (PRI-634): one lost telemetry line must
+            // never fail the diagnosis round, but the loss stays observable.
+            try {
+              process.stderr.write(`[PD:telemetry] WARNING: critical event persistence failed: ${detail}\n`);
+            } catch {
+              // stderr already closed (hostless/detached process): no further
+              // channel exists for this warning; the diagnosis still proceeds.
+            }
+          }),
           // PRI-1265: the auto-run path sees the bound session's ORIGINAL turns
           // like every other diagnosis entry.
           trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir: options.workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(options.workspaceDir) }),

@@ -44,6 +44,10 @@ import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime
  *     （PRI-1146 P1-01：低频 skip/degradation 取证 — 前者记录 ledger 不可证明
  *     时 canonical association 为何保持 unresolved，后者是 replay review skip
  *     的唯一持久记录；见 Set 内注释）
+ *   - diag_rootcause_intent_doc_template_only / diag_rootcause_intent_doc_read_failed
+ *     （PRI-1287：Intent 链降级到 not_configured 的唯一可取证记录 — 无快照时
+ *     relevance 恒为 not_configured；reason 区分「标题从未被识别」与「模板未
+ *     填写」，两者需要完全相反的 Owner 动作）
  *
  * 落点 `<workspaceDir>/.pd/telemetry/critical-events.jsonl`（JSONL，一行一
  * 事件，含完整 TelemetryEvent）。同步 append：事件量小（allowlist 限流），
@@ -73,6 +77,16 @@ const CRITICAL_EVENT_ALLOWLIST: ReadonlySet<string> = new Set([
   // (its only durable record — the candidate row itself carries no skip reason).
   'diag_router_trusted_context_unavailable',
   'replay_review_source_invalid',
+  // PRI-1287 (rc-9): the Intent chain's degradation evidence. Stage A has been
+  // emitting these since #2663, but production runners ride the unsubscribed
+  // storeEmitter singleton and the events were absent from this allowlist — an
+  // emitted degradation and a silent one looked identical to the Owner. That is
+  // how an entire Intent chain could degrade to `not_configured` for weeks
+  // (found by PRI-1284) with nothing to inspect afterwards. Low frequency: at
+  // most one line per diagnosis that could not anchor, plus its reason
+  // (`no_parsed_section` vs `placeholder_only`) and nextAction.
+  'diag_rootcause_intent_doc_template_only',
+  'diag_rootcause_intent_doc_read_failed',
 ]);
 
 export type WorkspaceTelemetryPersistFailureSink = (detailJson: string) => void;
