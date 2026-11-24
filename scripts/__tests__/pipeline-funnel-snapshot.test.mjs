@@ -475,14 +475,24 @@ describe('report output path allowlist', () => {
   it('replaces an existing valid report by inode (atomic swap, no temp residue)', async () => {
     const { reportsDir, run, out } = fixture();
     const target = out(REPORT_NAME);
-    fs.writeFileSync(target, 'OLD REPORT\n');
-    const inodeBefore = fs.statSync(target, { bigint: true }).ino;
+    // All inspection goes through file DESCRIPTORS: the name is swapped by
+    // the run on purpose, so the test never re-checks the path between the
+    // run and the read — it reads whatever inode the name points to now.
+    const oldFd = fs.openSync(target, 'w');
+    fs.writeFileSync(oldFd, 'OLD REPORT\n');
+    const inodeBefore = fs.fstatSync(oldFd, { bigint: true }).ino;
+    fs.closeSync(oldFd);
     await run(['--out', target]);
-    const after = fs.readFileSync(target, 'utf-8');
-    expect(after).toContain('# PD Pipeline Funnel Baseline');
-    expect(after).not.toContain('OLD REPORT');
-    // a NEW inode now carries the name — the old one was never truncated in place
-    expect(fs.statSync(target, { bigint: true }).ino).not.toBe(inodeBefore);
+    const newFd = fs.openSync(target, 'r');
+    try {
+      const after = fs.readFileSync(newFd, 'utf-8');
+      expect(after).toContain('# PD Pipeline Funnel Baseline');
+      expect(after).not.toContain('OLD REPORT');
+      // a NEW inode now carries the name — the old one was never truncated in place
+      expect(fs.fstatSync(newFd, { bigint: true }).ino).not.toBe(inodeBefore);
+    } finally {
+      fs.closeSync(newFd);
+    }
     expect(fs.readdirSync(reportsDir)).toEqual([REPORT_NAME]);
   });
 
