@@ -1092,30 +1092,6 @@ async function createDisabledBridge(
 
 
 
-/**
- * Supply registerBorrow for use across await or concurrent cleanup/eviction.
- * Release the registered lease in finally, even if no operation is started.
- * The legacy one-argument form is an unleased lookup for callers which
- * externally coordinate the workspace lifetime (including inspection tests).
- */
-export async function createPainSignalBridge(
-  opts: PainSignalRuntimeFactoryOptions,
-  registerBorrow?: RegisterBridgeBorrow,
-): Promise<PainSignalBridge> {
-  const workspaceDir = opts.workspaceDir;
-  if (closingWorkspaces.has(workspaceDir)) throw new Error('PainSignalBridge workspace cleanup is in progress');
-  const acquisition = createPainSignalBridgeInner(opts, registerBorrow);
-  const pending = pendingAcquisitions.get(workspaceDir) ?? new Set<Promise<PainSignalBridge>>();
-  pendingAcquisitions.set(workspaceDir, pending);
-  pending.add(acquisition);
-  try {
-    return await acquisition;
-  } finally {
-    pending.delete(acquisition);
-    if (pending.size === 0 && pendingAcquisitions.get(workspaceDir) === pending) pendingAcquisitions.delete(workspaceDir);
-  }
-}
-
 async function createPainSignalBridgeInner(
   opts: PainSignalRuntimeFactoryOptions,
   registerBorrow?: RegisterBridgeBorrow,
@@ -1271,3 +1247,28 @@ export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: s
     if (key.startsWith(kindPrefix)) retire(key);
   }
 }
+
+/**
+ * Supply registerBorrow for use across await or concurrent cleanup/eviction.
+ * Release the registered lease in finally, even if no operation is started.
+ * The legacy one-argument form is an unleased lookup for callers which
+ * externally coordinate the workspace lifetime (including inspection tests).
+ */
+export async function createPainSignalBridge(
+  opts: PainSignalRuntimeFactoryOptions,
+  registerBorrow?: RegisterBridgeBorrow,
+): Promise<PainSignalBridge> {
+  const { workspaceDir } = opts;
+  if (closingWorkspaces.has(workspaceDir)) throw new Error('PainSignalBridge workspace cleanup is in progress');
+  const acquisition = createPainSignalBridgeInner(opts, registerBorrow);
+  const pending = pendingAcquisitions.get(workspaceDir) ?? new Set<Promise<PainSignalBridge>>();
+  pendingAcquisitions.set(workspaceDir, pending);
+  pending.add(acquisition);
+  try {
+    return await acquisition;
+  } finally {
+    pending.delete(acquisition);
+    if (pending.size === 0 && pendingAcquisitions.get(workspaceDir) === pending) pendingAcquisitions.delete(workspaceDir);
+  }
+}
+

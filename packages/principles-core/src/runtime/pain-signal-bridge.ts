@@ -2291,7 +2291,10 @@ export class PainSignalBridge {
         // terminal: consume + complete as usual.
         const suppression = seedSuppressedByCandidate.get(candidate.candidateId);
         const parkedSuppressed = suppression?.suppress === true && suppression.reason === 'reuse_park_pending_owner';
-        if (!parkedSuppressed && candidate.status !== 'consumed' && !seedFailureCandidateIds.includes(candidate.candidateId)) {
+        if (!parkedSuppressed && candidate.status !== 'consumed') {
+          // A failed Dreamer seed does not undo a successful Ledger write.
+          // Preserve the established consumed contract, but still re-check
+          // Owner governance under the candidate lock before changing status.
           await this.consumeCandidateIfUnblocked(candidate.candidateId);
         }
       }
