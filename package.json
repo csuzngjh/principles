@@ -116,7 +116,7 @@
     "vitest": "^5.1.0"
   },
   "dependencies": {
-    "glob": "^13.0.6"
+    "glob": "^14.0.6"
   },
   "overrides": {
     "ip-address": "10.5.0",
