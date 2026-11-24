@@ -33,6 +33,9 @@ export const ADMISSION_POLICY_VERSION = 'admission-gate@cr-03';
 export const OWNER_DECISION_POLICY_VERSION = 'owner-decision@1';
 /** Bounded Owner decision history — decisions are rare (human-paced). */
 export const MAX_OWNER_DECISIONS = 10;
+/** Bounded append-only audit history for explicit invalid-kind recovery. */
+export const MAX_POST_PROCESSING_RECOVERIES = 10;
+export const POST_PROCESSING_RECOVERY_POLICY_VERSION = 'candidate-post-processing-recovery@1';
 
 type AdmissionDecisionValue = 'admitted' | 'needs_evidence' | 'deferred';
 
@@ -111,6 +114,29 @@ export interface OwnerDecisionRecord {
   supersededByDecisionId?: string;
 }
 
+export interface CandidatePostProcessingRecoveryRecord {
+  recoveryId: string;
+  candidateId: string;
+  rawRecommendationKind: 'principle' | 'rule' | 'prompt';
+  priorBlockedReason: string;
+  ownerId: string;
+  identitySource: string;
+  reason: string;
+  authorizedAt: string;
+  policyVersion: string;
+}
+
+export interface CandidatePostProcessingRecoveryInput {
+  ownerId: string;
+  identitySource: string;
+  reason: string;
+  authorizedAt: string;
+}
+
+export type CandidatePostProcessingRecoveryResult =
+  | { status: 'authorized' | 'already_authorized'; document: CandidateAdmissionDocument; recovery: CandidatePostProcessingRecoveryRecord }
+  | { status: 'refused'; reason: string };
+
 export interface CandidateAdmissionDocument {
   schemaVersion: typeof CANDIDATE_ADMISSION_SCHEMA_VERSION;
   evaluations: AdmissionEvaluationRecord[];
@@ -118,6 +144,8 @@ export interface CandidateAdmissionDocument {
   processing?: AdmissionProcessingRecord;
   /** Phase 7.2 P1-01 — append-only Owner decision history (oldest first). */
   ownerDecisions?: OwnerDecisionRecord[];
+  /** Owner-authorized recovery audit; never cleared by processing transitions. */
+  postProcessingRecoveries?: CandidatePostProcessingRecoveryRecord[];
 }
 
 type ParseAdmissionDocumentResult =
@@ -191,6 +219,29 @@ export function parseAdmissionDocument(raw: unknown): ParseAdmissionDocumentResu
       }
     }
   }
+  const {postProcessingRecoveries} = record;
+  if (postProcessingRecoveries !== undefined) {
+    if (!Array.isArray(postProcessingRecoveries) || postProcessingRecoveries.length > MAX_POST_PROCESSING_RECOVERIES) {
+      return { ok: false, document: null, reason: 'admission_json_post_processing_recoveries_invalid' };
+    }
+    for (const recovery of postProcessingRecoveries) {
+      if (typeof recovery !== 'object' || recovery === null) {
+        return { ok: false, document: null, reason: 'admission_json_post_processing_recovery_invalid' };
+      }
+      const entry = recovery as Record<string, unknown>;
+      if (typeof entry.recoveryId !== 'string' || entry.recoveryId === ''
+        || typeof entry.candidateId !== 'string' || entry.candidateId === ''
+        || (entry.rawRecommendationKind !== 'principle' && entry.rawRecommendationKind !== 'rule' && entry.rawRecommendationKind !== 'prompt')
+        || typeof entry.priorBlockedReason !== 'string' || !entry.priorBlockedReason.startsWith('candidate_kind_invalid')
+        || typeof entry.ownerId !== 'string' || entry.ownerId === ''
+        || typeof entry.identitySource !== 'string' || entry.identitySource === ''
+        || typeof entry.reason !== 'string' || entry.reason.trim() === '' || entry.reason.length > 500
+        || typeof entry.authorizedAt !== 'string' || !Number.isFinite(Date.parse(entry.authorizedAt))
+        || entry.policyVersion !== POST_PROCESSING_RECOVERY_POLICY_VERSION) {
+        return { ok: false, document: null, reason: 'admission_json_post_processing_recovery_invalid' };
+      }
+    }
+  }
   return {
     ok: true,
     document: {
@@ -199,10 +250,55 @@ export function parseAdmissionDocument(raw: unknown): ParseAdmissionDocumentResu
       currentEvaluationId: currentId ?? null,
       ...(processing !== undefined ? { processing: processing as AdmissionProcessingRecord } : {}),
       ...(ownerDecisions !== undefined ? { ownerDecisions: ownerDecisions as OwnerDecisionRecord[] } : {}),
+      ...(postProcessingRecoveries !== undefined ? { postProcessingRecoveries: postProcessingRecoveries as CandidatePostProcessingRecoveryRecord[] } : {}),
     },
   };
 }
 
+/**
+ * Explicitly authorize recovery of a candidate parked ONLY because its raw
+ * kind was invalid. This never lifts a real Owner/reuse park. The caller
+ * (CLI) must supply an ADR-0022-resolved Owner identity and an explicit reason;
+ * the store persists this audit and the existing `in_progress` state together.
+ */
+export function authorizeInvalidKindPostProcessingRecovery(
+  existing: CandidateAdmissionDocument | null,
+  candidateId: string,
+  rawKind: 'principle' | 'rule' | 'prompt',
+  input: CandidatePostProcessingRecoveryInput,
+): CandidatePostProcessingRecoveryResult {
+  const processing = existing?.processing;
+  if (existing === null || processing === undefined) return { status: 'refused', reason: 'admission_processing_missing' };
+  if (processing.state !== 'awaiting_owner') return { status: 'refused', reason: 'processing_state_not_invalid_kind_park:' + processing.state };
+  const priorBlockedReason = processing.blockedReason ?? '';
+  if (!priorBlockedReason.startsWith('candidate_kind_invalid')) return { status: 'refused', reason: 'processing_not_blocked_by_invalid_raw_kind' };
+  if (pendingOwnerDecision(existing) !== null || priorBlockedReason === 'reuse_pending_owner') return { status: 'refused', reason: 'owner_decision_pending_recovery_forbidden' };
+  const ownerId = input.ownerId.trim();
+  const identitySource = input.identitySource.trim();
+  const reason = input.reason.trim();
+  if (ownerId === '' || identitySource === '' || reason === '' || reason.length > 500) return { status: 'refused', reason: 'verified_owner_identity_and_reason_required' };
+  if (!Number.isFinite(Date.parse(input.authorizedAt))) return { status: 'refused', reason: 'recovery_authorized_at_invalid' };
+  const recoveryId = 'cpr_' + fingerprintMaterial([
+    candidateId, rawKind, priorBlockedReason, processing.lastFailure?.at ?? '', ownerId, identitySource, reason, POST_PROCESSING_RECOVERY_POLICY_VERSION,
+  ]).slice(0, 24);
+  const history = existing.postProcessingRecoveries ?? [];
+  const previous = history.find((entry) => entry.recoveryId === recoveryId);
+  if (previous !== undefined) {
+    if (processing.state === 'in_progress' || processing.state === 'complete') return { status: 'already_authorized', document: existing, recovery: previous };
+    return { status: 'refused', reason: 'recovery_audit_state_inconsistent' };
+  }
+  if (history.length >= MAX_POST_PROCESSING_RECOVERIES) return { status: 'refused', reason: 'post_processing_recovery_history_exceeded' };
+  const recovery: CandidatePostProcessingRecoveryRecord = {
+    recoveryId, candidateId, rawRecommendationKind: rawKind, priorBlockedReason, ownerId, identitySource, reason,
+    authorizedAt: input.authorizedAt, policyVersion: POST_PROCESSING_RECOVERY_POLICY_VERSION,
+  };
+  const document: CandidateAdmissionDocument = {
+    ...existing,
+    postProcessingRecoveries: [...history, recovery],
+    processing: { ...processing, state: 'in_progress', nextRetryAt: input.authorizedAt, blockedReason: 'candidate_kind_invalid_recovery_authorized' },
+  };
+  return { status: 'authorized', document, recovery };
+}
 export function serializeAdmissionDocument(document: CandidateAdmissionDocument): { ok: true; json: string } | { ok: false; reason: string } {
   const json = JSON.stringify(document);
   if (json.length > MAX_ADMISSION_JSON_CHARS) return { ok: false, reason: 'admission_json_size_exceeded' };

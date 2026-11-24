@@ -2,14 +2,18 @@
  * CandidateStore — in-memory test double using a Map.
  */
 import type { CandidateRecord, CandidateStore } from './candidate-store.js';
+import { validateRecommendationKind } from './recommendation-kind-resolver.js';
 import {
   appendAdmissionEvaluation,
+  authorizeInvalidKindPostProcessingRecovery as authorizeInvalidKindPostProcessingRecoveryInDocument,
   completeOwnerDecision as completeOwnerDecisionInDocument,
   recordOwnerDecision as recordOwnerDecisionInDocument,
   withProcessing,
   type AdmissionEvaluationRecord,
   type AdmissionProcessingRecord,
   type CandidateAdmissionDocument,
+  type CandidatePostProcessingRecoveryInput,
+  type CandidatePostProcessingRecoveryResult,
   type OwnerDecisionRecord,
 } from './admission-document.js';
 
@@ -68,6 +72,20 @@ export class MemoryCandidateStore implements CandidateStore {
     const existing = this.admissions.get(candidateId) ?? null;
     this.admissions.set(candidateId, withProcessing(existing, processing));
     return true;
+  }
+
+  async authorizeInvalidKindPostProcessingRecovery(candidateId: string, input: CandidatePostProcessingRecoveryInput): Promise<CandidatePostProcessingRecoveryResult> {
+    const candidate = this.candidates.get(candidateId);
+    if (!candidate) return { status: 'refused', reason: 'candidate_not_found' };
+    if (candidate.status !== 'pending') return { status: 'refused', reason: 'candidate_not_pending' };
+    const rawKind = validateRecommendationKind(candidate.rawRecommendationKind);
+    if (rawKind !== 'principle' && rawKind !== 'rule' && rawKind !== 'prompt') {
+      return { status: 'refused', reason: rawKind === null ? 'candidate_kind_still_invalid' : 'candidate_kind_has_no_dreamer_route' };
+    }
+    const existing = this.admissions.get(candidateId) ?? null;
+    const result = authorizeInvalidKindPostProcessingRecoveryInDocument(existing, candidateId, rawKind, input);
+    if (result.status !== 'refused') this.admissions.set(candidateId, result.document);
+    return result;
   }
 
   // Phase 7.2 P1-01 — same lifecycle semantics as the SQLite store, without

@@ -48,7 +48,7 @@ import type { CommitResult, CommitInput, CommitPIArtifactInput } from './commit/
 import type { PIArtifactRecord } from '../internalization/pi-artifact.js';
 import type { CommitStore } from './commit/commit-store.js';
 import type { CandidateStore } from './candidate/candidate-store.js';
-import type { AdmissionEvaluationRecord, AdmissionProcessingRecord, CandidateAdmissionDocument, OwnerDecisionRecord } from './candidate/admission-document.js';
+import type { AdmissionEvaluationRecord, AdmissionProcessingRecord, CandidateAdmissionDocument, CandidatePostProcessingRecoveryInput, CandidatePostProcessingRecoveryResult, OwnerDecisionRecord } from './candidate/admission-document.js';
 import type { ArtifactStore } from './artifact/artifact-store.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { PainDiagnosisRecord, PainDiagnosisStore, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
@@ -64,6 +64,9 @@ export type {
   AdmissionEvaluationRecord,
   AdmissionProcessingRecord,
   CandidateAdmissionDocument,
+  CandidatePostProcessingRecoveryRecord,
+  CandidatePostProcessingRecoveryInput,
+  CandidatePostProcessingRecoveryResult,
 } from './candidate/admission-document.js';
 export type { ArtifactRecord } from './artifact/artifact-store.js';
 export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
@@ -654,6 +657,11 @@ export class RuntimeStateManager {
   async updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean> {
     this.assertInitialized();
     return this._candidateStore.updateAdmissionProcessing(candidateId, processing);
+  }
+
+  async authorizeInvalidKindPostProcessingRecovery(candidateId: string, input: CandidatePostProcessingRecoveryInput): Promise<CandidatePostProcessingRecoveryResult> {
+    this.assertInitialized();
+    return this._candidateStore.authorizeInvalidKindPostProcessingRecovery(candidateId, input);
   }
 
   /** Phase 7.2 P1-01 Phase A — persist/resume a typed Owner decision intent (park NOT cleared). */
