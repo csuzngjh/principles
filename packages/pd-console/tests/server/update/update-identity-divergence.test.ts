@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({ create: vi.fn(), check: vi.fn() }));
 vi.mock('create-principles-disciple/update-console', async (original) => ({
   ...await original<typeof import('create-principles-disciple/update-console')>(),
   createReleaseManagerAuthority: mocks.create,
+  createReleaseManagerAuthorityAsync: mocks.create,
 }));
 import { handleUpdateRoute } from '../../../src/server/routes/update.js';
 

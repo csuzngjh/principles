@@ -25,6 +25,7 @@ vi.mock('node:child_process', async (importOriginal) => ({
 vi.mock('create-principles-disciple/update-console', async (original) => ({
   ...await original<typeof import('create-principles-disciple/update-console')>(),
   createReleaseManagerAuthority: mocks.create,
+  createReleaseManagerAuthorityAsync: mocks.create,
 }));
 vi.mock('../../../src/server/utils/installed-layout.js', () => ({
   readCurrentVersion: mocks.readCurrentVersion,

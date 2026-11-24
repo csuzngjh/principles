@@ -54,6 +54,23 @@ import { handleUpdateHistoryRoute, handleUpdateHistoryPruneRoute, reconcileUpdat
 import { handleUpdateTransactionRoute } from './routes/update-transaction.js';
 import { handleConfigRoute } from './routes/config.js';
 import { sendJson, sendNotFound, sendError } from './utils/response.js';
+import { activeReleaseRecordPath, getInstallLayoutPathsFromPdHome } from '@principles/install-layout';
+import {
+  consoleIdentityUrl,
+  decideReleaseHandoverWatch,
+  HANDOVER_BIND_WAIT_MS,
+  HANDOVER_HEALTHY_TIMEOUT_MS,
+  HANDOVER_RELISTEN_RETRY_MS,
+  isInstalledConsoleCode,
+  listenWithHandoverRetry,
+  performReleaseHandover,
+  probeConsolePid,
+  startConsoleSuccessor,
+  startReleaseHandoverWatch,
+  stopSuccessor,
+  waitUntilAnswer,
+  type SuccessorProcess,
+} from './release-handover.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -794,7 +811,18 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
 
 // ── Server startup ───────────────────────────────────────────────────────────
 
-export async function main(): Promise<void> {
+/** How this process was asked to start; the defaults describe the packaged entry. */
+export interface ConsoleLaunch {
+  /** The command line to serve with (`[node, entry, ...flags]`); defaults to this process's own. */
+  readonly argv?: readonly string[];
+  /**
+   * Successor mode (release handover): the predecessor is still releasing the
+   * port as this process boots, so "address in use" means "try again", not "stop".
+   */
+  readonly keepTryingToBind?: boolean;
+}
+
+export async function main(launch: ConsoleLaunch = {}): Promise<void> {
   // PRI-872: resolve the PD home BEFORE anything else. Everything below
   // (registry, update history, backups, gateway probes) derives from it, and a
   // broken experiment configuration must stop the process here instead of
@@ -815,8 +843,9 @@ export async function main(): Promise<void> {
     throw error;
   }
 
-  const { workspace, port, host } = parseArgs(process.argv, pdHome.mode);
-  warnAboutLegacyAuthArgs(process.argv);
+  const argv = launch.argv === undefined ? process.argv : [...launch.argv];
+  const { workspace, port, host } = parseArgs(argv, pdHome.mode);
+  warnAboutLegacyAuthArgs(argv);
 
   if (pdHome.mode === 'experiment') {
     console.log(`[pd-console] Environment: experiment (PD_EXPERIMENT_ROOT=${pdHome.experimentRoot ?? ''})`);
@@ -862,25 +891,97 @@ export async function main(): Promise<void> {
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
 
+  const stopAccepting = async (): Promise<void> => {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // Keep-alive connections idle in a browser tab must not hold the port
+      // hostage; requests still in flight are left to finish, within a bound.
+      server.closeIdleConnections();
+      setTimeout(resolve, 2000).unref();
+    });
+  };
+
+  // Release handover: once this process is serving, it must not outlive the
+  // release it serves. The watch re-reads the active release record; when an
+  // update has replaced it, a successor on the installed code takes this port
+  // and this process exits (see release-handover.ts for the safety contract).
+  let watchingRelease = false;
+
+  // Only a console that IS the installed one may start "the successor beside
+  // this file" and call it the new release; decided once, at boot.
+  const handover = decideReleaseHandoverWatch(
+    process.env,
+    isInstalledConsoleCode(path.dirname(__filename), getInstallLayoutPathsFromPdHome(pdHome).consoleDir),
+  );
+  let handoverOffAnnounced = false;
+  /** The successor this process started, for as long as a called-off handover may have to stop it. */
+  let successor: SuccessorProcess | null = null;
+
   // PRI-872: a second instance on an occupied port must fail with an
   // actionable message, not an unhandled 'error' stack. The usual cause is the
-  // production console already listening on 3100.
-  server.on('error', (error: Error & { code?: string }) => {
-    if (error.code === 'EADDRINUSE') {
-      console.error(`[pd-console] Port ${port} is already in use on ${host}.`);
-      console.error(pdHome.mode === 'production'
-        ? `[pd-console] Another console is probably serving this installation. Stop it, or pick another port with --port.`
-        : `[pd-console] Stop the process holding the port, or pass a different --port (the experiment default is ${EXPERIMENT_CONSOLE_PORT}).`);
+  // production console already listening on 3100. A handover successor is the
+  // one legitimate second instance: it was started before its predecessor let
+  // go of the port, so for a bounded time it retries instead of giving up.
+  const listener = listenWithHandoverRetry({
+    server,
+    port,
+    host,
+    retryInUseForMs: launch.keepTryingToBind === true ? HANDOVER_BIND_WAIT_MS : 0,
+    onListening: () => {
+      console.log('[pd-console] Listening on http://' + host + ':' + port);
+      console.log('[pd-console] Workspace: ' + workspace);
+      console.log('[pd-console] Auth: none (local OS session)');
+      // rc-9: a console that will NOT hand itself over says so and why — the
+      // alternative is an update that quietly ends on "restart required".
+      if (!handover.watch) {
+        if (!handoverOffAnnounced) {
+          handoverOffAnnounced = true;
+          console.log(`[pd-console] Release handover off: ${handover.reason}.`);
+        }
+        return;
+      }
+      if (watchingRelease) return;
+      watchingRelease = true;
+      startReleaseHandoverWatch({
+        recordPath: activeReleaseRecordPath(pdHome.pdHome),
+        onSuperseded: () => {
+          void performReleaseHandover({
+            log: (message) => console.log(message),
+            startSuccessor: () => {
+              successor = startConsoleSuccessor(
+                { args: argv.slice(2) },
+                (message) => console.log(message),
+              );
+              return successor;
+            },
+            stopAccepting,
+            waitForSuccessor: () => waitUntilAnswer(
+              () => probeConsolePid(consoleIdentityUrl(host, port), 1000),
+              HANDOVER_HEALTHY_TIMEOUT_MS,
+            ),
+            // Only the process this one started is ever stopped, and only when
+            // it failed to answer: it may be holding the port while it does.
+            abandonSuccessor: () => stopSuccessor(successor),
+            // A successor that was just stopped may still be letting go of the port.
+            resumeAccepting: () => listener.relisten(HANDOVER_RELISTEN_RETRY_MS),
+            exit: (code) => {
+              void closeServices().finally(() => process.exit(code));
+            },
+          });
+        },
+      });
+    },
+    giveUp: (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`[pd-console] Port ${port} is already in use on ${host}.`);
+        console.error(pdHome.mode === 'production'
+          ? `[pd-console] Another console is probably serving this installation. Stop it, or pick another port with --port.`
+          : `[pd-console] Stop the process holding the port, or pass a different --port (the experiment default is ${EXPERIMENT_CONSOLE_PORT}).`);
+      } else {
+        console.error('[pd-console] Server error:', error);
+      }
       process.exit(1);
-    }
-    console.error('[pd-console] Server error:', error);
-    process.exit(1);
-  });
-
-  server.listen(port, host, () => {
-    console.log('[pd-console] Listening on http://' + host + ':' + port);
-    console.log('[pd-console] Workspace: ' + workspace);
-    console.log('[pd-console] Auth: none (local OS session)');
+    },
   });
 }
 

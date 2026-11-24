@@ -16,7 +16,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('create-principles-disciple/update-console', async (original) => ({
   ...await original<typeof import('create-principles-disciple/update-console')>(),
+  // The route prefers the async factory (it serves requests); both factories
+  // answer through the same mock so the assertions below stay factory-neutral.
   createReleaseManagerAuthority: mocks.create,
+  createReleaseManagerAuthorityAsync: mocks.create,
 }));
 vi.mock('node:os', async (importOriginal) => ({
   ...await importOriginal<typeof import('node:os')>(),

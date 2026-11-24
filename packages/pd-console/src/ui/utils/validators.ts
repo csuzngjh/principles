@@ -3905,6 +3905,17 @@ export interface ApplyUpdateResultData {
   nextAction?: string;
   /** Present when the OpenClaw gateway could not be stopped/restarted around the update (PRI-723). */
   gatewayNotice?: string;
+  /**
+   * The console process that accepted the transaction. The page keeps it as
+   * its baseline for the release handover: the first transaction answer it
+   * can read may already come from the successor.
+   */
+  serverPid?: number;
+}
+
+/** A process id as this file accepts one: a positive safe integer (the console's `serverPid`). */
+export function isProcessId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
 export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | null {
@@ -3924,6 +3935,9 @@ export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | n
   }
   if (Object.hasOwn(v, 'transactionId') && isString(v.transactionId)) {
     result.transactionId = v.transactionId;
+  }
+  if (isProcessId(v.serverPid)) {
+    result.serverPid = v.serverPid;
   }
   if (Object.hasOwn(v, 'updatedFiles') && Array.isArray(v.updatedFiles)) {
     result.updatedFiles = v.updatedFiles.filter((f: unknown): f is string => typeof f === 'string');
@@ -4043,6 +4057,29 @@ export function validateUpdateRecovery(v: unknown): UpdateRecoveryData | null {
 
 // ── Update transaction validators (PRI-848/853, SPEC §12.1) ─────────────────
 
+/** How far along its current stage an update is. Observational: absent whenever it is unknown. */
+export interface UpdateTransactionProgress {
+  /** When the installer last reported (ISO-8601). */
+  at: string;
+  /** What the installer is doing, in its own words. */
+  step?: string;
+  /** The installer's weighted completion, 0–100. */
+  percent?: number;
+  bytesReceived?: number;
+  bytesTotal?: number;
+}
+
+/**
+ * Who switches the answering console to the new release once an update has
+ * activated it: the console itself, the Companion that launched it, or nobody
+ * (a restart by hand). Mirrors the server's `ReleaseHandoverOwner`.
+ */
+export type UpdateHandoverOwner = 'console' | 'companion' | 'manual';
+
+function isUpdateHandoverOwner(value: unknown): value is UpdateHandoverOwner {
+  return value === 'console' || value === 'companion' || value === 'manual';
+}
+
 export interface UpdateTransactionData {
   transactionId: string;
   exists: boolean;
@@ -4053,6 +4090,32 @@ export interface UpdateTransactionData {
   lastAt?: string | null;
   productVersion?: string | null;
   reason?: string;
+  /**
+   * The Console process that answered. It changes when a release handover
+   * replaces the process under the page — how the page tells that the new
+   * version is the one now serving.
+   */
+  serverPid?: number;
+  /** Absent from an older server; the page then assumes nothing switches on its own. */
+  handover?: UpdateHandoverOwner;
+  /** Null when nothing is known (an older executor, or a finished transaction). */
+  progress?: UpdateTransactionProgress | null;
+}
+
+function validateUpdateTransactionProgress(v: unknown): UpdateTransactionProgress | null {
+  if (!isObject(v) || !isString(v.at)) return null;
+  const progress: UpdateTransactionProgress = { at: v.at };
+  if (isString(v.step) && v.step.length > 0) progress.step = v.step;
+  if (typeof v.percent === 'number' && Number.isFinite(v.percent) && v.percent >= 0 && v.percent <= 100) {
+    progress.percent = v.percent;
+  }
+  // Bytes only mean something as a pair that adds up (rc-4); anything else is "unknown".
+  if (isNonNegativeSafeInteger(v.bytesReceived) && isNonNegativeSafeInteger(v.bytesTotal)
+    && v.bytesTotal > 0 && v.bytesReceived <= v.bytesTotal) {
+    progress.bytesReceived = v.bytesReceived;
+    progress.bytesTotal = v.bytesTotal;
+  }
+  return progress;
 }
 
 export function validateUpdateTransaction(v: unknown): UpdateTransactionData | null {
@@ -4069,6 +4132,10 @@ export function validateUpdateTransaction(v: unknown): UpdateTransactionData | n
     lastAt: Object.hasOwn(v, 'lastAt') && isString(v.lastAt) ? v.lastAt : null,
     productVersion: Object.hasOwn(v, 'productVersion') && isString(v.productVersion) ? v.productVersion : null,
     reason: Object.hasOwn(v, 'reason') && isString(v.reason) ? v.reason : undefined,
+    serverPid: isProcessId(v.serverPid) ? v.serverPid : undefined,
+    // An unknown value is "not said" — never a mode the page would wait on.
+    handover: isUpdateHandoverOwner(v.handover) ? v.handover : undefined,
+    progress: Object.hasOwn(v, 'progress') && v.progress !== null ? validateUpdateTransactionProgress(v.progress) : null,
   };
   return result;
 }

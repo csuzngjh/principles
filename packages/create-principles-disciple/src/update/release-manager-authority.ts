@@ -5,7 +5,7 @@ import {
   ReleaseManagerError,
   type InstallStatus,
 } from './release-manager.js';
-import { InstallLayoutError, digestDirectory, readBootstrapManifest, readInstallConfig, resolvePdHomePaths, type InstallConfig } from './install-layout.js';
+import { InstallLayoutError, digestDirectory, digestDirectoryAsync, readBootstrapManifest, readInstallConfig, resolvePdHomePaths, type InstallConfig } from './install-layout.js';
 import { resolveReleaseMetadataSource, type ReleaseMetadataSource } from './release-metadata-source.js';
 
 /** The two Console update operations. */
@@ -64,8 +64,15 @@ function probeTransactionJournalDir(pdHome: string): boolean {
   }
 }
 
-export function createReleaseManagerAuthority(
+/**
+ * The readiness decision, shared by both factories below. `executorDigest`
+ * supplies the deployed executor tree's digest where the decision needs one
+ * (a dual-slot install with a registered digest); whatever it throws is the
+ * `bootstrap_identity_mismatch` verdict.
+ */
+function assessReadiness(
   options: ReleaseManagerAuthorityOptions,
+  executorDigest: () => string,
 ): ReleaseManagerAuthority {
   const reasons = new Set<ReleaseManagerAuthorityReason>();
 
@@ -134,7 +141,7 @@ export function createReleaseManagerAuthority(
       reasons.add('bootstrap_not_registered');
     } else {
       try {
-        const actual = digestDirectory(pdHomePaths.bootstrapExecutorDir);
+        const actual = executorDigest();
         if (actual !== manifest.executorDigest) {
           reasons.add('bootstrap_identity_mismatch');
         }
@@ -161,6 +168,45 @@ export function createReleaseManagerAuthority(
   } satisfies Readonly<Record<ReleaseManagerAuthorityKind, ReleaseManagerAuthorityReadiness>>;
 
   return { manager, installStatus, kinds, metadataSource };
+}
+
+/**
+ * Synchronous assessment, for batch callers. It re-hashes the whole deployed
+ * executor tree on the calling thread: a caller that serves requests must use
+ * `createReleaseManagerAuthorityAsync`, or every other request waits for the
+ * length of that read.
+ */
+export function createReleaseManagerAuthority(
+  options: ReleaseManagerAuthorityOptions,
+): ReleaseManagerAuthority {
+  return assessReadiness(options, () => digestDirectory(resolvePdHomePaths(options.pdHome).bootstrapExecutorDir));
+}
+
+/**
+ * The same assessment with the executor tree re-hashed without holding the
+ * event loop. The Console server builds the authority inside `/api/update/check`
+ * and `/api/update/apply-full`.
+ *
+ * The digest is read up front and handed to the decision as a value (or as the
+ * error it would have thrown at the same point), so both factories run ONE
+ * readiness rule.
+ */
+export async function createReleaseManagerAuthorityAsync(
+  options: ReleaseManagerAuthorityOptions,
+): Promise<ReleaseManagerAuthority> {
+  const executorDir = resolvePdHomePaths(options.pdHome).bootstrapExecutorDir;
+  let digest: string | undefined;
+  let readFailure: Error | undefined;
+  try {
+    digest = await digestDirectoryAsync(executorDir);
+  } catch (error) {
+    readFailure = error instanceof Error ? error : new Error(String(error));
+  }
+  return assessReadiness(options, () => {
+    if (readFailure !== undefined) throw readFailure;
+    if (digest === undefined) throw new InstallLayoutError('bootstrap_executor', `executor directory is missing: ${executorDir}`);
+    return digest;
+  });
 }
 
 /** Preserve explicit failure details; never dispatch another writer. */
