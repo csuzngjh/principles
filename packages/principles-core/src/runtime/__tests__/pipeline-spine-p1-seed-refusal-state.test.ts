@@ -532,4 +532,38 @@ describe('P1-2 — automatic seed gate: a refused candidate is a SAVED state, ne
   });
 
 
+  it('allows explicit Owner recovery of a legacy consumed row only when it still has the invalid-kind awaiting_owner park', async () => {
+    const world = await createWorld();
+    const { taskId, output, candidates } = await commitDiagnosis(world, 'pain-legacy-consumed', ['principle']);
+    const [candidate] = candidates;
+    if (!candidate) throw new Error('no candidate');
+    setPersistedKind(world, candidate.candidateId, 'wizardry');
+    await runPostProcessing(world, { taskId, output }, 'pain-legacy-consumed');
+    await expectSavedRefusal(world, candidate.candidateId, 'candidate_kind_invalid:wizardry');
+
+    // Simulate the pre-fix path that marked the row consumed despite the
+    // durable invalid-kind processing park.
+    expect(await world.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' })).toBe(true);
+    setPersistedKind(world, candidate.candidateId, 'principle');
+
+    const authorization = {
+      ownerId: 'owner-recovery-test',
+      identitySource: 'file',
+      reason: 'Restore a legacy invalid-kind candidate after confirming the source recommendation',
+      authorizedAt: new Date().toISOString(),
+    };
+    const recovered = await world.stateManager.authorizeInvalidKindPostProcessingRecovery(candidate.candidateId, authorization);
+    expect(recovered.status).toBe('authorized');
+    if (recovered.status === 'refused') throw new Error(recovered.reason);
+    expect(recovered.document.processing?.state).toBe('in_progress');
+
+    await restartWorker(world);
+    const backlog = await world.stateManager.listDiagnosisPostProcessingBacklog({ limit: 100 });
+    expect(backlog.eligible.some((item) => item.candidateId === candidate.candidateId)).toBe(true);
+    const resumed = await world.bridge.resumeSucceededDiagnosisPostProcessing({ taskId });
+    expect(resumed.status).toBe('resumed');
+    expect(await dreamerTasksFor(world, candidate.candidateId)).toHaveLength(1);
+  });
+
+
 });

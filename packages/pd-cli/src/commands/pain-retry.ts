@@ -29,6 +29,7 @@ import {
   PDRuntimeError,
   isRuntimeConfigError,
   CandidateIntakeService,
+  pendingOwnerDecision,
   run as diagnoseRun,
   SPLIT_PIPELINE_TOTAL_TIMEOUT_MS,
   resolveDiagnosticianCapability,
@@ -1141,7 +1142,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             candidateId: candidate.candidateId,
             status: 'review_required',
             reusedPrincipleId: recommended?.selectedPrincipleId,
-            nextAction: `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`,
+            nextAction: recommended?.selectedPrincipleId
+              ? `pd candidate review --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --decide reuse --principle-id ${recommended.selectedPrincipleId} --reason "..."`
+              : `pd candidate review --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --decide reuse|create --reason "..."`,
           });
           continue;
         }
@@ -1157,9 +1160,36 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           intakeResults.push({
             candidateId: candidate.candidateId,
             status: 'refused',
-            error: intakeResult.message,
-            reason: invalidKind ? 'candidate_kind_invalid' : 'candidate_kind_recovery_required',
+            error: invalidKind ? 'candidate_kind_invalid' : 'candidate_kind_recovery_required',
             nextAction: `After restoring the intended RAW kind, obtain explicit Owner authorization: pd candidate resume-post-processing --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm.`,
+          });
+          continue;
+        }
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'admission_document_unreadable') {
+          intakeFailed = true;
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'intake_failed',
+            error: 'admission_document_unreadable',
+            nextAction: 'Inspect and repair the persisted admission_json; automatic intake failed closed and did not consume this candidate.',
+          });
+          continue;
+        }
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'owner_decision_pending') {
+          const admission = await stateManager.getAdmissionDocument(candidate.candidateId);
+          const pending = pendingOwnerDecision(admission.ok ? admission.document ?? null : null);
+          const decision = pending?.decision ?? (intakeResult.message.includes('--decide reuse') ? 'reuse' : 'create');
+          const missingReuseTarget = decision === 'reuse' && !pending?.selectedPrincipleId;
+          const principleArg = decision === 'reuse' && pending?.selectedPrincipleId
+            ? ` --principle-id ${pending.selectedPrincipleId}`
+            : '';
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'review_required',
+            ...(missingReuseTarget ? { error: 'owner_decision_missing_principle_id' } : {}),
+            nextAction: missingReuseTarget
+              ? 'The persisted reuse decision has no selectedPrincipleId. Inspect and repair admission_json; do not invent a target principle.'
+              : `Resume the SAME persisted Owner verdict: pd candidate review --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}" --decide ${decision}${principleArg} --reason "...".`,
           });
           continue;
         }

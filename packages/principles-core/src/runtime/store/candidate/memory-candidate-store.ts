@@ -83,9 +83,16 @@ export class MemoryCandidateStore implements CandidateStore {
     }
     const existing = this.admissions.get(candidateId) ?? null;
     const result = authorizeInvalidKindPostProcessingRecoveryInDocument(existing, { candidateId, rawRecommendationKind: rawKind, authorization: input });
-    if (result.status === 'already_authorized') return result;
-    if (candidate.status !== 'pending') return { status: 'refused', reason: 'candidate_not_pending' };
-    if (result.status !== 'refused') this.admissions.set(candidateId, result.document);
+    if (result.status === 'already_authorized' || result.status === 'refused') return result;
+    const processing = existing?.processing;
+    const legacyConsumedInvalidKindPark = candidate.status === 'consumed'
+      && processing?.state === 'awaiting_owner'
+      && typeof processing.blockedReason === 'string'
+      && processing.blockedReason.startsWith('candidate_kind_invalid');
+    if (candidate.status !== 'pending' && !legacyConsumedInvalidKindPark) {
+      return { status: 'refused', reason: 'candidate_not_pending' };
+    }
+    this.admissions.set(candidateId, result.document);
     return result;
   }
 
