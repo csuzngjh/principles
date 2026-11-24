@@ -4939,12 +4939,17 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Same-directory identity for a workspace pointer (Windows is case-insensitive). */
+/** Same-directory identity for a workspace pointer (real path; Windows is case-insensitive). */
 function sameWorkspaceTarget(left: string, right: string): boolean {
   const normalize = (value: string): string => {
     const resolved = path.resolve(value);
-    const trimmed = resolved.length > 1 ? resolved.replace(/[\\/]+$/, '') : resolved;
-    return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+    let real: string;
+    try {
+      real = realpathSync.native(resolved);
+    } catch {
+      real = resolved;
+    }
+    return process.platform === 'win32' ? real.toLowerCase() : real;
   };
   return normalize(left) === normalize(right);
 }
