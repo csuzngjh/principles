@@ -10,6 +10,7 @@
  *   pd candidate review --candidate-id <id> --decide create --reason "..." [--json]
  *   pd candidate audit --workspace <path> [--json]
  *   pd candidate repair --candidate-id <id> --workspace <path> [--json]
+ *   pd candidate resume-post-processing --candidate-id <id> --reason "..." --confirm [--json]
  *   pd candidate route --candidate-id <id> --workspace <path> [--json]
  */
 import { randomUUID } from 'crypto';
@@ -90,6 +91,14 @@ interface CandidateAuditOptions {
 interface CandidateRepairOptions {
   candidateId: string;
   workspace?: string;
+  json?: boolean;
+}
+
+interface CandidatePostProcessingRecoveryOptions {
+  candidateId: string;
+  workspace?: string;
+  reason: string;
+  confirm?: boolean;
   json?: boolean;
 }
 
@@ -2228,6 +2237,121 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
       console.error(`Repair failed: ${String(err)}`);
     }
     process.exit(1);
+  } finally {
+    await stateManager.close();
+  }
+}
+
+
+/**
+ * Resume only a candidate whose post-processing was parked by an invalid RAW
+ * recommendation kind. The data repair is performed separately; this command
+ * is an explicit, ADR-0022-verified Owner authorization that appends an audit
+ * record and moves the existing processing state to in_progress. It never
+ * creates a Dreamer task directly and never releases a genuine Owner park.
+ */
+export async function handleCandidatePostProcessingRecovery(opts: CandidatePostProcessingRecoveryOptions): Promise<void> {
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const reason = opts.reason.trim();
+  const output = (value: Record<string, unknown>, failed = false): void => {
+    if (opts.json) console.log(JSON.stringify(value, null, 2));
+    else {
+      const status = String(value.status ?? 'refused');
+      console.log(`\nCandidate Post-processing Recovery: ${opts.candidateId}\n`);
+      console.log(`  Status: ${status}`);
+      if (typeof value.reason === 'string') console.log(`  Reason: ${value.reason}`);
+      if (typeof value.recoveryId === 'string') console.log(`  Recovery: ${value.recoveryId}`);
+      if (typeof value.ownerId === 'string') console.log(`  Owner: ${value.ownerId} (${String(value.identitySource)})`);
+      if (typeof value.nextAction === 'string') console.log(`  Next: ${value.nextAction}`);
+      console.log('');
+    }
+    if (failed) process.exitCode = 1;
+  };
+
+  if (!opts.confirm) {
+    output({
+      candidateId: opts.candidateId,
+      status: 'confirmation_required',
+      reason: 'explicit_owner_confirmation_required',
+      nextAction: `After confirming the raw kind is repaired, run pd candidate resume-post-processing --candidate-id ${opts.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm. This operation only authorizes the existing worker backlog; it does not create a Dreamer task.`,
+    }, true);
+    return;
+  }
+  if (reason.length === 0 || reason.length > 500 || /[\u0000-\u001f\u007f]/.test(reason)) {
+    output({
+      candidateId: opts.candidateId,
+      status: 'refused',
+      reason: 'recovery_reason_invalid',
+      nextAction: 'Provide a non-empty --reason of at most 500 characters without control characters.',
+    }, true);
+    return;
+  }
+
+  let identity;
+  try {
+    identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
+  } catch {
+    output({
+      candidateId: opts.candidateId,
+      status: 'refused',
+      reason: 'owner_identity_home_unavailable',
+      nextAction: 'Repair the configured PD Owner identity home; no recovery was authorized.',
+    }, true);
+    return;
+  }
+  if ((identity.source !== 'env' && identity.source !== 'file') || !identity.ownerId || !identity.credentialId) {
+    output({
+      candidateId: opts.candidateId,
+      status: 'refused',
+      reason: identity.error ?? 'verified_owner_identity_required',
+      nextAction: 'Register the Owner identity through the existing PD Owner identity flow, then retry. A CLI-supplied owner name is not accepted.',
+    }, true);
+    return;
+  }
+
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+  try {
+    await stateManager.initialize();
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+    const recovery = await ledgerAdapter.withCandidateCoordination(opts.candidateId, async () =>
+      stateManager.authorizeInvalidKindPostProcessingRecovery(opts.candidateId, {
+        ownerId: identity.ownerId!,
+        identitySource: identity.source,
+        reason,
+        authorizedAt: new Date().toISOString(),
+      }),
+    );
+    if (recovery.status === 'refused') {
+      const nextAction = recovery.reason === 'candidate_kind_still_invalid'
+        ? 'Repair the persisted principle_candidates.recommendation_kind to a valid seedable kind first; do not bypass the invalid-kind refusal.'
+        : recovery.reason === 'owner_decision_pending_recovery_forbidden' || recovery.reason === 'processing_not_blocked_by_invalid_raw_kind'
+          ? 'This is not an invalid-kind-only park. Preserve the Owner decision/reuse state and use the existing pd candidate review flow.'
+          : recovery.reason === 'candidate_kind_has_no_dreamer_route'
+            ? 'The repaired kind has no enabled Dreamer route; do not resume it as an internalization candidate.'
+            : 'Inspect the candidate admission processing record; recovery was refused without changing it.';
+      output({ candidateId: opts.candidateId, status: 'refused', reason: recovery.reason, nextAction }, true);
+      return;
+    }
+    const recoveryRecord = recovery.recovery;
+    output({
+      candidateId: opts.candidateId,
+      status: recovery.status,
+      recoveryId: recoveryRecord.recoveryId,
+      ownerId: recoveryRecord.ownerId,
+      identitySource: recoveryRecord.identitySource,
+      rawRecommendationKind: recoveryRecord.rawRecommendationKind,
+      priorBlockedReason: recoveryRecord.priorBlockedReason,
+      processingState: recovery.document.processing?.state ?? null,
+      nextAction: 'The existing diagnosis post-processing worker will pick up this in_progress candidate on its next cycle. The audit and backlog state survive worker restart. This command does not create a Dreamer task.',
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output({
+      candidateId: opts.candidateId,
+      status: 'refused',
+      reason: message.includes('LockAcquisitionError') ? 'candidate_coordination_lock_timeout' : 'candidate_post_processing_recovery_failed',
+      nextAction: 'No recovery was authorized. Wait for any candidate operation to finish, inspect the admission document, and retry only after confirming the raw kind is repaired.',
+    }, true);
   } finally {
     await stateManager.close();
   }
