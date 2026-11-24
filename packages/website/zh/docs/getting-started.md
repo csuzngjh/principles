@@ -24,14 +24,16 @@ AI 助手反复出错 → PD 识别模式 → 你审核 → AI 助手改进
 ### 1. 安装
 
 ```bash
-npx create-principles-disciple --yes
+npx create-principles-disciple --yes --host openclaw
 openclaw gateway --force
 ```
+
+`--host openclaw` 是必需的：安装器不再默认绑定任何宿主。省略它只会安装 PD Service Host（等同 `--host none`）；Codex / WorkBuddy 请分别使用 `--host codex` / `--host workbuddy`。
 
 `--yes` 装出来的 PD **没有** LLM 运行时配置，它的内部智能体会一直停在 `needs_setup`：痛苦信号照常捕捉，但不会诊断。`apiKeyEnv` 是存放密钥的环境变量**名字**，不是密钥本身。想在安装时就配好：
 
 ```bash
-npx create-principles-disciple --yes --provider anthropic --api-key-env ANTHROPIC_API_KEY
+npx create-principles-disciple --yes --host openclaw --provider anthropic --api-key-env ANTHROPIC_API_KEY
 ```
 
 ### 2. 验证

@@ -280,6 +280,10 @@ describe('Real packaged install smoke test', () => {
     try {
       const result = await execFileAsync(process.execPath, [
         cliEntry,
+        // PRI-1278 Phase 5: --host has no default anymore (no silent
+        // OpenClaw). This smoke test validates the packaged OpenClaw host
+        // integration, so it asks for it explicitly.
+        '--host', 'openclaw',
         '--yes',
         '--workspace', tempWorkspaceDir,
         '--json',

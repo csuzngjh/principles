@@ -33,12 +33,14 @@ export const SERVICE_RUN_STATUS_SCHEMA_VERSION = 'pd.service-run-status.v1';
 
 /**
  * How this run was triggered (task §4): `manual` = a human at the CLI;
- * `scheduler` = the OS-level registration invoked the managed entry. The
- * two OS trigger flavours (login vs periodic) are deliberately NOT
+ * `scheduler` = the OS-level registration invoked the managed entry.
+ * `installer` = the fresh-install provisioning run (PRI-1278 Phase 5) executed
+ * the first bounded cycle before the OS trigger ever fired.
+ * The two OS trigger flavours (login vs periodic) are deliberately NOT
  * distinguished — no platform reports that reliably, so PD never fabricates
  * a finer source than it can prove.
  */
-export type ServiceRunTriggerSource = 'manual' | 'scheduler';
+export type ServiceRunTriggerSource = 'manual' | 'scheduler' | 'installer';
 
 /** Top-level run outcome (distinct from per-workspace verdicts). */
 export type ServiceRunOutcome =
@@ -172,7 +174,7 @@ export interface ShadowExecutionRecord {
   readonly refusalReason?: string;
   readonly refusalNextAction?: string;
   /** §8.3/§10 workspace state — `process_started`/`cycle_completed`/business_progress stay strictly distinct in `execution`. */
-  readonly workspaceState: 'completed' | 'paused' | 'degraded' | 'failed' | 'unavailable';
+  readonly workspaceState: 'completed' | 'paused' | 'degraded' | 'failed' | 'unavailable' | 'waiting_for_host_binding';
   /** Final carried-forward progress timestamp (this cycle or previous run; task §6). */
   readonly lastProgressAt: string | null;
   readonly lastProgressSource: 'task_state_change' | 'cycle_evidence' | 'previous_run' | null;
@@ -212,7 +214,7 @@ export interface ManagedExecutionRecord {
   /** Structured skip reason (skipped records only): owner state, authorization, adapter or budget. */
   readonly skipReason?: string;
   readonly skipNextAction?: string;
-  readonly workspaceState: 'completed' | 'paused' | 'degraded' | 'failed' | 'unavailable';
+  readonly workspaceState: 'completed' | 'paused' | 'degraded' | 'failed' | 'unavailable' | 'waiting_for_host_binding';
   readonly lastProgressAt: string | null;
   readonly lastProgressSource: 'task_state_change' | 'cycle_evidence' | 'previous_run' | null;
   readonly execution?: AdapterCycleResult;
@@ -271,7 +273,7 @@ export function readServiceRunStatus(pdHome: string): ServiceRunStatusRead {
     !Object.hasOwn(doc, 'schemaVersion') || doc.schemaVersion !== SERVICE_RUN_STATUS_SCHEMA_VERSION
     || !Object.hasOwn(doc, 'runId') || typeof doc.runId !== 'string'
     || !Object.hasOwn(doc, 'outcome') || (doc.outcome !== 'completed' && doc.outcome !== 'already_running' && doc.outcome !== 'refused' && doc.outcome !== 'failed')
-    || !Object.hasOwn(doc, 'triggerSource') || (doc.triggerSource !== 'manual' && doc.triggerSource !== 'scheduler')
+    || !Object.hasOwn(doc, 'triggerSource') || (doc.triggerSource !== 'manual' && doc.triggerSource !== 'scheduler' && doc.triggerSource !== 'installer')
   ) {
     return { ok: false, verdict: 'corrupt', detail: 'schema_mismatch' };
   }
