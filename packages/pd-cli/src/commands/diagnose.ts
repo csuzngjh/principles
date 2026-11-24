@@ -786,6 +786,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           }
           // A reuse-parked candidate also stays PENDING; the Owner resolves it
           // through the existing review channel.
+          if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
             const recommended =
               intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
             // PRI-939 review fix (CodeRabbit): the park observation reaches the
