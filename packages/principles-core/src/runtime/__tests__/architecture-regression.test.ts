@@ -395,6 +395,12 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // mapping from safeReadIntentDoc result to the core-owned IntentDocReadResult.
   // No new I/O; delegates to intent-doc-reader.ts above.
   'intent-doc-reader-adapter.ts',
+  // PRI-1292 Phase 2A (SPEC-PD-PIPELINE-SPINE-001 §4.2 point 3): plugin I/O
+  // boundary — the ONE PainToPrincipleService factory shared by the pain hook
+  // and the /pd pain command. Binds WorkspaceContext (the Gateway's in-process
+  // trajectory) and loadPdConfigForPlugin to the shared host-runtime
+  // resolveWorkspacePipelineHostDeps assembly; no new I/O beyond those bindings.
+  'pain-service.ts',
   // RuleCode safety containment I/O boundary — reads approved artifact scope and
   // persists circuit-breaker isolation through the core-owned SQLite safety store.
   // Pure threshold policy remains in principles-core.
@@ -541,7 +547,11 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // E2E R3: Added correction-anchor.ts (96 → 97) — plugin I/O boundary that
     // resolves a user correction to the assistant turn that actually executed a
     // write (trajectory reads), replacing the "most recent turn" heuristic.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
+    // PRI-1292 Phase 2A: Added pain-service.ts (97 → 98) — the ONE plugin
+    // PainToPrincipleService factory shared by the pain hook and the /pd pain
+    // command (plugin I/O boundary binding WorkspaceContext + plugin config
+    // loader to the shared host collaborator assembly).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
   });
 });
 
