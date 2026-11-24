@@ -725,6 +725,7 @@ export {
   resolvePdHome,
   resolveRealUserHome,
   isPathWithinRoot,
+  canonicalizeDeepestExisting,
   type PdHomeMode,
   type PdHomePaths,
   type PdHomeFailure,

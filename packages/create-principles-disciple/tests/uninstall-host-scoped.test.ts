@@ -29,7 +29,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { uninstall } from '../src/uninstaller.js';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
+import { canonicalizeDeepestExisting, getWorkbuddyWorkspaceDir, isPathWithinRoot } from '@principles/install-layout';
 import { WORKBUDDY_PLUGIN_KEY } from '../src/installers/workbuddy-host-installer.js';
 import { logger } from '../src/utils/logger.js';
 
@@ -62,14 +62,27 @@ function pinSandboxHome(sandbox: string): void {
   for (const key of AMBIENT_HOST_OVERRIDE_KEYS) delete process.env[key];
 }
 
-/** Fail loud instead of writing outside the disposable sandbox. */
+/** Every env var a test in this file may set — saved before, restored after. */
+const SAVED_ENV_NAMES = [
+  'HOME',
+  'USERPROFILE',
+  'PD_WORKBUDDY_ENGINE',
+  ...AMBIENT_HOST_OVERRIDE_KEYS,
+] as const;
+
+/**
+ * Fail loud instead of writing outside the disposable sandbox.
+ *
+ * REAL-path boundary check (round-2 P2): canonicalize the deepest existing
+ * ancestor of BOTH paths so a junction/symlink/reparse point cannot fake
+ * containment — a `path.relative`/`startsWith` string check resolves nothing.
+ */
 function assertInsideSandbox(sandbox: string, candidate: string): void {
-  const root = path.resolve(sandbox);
-  const target = path.resolve(candidate);
-  const relative = path.relative(root, target);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+  const root = canonicalizeDeepestExisting(sandbox) ?? path.resolve(sandbox);
+  const target = canonicalizeDeepestExisting(candidate);
+  if (target === null || !isPathWithinRoot(root, target)) {
     throw new Error(
-      `Refusing to seed outside the test sandbox: "${target}" escapes "${root}". ` +
+      `Refusing to seed outside the test sandbox: "${target ?? path.resolve(candidate)}" escapes "${root}". ` +
       'A host directory override (WORKBUDDY_CONFIG_DIR / CODEX_HOME / OPENCLAW_HOME) leaked into the test process.',
     );
   }
@@ -142,7 +155,11 @@ function seedThreeHosts(): Lab {
   // databases. `pinSandboxHome()` now runs FIRST, and the explicit
   // configDirOverride makes the sandbox win even if a future caller forgets.
   pinSandboxHome(sandbox);
-  const governance = getWorkbuddyWorkspaceDir(sandbox, path.join(sandbox, '.workbuddy'));
+  // Round-2 hardening: an EMPTY env makes the resolution independent of the
+  // process env entirely — the explicit override plus `{}` means the sandbox
+  // wins no matter what the ambient shell carried (or what a future refactor
+  // does to pinSandboxHome's ordering).
+  const governance = getWorkbuddyWorkspaceDir(sandbox, path.join(sandbox, '.workbuddy'), {});
   assertInsideSandbox(sandbox, governance);
   const governanceConfig = path.join(governance, '.pd', 'config.yaml');
   fs.mkdirSync(path.dirname(governanceConfig), { recursive: true });
@@ -178,13 +195,12 @@ describe('host-scoped uninstall isolation (S1: workbuddy-only must not select ot
   let labs: Lab[] = [];
 
   beforeEach(() => {
-    savedEnv = {
-      HOME: process.env.HOME,
-      USERPROFILE: process.env.USERPROFILE,
-      PD_WORKBUDDY_ENGINE: process.env.PD_WORKBUDDY_ENGINE,
-      WORKBUDDY_CONFIG_DIR: process.env.WORKBUDDY_CONFIG_DIR,
-      CODEBUDDY_CONFIG_DIR: process.env.CODEBUDDY_CONFIG_DIR,
-    };
+    // Save EVERY variable the seed/isolation path can mutate (round-2 P1):
+    // all ambient host overrides, both home authorities and the engine stub
+    // pin. afterEach restores them all unconditionally so a failing test can
+    // never leak a polluted process.env into the next file in this worker.
+    savedEnv = {};
+    for (const name of SAVED_ENV_NAMES) savedEnv[name] = process.env[name];
     labs = [];
     // Keep the uninstall console flow out of the test output.
     vi.spyOn(logger, 'info').mockImplementation(() => undefined);
@@ -224,7 +240,6 @@ describe('host-scoped uninstall isolation (S1: workbuddy-only must not select ot
       process.env.WORKBUDDY_CONFIG_DIR = path.join(decoy, '.workbuddy');
 
       const lab = makeLab();
-      labs.push(lab);
 
       const seededConfig = path.join(lab.governance, '.pd', 'config.yaml');
       expect(fs.existsSync(seededConfig)).toBe(true);

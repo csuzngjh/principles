@@ -162,8 +162,13 @@ export function isPathWithinRoot(root: string, candidate: string): boolean {
  * missing tail. Unlike `realpathSync(target)` this also answers for paths that
  * do not exist yet (PD creates its own directories), while still resolving any
  * link that already sits on the path.
+ *
+ * Exported for test-harness sandbox guards: an escape check done on
+ * `path.resolve()` strings alone misses a junction/symlink sitting on an
+ * existing ancestor. Pair with `isPathWithinRoot` for a real-path boundary
+ * judgment (the same semantics resolvePdHome applies to experiment roots).
  */
-function canonicalizeDeepestExisting(target: string): string | null {
+export function canonicalizeDeepestExisting(target: string): string | null {
   const missing: string[] = [];
   let current = path.resolve(target);
   for (;;) {

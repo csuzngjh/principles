@@ -22,7 +22,7 @@
  * - uninstall: disable-first ordering, only PD-owned files removed, governance
  *   database and other plugins preserved, new-session effect communicated
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -1792,8 +1792,34 @@ describe('WorkBuddy user-facing copy guard', () => {
 // a running host (locked settings.json) or a missing Git Bash must abort in
 // seconds with an actionable nextAction, not after minutes of work.
 describe('runWorkbuddyEarlyPreflight (PRI-1062)', () => {
+  // Ambient host overrides outrank the sandbox home in resolveWorkbuddyPaths
+  // — strip them and pin WORKBUDDY_CONFIG_DIR per seedHostHome call so no
+  // fixture can land in a host-provided config dir.
+  const AMBIENT_HOST_OVERRIDE_KEYS = [
+    'WORKBUDDY_CONFIG_DIR',
+    'CODEBUDDY_CONFIG_DIR',
+    'CODEX_HOME',
+    'OPENCLAW_HOME',
+    'OPENCLAW_STATE_DIR',
+    'PD_EXPERIMENT_ROOT',
+  ] as const;
+  let prevAmbient: Record<string, string | undefined> | undefined;
+  beforeEach(() => {
+    prevAmbient = Object.fromEntries(AMBIENT_HOST_OVERRIDE_KEYS.map((key) => [key, process.env[key]]));
+    for (const key of AMBIENT_HOST_OVERRIDE_KEYS) delete process.env[key];
+  });
+  afterEach(() => {
+    for (const key of AMBIENT_HOST_OVERRIDE_KEYS) {
+      const value = prevAmbient?.[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    prevAmbient = undefined;
+  });
+
   function seedHostHome(): { home: string; settingsPath: string } {
     const home = fs.mkdtempSync(path.join(TMP, 'pd-wb-preflight-'));
+    process.env.WORKBUDDY_CONFIG_DIR = path.join(home, '.workbuddy');
     const paths = resolveWorkbuddyPaths(home);
     fs.mkdirSync(path.dirname(paths.settingsPath), { recursive: true });
     fs.writeFileSync(paths.settingsPath, '{}');

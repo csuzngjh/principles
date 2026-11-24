@@ -113,6 +113,37 @@ function identityTargets(root: string): string[] {
   ];
 }
 
+/**
+ * The WorkBuddy GOVERNANCE WORKSPACE a fixture must never overwrite
+ * (round-2 remediation, 2026-11-22 real data-loss incident: a test fixture
+ * replaced the Owner's live config.yaml + trajectory.db under
+ * `~/.workbuddy/pd-workspace`). Guarded under every real home root AND under
+ * an ambient `WORKBUDDY_CONFIG_DIR`/`CODEBUDDY_CONFIG_DIR` — the host injects
+ * those into every child shell, so the pointed-at root is exactly where a
+ * leaked override would write.
+ */
+function workbuddyGovernanceTargets(): string[] {
+  const configRoots = new Set<string>();
+  for (const root of realHomeRoots()) {
+    configRoots.add(path.join(root, '.workbuddy'));
+    configRoots.add(path.join(root, '.codebuddy'));
+  }
+  for (const key of ['WORKBUDDY_CONFIG_DIR', 'CODEBUDDY_CONFIG_DIR']) {
+    const value = process.env[key]?.trim();
+    if (value !== undefined && value.length > 0) configRoots.add(path.resolve(value));
+  }
+  const targets: string[] = [];
+  for (const configRoot of [...configRoots].sort()) {
+    const workspace = path.join(configRoot, 'pd-workspace');
+    targets.push(
+      path.join(workspace, '.pd', 'config.yaml'),
+      path.join(workspace, '.state', 'trajectory.db'),
+      path.join(workspace, '.state', 'state.db'),
+    );
+  }
+  return targets;
+}
+
 export function snapshotRealHomeState(): RealHomeSnapshot {
   const roots = realHomeRoots();
   const entries: HomeEntrySnapshot[] = [];
@@ -120,6 +151,9 @@ export function snapshotRealHomeState(): RealHomeSnapshot {
     for (const target of identityTargets(root)) {
       entries.push({ path: target, state: describePath(target) });
     }
+  }
+  for (const target of workbuddyGovernanceTargets()) {
+    entries.push({ path: target, state: describePath(target) });
   }
   return { roots, entries };
 }
@@ -134,7 +168,16 @@ function describePath(target: string): string {
   let contentFailure: string | undefined;
   try {
     const bytes = fs.readFileSync(target);
-    return `file:${bytes.length}:${createHash('sha256').update(bytes).digest('hex')}`;
+    // Content digest + size + mtime (round-2 P1): a rewritten file of the
+    // same length or an out-of-band touch is still caught.
+    const mtime = (() => {
+      try {
+        return String(Math.trunc(fs.statSync(target).mtimeMs));
+      } catch {
+        return 'nomtime';
+      }
+    })();
+    return `file:${bytes.length}:${mtime}:${createHash('sha256').update(bytes).digest('hex')}`;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? 'unknown';
     if (code !== 'EISDIR' && code !== 'EPERM' && code !== 'EACCES') {

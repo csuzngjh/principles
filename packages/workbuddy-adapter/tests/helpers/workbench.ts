@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
+import { canonicalizeDeepestExisting, getWorkbuddyWorkspaceDir, isPathWithinRoot } from '@principles/install-layout';
 
 /**
  * Shared workbench builders for the entry/production suites: a FAKE home (so
@@ -17,8 +17,67 @@ import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 const EVENTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'host-contract', 'events');
 
 const tempDirs: string[] = [];
+
+/**
+ * Sandbox boundary registry (2026-11-24 remediation): every tracked temp dir
+ * is a write-allowed root. `assertInsideSandbox()` validates a path against
+ * these roots with REAL-path semantics — canonicalizeDeepestExisting resolves
+ * the deepest existing ancestor, so a junction/symlink/reparse point sitting
+ * on the path cannot fake containment the way a `startsWith` string check can.
+ */
+const sandboxRoots = new Set<string>();
+
+function registerSandboxRoot(dir: string): void {
+  const real = canonicalizeDeepestExisting(dir) ?? path.resolve(dir);
+  sandboxRoots.add(real);
+}
+
+/** Fail loud instead of writing outside a disposable sandbox. */
+export function assertInsideSandbox(candidate: string, hint = ''): void {
+  const real = canonicalizeDeepestExisting(candidate);
+  if (real === null) {
+    throw new Error(`Refusing to seed an unresolvable path: "${path.resolve(candidate)}" ${hint}`.trim());
+  }
+  for (const root of sandboxRoots) {
+    if (isPathWithinRoot(root, real)) return;
+  }
+  throw new Error(
+    `Refusing to seed outside the test sandbox: "${real}" escapes every registered sandbox root ${hint}`.trimEnd() +
+    ' — a host directory override (WORKBUDDY_CONFIG_DIR / CODEX_HOME / OPENCLAW_HOME) may have leaked into the test process.',
+  );
+}
+
+/**
+ * Host-directory overrides that `resolvePdHome()` honours AHEAD of an
+ * explicitly passed `homeDir`. A test helper that inherits any of them from
+ * the ambient host process (WorkBuddy sets WORKBUDDY_CONFIG_DIR in every child
+ * shell) silently resolves the REAL user directories instead of the sandbox.
+ */
+export const AMBIENT_HOST_OVERRIDE_KEYS = [
+  'WORKBUDDY_CONFIG_DIR',
+  'CODEBUDDY_CONFIG_DIR',
+  'CODEX_HOME',
+  'OPENCLAW_HOME',
+  'OPENCLAW_STATE_DIR',
+  'PD_EXPERIMENT_ROOT',
+] as const;
+
+/**
+ * A controlled env for sandbox resolution/spawning: the ambient host
+ * overrides are stripped and BOTH home authorities are pinned to the sandbox,
+ * so the result never depends on the caller having cleaned process.env first.
+ */
+export function sandboxEnv(home: string, extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of AMBIENT_HOST_OVERRIDE_KEYS) delete env[key];
+  env.HOME = home;
+  env.USERPROFILE = home;
+  return { ...env, ...(extra ?? {}) };
+}
+
 export function trackTempDir(dir: string): string {
   tempDirs.push(dir);
+  registerSandboxRoot(dir);
   return dir;
 }
 export function cleanupTempDirs(): void {
@@ -69,7 +128,13 @@ export const WB_READY_PROFILE_ID = 'pd.default';
 export const WB_READY_API_KEY_ENV = 'PD_WB_TEST_API_KEY';
 
 export function makeGovernance(home: string, options: GovernanceOptions = {}): string {
-  const governance = getWorkbuddyWorkspaceDir(home);
+  // Hermetic resolution (2026-11-24 remediation): the governance dir is
+  // derived through an EXPLICIT configDirOverride inside the sandbox and a
+  // controlled env with the ambient host overrides stripped — it can never
+  // resolve to the real WorkBuddy config root even when the caller forgot to
+  // clean process.env (the 2026-11-22 real data-loss vector).
+  const governance = getWorkbuddyWorkspaceDir(home, path.join(path.resolve(home), '.workbuddy'), sandboxEnv(path.resolve(home)));
+  assertInsideSandbox(governance, `(makeGovernance home=${home})`);
   fs.mkdirSync(path.join(governance, '.pd'), { recursive: true });
   if (options.malformed) {
     fs.writeFileSync(path.join(governance, '.pd', 'config.yaml'), '{ this is: not: valid yaml ][');
@@ -119,6 +184,7 @@ export interface ArtifactInput {
 
 /** Production store path: pi_artifacts row + SqliteActivationStateStore.recordActivation. */
 export async function activationArtifact(governance: string, input: ArtifactInput): Promise<void> {
+  assertInsideSandbox(governance, '(activationArtifact)');
   const connection = new SqliteConnection(governance);
   try {
     const now = new Date().toISOString();
@@ -143,6 +209,10 @@ export async function activationArtifact(governance: string, input: ArtifactInpu
 
 /** Create the canonical trajectory schema the shared pain evidence path writes into. */
 export function makeTrajectory(governance: string): void {
+  // Sandbox boundary validation: a governance dir resolved through an
+  // ambient host override (or hand-joined to a real user dir) fails here,
+  // before any bytes are written.
+  assertInsideSandbox(governance, '(makeTrajectory)');
   fs.mkdirSync(path.join(governance, '.state'), { recursive: true });
   const db = new Database(path.join(governance, '.state', 'trajectory.db'));
   db.exec(`

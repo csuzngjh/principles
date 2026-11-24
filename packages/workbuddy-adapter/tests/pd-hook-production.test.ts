@@ -40,7 +40,6 @@ import {
   makeProjectDir,
   makeTrajectory,
 } from './helpers/workbench.js';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 
 afterAll(() => { cleanupTempDirs(); });
 
@@ -388,7 +387,9 @@ describe('degraded / unsupported never masquerade as healthy', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toMatch(/status=degraded reason=[^\s]+/);
-    const governance = getWorkbuddyWorkspaceDir(home);
+    // Literal sandbox path: ambient host overrides must never redirect these
+    // assertions outside the test home.
+    const governance = path.join(home, '.workbuddy', 'pd-workspace');
     expect(fs.existsSync(path.join(governance, '.pd', 'state.db'))).toBe(false);
     expect(fs.existsSync(path.join(governance, '.state'))).toBe(false);
     expect(fs.existsSync(path.join(project, '.pd'))).toBe(false);
