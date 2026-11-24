@@ -562,7 +562,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         }
         // the route decision and the seed above were derived from the row read
         // before the lock: a kind that changed in between invalidates them
-        if (current.rawRecommendationKind !== candidate.rawRecommendationKind) {
+        if (JSON.stringify(current) !== JSON.stringify(candidate)) {
           return {
             kind: 'refused',
             headline: `Candidate ${opts.candidateId} changed while it was being internalized`,
@@ -630,6 +630,38 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
               status: 'refused',
               reason: 'admission_document_unreadable',
               nextAction: 'Inspect principle_candidates.admission_json for this candidate; repair the document or re-run the diagnosis',
+            },
+          };
+        }
+        const processing = gateAdmissionDoc.document?.processing;
+        if (processing?.state === 'awaiting_owner'
+          && typeof processing.blockedReason === 'string'
+          && processing.blockedReason.startsWith('candidate_kind_invalid')) {
+          return {
+            kind: 'refused',
+            headline: `Dreamer seed blocked for candidate ${opts.candidateId}: invalid-kind recovery has not been authorized.`,
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              status: 'refused',
+              reason: 'candidate_kind_recovery_required',
+              nextAction: `After repairing the persisted RAW kind, run pd candidate resume-post-processing --candidate-id ${opts.candidateId} --workspace "${workspaceDir}" --reason "<why this repair is safe>" --confirm. Do not use internalize to bypass the saved park.`,
+            },
+          };
+        }
+        const currentEvaluation = gateAdmissionDoc.document?.evaluations.find(
+          (evaluation) => evaluation.evaluationId === gateAdmissionDoc.document?.currentEvaluationId,
+        );
+        if (currentEvaluation === undefined || currentEvaluation.decision !== 'admitted') {
+          return {
+            kind: 'refused',
+            headline: `Admission changed while candidate ${opts.candidateId} was being internalized.`,
+            result: {
+              candidateId: opts.candidateId,
+              route: decision.route,
+              status: 'refused',
+              reason: currentEvaluation?.reason ?? 'admission_evaluation_missing',
+              nextAction: 'Re-run the full admission check and inspect the latest persisted admission evaluation; no Dreamer task was created.',
             },
           };
         }

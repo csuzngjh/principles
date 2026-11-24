@@ -348,5 +348,37 @@ describe('D4 — pd candidate internalize authority gate matrix', () => {
     const result = JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
     expect(result.status).toBe('existing');
     expect(await listDreamerTasks(tmpDir)).toHaveLength(1);
+  });  it('repaired raw kind does not bypass an existing invalid-kind Owner park', async () => {
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    const candidateId = await seedCandidate(sm, 'pain-d4-invalid-park', principleOutput('pain-d4-invalid-park'));
+    const parked = await sm.updateAdmissionProcessing(candidateId, {
+      state: 'awaiting_owner',
+      attempts: 0,
+      lastFailure: {
+        reason: 'candidate_kind_invalid',
+        nextAction: 'repair the raw kind and request Owner recovery',
+        at: new Date().toISOString(),
+      },
+      blockedReason: 'candidate_kind_invalid:wizardry',
+    });
+    expect(parked).toBe(true);
+    const dbPath = path.join(tmpDir, '.pd', 'state.db');
+    await sm.close();
+
+    const db = new Database(dbPath);
+    db.prepare('UPDATE principle_candidates SET recommendation_kind = ? WHERE candidate_id = ?').run('principle', candidateId);
+    db.close();
+
+    await handleCandidateInternalize({ candidateId, workspace: tmpDir, json: true });
+
+    const lines = consoleLogSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.trim().startsWith('{'));
+    const result = JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
+    expect(result.status).toBe('refused');
+    expect(result.reason).toBe('candidate_kind_recovery_required');
+    expect(String(result.nextAction)).toContain('pd candidate resume-post-processing');
+    expect(await listDreamerTasks(tmpDir)).toEqual([]);
   });
+
+
 });
