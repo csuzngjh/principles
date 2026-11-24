@@ -35,6 +35,46 @@ import { logger } from '../src/utils/logger.js';
 
 const TMP = fs.realpathSync(os.tmpdir());
 
+/**
+ * Host-directory overrides that `resolvePdHome()` honours AHEAD of an
+ * explicitly passed `homeDir`. A test that inherits any of them from the
+ * ambient host process (WorkBuddy sets WORKBUDDY_CONFIG_DIR in every child
+ * shell) silently resolves the REAL user directories instead of the
+ * sandbox. They must be removed before ANY layout resolution.
+ */
+const AMBIENT_HOST_OVERRIDE_KEYS = [
+  'WORKBUDDY_CONFIG_DIR',
+  'CODEBUDDY_CONFIG_DIR',
+  'CODEX_HOME',
+  'OPENCLAW_HOME',
+  'OPENCLAW_STATE_DIR',
+  'PD_EXPERIMENT_ROOT',
+] as const;
+
+/**
+ * Point every "where is ~" authority at the sandbox and drop the ambient
+ * host overrides. MUST run before `seedThreeHosts()` resolves any path.
+ * `getHomeDir()` reads HOME, `os.homedir()` reads USERPROFILE on win32.
+ */
+function pinSandboxHome(sandbox: string): void {
+  process.env.HOME = sandbox;
+  process.env.USERPROFILE = sandbox;
+  for (const key of AMBIENT_HOST_OVERRIDE_KEYS) delete process.env[key];
+}
+
+/** Fail loud instead of writing outside the disposable sandbox. */
+function assertInsideSandbox(sandbox: string, candidate: string): void {
+  const root = path.resolve(sandbox);
+  const target = path.resolve(candidate);
+  const relative = path.relative(root, target);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(
+      `Refusing to seed outside the test sandbox: "${target}" escapes "${root}". ` +
+      'A host directory override (WORKBUDDY_CONFIG_DIR / CODEX_HOME / OPENCLAW_HOME) leaked into the test process.',
+    );
+  }
+}
+
 interface Lab {
   sandbox: string;
   openclawExtDir: string;
@@ -91,7 +131,19 @@ function seedThreeHosts(): Lab {
   }, null, 2));
 
   // Governance workspace with REAL data that must survive any host uninstall.
-  const governance = getWorkbuddyWorkspaceDir(sandbox);
+  //
+  // HARD ISOLATION (2026-11-24, real data-loss incident): the governance dir
+  // MUST be derived from the sandbox, never from an ambient host override.
+  // `resolvePdHome()` honours WORKBUDDY_CONFIG_DIR ahead of the `homeDir`
+  // argument, so a seed that ran before `makeLab()` pinned the fake home
+  // wrote this fixture into the REAL `~/.workbuddy/pd-workspace` — observed
+  // on 2026-11-22 as a 24-byte config.yaml and a 22-byte
+  // `sqlite-governance-data` trajectory.db replacing the Owner's live
+  // databases. `pinSandboxHome()` now runs FIRST, and the explicit
+  // configDirOverride makes the sandbox win even if a future caller forgets.
+  pinSandboxHome(sandbox);
+  const governance = getWorkbuddyWorkspaceDir(sandbox, path.join(sandbox, '.workbuddy'));
+  assertInsideSandbox(sandbox, governance);
   const governanceConfig = path.join(governance, '.pd', 'config.yaml');
   fs.mkdirSync(path.dirname(governanceConfig), { recursive: true });
   fs.writeFileSync(governanceConfig, 'version: 1\nfeatures: {}\n');
@@ -153,17 +205,36 @@ describe('host-scoped uninstall isolation (S1: workbuddy-only must not select ot
   });
 
   function makeLab(): Lab {
+    // Isolation is established BEFORE seeding: seedThreeHosts() resolves the
+    // governance workspace through resolvePdHome(), which reads these same
+    // variables. Pinning them afterwards was the 2026-11-22 data-loss bug.
     const lab = seedThreeHosts();
     labs.push(lab);
-    // Pin BOTH so getHomeDir() (HOME) and os.homedir() (USERPROFILE on win32)
-    // agree on the sandbox as "~" — mvp-config, env.ts and install-layout all
-    // resolve through one of the two.
-    process.env.HOME = lab.sandbox;
-    process.env.USERPROFILE = lab.sandbox;
-    delete process.env.WORKBUDDY_CONFIG_DIR;
-    delete process.env.CODEBUDDY_CONFIG_DIR;
+    pinSandboxHome(lab.sandbox);
     return lab;
   }
+
+  it('seeding is hermetic even when the ambient host sets WORKBUDDY_CONFIG_DIR', () => {
+    // Regression (2026-11-22 real data loss): a decoy override that looks
+    // exactly like the one WorkBuddy injects into child shells. Pre-fix,
+    // seedThreeHosts() resolved the governance workspace to the decoy and
+    // wrote the fixture config + trajectory there.
+    const decoy = fs.mkdtempSync(path.join(TMP, 'pd-uninstall-scoped-decoy-'));
+    try {
+      process.env.WORKBUDDY_CONFIG_DIR = path.join(decoy, '.workbuddy');
+
+      const lab = makeLab();
+      labs.push(lab);
+
+      const seededConfig = path.join(lab.governance, '.pd', 'config.yaml');
+      expect(fs.existsSync(seededConfig)).toBe(true);
+      expect(path.resolve(lab.governance).startsWith(path.resolve(lab.sandbox))).toBe(true);
+      // Nothing may be written into the decoy tree.
+      expect(fs.existsSync(path.join(decoy, '.workbuddy'))).toBe(false);
+    } finally {
+      fs.rmSync(decoy, { recursive: true, force: true });
+    }
+  });
 
   it('uninstall --host workbuddy destroys ONLY WorkBuddy PD-owned state; OpenClaw and Codex stay intact', async () => {
     const lab = makeLab();
