@@ -102,6 +102,19 @@ function writeConfigAtomic(configPath: string, cfg: Record<string, unknown>): vo
   renameSync(tmpPath, configPath);
 }
 
+/**
+ * Live read-side conversation access decision. A missing global config keeps
+ * the documented missing-flag fallback semantics; an unreadable existing
+ * config or explicit `allowConversationAccess=false` blocks reads.
+ */
+export function shouldBlockOpenClawConversationReads(pluginId: string = PLUGIN_ID): boolean {
+  const configPath = getOpenClawConfigPath();
+  if (!existsSync(configPath)) return false;
+  const config = readConfig(configPath);
+  if (config === null) return true;
+  return isExplicitConversationAccessOptOut(getPluginEntry(config, pluginId));
+}
+
 export function ensureConversationAccessInConfig(): boolean {
   const configPath = getOpenClawConfigPath();
   if (!existsSync(configPath)) return false;

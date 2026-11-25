@@ -5,7 +5,7 @@
  * Pinned here: the five REQUIRED collaborators, the ONE shared consent-ledger
  * authorization instance between the default trajectory reader and the gate
  * (the double-instance defect this module removes), the OpenClaw
- * trajectoryTurnReaderOverride pass-through, and the workspace-scoped
+ * trajectoryTurnReaderOverride authorization wrapping, and the workspace-scoped
  * telemetry sink persistence boundary. All against a REAL workspace directory.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -58,8 +58,8 @@ function seedUserTurn(visibleText: string): void {
   if (!result.ok) throw new Error(`seed failed: ${result.reason}`);
 }
 
-function grantCodexConsent(decision: 'granted' | 'revoked'): void {
-  const write = recordConversationIngestionConsent(workspaceDir, 'codex', {
+function grantHostConsent(hostKind: 'codex' | 'openclaw', decision: 'granted' | 'revoked'): void {
+  const write = recordConversationIngestionConsent(workspaceDir, hostKind, {
     decision,
     decidedVia: 'owner_directive',
     decidedAt: NOW.toISOString(),
@@ -89,7 +89,7 @@ describe('resolveWorkspacePipelineHostDeps (PRI-1292 Phase 2A)', () => {
   it('the default trajectory reader and the gate observe the SAME authorization state', () => {
     // Granted: the reader serves the authorized governance turn AND the gate
     // authorizes codex — one consent ledger, one port instance.
-    grantCodexConsent('granted');
+    grantHostConsent('codex', 'granted');
     seedUserTurn('original owner words');
     const deps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig: effectiveConfig() });
     const turns: TrajectoryUserTurn[] = deps.trajectoryTurnReader.listUserTurnsForSession(ROOT_SESSION);
@@ -99,17 +99,47 @@ describe('resolveWorkspacePipelineHostDeps (PRI-1292 Phase 2A)', () => {
     // Revoked AFTER the deps object exists: the SAME instances flip together —
     // the reader hides the turn and the gate denies, with no second
     // authorization instance lagging behind.
-    grantCodexConsent('revoked');
+    grantHostConsent('codex', 'revoked');
     expect(deps.trajectoryTurnReader.listUserTurnsForSession(ROOT_SESSION)).toEqual([]);
     expect(deps.sourceMaterialAuthorization.isHostSourceMaterialAuthorized('codex').authorized).toBe(false);
   });
 
-  it('trajectoryTurnReaderOverride replaces the default reader and returns the SAME reference', () => {
+  it('trajectoryTurnReaderOverride delegates only while that host consent remains granted', () => {
     const override: TrajectoryTurnReader = {
-      listUserTurnsForSession: (sessionId) => [{
-        id: `turn-${sessionId}`,
+      listUserTurnsForSession: () => [{
+        id: 1,
         turnIndex: 0,
         rawExcerpt: 'override text',
+        correctionDetected: false,
+        correctionCue: null,
+        createdAt: NOW.toISOString(),
+      }],
+      listAssistantTurns: () => [],
+    };
+    grantHostConsent('openclaw', 'granted');
+    const deps = resolveWorkspacePipelineHostDeps({
+      workspaceDir,
+      effectiveConfig: effectiveConfig(),
+      trajectoryTurnReaderOverride: override,
+      trajectoryTurnReaderOverrideHostKind: 'openclaw',
+    });
+    expect(deps.trajectoryTurnReader).not.toBe(override);
+    expect(deps.trajectoryTurnReader.listUserTurnsForSession('s1')[0]?.rawExcerpt).toBe('override text');
+
+    // Revocation after assembly takes effect on the next read: the wrapper
+    // re-checks the same consent ledger instead of trusting construction-time state.
+    grantHostConsent('openclaw', 'revoked');
+    expect(deps.trajectoryTurnReader.listUserTurnsForSession('s1')).toEqual([]);
+    expect(deps.sourceMaterialAuthorization.isHostSourceMaterialAuthorized('openclaw').authorized).toBe(false);
+  });
+
+  it('an override-specific authorization probe is evaluated live on every read', () => {
+    let allowed = true;
+    const override: TrajectoryTurnReader = {
+      listUserTurnsForSession: () => [{
+        id: 2,
+        turnIndex: 0,
+        rawExcerpt: 'host text',
         correctionDetected: false,
         correctionCue: null,
         createdAt: NOW.toISOString(),
@@ -120,15 +150,24 @@ describe('resolveWorkspacePipelineHostDeps (PRI-1292 Phase 2A)', () => {
       workspaceDir,
       effectiveConfig: effectiveConfig(),
       trajectoryTurnReaderOverride: override,
+      trajectoryTurnReaderOverrideHostKind: 'openclaw',
+      trajectoryTurnReaderOverrideAuthorization: () => allowed,
     });
-    // Identity (not structural equality): the OpenClaw Gateway passes its own
-    // in-process reader and must get exactly that object back.
-    expect(deps.trajectoryTurnReader).toBe(override);
-    expect(deps.trajectoryTurnReader.listUserTurnsForSession('s1')[0]?.rawExcerpt).toBe('override text');
-    // The override does not touch the authorization instance, which stays a
-    // real workspace-scoped consent-ledger port answering with a structured state.
-    const state = deps.sourceMaterialAuthorization.isHostSourceMaterialAuthorized('codex');
-    expect(typeof state.authorized).toBe('boolean');
+    expect(deps.trajectoryTurnReader.listUserTurnsForSession('s1')).toHaveLength(1);
+    allowed = false;
+    expect(deps.trajectoryTurnReader.listUserTurnsForSession('s1')).toEqual([]);
+  });
+
+  it('requires the governed host kind when a trajectory reader override is supplied', () => {
+    const override: TrajectoryTurnReader = {
+      listUserTurnsForSession: () => [],
+      listAssistantTurns: () => [],
+    };
+    expect(() => resolveWorkspacePipelineHostDeps({
+      workspaceDir,
+      effectiveConfig: effectiveConfig(),
+      trajectoryTurnReaderOverride: override,
+    })).toThrow(/trajectoryTurnReaderOverrideHostKind/);
   });
 
   it('telemetrySink is workspace-scoped: allowlisted events persist, others do not', () => {

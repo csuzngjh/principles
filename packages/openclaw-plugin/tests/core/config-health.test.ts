@@ -7,6 +7,7 @@ import {
   getPluginEntry,
   ensureConversationAccessInConfig,
   isExplicitConversationAccessOptOut,
+  shouldBlockOpenClawConversationReads,
 } from '../../src/core/config-health.js';
 
 vi.mock('os', async () => {
@@ -90,6 +91,37 @@ describe('config-health', () => {
       expect(isExplicitConversationAccessOptOut('string')).toBe(false);
       expect(isExplicitConversationAccessOptOut([])).toBe(false);
     });
+  });
+});
+
+describe('shouldBlockOpenClawConversationReads', () => {
+  const testHome = join('/tmp', 'pd-test-config-health-read-' + Date.now());
+  const configDir = join(testHome, '.openclaw');
+  const configPath = join(configDir, 'openclaw.json');
+
+  beforeEach(() => {
+    vi.mocked(os.homedir).mockReturnValue(testHome);
+    mkdirSync(configDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testHome, { recursive: true, force: true });
+    vi.clearAllMocks();
+  });
+
+  it('re-reads the current global config from disk on every call', () => {
+    writeFileSync(configPath, JSON.stringify({ plugins: { entries: { 'principles-disciple': { hooks: { allowConversationAccess: true } } } } }), 'utf8');
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+
+    writeFileSync(configPath, JSON.stringify({ plugins: { entries: { 'principles-disciple': { hooks: { allowConversationAccess: false } } } } }), 'utf8');
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+  });
+
+  it('keeps missing config on the fallback path but fails closed when an existing config is unreadable', () => {
+    rmSync(configPath, { force: true });
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+    writeFileSync(configPath, '{broken', 'utf8');
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
   });
 });
 

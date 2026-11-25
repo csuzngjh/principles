@@ -24,6 +24,7 @@ import {
   type LedgerAdapter,
   type PDRuntimeAdapter,
 } from '@principles/core/runtime';
+import { computeEffectivePdConfig, getDefaultPdConfig } from '../config/index.js';
 
 let workspaceDir: string;
 
@@ -110,19 +111,45 @@ describe('createDiagnosticianRunnerBundle — resource ownership (SPEC §4.3)', 
     expect(() => bundle.stateManager.connection).toThrow();
   });
 
-  it('self-built manager is released when construction itself fails (no leak)', async () => {
-    // Make a collaborator constructor fail AFTER the manager was created and
-    // initialized: an uninitialized external manager as the assembler's
-    // sibling input is not available here, so force it via a workspace whose
-    // state directory cannot host the DB (path is a file, not a directory).
+  it('self-built manager is released when construction itself fails after successful initialization (no leak)', async () => {
+    // Force a post-initialize construction failure: invalid output language
+    // reaches the telemetry sink, whose throw aborts assembly AFTER the
+    // self-created manager has opened its connection.
+    const invalidLanguage = getDefaultPdConfig();
+    (invalidLanguage.principles as { outputLanguage?: unknown }).outputLanguage = 'not-a-language';
+    const effectiveConfig = computeEffectivePdConfig(invalidLanguage);
+    await expect(createDiagnosticianRunnerBundle(bundleOptions({
+      effectiveConfig,
+      telemetrySink: { emitTelemetry: () => { throw new Error('forced post-initialize construction failure'); } },
+    }))).rejects.toThrow('forced post-initialize construction failure');
+    // If cleanup ran, a fresh manager can initialize the same workspace DB
+    // instead of inheriting a locked/half-open handle.
+    const probe = new RuntimeStateManager({ workspaceDir });
+    await probe.initialize();
+    await probe.close();
+  });
+
+  it('initialize failure also releases the self-built manager (no leak)', async () => {
     const filePathWorkspace = path.join(workspaceDir, 'not-a-dir');
     fs.writeFileSync(filePathWorkspace, 'x');
-    const bundlePromise = createDiagnosticianRunnerBundle(bundleOptions({ workspaceDir: filePathWorkspace }));
-    await expect(bundlePromise).rejects.toThrow();
-    // The workspace file was untouched (the failed manager never wrote rows
-    // through a half-open store) and no state.db was created beside it.
+    await expect(createDiagnosticianRunnerBundle(bundleOptions({ workspaceDir: filePathWorkspace }))).rejects.toThrow();
     expect(fs.readFileSync(filePathWorkspace, 'utf8')).toBe('x');
     expect(fs.existsSync(path.join(filePathWorkspace, '.pd'))).toBe(false);
+  });
+});
+
+describe('createDiagnosticianRunnerBundle — workspace consistency', () => {
+  it('rejects an external stateManager bound to a different workspace before touching it', async () => {
+    const otherWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri1292-other-'));
+    try {
+      const stateManager = new RuntimeStateManager({ workspaceDir: otherWorkspace });
+      const closeSpy = vi.spyOn(stateManager, 'close');
+      await expect(createDiagnosticianRunnerBundle(bundleOptions({ stateManager }))).rejects.toThrow(/workspace mismatch/);
+      expect(closeSpy).not.toHaveBeenCalled();
+      closeSpy.mockRestore();
+    } finally {
+      fs.rmSync(otherWorkspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 60 });
+    }
   });
 });
 
@@ -169,8 +196,22 @@ describe('createDiagnosticianRunnerBundle — bridgeCache isolation (§4.4)', ()
 // below goes unused and tsc fails this file. The constructor is pure (stores
 // opts), so these calls are compile-time probes with no runtime effect.
 export function typeNegativeSyncOptionsRequireCollaborators(dir: string): void {
-  // @ts-expect-error sync mode requires trajectoryTurnReader + sourceMaterialAuthorization
-  new PainToPrincipleService({ workspaceDir: dir, stateDir: `${dir}/.state`, ledgerAdapter: {} as LedgerAdapter, asyncMode: false });
+  // @ts-expect-error sync mode requires trajectoryTurnReader even when authorization is present
+  new PainToPrincipleService({
+    workspaceDir: dir,
+    stateDir: `${dir}/.state`,
+    ledgerAdapter: {} as LedgerAdapter,
+    asyncMode: false,
+    sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false, reason: 'consent_missing' as const }) },
+  });
+  // @ts-expect-error sync mode requires sourceMaterialAuthorization even when the trajectory reader is present
+  new PainToPrincipleService({
+    workspaceDir: dir,
+    stateDir: `${dir}/.state`,
+    ledgerAdapter: {} as LedgerAdapter,
+    asyncMode: false,
+    trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+  });
   // Positive control: supplying BOTH required collaborators compiles.
   new PainToPrincipleService({
     workspaceDir: dir,

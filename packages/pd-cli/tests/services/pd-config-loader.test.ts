@@ -26,6 +26,7 @@ import {
   PD_CONFIG_DIR,
   PD_CONFIG_FILENAME,
 } from '../../src/services/pd-config-loader.js';
+import { resolveOutputLanguage } from '@principles/core/runtime';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -241,6 +242,28 @@ describe('Malformed config → fail loud', () => {
       if (result.ok) throw new Error('Expected error');
       expect(result.defaults.config.version).toBe(1);
       expect(result.defaults.config.features.prompt.enabled).toBe(true);
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('whole-config validation failure uses the full default config even when principles.outputLanguage itself is valid', () => {
+    // Policy pin (PRI-1292 review): .pd/config.yaml is ONE authority. If any
+    // unrelated required section is invalid, consumers receive the uniform
+    // defaults rather than salvaging individual valid fields. This makes the
+    // observable fallback deliberate instead of incidental.
+    const tmp = mkTmpDir();
+    writeConfig(tmp, yaml.dump({
+      version: 1,
+      features: { prompt: { category: 'core', enabled: 'yes' } },
+      runtimeProfiles: { 'openclaw.default': { type: 'openclaw', source: 'default' } },
+      internalAgents: { defaultRuntime: 'openclaw.default', agents: {} },
+      principles: { outputLanguage: 'en' },
+    }));
+    try {
+      const result = loadPdConfig(tmp);
+      if (result.ok) throw new Error('Expected error');
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.defaults.config.principles.outputLanguage).not.toBe('en');
+      expect(resolveOutputLanguage(result.defaults.config.principles.outputLanguage).outputLanguage).toBe('zh-CN');
     } finally { rmTmpDir(tmp); }
   });
 });

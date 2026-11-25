@@ -16,7 +16,9 @@
  *      instance — trajectory reads and gate decisions are always consistent.
  *   3. A host that already holds an in-process trajectory reader (OpenClaw
  *      Gateway `WorkspaceContext.trajectory`) passes it as
- *      `trajectoryTurnReaderOverride` instead of rebuilding one.
+ *      `trajectoryTurnReaderOverride` instead of rebuilding one; the resolver
+ *      wraps that reader in a live authorization probe rather than returning
+ *      it as an unguarded pass-through.
  *
  * The resolver performs NO I/O beyond the collaborators' own lazy probes —
  * the authorization, the intent reader (flag-first) and the auto-submission
@@ -29,6 +31,7 @@ import {
   type EffectivePdConfig,
   type IntentDocReader,
   type SourceMaterialAuthorizationPort,
+  type SourceMaterialHostKind,
   type TelemetryEvent,
   type TrajectoryTurnReader,
 } from '@principles/core/runtime';
@@ -59,10 +62,46 @@ export interface ResolveWorkspacePipelineHostDepsInput {
   /**
    * OpenClaw Gateway hook / command processes already hold
    * `WorkspaceContext.trajectory`; pass it here to replace the default
-   * governance reader. The override does NOT affect the authorization
-   * instance, which is still created and returned for the gate consumers.
+   * governance reader. The resolver wraps it in live authorization checks;
+   * the authorization instance is still created and returned for gate consumers.
    */
   readonly trajectoryTurnReaderOverride?: TrajectoryTurnReader;
+  /** Host whose consent governs the override's conversation material. Required with an override. */
+  readonly trajectoryTurnReaderOverrideHostKind?: SourceMaterialHostKind;
+  /**
+   * Host-specific LIVE access probe for a legacy/in-process reader. Called on
+   * every read; omitting it uses the consent-ledger port for hostKind.
+   */
+  readonly trajectoryTurnReaderOverrideAuthorization?: () => boolean;
+}
+
+
+function emptyExactTurns(): { readonly userTurns: readonly []; readonly assistantTurns: readonly [] } {
+  return { userTurns: [], assistantTurns: [] };
+}
+
+/**
+ * A host-provided reader is still conversation-material access. Wrap it in
+ * the same live consent decision as the default governance reader; every
+ * method re-checks the ledger per call, so revocation takes effect immediately.
+ */
+function authorizeTrajectoryTurnReaderOverride(input: {
+  readonly reader: TrajectoryTurnReader;
+  readonly authorization: SourceMaterialAuthorizationPort;
+  readonly hostKind: SourceMaterialHostKind;
+  readonly overrideAuthorization?: () => boolean;
+}): TrajectoryTurnReader {
+  const authorized = (): boolean => input.overrideAuthorization?.() ?? input.authorization.isHostSourceMaterialAuthorized(input.hostKind).authorized;
+  const wrapped: TrajectoryTurnReader = {
+    listUserTurnsForSession: (sessionId) => authorized() ? input.reader.listUserTurnsForSession(sessionId) : [],
+    listAssistantTurns: (sessionId) => authorized() ? input.reader.listAssistantTurns(sessionId) : [],
+  };
+  if (input.reader.listTurnTextsForHostTurnId !== undefined) {
+    wrapped.listTurnTextsForHostTurnId = (sessionId, hostTurnId, hostKindArg) => authorized()
+      ? input.reader.listTurnTextsForHostTurnId?.(sessionId, hostTurnId, hostKindArg) ?? emptyExactTurns()
+      : emptyExactTurns();
+  }
+  return wrapped;
 }
 
 export function resolveWorkspacePipelineHostDeps(
@@ -73,8 +112,20 @@ export function resolveWorkspacePipelineHostDeps(
   // the SAME latest-consent state (the double-instance defect this module
   // exists to remove).
   const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(input.workspaceDir);
-  const trajectoryTurnReader = input.trajectoryTurnReaderOverride
-    ?? createGovernanceTrajectoryTurnReader({
+  const overrideHostKind = input.trajectoryTurnReaderOverrideHostKind;
+  if (input.trajectoryTurnReaderOverride !== undefined && overrideHostKind === undefined) {
+    throw new Error('trajectoryTurnReaderOverrideHostKind is required when trajectoryTurnReaderOverride is provided');
+  }
+  const trajectoryTurnReader = input.trajectoryTurnReaderOverride !== undefined && overrideHostKind !== undefined
+    ? authorizeTrajectoryTurnReaderOverride({
+      reader: input.trajectoryTurnReaderOverride,
+      authorization: sourceMaterialAuthorization,
+      hostKind: overrideHostKind,
+      ...(input.trajectoryTurnReaderOverrideAuthorization === undefined
+        ? {}
+        : { overrideAuthorization: input.trajectoryTurnReaderOverrideAuthorization }),
+    })
+    : createGovernanceTrajectoryTurnReader({
       workspaceDir: input.workspaceDir,
       sourceMaterialAuthorization,
     });

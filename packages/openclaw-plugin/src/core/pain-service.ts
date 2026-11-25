@@ -18,6 +18,7 @@ import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type TrajectoryTurn
 import { resolveWorkspacePipelineHostDeps } from '@principles/host-runtime';
 import type { WorkspaceContext } from './workspace-context.js';
 import { loadPdConfigForPlugin } from './pd-config-loader.js';
+import { shouldBlockOpenClawConversationReads } from './config-health.js';
 
 /**
  * Build the (constant-sync) PainToPrincipleService for a workspace context.
@@ -40,6 +41,14 @@ export function createPluginPainToPrincipleService(wctx: WorkspaceContext): Pain
       listUserTurnsForSession: (sessionId: string) => wctx.trajectory.listUserTurnsForSession(sessionId),
       listAssistantTurns: (sessionId: string) => wctx.trajectory.listAssistantTurns(sessionId),
     } satisfies TrajectoryTurnReader,
+    trajectoryTurnReaderOverrideHostKind: 'openclaw',
+    // OpenClaw's legacy trajectory consent authority is the host plugin
+    // setting, not the Codex/WorkBuddy ingestion ledger. Read the global
+    // config fresh on every access so changing it to explicit false revokes
+    // even previously collected rows immediately; a missing config keeps the
+    // documented before_message_write fallback semantics, while an existing
+    // unreadable config fails closed.
+    trajectoryTurnReaderOverrideAuthorization: () => !shouldBlockOpenClawConversationReads(),
   });
   return new PainToPrincipleService({
     workspaceDir: wctx.workspaceDir,

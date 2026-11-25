@@ -55,6 +55,7 @@ import type { PainDiagnosisRecord, PainDiagnosisStore, PainDiagnosisWriteInput }
 import type { CommitRecord } from './commit/commit-store.js';
 import type { CandidateRecord } from './candidate/candidate-store.js';
 import type { ArtifactRecord, ArtifactWithCandidates } from './artifact/artifact-store.js';
+import * as fs from 'fs';
 import * as path from 'path';
 import { updatePrinciple } from '../../principle-tree-ledger.js';
 
@@ -85,6 +86,21 @@ export interface RuntimeStateManagerOptions {
    * Default true (backward compatible). Forwarded to SqliteConnection.
    */
   bootstrapIfMissing?: boolean;
+}
+
+/** Canonical workspace identity for equality checks (symlink/casing/trailing-slash safe). */
+export function workspaceIdentityForComparison(workspaceDir: string): string {
+  let resolved = path.resolve(workspaceDir);
+  try {
+    resolved = fs.realpathSync(resolved);
+  } catch {
+    // The directory may not exist yet; lexical resolution is still the best
+    // non-throwing identity for a mismatch guard.
+  }
+  let canonical = resolved.split(path.sep).join('/');
+  if (process.platform === 'win32') canonical = canonical.toLowerCase();
+  if (canonical.length > 1 && canonical.endsWith('/')) canonical = canonical.slice(0, -1);
+  return canonical;
 }
 
 // ── RuntimeStateManager ──────────────────────────────────────────────────────

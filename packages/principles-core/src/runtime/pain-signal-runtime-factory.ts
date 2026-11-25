@@ -14,7 +14,7 @@
 import { createHash } from 'node:crypto';
 import { PainSignalBridge, type DiagnosticianRunnerLike } from './pain-signal-bridge.js';
 import type { RunnerResult } from './runner/runner-result.js';
-import { RuntimeStateManager } from './store/runtime-state-manager.js';
+import { RuntimeStateManager, workspaceIdentityForComparison } from './store/runtime-state-manager.js';
 import { SplitDiagnosticianRunner } from './internalization/split-diagnostician-runner.js';
 import { DiagRootCauseRunner } from './internalization/diag-rootcause-runner.js';
 import { DiagDistillerRunner } from './internalization/diag-distiller-runner.js';
@@ -881,6 +881,12 @@ export async function createDiagnosticianRunnerBundle(
 ): Promise<DiagnosticianRunnerBundle> {
   const ownsStateManager = options.stateManager === undefined;
   const stateManager = options.stateManager ?? new RuntimeStateManager({ workspaceDir: options.workspaceDir });
+  if (workspaceIdentityForComparison(stateManager.workspaceDir) !== workspaceIdentityForComparison(options.workspaceDir)) {
+    throw new Error(
+      `[PainSignalRuntimeFactory] workspace mismatch: bundle workspaceDir '${options.workspaceDir}' `
+      + `but stateManager workspaceDir '${stateManager.workspaceDir}'. Refusing to mix task state, consent, Intent and telemetry across workspaces.`,
+    );
+  }
   let initializedHere = false;
   try {
     if (ownsStateManager) {

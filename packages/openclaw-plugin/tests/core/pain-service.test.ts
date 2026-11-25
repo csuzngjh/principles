@@ -11,6 +11,10 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+const { mockShouldBlockOpenClawConversationReads } = vi.hoisted(() => ({
+  mockShouldBlockOpenClawConversationReads: vi.fn(),
+}));
+
 const captured = {
   resolveInput: undefined as Record<string, unknown> | undefined,
   serviceOptions: undefined as Record<string, unknown> | undefined,
@@ -38,6 +42,10 @@ vi.mock('@principles/core/runtime', () => ({
   },
   PrincipleTreeLedgerAdapter: function PrincipleTreeLedgerAdapterMock() {},
 }));
+vi.mock('../../src/core/config-health.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  shouldBlockOpenClawConversationReads: mockShouldBlockOpenClawConversationReads,
+}));
 vi.mock('../../src/core/pd-config-loader.js', () => ({
   loadPdConfigForPlugin: () => ({ ok: true, effective: { marker: 'plugin-effective' }, source: 'workspace', warnings: [], errors: [] }),
 }));
@@ -49,6 +57,8 @@ describe('createPluginPainToPrincipleService (PRI-1292 Phase 2A, Layer C)', () =
   beforeEach(() => {
     captured.resolveInput = undefined;
     captured.serviceOptions = undefined;
+    mockShouldBlockOpenClawConversationReads.mockReset();
+    mockShouldBlockOpenClawConversationReads.mockReturnValue(false);
   });
 
   it('routes the five collaborators through resolveWorkspacePipelineHostDeps with the trajectory override', () => {
@@ -68,6 +78,12 @@ describe('createPluginPainToPrincipleService (PRI-1292 Phase 2A, Layer C)', () =
     // in-process trajectory as the reader override.
     expect(captured.resolveInput?.workspaceDir).toBe('/mock/workspace');
     expect(captured.resolveInput?.effectiveConfig).toEqual({ marker: 'plugin-effective' });
+    expect(captured.resolveInput?.trajectoryTurnReaderOverrideHostKind).toBe('openclaw');
+    const overrideAuth = captured.resolveInput?.trajectoryTurnReaderOverrideAuthorization as () => boolean;
+    mockShouldBlockOpenClawConversationReads.mockReturnValue(false);
+    expect(overrideAuth()).toBe(true);
+    mockShouldBlockOpenClawConversationReads.mockReturnValue(true);
+    expect(overrideAuth()).toBe(false);
     const override = captured.resolveInput?.trajectoryTurnReaderOverride as {
       listUserTurnsForSession: (sessionId: string) => unknown;
     };
