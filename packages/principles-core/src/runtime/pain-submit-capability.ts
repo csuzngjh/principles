@@ -93,6 +93,10 @@ export interface PainSubmitCapabilityOptions {
    * tests inject deterministic results. The capability itself stays I/O-free.
    */
   readonly verifyHostSession?: () => HostSessionVerification;
+  /** Per-call observation point for the exact receipt-facing association
+   * verdict resolved inside this capability. The MCP deadline wrapper uses
+   * it to retain the original request's verdict on timeout receipts. */
+  readonly observeSessionAssociation?: (association: HostSessionAssociation) => void;
   /** Workspace-effective config loaded at MCP startup (same authority the CLI
    * uses). Without it the async submission can only be created if the state
    * directory already carries a resolvable runtime config. */
@@ -126,11 +130,28 @@ export type HostSessionVerification =
     readonly targetEvidenceBlockedReason?: SourceMaterialDenialReason }
   | { readonly status: 'unverified'; readonly detail: string };
 
-/** PRI-1260: the association outcome surfaced on every submit receipt (internal; inlined into the receipt surface). */
+/** PRI-1260: the association outcome surfaced on every submit receipt (inlined into the receipt surface). */
 type HostSessionAssociation =
-  | Omit<Extract<HostSessionVerification, { status: 'verified' }>, 'inputEvidence'>
+  | Omit<Extract<HostSessionVerification, { status: 'verified' }>, 'inputEvidence' | 'targetEvidenceBlockedReason'>
   | Extract<HostSessionVerification, { status: 'unverified' }>
   | { readonly status: 'absent' };
+
+/** The receipt-facing projection of the verification verdict. This is the
+ * ONE conversion shared by the normal receipt and the MCP timeout receipts:
+ * enrichment-only verification fields (`inputEvidence`, consent detail for
+ * target evidence) never enter the receipt's association surface. */
+function hostSessionVerificationToAssociation(
+  verification: HostSessionVerification | undefined,
+): HostSessionAssociation {
+  return verification?.status === 'verified'
+    ? {
+      status: 'verified',
+      sessionId: verification.sessionId,
+      ...(verification.submissionTurnId === undefined ? {} : { submissionTurnId: verification.submissionTurnId }),
+      ...(verification.targetTurnId === undefined ? {} : { targetTurnId: verification.targetTurnId }),
+    }
+    : verification ?? { status: 'absent' };
+}
 
 export type PainSubmitStatus =
   | 'submitted'
@@ -375,6 +396,9 @@ export function buildUnconfirmedSubmitReceipt(input: {
   taskId: string;
   workspaceDir: string;
   message: string;
+  /** The verdict already resolved for THIS request before the write began;
+   * retained so a timeout does not erase the recoverability/security cause. */
+  sessionAssociation?: HostSessionAssociation;
 }): PainSubmitReceipt {
   return {
     schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
@@ -389,17 +413,22 @@ export function buildUnconfirmedSubmitReceipt(input: {
     warnings: [],
     error: { code: 'submit_unconfirmed', message: input.message },
     nextAction: `Run \`pd task show ${input.taskId}\` to reconcile; do not resubmit blindly.`,
+    ...(input.sessionAssociation === undefined ? {} : { sessionAssociation: input.sessionAssociation }),
   };
 }
 
 export type SubmittedTaskRecheck = 'found' | 'not_found' | 'unreadable';
 
 /** Minimal `submitted` receipt for a write that outlived the deadline but was
- * confirmed by the bounded read-back (§5.7). It reports only the task row. */
+ * confirmed by the bounded read-back (§5.7). It reports the task row and,
+ * when the caller supplies it, the association verdict already resolved for
+ * the original request. */
 export function buildReconciledSubmitReceipt(input: {
   painId: string;
   taskId: string;
   workspaceDir: string;
+  /** Same original-request verdict retention as the unconfirmed receipt. */
+  sessionAssociation?: HostSessionAssociation;
 }): PainSubmitReceipt {
   return {
     schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
@@ -416,6 +445,7 @@ export function buildReconciledSubmitReceipt(input: {
     ],
     error: null,
     nextAction: `Run \`pd task show ${input.taskId}\` to follow the diagnosis.`,
+    ...(input.sessionAssociation === undefined ? {} : { sessionAssociation: input.sessionAssociation }),
   };
 }
 
@@ -495,14 +525,8 @@ export async function submitPainCapability(
   // keeps the legal unbound contract with the specific cause surfaced on the
   // receipt.
   const verification = options.verifyHostSession?.();
-  const sessionAssociation: HostSessionAssociation = verification?.status === 'verified'
-    ? {
-      status: 'verified',
-      sessionId: verification.sessionId,
-      ...(verification.submissionTurnId === undefined ? {} : { submissionTurnId: verification.submissionTurnId }),
-      ...(verification.targetTurnId === undefined ? {} : { targetTurnId: verification.targetTurnId }),
-    }
-    : verification ?? { status: 'absent' };
+  const sessionAssociation = hostSessionVerificationToAssociation(verification);
+  options.observeSessionAssociation?.(sessionAssociation);
 
   // PRI-1274 / PRI-1283: one target-evidence rule shared with receipt
   // recovery. Missing-but-collectable text waits; consent-denied text becomes

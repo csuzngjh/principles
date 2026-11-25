@@ -31,6 +31,7 @@ import { createAdaptivePriorityProviderForConfig, loadPdConfigForPlugin, resolve
 import { createAdaptiveHookRegistrationRecorder, setAdaptiveHookSet } from './core/adaptive-config-identity.js';
 import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleSharedRuleHostResult } from './hooks/gate.js';
 import { handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
+import { isPainSubmitOpenclawToolName, runAfterToolCallReceiptFallback } from './hooks/pain-receipt-fallback.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
 import { makeLlmInputPresenceRegistration } from './hooks/llm-input-presence.js';
@@ -711,7 +712,7 @@ const plugin = {
     hookRegistrations.register(
       'hook:after_tool_call',
       'after_tool_call',
-      guardHook('hook:after_tool_call', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void | Promise<void> => {
+      guardHook('hook:after_tool_call', api.logger, async (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): Promise<void> => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'after_tool_call');
         if (!wsResult.ok) {
           api.logger.error(
@@ -737,12 +738,35 @@ const plugin = {
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({ hook: 'after_tool_call' }, { flushImmediately: true });
             return;
           }
+          // PRI-1276 (B2): structured-receipt fallback for the PD submit
+          // tool's own completion event. The installed OpenClaw runtime has
+          // no `_meta` producer on the MCP materializer yet (audit
+          // PRI1276_OPENCLAW_HOST_IDENTITY_AUDIT_20261125 §2.2), so a
+          // normal-entry submission legally persists unbound; THIS event's
+          // receipt + host-authoritative identity (sessionId on the context,
+          // toolCallId from the execution record) restores the SAME task via
+          // the Core CAS recovery. Exact tool-name gate (only
+          // `pd-recall__pd_submit_pain`), fail-open (a fallback failure never
+          // changes the tool outcome), one bounded ids-only line.
+          if (isPainSubmitOpenclawToolName(event.toolName)) {
+            const receipt = await runAfterToolCallReceiptFallback({ event, ctx, workspaceDir })
+              .catch((fallbackErr: unknown) => {
+                api.logger.warn(
+                  `[PD:after_tool_call] pain_receipt_fallback_failed:${fallbackErr instanceof Error ? fallbackErr.message.slice(0, 120) : String(fallbackErr).slice(0, 120)}` +
+                  ` The hook decision is unaffected; the submission stays unbound and is not retried automatically.`,
+                );
+                return { line: null as string | null };
+              });
+            if (receipt.line !== null) {
+              api.logger.warn(`[PD:after_tool_call] ${receipt.line}`);
+            }
+          }
           // The shared evidence kernel deliberately opens an existing
           // trajectory store without bootstrapping it. The OpenClaw host owns
           // workspace initialization, so ensure the selected workspace's
           // canonical store exists before dispatching the first tool event.
           void WorkspaceContext.fromHookContext({ workspaceDir, logger: api.logger }).trajectory;
-          return sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then((dispatched) => {
+          await sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then((dispatched) => {
             // PRI-1137 final review P1-4: the shared kernel's degradation
             // (trajectory DB missing/unreadable/schema-invalid) must be
             // OBSERVABLE — an evidence row that never persisted may not be

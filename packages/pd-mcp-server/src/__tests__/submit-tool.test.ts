@@ -244,6 +244,34 @@ describe('input contract (§5.3) — rejected before any write', () => {
     return workspaceDir;
   }
 
+  it('the production assembly reports the exact per-request association verdict to the timeout wrapper', async () => {
+    const workspaceDir = await b1Workspace({ minimalMetadata: true });
+    try {
+      const assembly = assembleSubmitCapability(workspaceDir, 'openclaw', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const observed: unknown[] = [];
+      const painId = 'mcp_1700000000123_abcdef12';
+      const result = await assembly.call({
+        workspaceDir,
+        painId,
+        taskId: deriveSubmitTaskId(painId),
+        submission: {
+          reason: 'Anchor: owner asked for verification. Observed: verification was skipped. Deviation: the request was not followed.',
+          anchorType: 'owner_expectation',
+          anchorRef: 'Owner request in this conversation',
+          painType: 'user_frustration',
+        },
+        observeSessionAssociation: (association) => {
+          observed.push(association);
+        },
+      });
+      expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+      expect(observed).toEqual([{ status: 'unverified', detail: 'host_session_claim_empty' }]);
+    } finally {
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('uses Codex request metadata and stores evidence only from the targeted turn in that session', async () => {
     const workspaceDir = await b1Workspace({ minimalMetadata: true });
     const state = new RuntimeStateManager({ workspaceDir });
@@ -744,6 +772,7 @@ describe('timeout reconciliation (§5.7, T14/T14a/T14b)', () => {
       deadlineMs: 30,
       submit: (input) => {
         submitted.push(input);
+        input.observeSessionAssociation?.({ status: 'unverified', detail: 'host_session_claim_empty' });
         return new Promise<PainSubmitReceipt>(() => undefined);
       },
       recheck: async (input) => {
@@ -756,6 +785,7 @@ describe('timeout reconciliation (§5.7, T14/T14a/T14b)', () => {
     const parsed = parseReceipt(result);
     expect(parsed.status).toBe('submitted');
     expect(parsed.warnings.join(' ')).toContain('reconciled_after_timeout');
+    expect(parsed.sessionAssociation).toEqual({ status: 'unverified', detail: 'host_session_claim_empty' });
     // Same identity on both sides — the reconciliation could not have guessed.
     expect(rechecks).toHaveLength(1);
     expect(rechecks[0]?.painId).toBe(submitted[0]?.painId);
@@ -766,13 +796,17 @@ describe('timeout reconciliation (§5.7, T14/T14a/T14b)', () => {
   it('a timed-out write with no visible row is submit_unconfirmed — never "not created"', async () => {
     const h = await makeSubmitHarness({
       deadlineMs: 30,
-      submit: () => new Promise<PainSubmitReceipt>(() => undefined),
+      submit: (input) => {
+        input.observeSessionAssociation?.({ status: 'unverified', detail: 'host_session_claim_empty' });
+        return new Promise<PainSubmitReceipt>(() => undefined);
+      },
       recheck: async () => 'not_found',
     });
     const result = await h.client.callTool({ name: SUBMIT_TOOL_NAME, arguments: VALID_INPUT });
     expect(result.isError).toBeFalsy();
     const parsed = parseReceipt(result);
     expect(parsed.status).toBe('submit_unconfirmed');
+    expect(parsed.sessionAssociation).toEqual({ status: 'unverified', detail: 'host_session_claim_empty' });
     expect(parsed.painId).toMatch(/^mcp_/u);
     expect(parsed.taskId).toMatch(/^diagnosis_/u);
     expect(parsed.nextAction).toContain('pd task show');
