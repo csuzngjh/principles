@@ -9,6 +9,10 @@ import type { PDTaskStatus } from '../../task-status.js';
 
 export interface TaskStoreFilter {
   status?: PDTaskStatus;
+  /** Multi-status membership filter. Used by bounded repair scans that must
+   * cover legacy rows already moved to retry_wait without widening the page
+   * to terminal/leased tasks. */
+  statuses?: readonly PDTaskStatus[];
   taskKind?: string;
   /** Filter tasks whose lease_expires_at is before this ISO timestamp. */
   leaseExpiresAtBefore?: string;

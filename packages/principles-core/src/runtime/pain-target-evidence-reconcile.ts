@@ -469,7 +469,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
     : undefined;
   let waiting = await input.stateManager.listTasks({
     taskKind: 'diagnostician',
-    status: 'pending',
+    statuses: ['pending', 'retry_wait'],
     recoveryState: 'waiting_for_target_evidence',
     orderBy: 'updated_at_asc',
     ...(resumeAfter !== undefined ? { afterCursor: resumeAfter } : {}),
@@ -485,7 +485,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
     // bounded examination still happens instead of wasting a worker cycle.
     waiting = await input.stateManager.listTasks({
       taskKind: 'diagnostician',
-      status: 'pending',
+      statuses: ['pending', 'retry_wait'],
       recoveryState: 'waiting_for_target_evidence',
       orderBy: 'updated_at_asc',
       limit,
@@ -521,7 +521,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
     : undefined;
   let readyCandidates = await input.stateManager.listTasks({
     taskKind: 'diagnostician',
-    status: 'pending',
+    statuses: ['pending', 'retry_wait'],
     recoveryState: 'ready_for_diagnosis',
     orderBy: 'updated_at_asc',
     ...(legacyResumeAfter !== undefined ? { afterCursor: legacyResumeAfter } : {}),
@@ -530,7 +530,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
   if (legacyResumeAfter !== undefined && readyCandidates.length === 0) {
     readyCandidates = await input.stateManager.listTasks({
       taskKind: 'diagnostician',
-      status: 'pending',
+      statuses: ['pending', 'retry_wait'],
       recoveryState: 'ready_for_diagnosis',
       orderBy: 'updated_at_asc',
       limit,

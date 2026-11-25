@@ -1083,6 +1083,55 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect((diagnostic.recovery as Record<string, unknown>).resolvedAt).toBeUndefined();
   });
 
+  it('PRI-1296 review: a legacy invalid ready task already in retry_wait is repaired and can retry after backfill', async () => {
+    const painId = 'mcp_1700000001296_lg000299';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const waiting = await readDiagnostic(taskId);
+    const legacyReady = {
+      ...waiting,
+      recovery: {
+        ...(waiting.recovery as Record<string, unknown>),
+        state: 'ready_for_diagnosis',
+        reasonCode: 'target_evidence_arrived',
+        resolvedAt: new Date().toISOString(),
+      },
+    };
+    await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      JSON.stringify(waiting),
+      { diagnosticJson: JSON.stringify(legacyReady) },
+    );
+    await stateManager.updateTask(taskId, {
+      status: 'retry_wait',
+      leaseExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+
+    const stillAbsent = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'not_found' }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+      nowIso: new Date().toISOString(),
+    });
+    expect(stillAbsent).toMatchObject({ checked: 1, flipped: 0, stillWaiting: 1 });
+    expect((await readDiagnostic(taskId)).recovery as Record<string, unknown>).toMatchObject({ state: 'waiting_for_target_evidence' });
+    expect(await pickDiagnosticianCandidate(stateManager, 5, new Date().toISOString())).toBeNull();
+
+    const repaired = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+      nowIso: new Date().toISOString(),
+    });
+    expect(repaired).toMatchObject({ checked: 1, flipped: 1, backfilled: 1 });
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual(TURN10_ENTRIES);
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis' });
+    const task = await stateManager.getTask(taskId);
+    expect(task?.status).toBe('retry_wait');
+    expect(await pickDiagnosticianCandidate(stateManager, 5, new Date().toISOString())).toMatchObject({ taskId });
+  });
+
   it('PRI-1296 review: a valid ready owner-statement task is not reclassified by the legacy repair scan', async () => {
     const painId = 'mcp_1700000001296_lg000298';
     const taskId = createDiagnosticianTaskId(painId);
