@@ -28,7 +28,7 @@
  * `tool_call` rows, or look-alike strings (SPEC TD §1.3).
  */
 import * as path from 'node:path';
-import { listGovernanceConversationTextsForHostTurn, readSourceMaterialAuthorization } from '@principles/host-runtime';
+import { createConsentLedgerSourceMaterialAuthorization, listGovernanceConversationTextsForHostTurn, readSourceMaterialAuthorization } from '@principles/host-runtime';
 import { isSentinelSessionId } from '@principles/core/runtime';
 import type { TargetTurnEvidenceRead } from '@principles/core/runtime';
 import {
@@ -233,8 +233,9 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
       toolCallId,
     },
     authorization: { minimalMetadataGranted: input.minimalMetadataGranted },
-    targetTurnTextAvailable: (hostSessionId, targetTurnId) =>
-      codexTargetTurnTextAvailable(normalizedWorkspace, hostSessionId, targetTurnId),
+    readTargetTurnEvidence: (hostSessionId, targetTurnId) =>
+      readCodexTargetTurnEvidence(normalizedWorkspace, hostSessionId, targetTurnId),
+    sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(normalizedWorkspace),
     ...(input.now !== undefined ? { now: input.now } : {}),
   });
   return { status: 'attempted', outcome };

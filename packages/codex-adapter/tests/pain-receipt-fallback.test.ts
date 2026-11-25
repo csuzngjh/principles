@@ -147,9 +147,10 @@ describe('attemptPainReceiptFallback — envelope decode and recovery', () => {
     if (result.outcome.status !== 'recovered') return;
     expect(result.outcome.taskId).toBe(taskId);
     expect(result.outcome.painId).toBe(painId);
-    // P1-3: the event turn is the target turn; no target text in the store
-    // yet, so the disposition waits for that exact turn.
-    expect(result.outcome.disposition.state).toBe('waiting_for_target_evidence');
+    // PRI-1296: with no source-material consent ledger the structured reader
+    // denies the target-turn read. That denial is distinct from a missing
+    // target and is reclassified blocked, never degraded to not_found.
+    expect(result.outcome.disposition.state).toBe('blocked_by_source_material_consent');
 
     const mgr = new RuntimeStateManager({ workspaceDir: ws });
     await mgr.initialize();

@@ -24,9 +24,9 @@ import {
   runOpenClawWorkspaceWorkerCycle,
 } from '../../src/openclaw-worker.js';
 import { runConsumerCycle } from '../../src/service/internalization-auto-consumer-service.js';
-import { getDefaultPdConfig } from '@principles/core/runtime';
+import { createDiagnosticianTaskId, createRuntimeStateHandle, getDefaultPdConfig } from '@principles/core/runtime';
 import { SystemLogger } from '../../src/core/system-logger.js';
-import { runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
+import { ensureGovernanceSchema, recordConversationIngestionConsent, runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
 import type { WorkspaceBackgroundOwnership } from '@principles/install-layout';
 import type { InternalizationConsumerCyclePorts } from '@principles/host-runtime';
 
@@ -311,5 +311,87 @@ describe('parity with the Gateway AutoConsumer ports (instruction §5.3)', () =>
     expect(typeof workerPorts.emitEvent).toBe('function');
     workerPorts.emitEvent?.('TEST_PARITY_EVENT', '{}');
     expect(SystemLogger.log).toHaveBeenCalledWith(workspaceDir, 'TEST_PARITY_EVENT', '{}');
+  });
+});
+
+describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execution', () => {
+  it('backfills real authorized target evidence on the SAME waiting task before the diagnostician is invoked', async () => {
+    const session = 'oc-session-pri1296';
+    const turn = 'turn-10';
+    const painId = 'mcp_1700000001296_oc001296';
+    const taskId = createDiagnosticianTaskId(painId);
+    const consent = recordConversationIngestionConsent(workspaceDir, 'openclaw', {
+      decision: 'granted', decidedVia: 'owner_directive', disclosureVersion: 'test-v1', evidenceRef: 'pri-1296-test',
+    });
+    expect(consent.ok).toBe(true);
+
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    const trajectory = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    const stamp = new Date().toISOString();
+    try {
+      ensureGovernanceSchema(trajectory);
+      trajectory.prepare(`INSERT INTO governance_rollouts (host_kind, rollout_identity, root_session_id, created_at, updated_at)
+        VALUES ('openclaw', ?, ?, ?, ?)`).run(session, session, stamp, stamp);
+      const rolloutId = Number((trajectory.prepare('SELECT id FROM governance_rollouts WHERE rollout_identity = ?').get(session) as { id: number }).id);
+      trajectory.prepare(`INSERT INTO governance_observations (
+          rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key,
+          source_order, visible_text, source, completeness, retention_class, observed_at
+        ) VALUES (?, 'openclaw', ?, ?, ?, 'user_turn', ?, 1, ?, 'openclaw-hook', 'complete', 'operational', ?)`)
+        .run(rolloutId, session, session, turn, 'openclaw|oc-session-pri1296|turn-10|user_turn', 'OC-T10-OWNER-CORRECTION', stamp);
+    } finally {
+      trajectory.close();
+    }
+
+    const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false, bootstrapIfMissing: true });
+    try {
+      await handle.stateManager.createTask({
+        taskId,
+        taskKind: 'diagnostician',
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        inputRef: painId,
+        diagnosticJson: JSON.stringify({
+          painId,
+          hostKind: 'openclaw',
+          evidence: [],
+          painIngress: {
+            verifiedHostSession: { status: 'verified', sessionId: session, targetTurnId: turn },
+            evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+          },
+          recovery: {
+            schemaVersion: 1,
+            state: 'waiting_for_target_evidence',
+            reasonCode: 'target_turn_text_pending',
+            attemptCount: 1,
+            lastCheckedAt: stamp,
+          },
+        }),
+      });
+    } finally {
+      await handle.close();
+    }
+
+    // Keep the paid/model boundary closed: capture that diagnosis is invoked
+    // after reconcile while the evidence write itself uses the real stores.
+    vi.mocked(runPendingDiagnosticianOnce).mockResolvedValueOnce({ served: false, reason: 'no_candidate' } as never);
+    const result = await runOpenClawWorkspaceWorkerCycle({ workspaceDir, logger, ownership: ownership(SERVICE_HOST_OWNED) });
+    expect(result.mode).toBe('ready');
+    expect(result.report?.targetEvidenceReconcile).toMatchObject({ checked: 1, flipped: 1, backfilled: 1, blocked: 0 });
+    expect(runPendingDiagnosticianOnce).toHaveBeenCalledTimes(1);
+
+    const verify = await createRuntimeStateHandle({ workspaceDir, readonly: true });
+    try {
+      const task = await verify.stateManager.getTask(taskId);
+      expect(task?.inputRef).toBe(painId);
+      const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}') as Record<string, any>;
+      expect(diagnostic.evidence).toEqual([
+        { sourceRef: 'governance_observation:openclaw|oc-session-pri1296|turn-10|user_turn', note: 'OC-T10-OWNER-CORRECTION' },
+      ]);
+      expect(diagnostic.painIngress.evidenceClass).toEqual({ status: 'available', entryCount: 1 });
+      expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
+    } finally {
+      await verify.close();
+    }
   });
 });

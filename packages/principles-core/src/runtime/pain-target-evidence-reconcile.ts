@@ -98,18 +98,20 @@ export interface ReconcileWaitingTargetEvidenceInput {
    * never a fake not-found. The backfill persists exactly what this returns.
    *
    * Optional at the TYPE level for one reason: published-package mixing
-   * (devin BUG_0001). An older `codex-adapter` compiled against the
-   * PRI-1274 contract still passes only `targetTurnTextAvailable`; against
-   * this newer Core that call must keep working at its OLD semantics
-   * (flip-only, no evidence, no consent classification) rather than
-   * throwing at the first waiting task and degrading the worker cycle.
+   * (devin BUG_0001). An older adapter compiled against the PRI-1274
+   * contract still passes only `targetTurnTextAvailable`; against this newer
+   * Core that call must not throw at the first waiting task. PRI-1296 then
+   * tightens the admission rule: a legacy boolean can keep the task waiting,
+   * but it can never by itself prove evidence completeness or flip it ready.
    */
   readonly readTargetTurnEvidence?: (sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead;
   /**
-   * PRI-1274 boolean probe (LEGACY). Used only when `readTargetTurnEvidence`
-   * is absent — the old adapter contract: text exists → flip WITHOUT
-   * backfill; no text → keep waiting. Consent denials cannot be classified
-   * through a boolean and stay waiting under this mode, exactly as before.
+   * PRI-1274 boolean probe (LEGACY compatibility only). Used only when
+   * `readTargetTurnEvidence` is absent. Since PRI-1296 its `true` result is
+   * NOT evidence completeness: a task with no persisted evidence stays
+   * waiting; only a task that already carries evidence may flip without a
+   * backfill write. Consent denials cannot be classified through a boolean
+   * and stay waiting under this mode.
    */
   readonly targetTurnTextAvailable?: (sessionId: string, targetTurnId: string) => boolean;
   /**
@@ -119,7 +121,8 @@ export interface ReconcileWaitingTargetEvidenceInput {
    * landing between that read and this write means NO write — the `available`
    * read is turned into a denial and the task is reclassified instead. This
    * is the existing PRI-1283 R2 port (a live ledger read per call), not a new
-   * mechanism. Unwired ⇒ the reader's read-time gate is the only check.
+   * mechanism. PRI-1296: unwired ⇒ no source-material evidence write at all;
+   * the task stays waiting with a bounded configuration error.
    */
   readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
   readonly nowIso: string;
@@ -179,7 +182,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * submit path's enrichment writes. Invalid input is a read failure, never a
  * partially-persisted evidence array.
  */
-function validateEvidenceEntries(entries: readonly unknown[]): PainEvidenceEntry[] | null {
+export function validateTargetTurnEvidenceEntries(entries: readonly unknown[]): PainEvidenceEntry[] | null {
   const validated: PainEvidenceEntry[] = [];
   for (const entry of entries) {
     if (!isRecord(entry)) return null;
@@ -402,7 +405,14 @@ export async function reconcileWaitingTargetEvidenceTasks(
     // so it is not gated here. A denial found at this point reclassifies the
     // task exactly like a read-time denial: nothing from the revoked source
     // is persisted.
-    if (read.status === 'available' && input.sourceMaterialAuthorization !== undefined) {
+    if (read.status === 'available') {
+      if (input.sourceMaterialAuthorization === undefined) {
+        // PRI-1296: no final authorization port means no source-material
+        // write at all. This is a caller misconfiguration, not evidence absence.
+        errors.push(`target_evidence_reconcile_authorization_unavailable:taskId=${task.taskId}`);
+        stillWaiting += 1;
+        continue;
+      }
       const gate = preWriteAuthorizationGate(facts.hostKind, input.sourceMaterialAuthorization);
       if (gate.outcome === 'host_invalid') {
         // Fail closed: a write whose governing host cannot be determined
@@ -461,10 +471,17 @@ export async function reconcileWaitingTargetEvidenceTasks(
       continue;
     }
     try {
-      // `legacy_available` (old adapter probe) flips WITHOUT evidence — the
-      // exact pre-PRI-1273 behavior; `available` backfills in the same CAS.
+      // `legacy_available` (old adapter probe) is not evidence. PRI-1296:
+      // it may flip ONLY a task that already carries persisted evidence; an
+      // empty-evidence task stays waiting until a structured reader can
+      // backfill real entries in the same CAS.
       let patch: { readonly newRecord: Record<string, unknown>; readonly backfilled: boolean };
       if (read.status === 'legacy_available') {
+        const existingEvidence = Array.isArray(parsedRecord.evidence) ? parsedRecord.evidence : [];
+        if (existingEvidence.length === 0) {
+          stillWaiting += 1;
+          continue;
+        }
         const disposition: PainRecoveryDisposition = {
           ...facts.existingDisposition,
           state: 'ready_for_diagnosis',
@@ -475,7 +492,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
         };
         patch = { newRecord: { ...parsedRecord, recovery: disposition }, backfilled: false };
       } else {
-        const entries = validateEvidenceEntries(read.entries);
+        const entries = validateTargetTurnEvidenceEntries(read.entries);
         if (entries === null || entries.length === 0) {
           errors.push(`target_evidence_read_invalid_entries:taskId=${task.taskId}`);
           stillWaiting += 1;

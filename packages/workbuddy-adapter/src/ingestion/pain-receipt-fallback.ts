@@ -31,7 +31,7 @@
  * look-alike strings (SPEC TD §1.3).
  */
 import * as path from 'node:path';
-import { readSourceMaterialAuthorization } from '@principles/host-runtime';
+import { createConsentLedgerSourceMaterialAuthorization, readSourceMaterialAuthorization } from '@principles/host-runtime';
 import { isSentinelSessionId } from '@principles/core/runtime';
 import type { TargetTurnEvidenceRead } from '@principles/core/runtime';
 import { listGovernanceConversationTextsForHostTurn } from '@principles/host-runtime';
@@ -226,8 +226,9 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
     // turn pinned to an unproven id would wedge the task's evidence wait.
     identity: { sessionId, toolCallId },
     authorization: { minimalMetadataGranted: input.minimalMetadataGranted },
-    targetTurnTextAvailable: (hostSessionId, targetTurnId) =>
-      workbuddyTargetTurnTextAvailable(normalizedWorkspace, hostSessionId, targetTurnId),
+    readTargetTurnEvidence: (hostSessionId, targetTurnId) =>
+      readWorkbuddyTargetTurnEvidence(normalizedWorkspace, hostSessionId, targetTurnId),
+    sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(normalizedWorkspace),
     ...(input.now !== undefined ? { now: input.now } : {}),
   });
   return { status: 'attempted', outcome };

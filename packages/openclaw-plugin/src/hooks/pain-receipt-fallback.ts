@@ -48,7 +48,7 @@
  * gateway private memory, session stores or look-alike strings (SPEC TD §1.3).
  */
 import * as path from 'node:path';
-import { readSourceMaterialAuthorization, listGovernanceConversationTextsForHostTurn, loadPdConfigForPlugin } from '@principles/host-runtime';
+import { createConsentLedgerSourceMaterialAuthorization, readSourceMaterialAuthorization, listGovernanceConversationTextsForHostTurn, loadPdConfigForPlugin } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig, isSentinelSessionId } from '@principles/core/runtime';
 import type { TargetTurnEvidenceRead } from '@principles/core/runtime';
 import {
@@ -291,8 +291,9 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
     receipt: validated.receipt,
     identity: { sessionId, toolCallId },
     authorization: { minimalMetadataGranted: input.minimalMetadataGranted },
-    targetTurnTextAvailable: (hostSessionId, targetTurnId) =>
-      openclawTargetTurnTextAvailable(normalizedWorkspace, hostSessionId, targetTurnId),
+    readTargetTurnEvidence: (hostSessionId, targetTurnId) =>
+      readOpenclawTargetTurnEvidence(normalizedWorkspace, hostSessionId, targetTurnId),
+    sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(normalizedWorkspace),
     ...(input.now !== undefined ? { now: input.now } : {}),
   });
   return { status: 'attempted', outcome };

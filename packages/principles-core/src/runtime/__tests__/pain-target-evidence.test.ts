@@ -87,6 +87,10 @@ async function readDiagnostic(taskId: string): Promise<Record<string, unknown>> 
   return JSON.parse(task.diagnosticJson as string) as Record<string, unknown>;
 }
 
+const AUTHORIZED_SOURCE_MATERIAL_PORT: SourceMaterialAuthorizationPort = {
+  isHostSourceMaterialAuthorized: () => ({ authorized: true }),
+};
+
 describe('P1-3.3 — submit-time waiting disposition', () => {
   it('a named target turn without text creates the task waiting_for_target_evidence', async () => {
     const painId = 'mcp_1700000000041_1a000041';
@@ -288,6 +292,7 @@ describe('P1-3 — the worker reconcile is the only exit from waiting', () => {
     const before = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'not_found' }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(before.checked).toBe(1);
@@ -304,6 +309,7 @@ describe('P1-3 — the worker reconcile is the only exit from waiting', () => {
         status: 'available',
         entries: [{ sourceRef: 'governance_observation:codex|rollout-target|turn-10|user_turn', note: 'turn ten body' }],
       }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(after.flipped).toBe(1);
@@ -340,6 +346,7 @@ describe('P1-3 — the worker reconcile is the only exit from waiting', () => {
     const malformed = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'available', entries: [{ sourceRef: 'x', note: 'y' }] }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(malformed.errors.some((line) => line.includes('diagnosis_malformed_waiting'))).toBe(true);
@@ -577,13 +584,13 @@ describe('r2b (0002) — the waiting reconcile rotates; the oldest five cannot s
         : { status: 'not_found' };
 
     // Default limit 5: the first pass sees the five OLDEST (no text).
-    const first = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
+    const first = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT, nowIso: new Date().toISOString() });
     expect(first.checked).toBe(5);
     expect(first.flipped).toBe(0);
     expect(first.stillWaiting).toBe(5);
 
     // Second pass rotates past them and reaches the sixth — which flips.
-    const second = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
+    const second = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT, nowIso: new Date().toISOString() });
     expect(second.checked).toBe(1);
     expect(second.flipped).toBe(1);
   });
@@ -625,7 +632,7 @@ describe('r2b (0002) — the waiting reconcile rotates; the oldest five cannot s
 
     // Pass 1: a FULL page — all five examined, none flipped; the resume
     // cursor advanced to the set's tail (the last task of the page).
-    const first = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
+    const first = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT, nowIso: new Date().toISOString() });
     expect(first).toMatchObject({ checked: 5, flipped: 0, stillWaiting: 5 });
     const waitingPage = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', recoveryState: 'waiting_for_target_evidence', orderBy: 'updated_at_asc', limit: 5 });
     const tail = waitingPage[waitingPage.length - 1];
@@ -636,7 +643,7 @@ describe('r2b (0002) — the waiting reconcile rotates; the oldest five cannot s
     // an empty page — the reconcile must wrap to the first page in the SAME
     // pass and flip all five, backfilling the SAME original tasks.
     textAvailable = true;
-    const second = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
+    const second = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT, nowIso: new Date().toISOString() });
     expect(second).toMatchObject({ checked: 5, flipped: 5, backfilled: 5, stillWaiting: 0 });
     // No new task was created — the five original tasks carry the evidence.
     const allTasks = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', limit: 50 });
@@ -653,7 +660,7 @@ describe('r2b (0002) — the waiting reconcile rotates; the oldest five cannot s
     // Pass 3: the flipped tasks left the waiting set — a repeated pass is a
     // strict no-op (nothing re-checks, no evidence is written twice) and the
     // drained set leaves a clean cursor for the next rotation.
-    const third = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, nowIso: new Date().toISOString() });
+    const third = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: probe, sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT, nowIso: new Date().toISOString() });
     expect(third).toMatchObject({ checked: 0, flipped: 0, backfilled: 0, blocked: 0 });
     expect(await stateManager.getDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE))
       .toEqual({ lastUpdatedAt: '', lastTaskId: '' });
@@ -763,6 +770,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
         seen.push([sessionId, turnId]);
         return { status: 'available', entries: TURN10_ENTRIES };
       },
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(seen).toEqual([['rollout-target', 'turn-10']]);
@@ -791,6 +799,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     const report = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'blocked_by_consent', reason: 'consent_revoked' }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(report.blocked).toBe(1);
@@ -809,6 +818,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     const second = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'blocked_by_consent', reason: 'consent_revoked' }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(second.checked).toBe(0);
@@ -822,6 +832,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
       const report = await reconcileWaitingTargetEvidenceTasks({
         stateManager,
         readTargetTurnEvidence: () => ({ status: 'blocked_by_consent', reason }),
+        sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
         nowIso: new Date().toISOString(),
       });
       expect(report.blocked).toBe(1);
@@ -837,6 +848,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     const report = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'read_failed', reason: 'sqlite_locked' }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(report.flipped).toBe(0);
@@ -863,6 +875,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
       const report = await reconcileWaitingTargetEvidenceTasks({
         stateManager,
         readTargetTurnEvidence: () => ({ status: 'available', entries: entries as never }),
+        sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
         nowIso: new Date().toISOString(),
       });
       expect(report.flipped).toBe(0);
@@ -880,12 +893,14 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     const first = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(first.backfilled).toBe(1);
     const second = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(second.checked).toBe(0);
@@ -910,6 +925,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     const report = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     // The CAS preconditions (expected lease owner/expiry) defeat the write:
@@ -929,6 +945,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     const report = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     // The store query filters status=pending, so the failed task is not even
@@ -959,6 +976,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     const report = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(report.flipped).toBe(1);
@@ -968,7 +986,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect(((after.painIngress as Record<string, unknown>).evidenceClass as Record<string, unknown>).entryCount).toBe(1);
   });
 
-  it('devin BUG_0001: the LEGACY boolean probe still works against this Core (old published adapter) — flip-only, no evidence, no consent classification, never a throw', async () => {
+  it('PRI-1296: the LEGACY boolean probe never flips an empty-evidence task ready — compatibility without weakening evidence admission', async () => {
     const painId = 'mcp_1700000001273_a0000011';
     const taskId = createDiagnosticianTaskId(painId);
     await submitTargetingTurn10(painId);
@@ -977,23 +995,24 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     const before = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       targetTurnTextAvailable: () => false,
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(before).toMatchObject({ checked: 1, flipped: 0, stillWaiting: 1 });
 
-    // Legacy probe true: the disposition flips with NO evidence write —
-    // exactly the pre-PRI-1273 behavior an old adapter expects.
+    // Legacy probe true is still not evidence: no ready flip, no fabricated
+    // entries or availability class. The old adapter keeps running (no throw),
+    // but admission now waits for the structured reader.
     const after = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
       targetTurnTextAvailable: () => true,
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
-    expect(after).toMatchObject({ checked: 1, flipped: 1, backfilled: 0, blocked: 0 });
+    expect(after).toMatchObject({ checked: 1, flipped: 0, backfilled: 0, blocked: 0, stillWaiting: 1 });
     const diagnostic = await readDiagnostic(taskId);
-    expect((diagnostic.recovery as Record<string, unknown>).state).toBe('ready_for_diagnosis');
+    expect((diagnostic.recovery as Record<string, unknown>).state).toBe('waiting_for_target_evidence');
     expect(diagnostic.evidence).toEqual([]);
-    // The class keeps its creation-time honest `unavailable` — a legacy
-    // flip must never fabricate availability without entries.
     expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'unavailable', reason: 'not_applicable_unbound' });
   });
 
@@ -1003,6 +1022,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     await submitTargetingTurn10(painId);
     const report = await reconcileWaitingTargetEvidenceTasks({
       stateManager,
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
       nowIso: new Date().toISOString(),
     });
     expect(report.checked).toBe(1);
@@ -1017,6 +1037,22 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
       isHostSourceMaterialAuthorized: () => state,
     });
     const creationTimeClass = { status: 'unavailable', reason: 'not_applicable_unbound' };
+
+    it('PRI-1296: a missing pre-write authorization port persists NO source evidence and keeps the task waiting', async () => {
+      const painId = 'mcp_1700000001296_a0001296';
+      const taskId = createDiagnosticianTaskId(painId);
+      await submitTargetingTurn10(painId);
+      const report = await reconcileWaitingTargetEvidenceTasks({
+        stateManager,
+        readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+        nowIso: new Date().toISOString(),
+      });
+      expect(report).toMatchObject({ checked: 1, flipped: 0, backfilled: 0, blocked: 0, stillWaiting: 1 });
+      expect(report.errors.some((line) => line.includes('target_evidence_reconcile_authorization_unavailable') && line.includes(taskId))).toBe(true);
+      const diagnostic = await readDiagnostic(taskId);
+      expect(diagnostic.evidence).toEqual([]);
+      expect((diagnostic.recovery as Record<string, unknown>).state).toBe('waiting_for_target_evidence');
+    });
 
     it('consent revoked BETWEEN the read and the write → nothing from the revoked source is persisted; the task is reclassified blocked', async () => {
       const painId = 'mcp_1700000001273_a0000013';
@@ -1144,8 +1180,8 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     // only ONE expected-value CAS can win — the loser sees either an empty
     // waiting set or a lost CAS, never a second write.
     const [first, second] = await Promise.all([
-      reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: read, nowIso, limit: 25 }),
-      reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: read, nowIso, limit: 25 }),
+      reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: read, sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT, nowIso, limit: 25 }),
+      reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: read, sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT, nowIso, limit: 25 }),
     ]);
     expect(first.flipped + second.flipped).toBe(1);
     expect(first.backfilled + second.backfilled).toBe(1);
@@ -1157,7 +1193,7 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'available', entryCount: 2 });
     expect((diagnostic.recovery as Record<string, unknown>).attemptCount).toBe(2);
     // And a third, later pass finds nothing left to do.
-    const again = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: read, nowIso, limit: 25 });
+    const again = await reconcileWaitingTargetEvidenceTasks({ stateManager, readTargetTurnEvidence: read, sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT, nowIso, limit: 25 });
     expect(again).toMatchObject({ checked: 0, flipped: 0, backfilled: 0 });
   });
 });

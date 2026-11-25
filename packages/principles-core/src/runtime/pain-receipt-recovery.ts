@@ -42,6 +42,9 @@ import {
 } from './pain-submit-capability.js';
 import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, targetEvidenceWaitRequired } from './pain-admission-disposition.js';
 import type { PainRecoveryDisposition, PainRecoveryReceiptRef } from './pain-admission-disposition.js';
+import { validateTargetTurnEvidenceEntries, type TargetTurnEvidenceRead } from './pain-target-evidence-reconcile.js';
+import type { PainEvidenceEntry } from './pain-signal-bridge.js';
+import type { SourceMaterialAuthorizationPort, SourceMaterialDenialReason } from './source-material-authorization.js';
 
 // Re-exported for the existing consumers of this module's surface (the
 // canonical definitions live in the leaf `pain-admission-disposition.ts`).
@@ -271,11 +274,24 @@ export interface RecoverTaskIdentityFromReceiptOptions {
   readonly identity: ReceiptEventIdentity;
   readonly authorization: ReceiptRecoveryAuthorization;
   /**
-   * P1-3: host-layer probe — does the authorized governance store already
-   * hold readable text for (session, target turn)? The fallback uses it to
-   * decide `waiting_for_target_evidence` vs `ready_for_diagnosis` when the
-   * task carries no submitted evidence. Absent → the text is treated as
-   * missing whenever a target turn is known.
+   * PRI-1296: host-layer structured read of the exact target turn. Only an
+   * `available` result whose entries validate and whose host remains
+   * authorized immediately before the CAS may make the task ready — the
+   * entries themselves are persisted in the same write as the identity and
+   * disposition. Absent → a target-dependent task waits; it never becomes
+   * ready from absence of proof.
+   */
+  readonly readTargetTurnEvidence?: (sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead;
+  /**
+   * PRI-1283 R2 port, consulted once more after entry validation and
+   * immediately before the evidence CAS. Required for persisting source
+   * material; absent → the evidence is not written and the task waits.
+   */
+  readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+  /**
+   * Legacy boolean probe retained only for published-caller compatibility.
+   * It is deliberately NOT evidence of completeness: a boolean can never by
+   * itself move a task to `ready_for_diagnosis` under PRI-1296.
    */
   readonly targetTurnTextAvailable?: (sessionId: string, targetTurnId: string) => boolean;
   readonly now?: () => Date;
@@ -362,19 +378,78 @@ type Evaluation =
   | { action: 'report'; outcome: PainReceiptRecoveryOutcome }
   | { action: 'cas_disposition_only'; expectedJson: string; newJson: string; preconditions: TaskCasPreconditions; outcome: PainReceiptRecoveryOutcome };
 
+type TargetEvidenceAdmission =
+  | { readonly status: 'not_required' }
+  | { readonly status: 'ready'; readonly entries: readonly PainEvidenceEntry[] }
+  | { readonly status: 'waiting'; readonly reasonCode: string }
+  | { readonly status: 'blocked'; readonly reason: SourceMaterialDenialReason };
+
+/**
+ * PRI-1296: decide target-turn admission from the structured evidence read,
+ * never from a boolean probe. The reader's entries are validated with the
+ * same helper the worker reconcile uses, and the PRI-1283 authorization port
+ * is consulted after validation and immediately before the caller attempts
+ * the CAS. Only valid, still-authorized entries may become ready evidence.
+ */
+function resolveTargetEvidenceAdmission(input: {
+  readonly sessionId: string;
+  readonly targetTurnId: string | undefined;
+  readonly submittedEvidenceCount: number;
+  readonly hasOwnerStatement: boolean;
+  readonly hostKind: 'codex' | 'workbuddy' | 'openclaw';
+  readonly readTargetTurnEvidence: ((sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead) | undefined;
+  readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort | undefined;
+}): TargetEvidenceAdmission {
+  if (input.targetTurnId === undefined) return { status: 'not_required' };
+  const {targetTurnId} = input;
+  const required = targetEvidenceWaitRequired({
+    hasVerifiedSession: true,
+    targetTurnId,
+    submittedEvidenceCount: input.submittedEvidenceCount,
+    hasOwnerStatement: input.hasOwnerStatement,
+  });
+  if (!required) return { status: 'not_required' };
+  if (input.readTargetTurnEvidence === undefined) {
+    return { status: 'waiting', reasonCode: 'target_turn_evidence_reader_unavailable' };
+  }
+  const read = input.readTargetTurnEvidence(input.sessionId, targetTurnId);
+  if (read.status === 'not_found') {
+    return { status: 'waiting', reasonCode: 'target_turn_text_pending' };
+  }
+  if (read.status === 'read_failed') {
+    return { status: 'waiting', reasonCode: 'target_turn_read_failed' };
+  }
+  if (read.status === 'blocked_by_consent') {
+    return { status: 'blocked', reason: read.reason };
+  }
+  const entries = validateTargetTurnEvidenceEntries(read.entries);
+  if (entries === null || entries.length === 0) {
+    return { status: 'waiting', reasonCode: 'target_turn_evidence_invalid' };
+  }
+  if (input.sourceMaterialAuthorization === undefined) {
+    return { status: 'waiting', reasonCode: 'target_turn_source_material_authorization_unavailable' };
+  }
+  const decision = input.sourceMaterialAuthorization.isHostSourceMaterialAuthorized(input.hostKind);
+  if (!decision.authorized) {
+    return { status: 'blocked', reason: decision.reason };
+  }
+  return { status: 'ready', entries };
+}
+
 function evaluateRecoveryPass(input: {
   task: TaskRecord;
   diagnostic: ParsedDiagnosticJson;
   receipt: ValidatedPainSubmitReceipt;
   identity: ReceiptEventIdentity;
   authorized: boolean;
-  targetTurnTextAvailable: ((sessionId: string, targetTurnId: string) => boolean) | undefined;
+  readTargetTurnEvidence: ((sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead) | undefined;
+  sourceMaterialAuthorization: SourceMaterialAuthorizationPort | undefined;
   nowIso: string;
   /** The host whose completion event produced this receipt (P1-2.7 owner
    * check — the original task must belong to the SAME host). */
   hostKind: 'codex' | 'workbuddy' | 'openclaw';
 }): Evaluation {
-  const { task, diagnostic, receipt, identity, authorized, targetTurnTextAvailable, nowIso, hostKind } = input;
+  const { task, diagnostic, receipt, identity, authorized, readTargetTurnEvidence, sourceMaterialAuthorization, nowIso, hostKind } = input;
   const preconditions: TaskCasPreconditions = {
     expectedStatus: task.status,
     expectedLeaseOwner: task.leaseOwner ?? null,
@@ -479,23 +554,43 @@ function evaluateRecoveryPass(input: {
   // submitted evidence is independently admissible and never waits.
   const {anchor} = diagnostic.record;
   const hasOwnerStatement = isRecord(anchor) && anchor.type === 'owner_expectation';
-  const targetTextMissing = targetEvidenceWaitRequired({
-    hasVerifiedSession: true,
+  const evidenceAdmission = resolveTargetEvidenceAdmission({
+    sessionId: identity.sessionId,
     targetTurnId,
     submittedEvidenceCount: evidenceCount,
     hasOwnerStatement,
-  }) && targetTurnId !== undefined
-    && (targetTurnTextAvailable === undefined || !targetTurnTextAvailable(identity.sessionId, targetTurnId));
+    hostKind,
+    readTargetTurnEvidence,
+    sourceMaterialAuthorization,
+  });
   const disposition: PainRecoveryDisposition = {
     schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
-    state: targetTextMissing ? 'waiting_for_target_evidence' : 'ready_for_diagnosis',
-    reasonCode: targetTextMissing ? 'target_turn_text_pending' : 'receipt_recovered',
+    state: evidenceAdmission.status === 'waiting'
+      ? 'waiting_for_target_evidence'
+      : evidenceAdmission.status === 'blocked'
+        ? 'blocked_by_source_material_consent'
+        : 'ready_for_diagnosis',
+    reasonCode: evidenceAdmission.status === 'waiting'
+      ? evidenceAdmission.reasonCode
+      : evidenceAdmission.status === 'blocked'
+        ? `target_turn_source_material_${evidenceAdmission.reason}`
+        : 'receipt_recovered',
     attemptCount: nextAttemptCount(existingRecovery),
     lastCheckedAt: nowIso,
     receiptRef: buildReceiptRef(receipt, identity, nowIso),
-    ...(targetTextMissing ? {} : { resolvedAt: nowIso }),
+    ...(evidenceAdmission.status === 'ready' || evidenceAdmission.status === 'not_required' ? { resolvedAt: nowIso } : {}),
   };
   const painIngress: Record<string, unknown> = { ...diagnostic.record.painIngress };
+  const backfillEntries = evidenceAdmission.status === 'ready' && evidenceCount === 0
+    ? evidenceAdmission.entries
+    : undefined;
+  if (backfillEntries !== undefined) {
+    // PRI-1296: the real target-turn entries and the count class travel in
+    // the SAME diagnostic_json CAS as the identity binding and the ready
+    // disposition. No boolean, placeholder or follow-up write can represent
+    // evidence completeness.
+    painIngress.evidenceClass = { status: 'available', entryCount: backfillEntries.length };
+  }
   painIngress.verifiedHostSession = {
     status: 'verified',
     sessionId: identity.sessionId,
@@ -504,6 +599,7 @@ function evaluateRecoveryPass(input: {
   };
   const newRecord = {
     ...diagnostic.record,
+    ...(backfillEntries !== undefined ? { evidence: [...backfillEntries] } : {}),
     sessionIdHint: identity.sessionId,
     painIngress,
     recovery: disposition,
@@ -583,7 +679,8 @@ export async function recoverTaskIdentityFromReceipt(
         receipt: options.receipt,
         identity: options.identity,
         authorized: options.authorization.minimalMetadataGranted,
-        targetTurnTextAvailable: options.targetTurnTextAvailable,
+        readTargetTurnEvidence: options.readTargetTurnEvidence,
+        sourceMaterialAuthorization: options.sourceMaterialAuthorization,
         nowIso: now().toISOString(),
         hostKind: options.hostKind,
       });
