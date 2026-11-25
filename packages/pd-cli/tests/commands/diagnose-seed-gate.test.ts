@@ -75,6 +75,7 @@ const {
   }
   const mockGetTask = vi.fn();
   class MockRuntimeStateManager {
+    workspaceDir = '/tmp/fake-workspace';
     initialize = vi.fn().mockResolvedValue(undefined);
     close = vi.fn().mockResolvedValue(undefined);
     getTask = mockGetTask;
