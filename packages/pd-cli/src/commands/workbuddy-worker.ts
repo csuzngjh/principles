@@ -205,7 +205,7 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
   }
 
   if (options.once === true) {
-    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace });
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace, emitEvent: (event, payloadJson) => console.error(`[PD:WorkbuddyWorker] ${event}: ${payloadJson}`) });
     runRetentionAfterCycle(workspace);
     printCycleReport(result, options.json === true);
     if (result.mode === 'degraded') process.exitCode = 1;
@@ -219,7 +219,7 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
       // One escaping cycle exception must not kill the daemon (same
       // PRI-655 discipline as the Codex worker): report, keep looping.
       try {
-        const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace });
+        const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace, emitEvent: (event, payloadJson) => console.error(`[PD:WorkbuddyWorker] ${event}: ${payloadJson}`) });
         runRetentionAfterCycle(workspace);
         printCycleReport(result, false);
       } catch (err) {

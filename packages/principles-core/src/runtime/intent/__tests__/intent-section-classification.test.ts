@@ -13,7 +13,9 @@ import {
   analyzeIntentDocSections,
   classifyIntentSectionContent,
   createIntentTemplate,
+  deriveIntentDocDegradation,
   deriveIntentDocState,
+  INTENT_DOC_CANONICAL_HEADINGS,
   INTENT_DOC_TEMPLATE,
   parseIntentDocSections,
   type IntentDocSections,
@@ -26,6 +28,7 @@ import {
   filterIntentSnapshotSections,
   hasAuthoredSnapshotSections,
   intentSnapshotSectionsToDoc,
+  intentSnapshotToUnfilteredDocSections,
   isValidIntentSnapshot,
   renderIntentSnapshotDoc,
   type IntentSnapshot,
@@ -306,5 +309,105 @@ describe('snapshot projections exclude non-authored sections', () => {
     expect(empty.sections).toEqual([]);
     expect(empty.contentHash).toBe(HASH);
     expect(empty.capturedAt).toBe('2026-11-15T00:00:00.000Z');
+  });
+});
+
+// ── PRI-1287: why did the chain degrade to not_configured? ───────────────────
+//
+// A silent `not_configured` is the defect under test: the verdict is the same
+// for an unreadable document and an unanswered template, but the Owner action
+// is opposite. Every degradation branch below must produce a structured reason
+// AND an actionable nextAction; the normal path must produce neither.
+describe('deriveIntentDocDegradation (PRI-1287 / rc-9)', () => {
+  const UNRECOGNIZED_HEADINGS = `# INTENT.md
+
+## 1. 为什么存在
+Owner trust is the long-term asset we are protecting.
+
+## 2. 期望结果
+Every principle is traceable to the strategic basis it came from.
+`;
+
+  it('returns null for a document with at least one authored section', () => {
+    for (const section of [ALL_AUTHORED, `# INTENT.md\n\n## 1. Why\n\nOwner trust matters more than speed here.\n`]) {
+      expect(deriveIntentDocDegradation(parseIntentDocSections(section), 'en')).toBeNull();
+    }
+  });
+
+  it('reports placeholder_only for a shipped template, in both languages', () => {
+    for (const lang of ['zh-CN', 'en'] as const) {
+      const degradation = deriveIntentDocDegradation(
+        parseIntentDocSections(createIntentTemplate(lang)),
+        lang,
+      );
+      expect(degradation).not.toBeNull();
+      expect(degradation?.reason).toBe('placeholder_only');
+      expect(degradation?.parsedSectionCount).toBe(5);
+      expect(degradation?.nextAction).toContain('template');
+    }
+  });
+
+  it('reports the legacy generic template as placeholder_only too', () => {
+    const degradation = deriveIntentDocDegradation(
+      parseIntentDocSections(INTENT_DOC_TEMPLATE),
+      'en',
+    );
+    expect(degradation?.reason).toBe('placeholder_only');
+  });
+
+  it('reports no_parsed_section when the canonical headings were never recognised', () => {
+    const degradation = deriveIntentDocDegradation(
+      parseIntentDocSections(UNRECOGNIZED_HEADINGS),
+      'zh-CN',
+    );
+    expect(degradation).not.toBeNull();
+    // The Owner clearly wrote content — the failure is the heading vocabulary,
+    // not an empty document, so the nextAction must name the canonical headings.
+    expect(degradation?.reason).toBe('no_parsed_section');
+    expect(degradation?.parsedSectionCount).toBe(0);
+    expect(degradation?.nextAction).toContain(INTENT_DOC_CANONICAL_HEADINGS);
+    expect(degradation?.nextAction).not.toContain('template');
+  });
+
+  it('reports no_parsed_section for canonical headings with empty bodies', () => {
+    const empty = `# INTENT.md\n\n## 1. Why\n\n## 2. Desired Outcome\n\n## 3. Non-negotiables\n`;
+    const degradation = deriveIntentDocDegradation(parseIntentDocSections(empty), 'en');
+    expect(degradation?.reason).toBe('no_parsed_section');
+    expect(degradation?.parsedSectionCount).toBe(0);
+  });
+
+  it('an empty document is not authored but still yields a structured reason', () => {
+    const degradation = deriveIntentDocDegradation(parseIntentDocSections(''), 'en');
+    expect(degradation?.reason).toBe('no_parsed_section');
+    expect(degradation?.nextAction.length).toBeGreaterThan(0);
+  });
+
+  it('projects a snapshot back for classification WITHOUT dropping placeholders', () => {
+    const templateSnapshot = buildIntentSnapshot({
+      raw: createIntentTemplate('en'),
+      contentHash: HASH,
+      capturedAt: '2026-11-15T00:00:00.000Z',
+      lang: 'en',
+    });
+    // intentSnapshotSectionsToDoc drops placeholders (it feeds a prompt); the
+    // degradation projection must keep them or the reason becomes unknowable.
+    expect(intentSnapshotSectionsToDoc(templateSnapshot).why).toBeUndefined();
+    const projected = intentSnapshotToUnfilteredDocSections(templateSnapshot);
+    expect(projected.why).toContain('Why does this project matter?');
+    expect(deriveIntentDocDegradation(projected, 'en')?.reason).toBe('placeholder_only');
+  });
+
+  it('projects an unrecognised-headings snapshot to an empty section model', () => {
+    const snapshot = buildIntentSnapshot({
+      raw: UNRECOGNIZED_HEADINGS,
+      contentHash: HASH,
+      capturedAt: '2026-11-15T00:00:00.000Z',
+      lang: 'zh-CN',
+    });
+    expect(intentSnapshotToUnfilteredDocSections(snapshot)).toEqual({});
+    expect(deriveIntentDocDegradation(
+      intentSnapshotToUnfilteredDocSections(snapshot),
+      'zh-CN',
+    )?.reason).toBe('no_parsed_section');
   });
 });

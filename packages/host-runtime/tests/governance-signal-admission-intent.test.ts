@@ -370,5 +370,18 @@ describe('PRI-1233: governance admission → L3 execution captures the intent sn
     // The diagnosis itself still ran; only the intent anchoring degraded.
     expect(run.served).toBe(true);
     expect(await readStageSnapshot(ensured.ok ? ensured.taskId : '')).toBeUndefined();
+
+    // P5/EP-09 production-path evidence: this is not a hand-fed emitter test.
+    // The real admission → ensure → L3 automatic diagnosis chain above must
+    // have persisted the degradation emitted by Stage A into the workspace sink.
+    const sinkPath = path.join(workspaceDir, '.pd', 'telemetry', 'critical-events.jsonl');
+    expect(fs.existsSync(sinkPath)).toBe(true);
+    const persisted = fs.readFileSync(sinkPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as {
+      eventType?: string;
+      payload?: { reason?: unknown; nextAction?: unknown };
+    });
+    expect(persisted.some((event) => event.eventType === 'diag_rootcause_intent_doc_read_failed'
+      && event.payload?.reason === 'oversized'
+      && String(event.payload.nextAction).includes('Reduce content.'))).toBe(true);
   }, 180_000);
 });

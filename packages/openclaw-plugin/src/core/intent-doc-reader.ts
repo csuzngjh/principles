@@ -228,7 +228,7 @@ export function safeReadIntentDoc(
         found: false,
         flagEnabled: true,
         reason: 'not_found',
-        nextAction: `Create .principles/${getIntentFilename(lang)} using "pd intent init".`,
+        nextAction: `From workspace directory ${workspaceDir}, create .principles/${getIntentFilename(lang)} using "pd intent init --confirm --lang ${lang} --workspace .".`,
         warnings: [],
       };
     }

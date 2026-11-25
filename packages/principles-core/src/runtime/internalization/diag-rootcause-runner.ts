@@ -33,7 +33,14 @@ import type { ContextAssembler } from '../store/context/context-assembler.js';
 import type { TaskRecord } from '../task-status.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import type { IntentDocReader } from '../intent/intent-doc-reader-port.js';
-import { getIntentFilename, type IntentLang } from '../intent/intent-doc.js';
+import {
+  analyzeIntentDocSections,
+  deriveIntentDocDegradation,
+  getIntentFilename,
+  parseIntentDocSections,
+  type IntentDocSections,
+  type IntentLang,
+} from '../intent/intent-doc.js';
 import {
   buildIntentSnapshot,
   deriveAuthoredSnapshotSectionKeys,
@@ -41,6 +48,7 @@ import {
   filterIntentSnapshotSections,
   hasAuthoredSnapshotSections,
   INTENT_SNAPSHOT_SECTION_MAX_CHARS,
+  intentSnapshotToUnfilteredDocSections,
   renderIntentSnapshotDoc,
   type IntentSnapshot,
 } from '../intent/intent-snapshot.js';
@@ -246,6 +254,9 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
    *   4. absent + reader → capture, persist via CAS, then continue
    *   5. no authored section in the fresh capture → not_configured, not persisted
    *   6. anything else → no snapshot (degraded, prompt byte-identical)
+   *
+   * Steps 3 and 5 are degradations, never silent ones: each records a
+   * structured reason + nextAction (PRI-1287, rc-9).
    */
   private async resolveIntentSnapshot(task: TaskRecord): Promise<IntentSnapshot | undefined> {
     // PRI-468 / SPEC §20.4: the flag owns the WHOLE anchoring chain. Checking it
@@ -267,13 +278,9 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     }
     if (persisted.state === 'valid') {
       if (hasAuthoredSnapshotSections(persisted.snapshot)) return persisted.snapshot;
-      // Historical template-only capture: keep the record, stop using it as a
-      // strategic basis (SPEC §20.1 / §20.3).
-      this.emitEvent('intent_doc_template_only', task.taskId, {
-        source: 'persisted_snapshot',
-        reason: 'no_authored_section',
-        nextAction: 'Fill in at least one INTENT.md section with your own content; template text is not treated as Owner intent.',
-      });
+      // Historical capture the trust boundary no longer accepts: keep the
+      // record, stop using it as a strategic basis (SPEC §20.1 / §20.3).
+      this.emitIntentDegradation(task.taskId, { source: 'persisted_snapshot' }, persisted.snapshot);
       return undefined;
     }
 
@@ -306,12 +313,11 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
       // `not_configured`. It is neither injected nor persisted — persisting it
       // would let the template questions masquerade as a fixed strategic basis
       // on every retry.
-      this.emitEvent('intent_doc_template_only', task.taskId, {
-        source: 'fresh_read',
-        reason: 'no_authored_section',
-        docPath: doc.path,
-        nextAction: 'Fill in at least one INTENT.md section with your own content; template text is not treated as Owner intent.',
-      });
+      this.emitIntentDegradation(
+        task.taskId,
+        { source: 'fresh_read', docPath: doc.path, untruncatedSections: parseIntentDocSections(doc.raw) },
+        snapshot,
+      );
       return undefined;
     }
 
@@ -334,6 +340,65 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     }
 
     return await this.persistIntentSnapshot(task, snapshot);
+  }
+
+  /**
+   * Record WHY the Intent chain degraded to `not_configured` (PRI-1287).
+   *
+   * `not_configured` is a verdict, not an explanation: an unreadable document
+   * (headings never recognised) and an unanswered template both stop the chain,
+   * but they require opposite Owner actions. The event type keeps its
+   * historical name so existing telemetry queries stay valid; `reason` +
+   * `nextAction` now carry the distinction.
+   *
+   * Observability is part of the contract: host-runtime allowlists this event
+   * into the workspace's durable critical-events sink. Before that, the emit
+   * existed only on the unsubscribed storeEmitter singleton in production, so
+   * "an event is emitted" and "the Owner can see it" were different claims.
+   */
+  private emitIntentDegradation(
+    taskId: string,
+    origin: {
+      readonly source: 'persisted_snapshot' | 'fresh_read';
+      readonly docPath?: string;
+      readonly untruncatedSections?: IntentDocSections;
+    },
+    snapshot: IntentSnapshot,
+  ): void {
+    const { untruncatedSections, ...eventOrigin } = origin;
+    let degradation = deriveIntentDocDegradation(
+      intentSnapshotToUnfilteredDocSections(snapshot),
+      snapshot.lang,
+    ) ?? {
+      // Defensive only: the caller just proved hasAuthoredSnapshotSections=false,
+      // so classification cannot find an authored section. If it ever does, the
+      // record must still carry a structured reason instead of throwing.
+      reason: 'no_authored_section' as const,
+      parsedSectionCount: snapshot.sections.filter((section) => section.missing !== true).length,
+      nextAction: 'Fill in at least one INTENT.md section with your own content; template text is not treated as Owner intent.',
+    };
+    if (
+      origin.source === 'fresh_read'
+      && untruncatedSections !== undefined
+      && snapshot.sections.some((section) => section.truncated === true)
+    ) {
+      const untruncatedAnalyses = analyzeIntentDocSections(untruncatedSections, snapshot.lang);
+      if (untruncatedAnalyses.some((analysis) => analysis.state === 'authored')) {
+        degradation = {
+          reason: 'authored_content_truncated',
+          parsedSectionCount: untruncatedAnalyses.filter((analysis) => analysis.state !== 'missing').length,
+          nextAction:
+            'INTENT.md contains Owner-authored content, but template or TODO material before it fills the per-section snapshot limit, so Stage A cannot see the answer. Shorten the section or move the answer ahead of the draft/template text, then retry diagnosis.',
+        };
+      }
+    }
+    this.emitEvent('intent_doc_template_only', taskId, {
+      ...eventOrigin,
+      reason: degradation.reason,
+      nextAction: degradation.nextAction,
+      parsedSectionCount: degradation.parsedSectionCount,
+      contentHash: snapshot.contentHash,
+    });
   }
 
   /**

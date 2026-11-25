@@ -26,6 +26,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as yaml from 'js-yaml';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { handleIntentInit, handleIntentShow } from '../../src/commands/intent.js';
 
 let workspaceDir: string;
@@ -109,6 +111,22 @@ describe('handleIntentInit', () => {
     expect(content).toContain('# INTENT.md');
     expect(content).toContain('## 1. Why');
     expect(content).toContain('## 5. Current Strategic Focus');
+  });
+
+  it('real CLI registration path writes only the current directory when --workspace . overrides PD_WORKSPACE_DIR', () => {
+    const current = path.join(tmpDir, 'current workspace');
+    const envWorkspace = path.join(tmpDir, 'env workspace');
+    fs.mkdirSync(current, { recursive: true });
+    fs.mkdirSync(envWorkspace, { recursive: true });
+
+    execFileSync(process.execPath, [path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist', 'index.js'), 'intent', 'init', '--confirm', '--lang', 'zh-CN', '--workspace', '.', '--json'], {
+      cwd: current,
+      env: { ...process.env, PD_WORKSPACE_DIR: envWorkspace },
+      encoding: 'utf8',
+    });
+
+    expect(fs.existsSync(path.join(current, '.principles', 'INTENT.zh-CN.md'))).toBe(true);
+    expect(fs.existsSync(path.join(envWorkspace, '.principles', 'INTENT.zh-CN.md'))).toBe(false);
   });
 
   it('defaults to dry-run (does not write) when no --confirm', async () => {

@@ -44,6 +44,20 @@ for (const [host, handler, cycle] of [
       } finally { process.emit('SIGTERM'); finish?.(); await running; }
       expect(process.listenerCount('message')).toBe(messageListeners);
     });
+    it('passes an stderr emitEvent callback into the worker cycle', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      cycle.mockImplementation(async (options: { emitEvent?: (event: string, payloadJson: string) => void }) => {
+        options.emitEvent?.('TEST_WORKER_EVENT', 'detail');
+        return { workspaceDir: 'isolated-worker-test', mode: 'ready' };
+      });
+
+      await handler({ workspace: 'isolated-worker-test', once: true });
+
+      expect(cycle).toHaveBeenCalledWith(expect.objectContaining({ emitEvent: expect.any(Function) }));
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('TEST_WORKER_EVENT'));
+    });
+
     it('wakes a 120-second idle wait immediately on drain', async () => {
       vi.stubEnv('PD_COMPANION_WORKER_IPC', '1');
       vi.spyOn(process, 'disconnect').mockImplementation(() => {});
