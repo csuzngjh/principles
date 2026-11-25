@@ -31,7 +31,7 @@ import type { WorkspaceBackgroundOwnership } from '@principles/install-layout';
 import type { InternalizationConsumerCyclePorts } from '@principles/host-runtime';
 import { prepareOpenClawPromptRound } from '../../src/hooks/prompt.js';
 import { readOpenclawTargetTurnEvidence } from '../../src/hooks/pain-receipt-fallback.js';
-import { clearOpenclawRunTurnCorrelationsForTest, rememberOpenclawRunTurnCorrelation, resolveOpenclawRunTurnCorrelation } from '../../src/hooks/openclaw-run-turn-correlation.js';
+import { clearOpenclawRunTurnCorrelationsForTest, confirmOpenclawRunTurnMessage, rememberOpenclawRunTurnCorrelation, resolveOpenclawRunTurnCorrelation } from '../../src/hooks/openclaw-run-turn-correlation.js';
 
 vi.mock('../../src/core/system-logger.js');
 // Spread-mock host-runtime (ERR-115 pattern): default delegates to the real
@@ -550,6 +550,23 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
         runId: 'run-pri1296-embedded-turn-11',
         consume: false,
       })).toBe(secondHostTurnId);
+      expect(confirmOpenclawRunTurnMessage({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-11',
+        message: 'EMBEDDED-T11-OWNER-CORRECTION',
+      })).toBe(true);
+      expect(confirmOpenclawRunTurnMessage({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-11',
+        message: 'a different message on a reused run id',
+      })).toBe(false);
+      expect(resolveOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-11',
+      })).toBeUndefined();
       // A reused run id that points to a different persisted turn is ambiguous,
       // so a late after_tool_call event cannot be silently retargeted.
       expect(rememberOpenclawRunTurnCorrelation({
