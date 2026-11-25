@@ -101,6 +101,10 @@ export class MemoryTaskStore implements TaskStore {
   async listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]> {
     let results = [...this.tasks.values()];
     if (filter?.status) results = results.filter((t) => t.status === filter.status);
+    if (filter?.statuses !== undefined && filter.statuses.length > 0) {
+      const statuses = new Set(filter.statuses);
+      results = results.filter((t) => statuses.has(t.status));
+    }
     if (filter?.taskKind) results = results.filter((t) => t.taskKind === filter.taskKind);
     // PRI-1274 (B1 / P1-3): parity with SqliteTaskStore's admission-disposition
     // gating — applied BEFORE the sort/limit cut, exactly like the SQL WHERE

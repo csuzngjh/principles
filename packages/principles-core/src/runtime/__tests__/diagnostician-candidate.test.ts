@@ -127,4 +127,27 @@ describe('pickDiagnosticianCandidate', () => {
     ]);
     await expect(pickDiagnosticianCandidate(state, 1, NOW)).resolves.toMatchObject({ taskId: 'p-old' });
   });
+
+  it('never picks an unreconciled legacy empty-evidence target task merely because it says ready', async () => {
+    const invalidReady = JSON.stringify({
+      hostKind: 'codex',
+      evidence: [],
+      anchor: { type: 'agent_instruction', ref: 'test' },
+      painIngress: {
+        verifiedHostSession: { status: 'verified', sessionId: 'rollout-1', targetTurnId: 'turn-10' },
+        evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      },
+      recovery: { schemaVersion: 1, state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived', attemptCount: 1, lastCheckedAt: NOW },
+    });
+
+    const onlyInvalid = new FakeState([task({ taskId: 'legacy-invalid', diagnosticJson: invalidReady })]);
+    await expect(pickDiagnosticianCandidate(onlyInvalid, 10, NOW)).resolves.toBeNull();
+    expect(onlyInvalid.cursorWrites).toEqual([]);
+
+    const withValidBehindIt = new FakeState([
+      task({ taskId: 'legacy-invalid', diagnosticJson: invalidReady, updatedAt: '2026-11-11T07:00:00.000Z' }),
+      task({ taskId: 'valid-ready', updatedAt: '2026-11-11T08:00:00.000Z' }),
+    ]);
+    await expect(pickDiagnosticianCandidate(withValidBehindIt, 10, NOW)).resolves.toMatchObject({ taskId: 'valid-ready' });
+  });
 });

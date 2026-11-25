@@ -481,6 +481,73 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
     expect(readOpenclawTargetTurnEvidence(workspaceDir, 'oc-idempotent-capture', 'native-turn-1')).toMatchObject({ status: 'available' });
   });
 
+  it('embedded chat without a native message id captures unique user-turn row identities', () => {
+    const session = 'oc-session-pri1296-embedded';
+    const consent = recordConversationIngestionConsent(workspaceDir, 'openclaw', {
+      decision: 'granted', decidedVia: 'owner_directive', disclosureVersion: 'test-v1', evidenceRef: 'pri-1296-embedded-test',
+    });
+    expect(consent.ok).toBe(true);
+
+    const ordinal = prepareOpenClawPromptRound({
+      prompt: 'prompt',
+      currentUserMessage: 'EMBEDDED-T10-OWNER-CORRECTION',
+      messages: [{ role: 'user', content: 'EMBEDDED-T10-OWNER-CORRECTION' }],
+    }, {
+      workspaceDir,
+      sessionId: session,
+      trigger: 'user',
+      runId: 'run-pri1296-embedded-turn-10',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+
+    const firstDb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    let firstRowId: number | undefined;
+    try {
+      const row = firstDb.prepare('SELECT id FROM user_turns WHERE session_id = ? ORDER BY id DESC LIMIT 1').get(session) as { id: number } | undefined;
+      firstRowId = row?.id;
+      expect(firstRowId).toEqual(expect.any(Number));
+      // Simulate host-side trajectory cleanup deleting the visible user turn.
+      // SQLite AUTOINCREMENT must still make the next embedded fallback key unique
+      // even when the prompt-window ordinal is reused.
+      firstDb.prepare('DELETE FROM user_turns WHERE id = ?').run(firstRowId);
+    } finally {
+      firstDb.close();
+    }
+
+    const secondOrdinal = prepareOpenClawPromptRound({
+      prompt: 'prompt',
+      currentUserMessage: 'EMBEDDED-T11-OWNER-CORRECTION',
+      messages: [{ role: 'user', content: 'EMBEDDED-T11-OWNER-CORRECTION' }],
+    }, {
+      workspaceDir,
+      sessionId: session,
+      trigger: 'user',
+      runId: 'run-pri1296-embedded-turn-11',
+      logger,
+    });
+    expect(Number.isInteger(secondOrdinal)).toBe(true);
+
+    const secondDb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const row = secondDb.prepare('SELECT id FROM user_turns WHERE session_id = ? ORDER BY id DESC LIMIT 1').get(session) as { id: number } | undefined;
+      expect(row?.id).toEqual(expect.any(Number));
+      expect(row?.id).toBeGreaterThan(firstRowId ?? 0);
+      const firstHostTurnId = `user-turn-row:${firstRowId}`;
+      const secondHostTurnId = `user-turn-row:${row?.id}`;
+      expect(readOpenclawTargetTurnEvidence(workspaceDir, session, firstHostTurnId)).toMatchObject({
+        status: 'available',
+        entries: expect.arrayContaining([expect.objectContaining({ note: 'EMBEDDED-T10-OWNER-CORRECTION' })]),
+      });
+      expect(readOpenclawTargetTurnEvidence(workspaceDir, session, secondHostTurnId)).toMatchObject({
+        status: 'available',
+        entries: expect.arrayContaining([expect.objectContaining({ note: 'EMBEDDED-T11-OWNER-CORRECTION' })]),
+      });
+    } finally {
+      secondDb.close();
+    }
+  });
+
   it('negative control: the same real prompt collection writes no target evidence before consent is granted', () => {
     const session = 'oc-session-pri1296-no-consent';
     const turn = 'turn-11';

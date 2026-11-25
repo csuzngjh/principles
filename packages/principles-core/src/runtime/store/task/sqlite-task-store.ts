@@ -273,6 +273,11 @@ export class SqliteTaskStore implements TaskStore {
     const values: unknown[] = [];
 
     if (filter?.status) { conditions.push('status = ?'); values.push(filter.status); }
+    if (filter?.statuses !== undefined && filter.statuses.length > 0) {
+      const placeholders = filter.statuses.map(() => '?').join(', ');
+      conditions.push(`status IN (${placeholders})`);
+      values.push(...filter.statuses);
+    }
     if (filter?.taskKind) { conditions.push('task_kind = ?'); values.push(filter.taskKind); }
     if (filter?.leaseExpiresAtBefore) {
       conditions.push('lease_expires_at IS NOT NULL AND lease_expires_at < ?');
