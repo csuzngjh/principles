@@ -33,10 +33,11 @@
  * the namespaced `_meta` producer (upstream OpenClaw patch, audit §5) remains
  * the designed main path.
  *
- * NO submission turn: the OpenClaw runtime exposes no stable submission-turn
- * field (`runId`/`sessionKey` are not turn ids — SPEC TD §1.3 field rules),
- * so the identity type physically omits it; the session binding never waits
- * on one (SPEC §G2).
+ * Target-turn association: OpenClaw's runId is NOT itself a turn id.
+ * The before_prompt_build hook records the exact PD-owned user-turn identity
+ * under the same host runId; after_tool_call joins that tuple in bounded
+ * process memory. Missing/expired correlation is fail-closed for tasks that
+ * require target evidence — the original task remains unbound.
  *
  * Authorization: the Workspace-level `host_identity_minimal_metadata` quiet
  * flag — deliberately INDEPENDENT of conversation ingestion consent (this
@@ -57,6 +58,7 @@ import {
   type PainReceiptRecoveryOutcome,
 } from '@principles/core/runtime';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext } from '../openclaw-sdk.js';
+import { resolveOpenclawRunTurnCorrelation } from './openclaw-run-turn-correlation.js';
 
 /** The exact materialized tool name this fallback processes (audit §2.5).
  * Exact equality — no substring, no regex, no second spelling. */
@@ -211,12 +213,16 @@ export interface PainReceiptFallbackInput {
   readonly toolName: string;
   /** The formal event's `result` (double-encoded MCP envelope). */
   readonly toolResult: unknown;
-  /** Host-authoritative identity from the EVENT context. NO submission turn:
-   * OpenClaw exposes no proven one (module header). */
+  /** Host-authoritative identity plus an optional exact turn identity
+   * resolved by the same-process (workspace, session, runId) correlation. */
   readonly identity: {
     readonly sessionId: string | undefined;
     readonly toolCallId: string | undefined;
+    readonly submissionTurnId?: string;
   };
+  /** OpenClaw's production after_tool_call path sets this to prevent a
+   * session-only READY fallback when target evidence is required. */
+  readonly requireTargetTurnIdentity?: boolean;
   /** Caller-resolved `host_identity_minimal_metadata` flag verdict. */
   readonly minimalMetadataGranted: boolean;
   readonly now?: () => Date;
@@ -248,7 +254,8 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
   // spelling in Core/SQLite.
   const sessionId = normalizeEventId(input.identity.sessionId, { allowEmpty: false });
   const toolCallId = normalizeEventId(input.identity.toolCallId, { allowEmpty: false });
-  if (sessionId === null || toolCallId === null) {
+  const submissionTurnId = normalizeEventId(input.identity.submissionTurnId, { allowEmpty: false });
+  if (sessionId === null || toolCallId === null || submissionTurnId === null) {
     return { status: 'attempted', outcome: { status: 'rejected', reasonCode: 'event_identity_invalid' } };
   }
   if (sessionId === undefined || toolCallId === undefined) {
@@ -289,8 +296,13 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
     workspaceDir: normalizedWorkspace,
     hostKind: 'openclaw',
     receipt: validated.receipt,
-    identity: { sessionId, toolCallId },
+    identity: {
+      sessionId,
+      toolCallId,
+      ...(submissionTurnId !== undefined ? { submissionTurnId } : {}),
+    },
     authorization: { minimalMetadataGranted: input.minimalMetadataGranted },
+    requireTargetTurnIdentity: input.requireTargetTurnIdentity === true,
     readTargetTurnEvidence: (hostSessionId, targetTurnId) =>
       readOpenclawTargetTurnEvidence(normalizedWorkspace, hostSessionId, targetTurnId),
     sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(normalizedWorkspace),
@@ -359,11 +371,24 @@ export async function runAfterToolCallReceiptFallback(input: {
     : typeof ctxToolCallId === 'string' && ctxToolCallId.length > 0
       ? ctxToolCallId
       : undefined;
+  const submissionTurnId = resolveOpenclawRunTurnCorrelation({
+    workspaceDir: input.workspaceDir,
+    sessionId: input.ctx.sessionId,
+    runId: input.event.runId,
+  });
   const fallback = await attemptPainReceiptFallback({
     workspaceDir: input.workspaceDir,
     toolName: input.event.toolName,
     toolResult: input.event.result,
-    identity: { sessionId: input.ctx.sessionId, toolCallId },
+    identity: {
+      sessionId: input.ctx.sessionId,
+      toolCallId,
+      ...(submissionTurnId !== undefined ? { submissionTurnId } : {}),
+    },
+    // Without the same-run turn join, a target-dependent OpenClaw task stays
+    // unbound. Explicit requested targets, valid submitted evidence and
+    // owner_expectation anchors retain their existing admission semantics.
+    requireTargetTurnIdentity: true,
     minimalMetadataGranted,
   });
   return { line: painReceiptFallbackDiagnostic(fallback) };
