@@ -18,7 +18,8 @@ const MAX_ENTRIES = 512;
 const TTL_MS = 30 * 60 * 1000;
 
 interface RunTurnEntry {
-  readonly targetTurnId: string;
+  /** undefined is an ambiguity tombstone: the host reused a run id for a different turn. */
+  readonly targetTurnId: string | undefined;
   readonly expiresAt: number;
 }
 
@@ -51,7 +52,19 @@ export function rememberOpenclawRunTurnCorrelation(input: {
   for (const [existingKey, entry] of entries) {
     if (entry.expiresAt <= now) entries.delete(existingKey);
   }
-  entries.delete(entryKey);
+  const existing = entries.get(entryKey);
+  if (existing !== undefined) {
+    // OpenClaw run ids may be reused after a run ends. If the same tuple now
+    // points at a different row, it is impossible to distinguish a late event
+    // from the prior run; quarantine the key instead of silently retargeting it.
+    if (existing.targetTurnId !== input.targetTurnId) {
+      entries.set(entryKey, { targetTurnId: undefined, expiresAt: Math.max(existing.expiresAt, now + TTL_MS) });
+      return false;
+    }
+    entries.delete(entryKey);
+    entries.set(entryKey, existing);
+    return true;
+  }
   entries.set(entryKey, { targetTurnId: input.targetTurnId, expiresAt: now + TTL_MS });
   while (entries.size > MAX_ENTRIES) {
     const oldest = entries.keys().next().value;
