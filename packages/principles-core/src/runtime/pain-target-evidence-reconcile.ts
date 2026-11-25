@@ -31,14 +31,20 @@
  * sequence between that last read and the CAS, and the downstream R2
  * assembly/model-boundary filters plus the R3 sweep remain the backstop.
  *
- * Bounded by design: at most `limit` (default 5) waiting tasks per cycle, no
+ * Bounded by design: at most `limit` (default 5) rows per scan per cycle, no
  * new Task, no queue, no scheduler, no transcript scanning — the only input
  * beyond the task rows is the caller-injected `readTargetTurnEvidence`
  * probe (the host adapter reads its own authorized governance store).
+ *
+ * PRI-1296 legacy repair: pre-upgrade boolean-probe builds could already
+ * have persisted `ready_for_diagnosis` on an empty-evidence target task.
+ * Those rows are swept through the same structured admission rule: proven
+ * evidence is backfilled atomically; unproven rows return to waiting (or the
+ * consent-blocked state), so the old boolean flip is never treated as proof.
  */
 import type { RuntimeStateManager } from './store/runtime-state-manager.js';
 import type { TaskRecord } from './task-status.js';
-import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, type PainRecoveryDisposition } from './pain-admission-disposition.js';
+import { PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION, targetEvidenceWaitRequired, type PainRecoveryDisposition } from './pain-admission-disposition.js';
 import type {
   SourceMaterialAuthorizationPort,
   SourceMaterialDenialReason,
@@ -74,8 +80,14 @@ export type TargetTurnEvidenceRead =
  */
 export const TARGET_EVIDENCE_RECONCILE_SCOPE = 'target-evidence-reconcile';
 
+/** Rotation cursor for the bounded legacy-invalid-ready repair sweep. It is
+ * deliberately separate from the ordinary waiting cursor: valid ready tasks
+ * may occupy the oldest page, and the sweep must still reach malformed legacy
+ * rows behind them instead of starving permanently. */
+export const TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE = 'target-evidence-legacy-ready-reconcile';
+
 export interface TargetEvidenceReconcileReport {
-  /** Waiting tasks examined this run (bounded by `limit`). */
+  /** Waiting or legacy-invalid-ready tasks examined this run (bounded by `limit` per scan). */
   readonly checked: number;
   /** Dispositions flipped to `ready_for_diagnosis`. */
   readonly flipped: number;
@@ -142,7 +154,16 @@ interface WaitingTaskFacts {
    * host whose consent governs the evidence this task may receive. */
   readonly hostKind: unknown;
   readonly existingDisposition: PainRecoveryDisposition;
+  /** PRI-1296 legacy repair: a pre-upgrade boolean probe already marked this
+   * empty-evidence task ready. It must be re-admitted (or returned to
+   * waiting), never trusted because its state already says ready. */
+  readonly invalidReady: boolean;
 }
+
+type ParsedTargetEvidenceTask =
+  | { readonly status: 'candidate'; readonly facts: WaitingTaskFacts }
+  | { readonly status: 'not_applicable' }
+  | { readonly status: 'malformed' };
 
 /** Every consent-governed host, exhaustively (a `Record` over the union, so
  * adding a host without listing it here fails the typecheck). Keyed lookup
@@ -200,26 +221,40 @@ export function validateTargetTurnEvidenceEntries(entries: readonly unknown[]): 
   return validated;
 }
 
-/** Parse a waiting task's persisted facts; null when the payload does not
- * carry the verified session + target turn the waiting state promises. */
-function parseWaitingTaskFacts(task: TaskRecord): WaitingTaskFacts | null {
-  if (task.diagnosticJson === null || task.diagnosticJson === undefined) return null;
+/** Parse a reconcilable task's persisted facts. Waiting tasks are ordinary
+ * candidates; a ready task is a candidate ONLY when the current admission
+ * rule says its target evidence is still required — the exact shape left
+ * behind by the pre-PRI-1296 boolean-probe flip. Other ready tasks are not
+ * applicable and must not be reclassified. */
+function parseWaitingTaskFacts(task: TaskRecord): ParsedTargetEvidenceTask {
+  if (task.diagnosticJson === null || task.diagnosticJson === undefined) return { status: 'malformed' };
   let parsed: unknown;
   try {
     parsed = JSON.parse(task.diagnosticJson);
   } catch {
-    return null;
+    return { status: 'malformed' };
   }
-  if (!isRecord(parsed)) return null;
+  if (!isRecord(parsed)) return { status: 'malformed' };
+  const {recovery} = parsed;
+  if (!isRecord(recovery)) return { status: 'not_applicable' };
+  const recoveryState = recovery.state === 'waiting_for_target_evidence'
+    ? 'waiting_for_target_evidence' as const
+    : recovery.state === 'ready_for_diagnosis'
+      ? 'ready_for_diagnosis' as const
+      : undefined;
+  if (recoveryState === undefined) return { status: 'not_applicable' };
   const {painIngress} = parsed;
   const verified = isRecord(painIngress) ? painIngress.verifiedHostSession : undefined;
-  if (!isRecord(verified) || verified.status !== 'verified') return null;
+  const promisedFactsMissing = (): ParsedTargetEvidenceTask =>
+    // A WAITING row without the verified session + target its state promises
+    // is malformed (the historical contract this scanner must surface). A
+    // READY row without them is simply outside the legacy-repair shape.
+    recoveryState === 'waiting_for_target_evidence' ? { status: 'malformed' } : { status: 'not_applicable' };
+  if (!isRecord(verified) || verified.status !== 'verified') return promisedFactsMissing();
   const {sessionId} = verified;
   const {targetTurnId} = verified;
-  if (typeof sessionId !== 'string' || sessionId.length === 0) return null;
-  if (typeof targetTurnId !== 'string' || targetTurnId.length === 0) return null;
-  const {recovery} = parsed;
-  if (!isRecord(recovery) || recovery.state !== 'waiting_for_target_evidence') return null;
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return promisedFactsMissing();
+  if (typeof targetTurnId !== 'string' || targetTurnId.length === 0) return promisedFactsMissing();
   const attemptCount = typeof recovery.attemptCount === 'number' && Number.isInteger(recovery.attemptCount) && recovery.attemptCount >= 1
     ? recovery.attemptCount
     : 1;
@@ -240,19 +275,34 @@ function parseWaitingTaskFacts(task: TaskRecord): WaitingTaskFacts | null {
       receivedAt: rawRef.receivedAt,
     }
     : undefined;
-  return {
-    task,
-    diagnosticText: task.diagnosticJson,
-    sessionId,
+  const existingEvidence = Array.isArray(parsed.evidence) ? parsed.evidence : [];
+  const {anchor} = parsed;
+  const hasOwnerStatement = isRecord(anchor) && anchor.type === 'owner_expectation';
+  const evidenceRequired = targetEvidenceWaitRequired({
+    hasVerifiedSession: true,
     targetTurnId,
-    hostKind: parsed.hostKind,
-    existingDisposition: {
-      schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
-      state: 'waiting_for_target_evidence',
-      reasonCode: typeof recovery.reasonCode === 'string' ? recovery.reasonCode : 'target_turn_text_pending',
-      attemptCount,
-      lastCheckedAt: typeof recovery.lastCheckedAt === 'string' ? recovery.lastCheckedAt : new Date(0).toISOString(),
-      ...(receiptRef !== undefined ? { receiptRef } : {}),
+    submittedEvidenceCount: existingEvidence.length,
+    hasOwnerStatement,
+  });
+  const invalidReady = recoveryState === 'ready_for_diagnosis' && evidenceRequired;
+  if (recoveryState === 'ready_for_diagnosis' && !invalidReady) return { status: 'not_applicable' };
+  return {
+    status: 'candidate',
+    facts: {
+      task,
+      diagnosticText: task.diagnosticJson,
+      sessionId,
+      targetTurnId,
+      hostKind: parsed.hostKind,
+      invalidReady,
+      existingDisposition: {
+        schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
+        state: recoveryState,
+        reasonCode: typeof recovery.reasonCode === 'string' ? recovery.reasonCode : 'target_turn_text_pending',
+        attemptCount,
+        lastCheckedAt: typeof recovery.lastCheckedAt === 'string' ? recovery.lastCheckedAt : new Date(0).toISOString(),
+        ...(receiptRef !== undefined ? { receiptRef } : {}),
+      },
     },
   };
 }
@@ -300,6 +350,46 @@ function buildBackfillPatch(input: {
     newRecord: { ...diagnostic, recovery: disposition },
     backfilled: false,
   };
+}
+
+/**
+ * Return a legacy invalid-ready task to the waiting admission state in one
+ * CAS. The persisted ready disposition is not evidence of completeness; once
+ * the structured read cannot prove the target turn, the task must become
+ * invisible to the diagnostician picker again instead of remaining diagnosable
+ * with an empty evidence array.
+ */
+async function writeInvalidReadyWaiting(input: {
+  readonly stateManager: ReconcileWaitingTargetEvidenceInput['stateManager'];
+  readonly facts: WaitingTaskFacts;
+  readonly diagnostic: Record<string, unknown>;
+  readonly reasonCode: string;
+  readonly nowIso: string;
+}): Promise<boolean> {
+  const {stateManager, facts, diagnostic, reasonCode, nowIso} = input;
+  const {task} = facts;
+  const disposition: PainRecoveryDisposition = {
+    schemaVersion: facts.existingDisposition.schemaVersion,
+    state: 'waiting_for_target_evidence',
+    reasonCode,
+    attemptCount: facts.existingDisposition.attemptCount + 1,
+    lastCheckedAt: nowIso,
+    ...(facts.existingDisposition.nextCheckAt !== undefined ? { nextCheckAt: facts.existingDisposition.nextCheckAt } : {}),
+    ...(facts.existingDisposition.receiptRef !== undefined ? { receiptRef: facts.existingDisposition.receiptRef } : {}),
+  };
+  const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+    task.taskId,
+    facts.diagnosticText,
+    { diagnosticJson: JSON.stringify({ ...diagnostic, recovery: disposition }) },
+    {
+      expectedStatus: task.status,
+      expectedLeaseOwner: task.leaseOwner ?? null,
+      expectedLeaseExpiresAt: task.leaseExpiresAt ?? null,
+      expectedLeaseGeneration: task.leaseGeneration ?? 0,
+      expectedAttemptCount: task.attemptCount,
+    },
+  );
+  return updated !== null;
 }
 
 /**
@@ -377,15 +467,54 @@ export async function reconcileWaitingTargetEvidenceTasks(
     await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE, { lastUpdatedAt: '', lastTaskId: '' });
   }
 
-  for (const task of waiting) {
-    checked += 1;
-    const facts = parseWaitingTaskFacts(task);
-    if (facts === null) {
+  // PRI-1296 legacy repair: pre-upgrade boolean-probe builds could already
+  // have written `ready_for_diagnosis` onto an empty-evidence task. Those
+  // rows are outside the waiting-state query above, so sweep ready rows with
+  // the same bounded rotation contract. This second cursor matters: valid
+  // ready tasks parse as not-applicable but can occupy the oldest page, and
+  // without rotation they would permanently hide legacy rows behind them.
+  const legacyReadyCursor = await input.stateManager.getDiagnosticianServiceCursor(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE);
+  const legacyResumeAfter = legacyReadyCursor !== null && legacyReadyCursor.lastUpdatedAt.length > 0
+    ? { updatedAt: legacyReadyCursor.lastUpdatedAt, taskId: legacyReadyCursor.lastTaskId }
+    : undefined;
+  let readyCandidates = await input.stateManager.listTasks({
+    taskKind: 'diagnostician',
+    status: 'pending',
+    recoveryState: 'ready_for_diagnosis',
+    orderBy: 'updated_at_asc',
+    ...(legacyResumeAfter !== undefined ? { afterCursor: legacyResumeAfter } : {}),
+    limit,
+  });
+  if (legacyResumeAfter !== undefined && readyCandidates.length === 0) {
+    readyCandidates = await input.stateManager.listTasks({
+      taskKind: 'diagnostician',
+      status: 'pending',
+      recoveryState: 'ready_for_diagnosis',
+      orderBy: 'updated_at_asc',
+      limit,
+    });
+  }
+  if (readyCandidates.length > 0) {
+    const last = readyCandidates[readyCandidates.length - 1];
+    if (last === undefined) throw new Error('unreachable: non-empty ready page has a last element');
+    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE, readyCandidates.length === limit
+      ? { lastUpdatedAt: last.updatedAt, lastTaskId: last.taskId }
+      : { lastUpdatedAt: '', lastTaskId: '' });
+  } else if (legacyResumeAfter !== undefined) {
+    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE, { lastUpdatedAt: '', lastTaskId: '' });
+  }
+
+  for (const task of [...waiting, ...readyCandidates]) {
+    const parsedFacts = parseWaitingTaskFacts(task);
+    if (parsedFacts.status === 'not_applicable') continue;
+    if (parsedFacts.status === 'malformed') {
       // A waiting task without its promised verified session + target turn
       // is a malformed payload — reported, never silently dropped (rc-9).
       errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
       continue;
     }
+    checked += 1;
+    const {facts} = parsedFacts;
     if (input.hostKind !== undefined && facts.hostKind !== input.hostKind) {
       if (!isSourceMaterialHostKind(facts.hostKind)) {
         errors.push(`target_evidence_reconcile_host_invalid:taskId=${task.taskId}`);
@@ -393,12 +522,30 @@ export async function reconcileWaitingTargetEvidenceTasks(
       continue;
     }
     let read = resolveRead(facts.sessionId, facts.targetTurnId);
+    let parsedRecord: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(facts.diagnosticText);
+      parsedRecord = isRecord(parsed) ? parsed : {};
+    } catch {
+      errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
+      continue;
+    }
+    const repairInvalidReady = async (reasonCode: string): Promise<void> => {
+      if (!facts.invalidReady) return;
+      try {
+        await writeInvalidReadyWaiting({ stateManager: input.stateManager, facts, diagnostic: parsedRecord, reasonCode, nowIso: input.nowIso });
+      } catch (error: unknown) {
+        errors.push(`target_evidence_reconcile_failed:taskId=${task.taskId}:${error instanceof Error ? Array.from(error.message).slice(0, 80).join('') : 'unknown'}`);
+      }
+    };
     if (read.status === 'not_found') {
+      await repairInvalidReady('target_turn_text_pending');
       stillWaiting += 1;
       continue;
     }
     if (read.status === 'misconfigured') {
       errors.push(`target_evidence_reconcile_unconfigured:taskId=${task.taskId}`);
+      await repairInvalidReady('target_turn_evidence_reader_unavailable');
       stillWaiting += 1;
       continue;
     }
@@ -406,6 +553,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
       // Observable degradation, bounded code + reason (rc-9): the task keeps
       // waiting and is re-examined on a later cycle.
       errors.push(`target_evidence_read_failed:taskId=${task.taskId}:${read.reason.slice(0, 80)}`);
+      await repairInvalidReady('target_turn_read_failed');
       stillWaiting += 1;
       continue;
     }
@@ -420,6 +568,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
         // PRI-1296: no final authorization port means no source-material
         // write at all. This is a caller misconfiguration, not evidence absence.
         errors.push(`target_evidence_reconcile_authorization_unavailable:taskId=${task.taskId}`);
+        await repairInvalidReady('target_turn_source_material_authorization_unavailable');
         stillWaiting += 1;
         continue;
       }
@@ -428,18 +577,11 @@ export async function reconcileWaitingTargetEvidenceTasks(
         // Fail closed: a write whose governing host cannot be determined
         // cannot be authorization-checked, so it does not happen (rc-9).
         errors.push(`target_evidence_reconcile_host_kind_invalid:taskId=${task.taskId}`);
+        await repairInvalidReady('target_turn_host_kind_invalid');
         stillWaiting += 1;
         continue;
       }
       if (gate.outcome === 'denied') read = { status: 'blocked_by_consent', reason: gate.reason };
-    }
-    let parsedRecord: Record<string, unknown>;
-    try {
-      const parsed: unknown = JSON.parse(facts.diagnosticText);
-      parsedRecord = isRecord(parsed) ? parsed : {};
-    } catch {
-      errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
-      continue;
     }
     if (read.status === 'blocked_by_consent') {
       // PRI-1273 / PRI-1283: a source-material denial is a DIFFERENT state
@@ -489,6 +631,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
       if (read.status === 'legacy_available') {
         const existingEvidence = Array.isArray(parsedRecord.evidence) ? parsedRecord.evidence : [];
         if (existingEvidence.length === 0) {
+          await repairInvalidReady('target_turn_evidence_unproven');
           stillWaiting += 1;
           continue;
         }
@@ -505,6 +648,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
         const entries = validateTargetTurnEvidenceEntries(read.entries);
         if (entries === null || entries.length === 0) {
           errors.push(`target_evidence_read_invalid_entries:taskId=${task.taskId}`);
+          await repairInvalidReady('target_turn_evidence_invalid');
           stillWaiting += 1;
           continue;
         }

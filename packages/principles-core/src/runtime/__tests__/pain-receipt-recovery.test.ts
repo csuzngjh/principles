@@ -703,6 +703,77 @@ describe('recoverTaskIdentityFromReceipt — idempotence and ambiguity (T4/T7)',
     expect(recovery.attemptCount).toBe(1);
   });
 
+  it('PRI-1296 review: an already-bound replay backfills target evidence onto a legacy boolean-flipped empty task', async () => {
+    const painId = 'mcp_1700000001296_rb000296';
+    const taskId = await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const base = {
+      workspaceDir: tmpDir, hostKind: 'codex' as const, receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+    };
+    const first = await recoverTaskIdentityFromReceipt(base);
+    expect(first.status).toBe('recovered');
+
+    const waiting = await readDiagnostic(taskId);
+    const legacyReady = {
+      ...waiting,
+      recovery: {
+        ...(waiting.recovery as Record<string, unknown>),
+        state: 'ready_for_diagnosis',
+        reasonCode: 'target_evidence_arrived',
+        resolvedAt: new Date().toISOString(),
+      },
+    };
+    await stateManager.updateTaskIfDiagnosticJsonUnchanged(taskId, JSON.stringify(waiting), { diagnosticJson: JSON.stringify(legacyReady) });
+
+    const replay = await recoverTaskIdentityFromReceipt({
+      ...base,
+      readTargetTurnEvidence: availableTargetEntries(),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(replay.status).toBe('already_bound');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual(TARGET_ENTRIES);
+    expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'available', entryCount: TARGET_ENTRIES.length });
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
+  });
+
+  it('PRI-1296 review: an already-bound replay returns a legacy invalid READY task to waiting when evidence is absent', async () => {
+    const painId = 'mcp_1700000001296_rb000297';
+    const taskId = await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const base = {
+      workspaceDir: tmpDir, hostKind: 'codex' as const, receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+    };
+    expect((await recoverTaskIdentityFromReceipt(base)).status).toBe('recovered');
+
+    const waiting = await readDiagnostic(taskId);
+    const legacyReady = {
+      ...waiting,
+      recovery: {
+        ...(waiting.recovery as Record<string, unknown>),
+        state: 'ready_for_diagnosis',
+        reasonCode: 'target_evidence_arrived',
+        resolvedAt: new Date().toISOString(),
+      },
+    };
+    await stateManager.updateTaskIfDiagnosticJsonUnchanged(taskId, JSON.stringify(waiting), { diagnosticJson: JSON.stringify(legacyReady) });
+
+    const replay = await recoverTaskIdentityFromReceipt({
+      ...base,
+      readTargetTurnEvidence: () => ({ status: 'not_found' as const }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(replay.status).toBe('already_bound');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual([]);
+    expect(diagnostic.recovery).toMatchObject({ state: 'waiting_for_target_evidence', reasonCode: 'target_turn_text_pending' });
+    expect((diagnostic.recovery as Record<string, unknown>).resolvedAt).toBeUndefined();
+  });
+
   it('a DIFFERENT toolCallId matching the same task is ambiguous — identity untouched', async () => {
     const painId = 'mcp_1700000000005_ee000005';
     await persistUnboundPain(painId);

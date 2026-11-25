@@ -26,9 +26,11 @@ import {
 import { runConsumerCycle } from '../../src/service/internalization-auto-consumer-service.js';
 import { createDiagnosticianTaskId, createRuntimeStateHandle, getDefaultPdConfig } from '@principles/core/runtime';
 import { SystemLogger } from '../../src/core/system-logger.js';
-import { ensureGovernanceSchema, recordConversationIngestionConsent, runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
+import { recordConversationIngestionConsent, runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
 import type { WorkspaceBackgroundOwnership } from '@principles/install-layout';
 import type { InternalizationConsumerCyclePorts } from '@principles/host-runtime';
+import { prepareOpenClawPromptRound } from '../../src/hooks/prompt.js';
+import { readOpenclawTargetTurnEvidence } from '../../src/hooks/pain-receipt-fallback.js';
 
 vi.mock('../../src/core/system-logger.js');
 // Spread-mock host-runtime (ERR-115 pattern): default delegates to the real
@@ -325,22 +327,28 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
     });
     expect(consent.ok).toBe(true);
 
-    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
-    const trajectory = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    // Real collection path: the production before_prompt_build pre-selection
+    // hook persists the admitted user message and connects it to the exact
+    // native message id the evidence reader later queries. No direct
+    // governance_observations fixture — the row must arrive through the hook.
+    const ordinal = prepareOpenClawPromptRound({
+      prompt: 'prompt',
+      currentUserMessage: 'OC-T10-OWNER-CORRECTION',
+      currentUserMessageId: turn,
+      messages: [{ role: 'user', content: 'OC-T10-OWNER-CORRECTION' }],
+    }, {
+      workspaceDir,
+      sessionId: session,
+      trigger: 'user',
+      runId: 'run-pri1296-turn-10',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+    expect(readOpenclawTargetTurnEvidence(workspaceDir, session, turn)).toMatchObject({
+      status: 'available',
+      entries: expect.arrayContaining([expect.objectContaining({ note: 'OC-T10-OWNER-CORRECTION' })]),
+    });
     const stamp = new Date().toISOString();
-    try {
-      ensureGovernanceSchema(trajectory);
-      trajectory.prepare(`INSERT INTO governance_rollouts (host_kind, rollout_identity, root_session_id, created_at, updated_at)
-        VALUES ('openclaw', ?, ?, ?, ?)`).run(session, session, stamp, stamp);
-      const rolloutId = Number((trajectory.prepare('SELECT id FROM governance_rollouts WHERE rollout_identity = ?').get(session) as { id: number }).id);
-      trajectory.prepare(`INSERT INTO governance_observations (
-          rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key,
-          source_order, visible_text, source, completeness, retention_class, observed_at
-        ) VALUES (?, 'openclaw', ?, ?, ?, 'user_turn', ?, 1, ?, 'openclaw-hook', 'complete', 'operational', ?)`)
-        .run(rolloutId, session, session, turn, 'openclaw|oc-session-pri1296|turn-10|user_turn', 'OC-T10-OWNER-CORRECTION', stamp);
-    } finally {
-      trajectory.close();
-    }
 
     const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false, bootstrapIfMissing: true });
     try {
@@ -386,12 +394,42 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
       expect(task?.inputRef).toBe(painId);
       const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}') as Record<string, any>;
       expect(diagnostic.evidence).toEqual([
-        { sourceRef: 'governance_observation:openclaw|oc-session-pri1296|turn-10|user_turn', note: 'OC-T10-OWNER-CORRECTION' },
+        { sourceRef: 'governance_observation:openclaw|oc-session-pri1296|turn-10|user', note: 'OC-T10-OWNER-CORRECTION' },
       ]);
       expect(diagnostic.painIngress.evidenceClass).toEqual({ status: 'available', entryCount: 1 });
       expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
     } finally {
       await verify.close();
+    }
+  });
+
+  it('negative control: the same real prompt collection writes no target evidence before consent is granted', () => {
+    const session = 'oc-session-pri1296-no-consent';
+    const turn = 'turn-11';
+    const ordinal = prepareOpenClawPromptRound({
+      prompt: 'prompt',
+      currentUserMessage: 'uncollected owner correction',
+      currentUserMessageId: turn,
+      messages: [{ role: 'user', content: 'uncollected owner correction' }],
+    }, {
+      workspaceDir,
+      sessionId: session,
+      trigger: 'user',
+      runId: 'run-pri1296-no-consent',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+    expect(readOpenclawTargetTurnEvidence(workspaceDir, session, turn).status).toBe('blocked_by_consent');
+
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'governance_observations'").get();
+      const count = table === undefined
+        ? 0
+        : Number((db.prepare('SELECT COUNT(*) AS count FROM governance_observations').get() as { count: number }).count);
+      expect(count).toBe(0);
+    } finally {
+      db.close();
     }
   });
 });

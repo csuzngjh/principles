@@ -1016,6 +1016,92 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'unavailable', reason: 'not_applicable_unbound' });
   });
 
+  it('PRI-1296 review: a pre-upgrade boolean-flipped empty-evidence READY task is re-admitted and backfilled', async () => {
+    const painId = 'mcp_1700000001296_lg000296';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const waiting = await readDiagnostic(taskId);
+    const legacyReady = {
+      ...waiting,
+      recovery: {
+        ...(waiting.recovery as Record<string, unknown>),
+        state: 'ready_for_diagnosis',
+        reasonCode: 'target_evidence_arrived',
+        resolvedAt: new Date().toISOString(),
+      },
+    };
+    const seeded = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      JSON.stringify(waiting),
+      { diagnosticJson: JSON.stringify(legacyReady) },
+    );
+    expect(seeded).not.toBeNull();
+
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+      nowIso: new Date().toISOString(),
+    });
+    expect(report).toMatchObject({ checked: 1, flipped: 1, backfilled: 1, blocked: 0 });
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual(TURN10_ENTRIES);
+    expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'available', entryCount: TURN10_ENTRIES.length });
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
+  });
+
+  it('PRI-1296 review: a legacy invalid READY task returns to waiting when the exact target text is still absent', async () => {
+    const painId = 'mcp_1700000001296_lg000297';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId);
+    const waiting = await readDiagnostic(taskId);
+    const legacyReady = {
+      ...waiting,
+      recovery: {
+        ...(waiting.recovery as Record<string, unknown>),
+        state: 'ready_for_diagnosis',
+        reasonCode: 'target_evidence_arrived',
+        resolvedAt: new Date().toISOString(),
+      },
+    };
+    await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      JSON.stringify(waiting),
+      { diagnosticJson: JSON.stringify(legacyReady) },
+    );
+
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'not_found' }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+      nowIso: new Date().toISOString(),
+    });
+    expect(report).toMatchObject({ checked: 1, flipped: 0, backfilled: 0, blocked: 0, stillWaiting: 1 });
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual([]);
+    expect(diagnostic.recovery).toMatchObject({ state: 'waiting_for_target_evidence', reasonCode: 'target_turn_text_pending' });
+    expect((diagnostic.recovery as Record<string, unknown>).resolvedAt).toBeUndefined();
+  });
+
+  it('PRI-1296 review: a valid ready owner-statement task is not reclassified by the legacy repair scan', async () => {
+    const painId = 'mcp_1700000001296_lg000298';
+    const taskId = createDiagnosticianTaskId(painId);
+    await submitTargetingTurn10(painId, 'owner_expectation');
+    const before = await readDiagnostic(taskId);
+    // Owner statements are already valid on submission: no recovery wait is
+    // persisted. The legacy repair scan must leave this ordinary ready shape
+    // byte-for-byte alone.
+    expect(before.recovery).toBeUndefined();
+
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'not_found' }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+      nowIso: new Date().toISOString(),
+    });
+    expect(report.checked).toBe(0);
+    expect(await readDiagnostic(taskId)).toEqual(before);
+  });
 
   it("PRI-1296 review: a host-scoped worker reconcile never reclassifies another host's waiting task", async () => {
     const codexPainId = 'mcp_1700000001296_hx000296';

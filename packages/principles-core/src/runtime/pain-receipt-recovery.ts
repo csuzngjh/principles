@@ -436,6 +436,125 @@ function resolveTargetEvidenceAdmission(input: {
   return { status: 'ready', entries };
 }
 
+/**
+ * Re-evaluate target evidence on an already-bound replay. Before PRI-1296 a
+ * boolean probe could leave such a task `ready_for_diagnosis` with an empty
+ * evidence array; folding the replay into `already_bound` without looking at
+ * evidence made that state permanent. The replay is not an identity write —
+ * it only repairs the recovery disposition and, when the structured reader
+ * can prove the exact turn, backfills the entries in the same CAS.
+ */
+function evaluateAlreadyBoundTargetEvidence(input: {
+  readonly diagnostic: ParsedDiagnosticJson;
+  readonly sessionId: string;
+  readonly hostKind: 'codex' | 'workbuddy' | 'openclaw';
+  readonly readTargetTurnEvidence: ((sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead) | undefined;
+  readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort | undefined;
+  readonly nowIso: string;
+  readonly preconditions: TaskCasPreconditions;
+  readonly outcome: PainReceiptRecoveryOutcome;
+}): Evaluation {
+  const { diagnostic, sessionId, hostKind, readTargetTurnEvidence, sourceMaterialAuthorization, nowIso, preconditions, outcome } = input;
+  const painIngress = isRecord(diagnostic.record.painIngress) ? diagnostic.record.painIngress : undefined;
+  const verified = painIngress !== undefined && isRecord(painIngress.verifiedHostSession)
+    ? painIngress.verifiedHostSession
+    : undefined;
+  const targetTurnId = verified !== undefined && typeof verified.targetTurnId === 'string' && verified.targetTurnId.length > 0
+    ? verified.targetTurnId
+    : undefined;
+  const existingRecovery = diagnostic.record.recovery;
+  const existingState = isRecord(existingRecovery) && typeof existingRecovery.state === 'string'
+    ? existingRecovery.state
+    : undefined;
+  const reconcilableState = existingState === undefined
+    || existingState === 'waiting_for_target_evidence'
+    || existingState === 'ready_for_diagnosis';
+  if (!reconcilableState) return { action: 'report', outcome };
+
+  const {anchor} = diagnostic.record;
+  const evidenceAdmission = resolveTargetEvidenceAdmission({
+    sessionId,
+    targetTurnId,
+    submittedEvidenceCount: countEvidence(diagnostic),
+    hasOwnerStatement: isRecord(anchor) && anchor.type === 'owner_expectation',
+    hostKind,
+    readTargetTurnEvidence,
+    sourceMaterialAuthorization,
+  });
+  if (evidenceAdmission.status === 'not_required') return { action: 'report', outcome };
+  // A task already waiting remains waiting when the read still cannot prove
+  // the target turn: the check happened, but rewriting the same state would
+  // only churn attemptCount and updated_at.
+  if (existingState === 'waiting_for_target_evidence' && evidenceAdmission.status === 'waiting') {
+    return { action: 'report', outcome };
+  }
+
+  const existing = isRecord(existingRecovery) ? existingRecovery : {};
+  const rawReceiptRef = isRecord(existing.receiptRef) ? existing.receiptRef : undefined;
+  const receiptRef = rawReceiptRef !== undefined
+    && typeof rawReceiptRef.schemaVersion === 'string'
+    && typeof rawReceiptRef.capability === 'string'
+    && typeof rawReceiptRef.status === 'string'
+    && typeof rawReceiptRef.toolCallId === 'string'
+    && typeof rawReceiptRef.receivedAt === 'string'
+    ? {
+      schemaVersion: rawReceiptRef.schemaVersion,
+      capability: rawReceiptRef.capability,
+      status: rawReceiptRef.status,
+      toolCallId: rawReceiptRef.toolCallId,
+      receivedAt: rawReceiptRef.receivedAt,
+    }
+    : undefined;
+  const dispositionBase = {
+    schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
+    attemptCount: nextAttemptCount(existingRecovery),
+    lastCheckedAt: nowIso,
+    ...(typeof existing.nextCheckAt === 'string' ? { nextCheckAt: existing.nextCheckAt } : {}),
+    ...(receiptRef !== undefined ? { receiptRef } : {}),
+  };
+  let disposition: PainRecoveryDisposition;
+  let newRecord: Record<string, unknown>;
+  if (evidenceAdmission.status === 'ready') {
+    disposition = {
+      ...dispositionBase,
+      state: 'ready_for_diagnosis',
+      reasonCode: 'target_evidence_arrived',
+      resolvedAt: nowIso,
+    };
+    const {entries} = evidenceAdmission;
+    newRecord = {
+      ...diagnostic.record,
+      evidence: [...entries],
+      painIngress: {
+        ...(painIngress ?? {}),
+        evidenceClass: { status: 'available', entryCount: entries.length },
+      },
+      recovery: disposition,
+    };
+  } else if (evidenceAdmission.status === 'blocked') {
+    disposition = {
+      ...dispositionBase,
+      state: 'blocked_by_source_material_consent',
+      reasonCode: `target_turn_source_material_${evidenceAdmission.reason}`,
+    };
+    newRecord = { ...diagnostic.record, recovery: disposition };
+  } else {
+    disposition = {
+      ...dispositionBase,
+      state: 'waiting_for_target_evidence',
+      reasonCode: evidenceAdmission.reasonCode,
+    };
+    newRecord = { ...diagnostic.record, recovery: disposition };
+  }
+  return {
+    action: 'cas',
+    expectedJson: diagnostic.text,
+    newJson: JSON.stringify(newRecord),
+    preconditions,
+    outcome,
+  };
+}
+
 function evaluateRecoveryPass(input: {
   task: TaskRecord;
   diagnostic: ParsedDiagnosticJson;
@@ -502,8 +621,19 @@ function evaluateRecoveryPass(input: {
       return { action: 'report', outcome: { status: 'rejected', reasonCode: 'ambiguous_receipt', painId: receipt.painId, taskId: receipt.taskId } };
     }
     // Same physical call replayed (or a prebound task whose _meta already
-    // bound this session): idempotent — nothing to write.
-    return { action: 'report', outcome: { status: 'already_bound', painId: receipt.painId, taskId: receipt.taskId } };
+    // bound this session): identity remains idempotent, but evidence admission
+    // is re-evaluated because pre-PRI-1296 boolean flips could have left an
+    // empty-evidence task ready. A no-change replay still writes nothing.
+    return evaluateAlreadyBoundTargetEvidence({
+      diagnostic,
+      sessionId: identity.sessionId,
+      hostKind,
+      readTargetTurnEvidence,
+      sourceMaterialAuthorization,
+      nowIso,
+      preconditions,
+      outcome: { status: 'already_bound', painId: receipt.painId, taskId: receipt.taskId },
+    });
   }
 
   if (!authorized) {

@@ -64,6 +64,7 @@ import {
 } from './prompt-helpers.js';
 import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
 import { createLiveSignalKeywordStore } from '../core/signal-keyword-store.js';
+import { captureOpenclawUserTurnForTargetEvidence } from './openclaw-target-turn-capture.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 
@@ -541,6 +542,13 @@ export function prepareOpenClawPromptRound(
       );
       return undefined;
     }
+    captureOpenclawUserTurnForTargetEvidence({
+      workspaceDir: wctx.workspaceDir,
+      sessionId,
+      hostTurnId: getOwnValue(event, 'currentUserMessageId'),
+      text: currentUserMessage,
+      ...(logger !== undefined ? { logger } : {}),
+    });
   } catch (error) {
     // Detection failure means "no confirmed persistence" — no round key.
     logger?.warn?.(`[PD:Prompt] pre-selection signal collection failed: ${String(error)} → legacy_fifo_prefix_v1`);
@@ -766,6 +774,15 @@ export async function handleBeforePromptBuild(
           turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages),
         },
       );
+      if (outcome?.status === 'user_turn_persisted') {
+        captureOpenclawUserTurnForTargetEvidence({
+          workspaceDir: wctx.workspaceDir,
+          sessionId,
+          hostTurnId: getOwnValue(event, 'currentUserMessageId'),
+          text: currentUserMessage,
+          ...(logger !== undefined ? { logger } : {}),
+        });
+      }
       // PRI-1137: a run is claimed only when its user_turns row really landed,
       // so a failed write stays retryable instead of looking "already
       // collected". P1-3: the claim carries the ordinal this write produced,
