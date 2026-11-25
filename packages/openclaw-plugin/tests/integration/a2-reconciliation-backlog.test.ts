@@ -80,21 +80,43 @@ async function succeedFenced(taskId: string): Promise<void> {
   );
 }
 
+// PRI-1293 Phase 3: 血缘可证明种子根 — commit 血缘门禁要求 orphan/rollout
+// 可回溯根 dreamer。根为 pending（不进 reconciliation 扫描, resolver 不读状态）,
+// 顶层 candidateId 与链 correlationId 同值作根侧佐证。
+async function seedProvableRoot(correlationId: string): Promise<string> {
+  const dreamerId = `dreamer-${correlationId}-src`;
+  const existing = await stateManager.getTask(dreamerId);
+  if (!existing) {
+    await stateManager.createTask({
+      taskId: dreamerId, taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        pi_metadata: { dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+        candidateId: correlationId,
+      }),
+    });
+  }
+  return dreamerId;
+}
+
 async function seedMaterializedRollout(id: string): Promise<void> {
-  await stateManager.createTask({ taskId: id, taskKind: 'rollout_reviewer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(id) });
+  const root = await seedProvableRoot(id);
+  const parsed = JSON.parse(meta(id)) as { pi_metadata: Record<string, unknown> };
+  parsed.pi_metadata.parentTaskId = root;
+  await stateManager.createTask({ taskId: id, taskKind: 'rollout_reviewer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: JSON.stringify(parsed) });
   await succeedFenced(id);
   const pi = hydratePITaskRecord(await stateManager.getTask(id) as TaskRecord);
   await stateManager.updateTaskDiagnosticJson(id, createPITaskDiagnosticJson(mergePITaskMetadata(pi!, { runnerDecision: 'approve_rollout' })));
 }
 
 async function seedOrphanEvaluator(id: string): Promise<void> {
+  const root = await seedProvableRoot(id);
   // PRI-720: an evaluator is a full-chain entity — the standard prompt graph
   // never creates one, so the orphan chain is declared full_chain explicitly.
   await stateManager.createTask({
     taskId: id, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
     diagnosticJson: createPITaskDiagnosticJson({
       dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 5_000,
-      inputArtifactRefs: [], outputArtifactRefs: [], correlationId: id,
+      inputArtifactRefs: [], outputArtifactRefs: [], correlationId: id, parentTaskId: root,
     }),
   });
   await succeedFenced(id);

@@ -31,6 +31,19 @@ const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {
 let workspaceDir: string;
 let stateManager: RuntimeStateManager;
 
+// PRI-1293 Phase 3: seeder/reopen 的血缘门禁要求来源任务可回溯根 dreamer —
+// 夹具补种子根（顶层 candidateId 与链 id 同值）+ parentTaskId 线性挂链。
+async function seedProvableSourceEvaluator(): Promise<void> {
+  await stateManager.createTask({
+    taskId: 'dreamer-wire-src', taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+    diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [] }, candidateId: 'cand-eval-1' }),
+  });
+  await stateManager.createTask({
+    taskId: 'eval-1', taskKind: 'evaluator', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+    diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'cand-eval-1', parentTaskId: 'dreamer-wire-src' } }),
+  });
+}
+
 beforeEach(async () => {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-wiring-'));
   stateManager = new RuntimeStateManager({ workspaceDir });
@@ -85,6 +98,7 @@ describe('createEvaluatorRepairDeps', () => {
 
   it('seedArtificerRepairTask 创建 pending repair 任务并携带 payload', async () => {
     writeConfig();
+    await seedProvableSourceEvaluator();
     const deps = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
     const taskId = await deps.seedArtificerRepairTask({
       repairPayload: {
@@ -110,6 +124,7 @@ describe('createEvaluatorRepairDeps', () => {
 
   it('seedArtificerRepairTask: in-flight (pending) round → idempotent reuse', async () => {
     writeConfig();
+    await seedProvableSourceEvaluator();
     const deps = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
     const params = {
       repairPayload: {
@@ -128,6 +143,7 @@ describe('createEvaluatorRepairDeps', () => {
 
   it('seedArtificerRepairTask: SUCCEEDED round → refuses reuse (no fake new corrective work)', async () => {
     writeConfig();
+    await seedProvableSourceEvaluator();
     const deps = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
     const params = {
       repairPayload: {
@@ -146,6 +162,7 @@ describe('createEvaluatorRepairDeps', () => {
 
   it('seedArtificerRepairTask: FAILED / NEEDS_HUMAN_REVIEW rounds → refuse reuse too', async () => {
     writeConfig();
+    await seedProvableSourceEvaluator();
     const deps = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
     const makeParams = (iteration: number) => ({
       repairPayload: {
@@ -251,9 +268,10 @@ describe('dispatchRolloutActivation (真实 dispatcher 冒烟)', () => {
 describe('createRolloutGovernanceDeps', () => {
   it('reopenRevisionTarget 经 orchestrator reopen succeeded 任务', async () => {
     writeConfig();
+    await seedProvableSourceEvaluator();
     await stateManager.createTask({
       taskId: 'scribe-wire', taskKind: 'scribe', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [] } }),
+      diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'cand-eval-1', parentTaskId: 'dreamer-wire-src' } }),
     });
     // SPEC §5.3: the terminal write requires the fence + runId minted by the
     // acquisition, so the seed keeps the real acquisition.
