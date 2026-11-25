@@ -300,7 +300,7 @@ export function assembleSubmitCapability(
 
   return {
     ok: true,
-    call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission, requestMeta }) => {
+    call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission, requestMeta, observeSessionAssociation }) => {
       // PRI-1275 review round (Devin): the minimal identity authorization is
       // resolved PER REQUEST from the CURRENT workspace config — a Workspace
       // admin revoking `host_identity_minimal_metadata` stops binding on the
@@ -333,6 +333,7 @@ export function assembleSubmitCapability(
             return typeof value === 'string' ? value : undefined;
           },
           verifyHostSession: () => verification,
+          ...(observeSessionAssociation === undefined ? {} : { observeSessionAssociation }),
         },
         submission,
       );

@@ -288,6 +288,21 @@ export interface PluginHookToolContext {
 export interface PluginHookAfterToolCallEvent {
   toolName: string;
   toolArgs?: Record<string, unknown>;
+  /**
+   * Host field since OpenClaw 2026.11.x: the executed tool arguments
+   * (`params`, structuredClone'd) — the deprecated `toolArgs` above is the
+   * legacy spelling some adapter shims still send.
+   */
+  params?: Record<string, unknown>;
+  /** Host field since OpenClaw 2026.11.x: the agent run id. */
+  runId?: string;
+  /**
+   * Host field since OpenClaw 2026.11.x: the physical tool call id from the
+   * real execution record (embedded-agent-subscribe `prepareToolExecutionEnd`
+   * → event `toolCallId`). PRI-1276's receipt fallback uses it as the
+   * ambiguity key — never synthesize it from params or ordering.
+   */
+  toolCallId?: string;
   result?: unknown;
   error?: unknown;
   agentId?: string;

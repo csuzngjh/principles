@@ -84,9 +84,9 @@ const RECEIPT_ALLOWED_KEYS = [
  * caller supplied no claim of its own, so the completion event's own host
  * identity is the designated repair source:
  *  - `codex_host_metadata_missing` (Codex, PRI-1274);
- *  - `host_session_claim_empty` (non-Codex hosts, PRI-1275 WorkBuddy) — the
- *    unbound outcome when no `_meta` identity existed and NO claim was
- *    supplied at all.
+ *  - `host_session_claim_empty` (non-Codex hosts, PRI-1275 WorkBuddy and
+ *    PRI-1276 OpenClaw) — the unbound outcome when no `_meta` identity
+ *    existed and NO claim was supplied at all.
  * Every cause that records a REFUSAL of something the caller actually
  * supplied stays refused here — a specific claim existed and was rejected,
  * so the completion event must not overturn that recorded decision:
@@ -249,7 +249,10 @@ export interface ReceiptEventIdentity {
 export type PainReceiptRecoveryOutcome =
   | { readonly status: 'recovered'; readonly painId: string; readonly taskId: string; readonly disposition: PainRecoveryDisposition }
   | { readonly status: 'already_bound'; readonly painId: string; readonly taskId: string }
-  | { readonly status: 'rejected'; readonly reasonCode: string; readonly detail?: string; readonly painId?: string; readonly taskId?: string };
+  | { readonly status: 'rejected'; readonly reasonCode: string; readonly detail?: string; readonly painId?: string; readonly taskId?: string;
+    /** Present only when the recovery pass read the task and proved it had no
+     * session binding at decision time; unknown-state rejections omit it. */
+    readonly taskUnbound?: true };
 
 /** Caller-resolved authorization (the quiet flag verdict — Core stays
  * flag-agnostic; both MCP prebind and this fallback share the same scope). */
@@ -260,9 +263,10 @@ export interface ReceiptRecoveryAuthorization {
 export interface RecoverTaskIdentityFromReceiptOptions {
   readonly workspaceDir: string;
   /** The host whose completion event produced this receipt. PRI-1274 froze
-   * 'codex'; PRI-1275 admits the WorkBuddy adapter through the SAME CAS
-   * recovery (per-host producers, one shared recovery authority). */
-  readonly hostKind: 'codex' | 'workbuddy';
+   * 'codex'; PRI-1275 admits the WorkBuddy adapter and PRI-1276 the OpenClaw
+   * plugin through the SAME CAS recovery (per-host producers, one shared
+   * recovery authority). */
+  readonly hostKind: 'codex' | 'workbuddy' | 'openclaw';
   readonly receipt: ValidatedPainSubmitReceipt;
   readonly identity: ReceiptEventIdentity;
   readonly authorization: ReceiptRecoveryAuthorization;
@@ -368,7 +372,7 @@ function evaluateRecoveryPass(input: {
   nowIso: string;
   /** The host whose completion event produced this receipt (P1-2.7 owner
    * check — the original task must belong to the SAME host). */
-  hostKind: 'codex' | 'workbuddy';
+  hostKind: 'codex' | 'workbuddy' | 'openclaw';
 }): Evaluation {
   const { task, diagnostic, receipt, identity, authorized, targetTurnTextAvailable, nowIso, hostKind } = input;
   const preconditions: TaskCasPreconditions = {
@@ -444,7 +448,7 @@ function evaluateRecoveryPass(input: {
       expectedJson: diagnostic.text,
       newJson: mergeDisposition(diagnostic, disposition),
       preconditions,
-      outcome: { status: 'rejected', reasonCode: 'blocked_by_consent', painId: receipt.painId, taskId: receipt.taskId },
+      outcome: { status: 'rejected', reasonCode: 'blocked_by_consent', painId: receipt.painId, taskId: receipt.taskId, taskUnbound: true },
     };
   }
 
@@ -452,7 +456,7 @@ function evaluateRecoveryPass(input: {
   if (!isRecord(diagnostic.record.painIngress)) {
     // An original pd_submit_pain task always carries the versioned ingress
     // block; without it this is not that task — fail closed, no mutation.
-    return { action: 'report', outcome: { status: 'rejected', reasonCode: 'diagnostic_payload_invalid:pain_ingress_missing', painId: receipt.painId, taskId: receipt.taskId } };
+    return { action: 'report', outcome: { status: 'rejected', reasonCode: 'diagnostic_payload_invalid:pain_ingress_missing', painId: receipt.painId, taskId: receipt.taskId, taskUnbound: true } };
   }
   // P1-3 (r2b, devin finding 0001) + review round 2 (directive I3): the
   // target is the original submission's EXPLICIT request when it named one
