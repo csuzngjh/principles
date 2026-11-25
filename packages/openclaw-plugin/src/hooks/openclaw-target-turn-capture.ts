@@ -6,7 +6,10 @@
  * is the connection between those existing mechanisms: when the real prompt
  * hook persists a user interaction and the workspace has granted OpenClaw
  * conversation-ingestion consent, the SAME admitted utterance is appended as
- * one live governance observation keyed by the host's exact message id.
+ * one live governance observation keyed by the host's exact turn identity:
+ * the native message id when OpenClaw supplies one, otherwise the per-session
+ * user-turn index already persisted with that same interaction. The fallback
+ * is therefore a host-persisted exact identity, never a nearby-turn guess.
  *
  * No transcript scan, no retry queue, no second evidence authority: the write
  * is idempotent on the logical observation key and missing/revoked consent is
@@ -28,11 +31,15 @@ export function captureOpenclawUserTurnForTargetEvidence(input: {
   readonly workspaceDir: string;
   readonly sessionId: string;
   readonly hostTurnId: unknown;
+  /** Exact persisted per-session user-turn index used when the embedded
+   * OpenClaw entry supplies no native message id. */
+  readonly fallbackHostTurnId?: string;
   readonly text: string;
   readonly logger?: Partial<PluginLogger>;
   readonly now?: Date;
 }): void {
-  if (!usableHostId(input.sessionId) || !usableHostId(input.hostTurnId) || input.text.length === 0) return;
+  const hostTurnId = usableHostId(input.hostTurnId) ? input.hostTurnId : input.fallbackHostTurnId;
+  if (!usableHostId(input.sessionId) || !usableHostId(hostTurnId) || input.text.length === 0) return;
   const authorization = readSourceMaterialAuthorization({ workspaceDir: input.workspaceDir, hostKind: 'openclaw' });
   if (authorization.status === 'blocked') return;
   try {
@@ -42,9 +49,9 @@ export function captureOpenclawUserTurnForTargetEvidence(input: {
         hostKind: 'openclaw',
         rolloutIdentity: input.sessionId,
         rootSessionId: input.sessionId,
-        hostTurnId: input.hostTurnId,
+        hostTurnId,
         kind: 'user_turn',
-        logicalObservationKey: `openclaw|${input.sessionId}|${input.hostTurnId}|user`,
+        logicalObservationKey: `openclaw|${input.sessionId}|${hostTurnId}|user`,
         visibleText: input.text,
         source: 'live_hook',
         completeness: 'complete',

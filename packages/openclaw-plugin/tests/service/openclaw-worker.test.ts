@@ -403,6 +403,40 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
     }
   });
 
+  it('embedded chat without a native message id captures the exact persisted user-turn index', () => {
+    const session = 'oc-session-pri1296-embedded';
+    const consent = recordConversationIngestionConsent(workspaceDir, 'openclaw', {
+      decision: 'granted', decidedVia: 'owner_directive', disclosureVersion: 'test-v1', evidenceRef: 'pri-1296-embedded-test',
+    });
+    expect(consent.ok).toBe(true);
+
+    const ordinal = prepareOpenClawPromptRound({
+      prompt: 'prompt',
+      currentUserMessage: 'EMBEDDED-T10-OWNER-CORRECTION',
+      messages: [{ role: 'user', content: 'EMBEDDED-T10-OWNER-CORRECTION' }],
+    }, {
+      workspaceDir,
+      sessionId: session,
+      trigger: 'user',
+      runId: 'run-pri1296-embedded-turn-10',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT turn_index AS turnIndex FROM user_turns WHERE session_id = ? ORDER BY id DESC LIMIT 1').get(session) as { turnIndex: number } | undefined;
+      expect(row?.turnIndex).toEqual(expect.any(Number));
+      const hostTurnId = String(row?.turnIndex);
+      expect(readOpenclawTargetTurnEvidence(workspaceDir, session, hostTurnId)).toMatchObject({
+        status: 'available',
+        entries: expect.arrayContaining([expect.objectContaining({ note: 'EMBEDDED-T10-OWNER-CORRECTION' })]),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it('negative control: the same real prompt collection writes no target evidence before consent is granted', () => {
     const session = 'oc-session-pri1296-no-consent';
     const turn = 'turn-11';

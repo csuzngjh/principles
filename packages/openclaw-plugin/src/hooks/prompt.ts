@@ -522,11 +522,12 @@ export function prepareOpenClawPromptRound(
     logger?.warn?.(`[PD:Prompt] pre-selection assistant-turn anchor unavailable: ${String(error)}`);
   }
   try {
+    const userTurnIndex = nextUserTurnIndex(wctx, sessionId, event.messages);
     const outcome = getSignalCollectorHost(wctx, logger).detectSync(
       currentUserMessage, sessionId, trigger ?? 'api',
       {
         referencesAssistantTurnId,
-        turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages),
+        turnIndex: userTurnIndex,
         ...(runId ? { idempotencyKey: `${sessionKey ?? sessionId}\u0000${runId}` } : {}),
       },
     );
@@ -546,6 +547,7 @@ export function prepareOpenClawPromptRound(
       workspaceDir: wctx.workspaceDir,
       sessionId,
       hostTurnId: getOwnValue(event, 'currentUserMessageId'),
+      fallbackHostTurnId: String(userTurnIndex),
       text: currentUserMessage,
       ...(logger !== undefined ? { logger } : {}),
     });
@@ -767,11 +769,12 @@ export async function handleBeforePromptBuild(
       }
       // trigger ?? 'api':detectSync 的 trigger 参数必须为具体值(host 内部用
       // isUserInteractionTrigger 判定,undefined 会被接受但下游日志/标签需要具体值)。
+      const userTurnIndex = nextUserTurnIndex(wctx, sessionId, event.messages);
       const outcome = getSignalCollectorHost(wctx, logger).detectSync(
         currentUserMessage, sessionId, trigger ?? 'api',
         {
           referencesAssistantTurnId: correctionReferencesAssistantTurnId,
-          turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages),
+          turnIndex: userTurnIndex,
         },
       );
       if (outcome?.status === 'user_turn_persisted') {
@@ -779,6 +782,7 @@ export async function handleBeforePromptBuild(
           workspaceDir: wctx.workspaceDir,
           sessionId,
           hostTurnId: getOwnValue(event, 'currentUserMessageId'),
+          fallbackHostTurnId: String(userTurnIndex),
           text: currentUserMessage,
           ...(logger !== undefined ? { logger } : {}),
         });
