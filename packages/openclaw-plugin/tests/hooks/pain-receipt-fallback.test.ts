@@ -729,6 +729,12 @@ describe('runAfterToolCallReceiptFallback — hook entry (flags from the CURRENT
       targetTurnId,
       message: 'authorized hook owner message',
     })).toBe(true);
+    expect(resolveOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      runId,
+      consume: false,
+    })).toBe(targetTurnId);
     const first = await runAfterToolCallReceiptFallback({
       event: {
         toolName: 'pd-recall__pd_submit_pain',
@@ -778,6 +784,12 @@ describe('runAfterToolCallReceiptFallback — hook entry (flags from the CURRENT
       targetTurnId,
       message: 'before revocation owner message',
     })).toBe(true);
+    expect(resolveOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      runId,
+      consume: false,
+    })).toBe(targetTurnId);
     const before = await runAfterToolCallReceiptFallback({
       event: { toolName: 'pd-recall__pd_submit_pain', runId, toolCallId: EVENT_IDENTITY.toolCallId, result: envelopeForReceipt(painId, ws) },
       ctx: { sessionId: EVENT_IDENTITY.sessionId },
