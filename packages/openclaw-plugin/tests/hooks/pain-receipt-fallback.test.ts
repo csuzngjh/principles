@@ -349,6 +349,7 @@ describe('runAfterToolCallReceiptFallback — exact same-run target-turn associa
       sessionId,
       runId,
       targetTurnId,
+      message: 'the exact embedded owner message',
     })).toBe(true);
 
     const result = await runAfterToolCallReceiptFallback({
