@@ -24,7 +24,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { RuntimeStateManager, getDefaultPdConfig } from '@principles/core/runtime';
-import { deriveSubmitTaskId, submitPainCapability } from '@principles/core/runtime/pain-submit-capability';
+import {
+  buildReconciledSubmitReceipt,
+  buildUnconfirmedSubmitReceipt,
+  deriveSubmitTaskId,
+  submitPainCapability,
+} from '@principles/core/runtime/pain-submit-capability';
 
 const { recoverSpy, validateSpy } = vi.hoisted(() => ({
   recoverSpy: vi.fn(),
@@ -135,7 +140,7 @@ function receiptJson(painId: string, workspaceDir: string, overrides: Record<str
     warnings: [],
     error: null,
     nextAction: null,
-    sessionAssociation: { status: 'unverified', detail: 'codex_host_metadata_missing' },
+    sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' },
     ...overrides,
   };
 }
@@ -351,6 +356,92 @@ describe('attemptPainReceiptFallback — REAL recovery against the REAL task sto
     expect(replay.outcome).toMatchObject({ status: 'already_bound', taskId });
   });
 
+  it('recovers through the server\'s actual reconciled timeout receipt (association verdict retained)', async () => {
+    const ws = workspace();
+    const painId = 'mcp_1764000000010_aa000010';
+    const taskId = await persistUnboundPain(ws, painId);
+    const timeoutReceipt = buildReconciledSubmitReceipt({
+      painId,
+      taskId,
+      workspaceDir: ws,
+      sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' },
+    });
+    const result = await attemptPainReceiptFallback({
+      workspaceDir: ws,
+      toolName: 'pd-recall__pd_submit_pain',
+      toolResult: openclawEnvelope(timeoutReceipt),
+      identity: { ...EVENT_IDENTITY },
+      minimalMetadataGranted: true,
+    });
+    expect(result.status).toBe('attempted');
+    if (result.status !== 'attempted') return;
+    expect(result.outcome).toMatchObject({ status: 'recovered', taskId });
+  });
+
+  it('a timeout receipt WITHOUT sessionAssociation still fails closed instead of becoming recoverable', async () => {
+    const ws = workspace();
+    const painId = 'mcp_1764000000014_aa000014';
+    const taskId = await persistUnboundPain(ws, painId);
+    const legacyTimeoutReceipt = buildReconciledSubmitReceipt({ painId, taskId, workspaceDir: ws });
+    const result = await attemptPainReceiptFallback({
+      workspaceDir: ws,
+      toolName: 'pd-recall__pd_submit_pain',
+      toolResult: openclawEnvelope(legacyTimeoutReceipt),
+      identity: { ...EVENT_IDENTITY },
+      minimalMetadataGranted: true,
+    });
+    expect(result.status).toBe('attempted');
+    if (result.status !== 'attempted') return;
+    expect(result.outcome).toMatchObject({ status: 'rejected', reasonCode: 'session_association_not_recoverable' });
+    const diagnostic = await readDiagnostic(ws, taskId);
+    expect(diagnostic.sessionIdHint).toBeNull();
+  });
+
+  it('the server\'s actual submit_unconfirmed timeout receipt still requires the exact read-back', async () => {
+    const ws = workspace();
+    // Initialize the real store with an unrelated task so the negative case is
+    // an exact-ID miss, not a missing database.
+    await persistUnboundPain(ws, 'mcp_1764000000011_aa000011');
+    const missingPainId = 'mcp_1764000000012_aa000012';
+    const missingReceipt = buildUnconfirmedSubmitReceipt({
+      painId: missingPainId,
+      taskId: deriveSubmitTaskId(missingPainId),
+      workspaceDir: ws,
+      message: 'timeout before the write outcome was known',
+      sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' },
+    });
+    const missing = await attemptPainReceiptFallback({
+      workspaceDir: ws,
+      toolName: 'pd-recall__pd_submit_pain',
+      toolResult: openclawEnvelope(missingReceipt),
+      identity: { ...EVENT_IDENTITY },
+      minimalMetadataGranted: true,
+    });
+    expect(missing.status).toBe('attempted');
+    if (missing.status !== 'attempted') return;
+    expect(missing.outcome).toMatchObject({ status: 'rejected', reasonCode: 'submit_unconfirmed_task_not_found' });
+
+    const painId = 'mcp_1764000000013_aa000013';
+    const taskId = await persistUnboundPain(ws, painId);
+    const timeoutReceipt = buildUnconfirmedSubmitReceipt({
+      painId,
+      taskId,
+      workspaceDir: ws,
+      message: 'timeout before the write outcome was known',
+      sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' },
+    });
+    const recovered = await attemptPainReceiptFallback({
+      workspaceDir: ws,
+      toolName: 'pd-recall__pd_submit_pain',
+      toolResult: openclawEnvelope(timeoutReceipt),
+      identity: { ...EVENT_IDENTITY },
+      minimalMetadataGranted: true,
+    });
+    expect(recovered.status).toBe('attempted');
+    if (recovered.status !== 'attempted') return;
+    expect(recovered.outcome).toMatchObject({ status: 'recovered', taskId });
+  });
+
   it('a different toolCallId on the same task is ambiguous and never overwrites', async () => {
     const ws = workspace();
     const painId = 'mcp_1764000000002_bb000002';
@@ -523,7 +614,7 @@ describe('diagnostics — bounded, ids and codes only', () => {
     expect(painReceiptFallbackDiagnostic({ status: 'not_applicable' })).toBeNull();
   });
 
-  it('rejections carry the stage and the unbound fact — NEVER the raw detail (path-leak surface)', () => {
+  it('unknown-state rejections carry the stage but NOT unbound=true — and never the raw detail (path-leak surface)', () => {
     const line = painReceiptFallbackDiagnostic({
       status: 'attempted',
       outcome: {
@@ -538,11 +629,25 @@ describe('diagnostics — bounded, ids and codes only', () => {
     });
     expect(line).toContain('pain_receipt_rejected:recovery_store_error');
     expect(line).toContain('stage=after_tool_call');
-    expect(line).toContain('unbound=true');
+    expect(line).not.toContain('unbound=');
     expect(line).toContain('taskId=task_p');
     expect(line).not.toContain('detail=');
     expect(line).not.toContain('secret');
     expect(line).not.toContain('\n');
+  });
+
+  it('unbound=true appears only when the recovery outcome proves the task was unbound', () => {
+    const line = painReceiptFallbackDiagnostic({
+      status: 'attempted',
+      outcome: {
+        status: 'rejected',
+        reasonCode: 'blocked_by_consent',
+        painId: 'mcp_p',
+        taskId: 'task_p',
+        taskUnbound: true,
+      },
+    });
+    expect(line).toBe('pain_receipt_rejected:blocked_by_consent:stage=after_tool_call:unbound=true:taskId=task_p');
   });
 
   it('target-turn probe reads the exact (session, turn) or nothing', () => {

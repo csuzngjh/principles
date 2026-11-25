@@ -690,6 +690,7 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4/T8/T9 negat
     expect(outcome.status).toBe('rejected');
     if (outcome.status !== 'rejected') return;
     expect(outcome.reasonCode).toBe('blocked_by_consent');
+    expect(outcome.taskUnbound).toBe(true);
     const diagnostic = await readDiagnostic(taskId);
     expect(diagnostic.sessionIdHint).toBeNull();
     const recovery = diagnostic.recovery as Record<string, unknown>;
@@ -904,6 +905,7 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4/T8/T9 negat
     expect(outcome.status).toBe('rejected');
     if (outcome.status !== 'rejected') return;
     expect(outcome.reasonCode).toBe('diagnostic_payload_invalid:pain_ingress_missing');
+    expect(outcome.taskUnbound).toBe(true);
     const diagnostic = await readDiagnostic(taskId);
     expect(Object.hasOwn(diagnostic, 'recovery')).toBe(false);
   });

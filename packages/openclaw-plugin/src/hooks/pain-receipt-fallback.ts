@@ -301,9 +301,10 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
 /**
  * One bounded stderr/logger diagnostic line for the hook (ids and codes
  * only — never receipt content, prompts or tool input/output). The
- * `stage`/`unbound` segments keep the degraded state observable per the
- * host contract: a rejection here means the original task REMAINS unbound
- * and nothing is retried automatically.
+ * `stage` segment keeps the degraded state observable per the host contract.
+ * `unbound=true` is emitted only when the shared recovery pass actually read
+ * the task and proved it unbound; conflict, parse and store failures leave
+ * the binding state unknown and therefore omit the field.
  */
 export function painReceiptFallbackDiagnostic(result: PainReceiptFallbackResult): string | null {
   if (result.status === 'not_applicable') return null;
@@ -318,7 +319,7 @@ export function painReceiptFallbackDiagnostic(result: PainReceiptFallbackResult)
       // `recovery_store_error` with a raw exception message that may embed a
       // workspace path or newlines; the ids-only line contract admits codes
       // and ids only.
-      return `pain_receipt_rejected:${outcome.reasonCode}:stage=after_tool_call:unbound=true${outcome.taskId !== undefined ? `:taskId=${outcome.taskId}` : ''}`;
+      return `pain_receipt_rejected:${outcome.reasonCode}:stage=after_tool_call${outcome.taskUnbound === true ? ':unbound=true' : ''}${outcome.taskId !== undefined ? `:taskId=${outcome.taskId}` : ''}`;
   }
 }
 

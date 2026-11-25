@@ -249,7 +249,10 @@ export interface ReceiptEventIdentity {
 export type PainReceiptRecoveryOutcome =
   | { readonly status: 'recovered'; readonly painId: string; readonly taskId: string; readonly disposition: PainRecoveryDisposition }
   | { readonly status: 'already_bound'; readonly painId: string; readonly taskId: string }
-  | { readonly status: 'rejected'; readonly reasonCode: string; readonly detail?: string; readonly painId?: string; readonly taskId?: string };
+  | { readonly status: 'rejected'; readonly reasonCode: string; readonly detail?: string; readonly painId?: string; readonly taskId?: string;
+    /** Present only when the recovery pass read the task and proved it had no
+     * session binding at decision time; unknown-state rejections omit it. */
+    readonly taskUnbound?: true };
 
 /** Caller-resolved authorization (the quiet flag verdict — Core stays
  * flag-agnostic; both MCP prebind and this fallback share the same scope). */
@@ -445,7 +448,7 @@ function evaluateRecoveryPass(input: {
       expectedJson: diagnostic.text,
       newJson: mergeDisposition(diagnostic, disposition),
       preconditions,
-      outcome: { status: 'rejected', reasonCode: 'blocked_by_consent', painId: receipt.painId, taskId: receipt.taskId },
+      outcome: { status: 'rejected', reasonCode: 'blocked_by_consent', painId: receipt.painId, taskId: receipt.taskId, taskUnbound: true },
     };
   }
 
@@ -453,7 +456,7 @@ function evaluateRecoveryPass(input: {
   if (!isRecord(diagnostic.record.painIngress)) {
     // An original pd_submit_pain task always carries the versioned ingress
     // block; without it this is not that task — fail closed, no mutation.
-    return { action: 'report', outcome: { status: 'rejected', reasonCode: 'diagnostic_payload_invalid:pain_ingress_missing', painId: receipt.painId, taskId: receipt.taskId } };
+    return { action: 'report', outcome: { status: 'rejected', reasonCode: 'diagnostic_payload_invalid:pain_ingress_missing', painId: receipt.painId, taskId: receipt.taskId, taskUnbound: true } };
   }
   // P1-3 (r2b, devin finding 0001) + review round 2 (directive I3): the
   // target is the original submission's EXPLICIT request when it named one

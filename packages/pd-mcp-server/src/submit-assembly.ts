@@ -44,7 +44,7 @@ import {
   resolveHostSubmissionContext,
   type TargetTurnEvidenceRead,
 } from '@principles/core/runtime';
-import { submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
+import { hostSessionVerificationToAssociation, submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
 import type { PdMcpHost } from './workspace.js';
 
@@ -300,7 +300,7 @@ export function assembleSubmitCapability(
 
   return {
     ok: true,
-    call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission, requestMeta }) => {
+    call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission, requestMeta, observeSessionAssociation }) => {
       // PRI-1275 review round (Devin): the minimal identity authorization is
       // resolved PER REQUEST from the CURRENT workspace config — a Workspace
       // admin revoking `host_identity_minimal_metadata` stops binding on the
@@ -320,6 +320,10 @@ export function assembleSubmitCapability(
       // present, the legal unbound reason when not. Codex never consults
       // model-supplied claims (its identity is host meta or unbound).
       const verification = resolveSessionVerification(requestMeta, submission, minimalMetadataGranted);
+      // The deadline wrapper observes the verdict resolved for THIS request.
+      // If the write outlives the MCP deadline, the timeout receipt can carry
+      // the same association cause instead of losing the security boundary.
+      observeSessionAssociation?.(hostSessionVerificationToAssociation(verification));
       return submitPainCapability(
         {
           workspaceDir: boundWorkspaceDir,

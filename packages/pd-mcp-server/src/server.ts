@@ -34,6 +34,7 @@ import {
   recheckSubmittedTask,
   type PainSubmitReceipt,
   type SubmittedTaskRecheck,
+  type HostSessionAssociation,
 } from '@principles/core/runtime/pain-submit-capability';
 import { runWithDeadline, OrphanLimiter, AdmissionLimiter, DEFAULT_DEADLINE_MS } from './deadline.js';
 import {
@@ -210,6 +211,11 @@ export type SubmitCapabilityCall = (input: {
   readonly taskId: string;
   readonly submission: SubmitToolInput;
   readonly requestMeta?: Readonly<Record<string, unknown>>;
+  /** Per-request observation point used by the deadline wrapper: the
+   * production assembly reports the exact association verdict it resolved
+   * immediately before invoking the write. A timeout receipt can then retain
+   * that verdict instead of inventing a second identity decision. */
+  readonly observeSessionAssociation?: (association: HostSessionAssociation) => void;
 }) => Promise<PainSubmitReceipt>;
 
 /** Bounded read-back entry — injectable for timeout tests. */
@@ -573,6 +579,7 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
         // reconciled by id instead of guessing (§5.7).
         const painId = createMcpPainId();
         const taskId = deriveSubmitTaskId(painId);
+        let sessionAssociation: HostSessionAssociation | undefined;
 
         const outcome = await runWithDeadline(
           async () => {
@@ -580,6 +587,9 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
               const requestMeta = ctx.mcpReq._meta;
               const receipt = await submitCall({ workspaceDir, painId, taskId, submission,
                 ...(requestMeta === undefined ? {} : { requestMeta }),
+                observeSessionAssociation: (association) => {
+                  sessionAssociation = association;
+                },
               });
               return { kind: 'receipt' as const, receipt };
             } catch (err) {
@@ -613,6 +623,7 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
             workspaceDir,
             message:
               'The submission threw unexpectedly after the identity was assigned; the write outcome is unknown (it may already have been written).',
+            ...(sessionAssociation === undefined ? {} : { sessionAssociation }),
           });
           const assembled = assembleSubmitResult(unconfirmed);
           logSubmitCall({
@@ -634,7 +645,12 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
         );
 
         if (recheck.ok && recheck.value === 'found') {
-          const reconciled = buildReconciledSubmitReceipt({ painId, taskId, workspaceDir });
+          const reconciled = buildReconciledSubmitReceipt({
+            painId,
+            taskId,
+            workspaceDir,
+            ...(sessionAssociation === undefined ? {} : { sessionAssociation }),
+          });
           const assembled = assembleSubmitResult(reconciled);
           logSubmitCall({
             startedAt,
@@ -655,6 +671,7 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
             recheck.ok && recheck.value === 'not_found'
               ? `The submission exceeded the ${deadlineMs} ms deadline and the bounded read-back did not find task '${taskId}'. It may still be written; do not resubmit blindly.`
               : `The submission exceeded the ${deadlineMs} ms deadline and the bounded read-back could not determine whether task '${taskId}' was written.`,
+          ...(sessionAssociation === undefined ? {} : { sessionAssociation }),
         });
         const assembled = assembleSubmitResult(unconfirmed);
         logSubmitCall({
