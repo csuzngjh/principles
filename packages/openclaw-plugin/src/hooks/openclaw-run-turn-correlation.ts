@@ -89,7 +89,7 @@ export function confirmOpenclawRunTurnMessage(input: {
   readonly now?: number;
 }): boolean {
   const entryKey = key(input);
-  if (entryKey === undefined || typeof input.message !== 'string' || input.message.length === 0) return false;
+  if (entryKey === undefined || typeof input.message !== 'string') return false;
   const entry = entries.get(entryKey);
   if (entry === undefined) return false;
   const now = input.now ?? Date.now();
