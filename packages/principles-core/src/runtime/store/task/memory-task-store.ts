@@ -25,6 +25,17 @@ function readRecoveryStateFromDiagnosticJson(diagnosticJson: string | null | und
   }
 }
 
+function readDiagnosticHostKind(diagnosticJson: string | null | undefined): string | null {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(diagnosticJson);
+    if (!isPlainObject(parsed)) return null;
+    return typeof parsed.hostKind === 'string' ? parsed.hostKind : null;
+  } catch {
+    return null;
+  }
+}
+
 export class MemoryTaskStore implements TaskStore {
   private readonly tasks = new Map<string, TaskRecord>();
 
@@ -90,6 +101,10 @@ export class MemoryTaskStore implements TaskStore {
   async listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]> {
     let results = [...this.tasks.values()];
     if (filter?.status) results = results.filter((t) => t.status === filter.status);
+    if (filter?.statuses !== undefined && filter.statuses.length > 0) {
+      const statuses = new Set(filter.statuses);
+      results = results.filter((t) => statuses.has(t.status));
+    }
     if (filter?.taskKind) results = results.filter((t) => t.taskKind === filter.taskKind);
     // PRI-1274 (B1 / P1-3): parity with SqliteTaskStore's admission-disposition
     // gating — applied BEFORE the sort/limit cut, exactly like the SQL WHERE
@@ -100,6 +115,9 @@ export class MemoryTaskStore implements TaskStore {
     if (filter?.excludeRecoveryStates !== undefined && filter.excludeRecoveryStates.length > 0) {
       const excluded = new Set<string>(filter.excludeRecoveryStates);
       results = results.filter((t) => !excluded.has(readRecoveryStateFromDiagnosticJson(t.diagnosticJson) ?? ''));
+    }
+    if (filter?.diagnosticHostKind !== undefined) {
+      results = results.filter((t) => readDiagnosticHostKind(t.diagnosticJson) === filter.diagnosticHostKind);
     }
     // Parity with SqliteTaskStore (A-liveness): silently ignoring
     // orderBy/afterCursor here would make cursor-based scans return wrong

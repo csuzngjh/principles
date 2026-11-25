@@ -14,6 +14,7 @@ import path from 'node:path';
 import { getDefaultPdConfig, RuntimeStateManager } from '@principles/core/runtime';
 import { deriveSubmitTaskId, submitPainCapability } from '@principles/core/runtime/pain-submit-capability';
 import { processHookInvocation } from '../src/pd-hook.js';
+import { writeGrantedCodexConsent } from './helpers/consent.js';
 
 const dirs: string[] = [];
 function workspace(minimalMetadata: boolean): { root: string; env: Record<string, string> } {
@@ -102,6 +103,10 @@ async function readTask(workspaceDir: string, taskId: string) {
 describe('pd-hook PostToolUse receipt fallback (B1/T2 through the real entry)', () => {
   it('recovers the same original task without Console, manual ids or resubmission', async () => {
     const { root, env } = workspace(true);
+    // Keep conversation ingestion OFF while granting the separate source-material
+    // consent the exact target-turn reader requires; this isolates the waiting
+    // branch from the intentionally tested no-consent branch.
+    writeGrantedCodexConsent(root);
     const painId = 'mcp_1700000000031_dd000031';
     const taskId = await persistUnboundPain(root, painId);
 

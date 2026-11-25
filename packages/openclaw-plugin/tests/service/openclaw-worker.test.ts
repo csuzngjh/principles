@@ -24,11 +24,14 @@ import {
   runOpenClawWorkspaceWorkerCycle,
 } from '../../src/openclaw-worker.js';
 import { runConsumerCycle } from '../../src/service/internalization-auto-consumer-service.js';
-import { getDefaultPdConfig } from '@principles/core/runtime';
+import { createDiagnosticianTaskId, createRuntimeStateHandle, getDefaultPdConfig } from '@principles/core/runtime';
 import { SystemLogger } from '../../src/core/system-logger.js';
-import { runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
+import { recordConversationIngestionConsent, runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
 import type { WorkspaceBackgroundOwnership } from '@principles/install-layout';
 import type { InternalizationConsumerCyclePorts } from '@principles/host-runtime';
+import { prepareOpenClawPromptRound } from '../../src/hooks/prompt.js';
+import { readOpenclawTargetTurnEvidence } from '../../src/hooks/pain-receipt-fallback.js';
+import { clearOpenclawRunTurnCorrelationsForTest, confirmOpenclawRunTurnMessage, rememberOpenclawRunTurnCorrelation, resolveOpenclawRunTurnCorrelation } from '../../src/hooks/openclaw-run-turn-correlation.js';
 
 vi.mock('../../src/core/system-logger.js');
 // Spread-mock host-runtime (ERR-115 pattern): default delegates to the real
@@ -55,6 +58,7 @@ const SERVICE_HOST_OWNED: WorkspaceBackgroundOwnership = {
 const UNREADABLE: WorkspaceBackgroundOwnership = { status: 'manifest_unreadable', reason: 'install_manifest_missing', nextAction: 'restore' };
 
 beforeEach(() => {
+  clearOpenclawRunTurnCorrelationsForTest();
   vi.clearAllMocks();
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-openclaw-worker-'));
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
@@ -311,5 +315,312 @@ describe('parity with the Gateway AutoConsumer ports (instruction §5.3)', () =>
     expect(typeof workerPorts.emitEvent).toBe('function');
     workerPorts.emitEvent?.('TEST_PARITY_EVENT', '{}');
     expect(SystemLogger.log).toHaveBeenCalledWith(workspaceDir, 'TEST_PARITY_EVENT', '{}');
+  });
+});
+
+describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execution', () => {
+  const countGovernanceObservations = (): number => {
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'governance_observations'").get();
+      return table === undefined
+        ? 0
+        : Number((db.prepare('SELECT COUNT(*) AS count FROM governance_observations').get() as { count: number }).count);
+    } finally {
+      db.close();
+    }
+  };
+  const grantOpenclawConsent = (): void => {
+    const consent = recordConversationIngestionConsent(workspaceDir, 'openclaw', {
+      decision: 'granted', decidedVia: 'owner_directive', disclosureVersion: 'test-v1', evidenceRef: 'pri-1296-test',
+    });
+    expect(consent.ok).toBe(true);
+  };
+  it('backfills real authorized target evidence on the SAME waiting task before the diagnostician is invoked', async () => {
+    const session = 'oc-session-pri1296';
+    const turn = 'turn-10';
+    const painId = 'mcp_1700000001296_oc001296';
+    const taskId = createDiagnosticianTaskId(painId);
+    const consent = recordConversationIngestionConsent(workspaceDir, 'openclaw', {
+      decision: 'granted', decidedVia: 'owner_directive', disclosureVersion: 'test-v1', evidenceRef: 'pri-1296-test',
+    });
+    expect(consent.ok).toBe(true);
+
+    // Supporting-host native identity contract: when an OpenClaw path does
+    // supply own currentUserMessage + currentUserMessageId, the production
+    // before_prompt_build pre-selection hook persists that admitted message
+    // and connects it to the exact id the evidence reader later queries. No
+    // direct governance_observations fixture — the row must arrive through the
+    // hook. Embedded OpenClaw 2026.11.1 does NOT supply those fields; the
+    // embedded-shaped negative tests below are the production evidence for
+    // that runtime and must not be overwritten by this supporting-path fixture.
+    const ordinal = prepareOpenClawPromptRound({
+      prompt: 'prompt',
+      currentUserMessage: 'OC-T10-OWNER-CORRECTION',
+      currentUserMessageId: turn,
+      messages: [{ role: 'user', content: 'OC-T10-OWNER-CORRECTION' }],
+    }, {
+      workspaceDir,
+      sessionId: session,
+      trigger: 'user',
+      runId: 'run-pri1296-turn-10',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+    expect(readOpenclawTargetTurnEvidence(workspaceDir, session, turn)).toMatchObject({
+      status: 'available',
+      entries: expect.arrayContaining([expect.objectContaining({ note: 'OC-T10-OWNER-CORRECTION' })]),
+    });
+    const stamp = new Date().toISOString();
+
+    const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false, bootstrapIfMissing: true });
+    try {
+      await handle.stateManager.createTask({
+        taskId,
+        taskKind: 'diagnostician',
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        inputRef: painId,
+        diagnosticJson: JSON.stringify({
+          painId,
+          hostKind: 'openclaw',
+          evidence: [],
+          painIngress: {
+            verifiedHostSession: { status: 'verified', sessionId: session, targetTurnId: turn },
+            evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+          },
+          recovery: {
+            schemaVersion: 1,
+            state: 'waiting_for_target_evidence',
+            reasonCode: 'target_turn_text_pending',
+            attemptCount: 1,
+            lastCheckedAt: stamp,
+          },
+        }),
+      });
+    } finally {
+      await handle.close();
+    }
+
+    // Keep the paid/model boundary closed: capture that diagnosis is invoked
+    // after reconcile while the evidence write itself uses the real stores.
+    vi.mocked(runPendingDiagnosticianOnce).mockResolvedValueOnce({ served: false, reason: 'no_candidate' } as never);
+    const result = await runOpenClawWorkspaceWorkerCycle({ workspaceDir, logger, ownership: ownership(SERVICE_HOST_OWNED) });
+    expect(result.mode).toBe('ready');
+    expect(result.report?.targetEvidenceReconcile).toMatchObject({ checked: 1, flipped: 1, backfilled: 1, blocked: 0 });
+    expect(runPendingDiagnosticianOnce).toHaveBeenCalledTimes(1);
+
+    const verify = await createRuntimeStateHandle({ workspaceDir, readonly: true });
+    try {
+      const task = await verify.stateManager.getTask(taskId);
+      expect(task?.inputRef).toBe(painId);
+      const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}') as Record<string, any>;
+      expect(diagnostic.evidence).toEqual([
+        { sourceRef: 'governance_observation:openclaw|oc-session-pri1296|turn-10|user', note: 'OC-T10-OWNER-CORRECTION' },
+      ]);
+      expect(diagnostic.painIngress.evidenceClass).toEqual({ status: 'available', entryCount: 1 });
+      expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
+    } finally {
+      await verify.close();
+    }
+  });
+
+  it('embedded-shaped before_prompt_build events without native message identity write no evidence', () => {
+    grantOpenclawConsent();
+    const ordinal = prepareOpenClawPromptRound({
+      // OpenClaw 2026.11.1 embedded producer shape documented in
+      // docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md:
+      // prompt + messages only; no own currentUserMessage/currentUserMessageId.
+      prompt: 'rebuilt prompt containing the owner correction',
+      messages: [{ role: 'user', content: 'owner correction' }],
+    }, {
+      workspaceDir,
+      sessionId: 'oc-embedded-no-native-id',
+      trigger: 'user',
+      runId: 'run-embedded-no-native-id',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+    expect(countGovernanceObservations()).toBe(0);
+    expect(resolveOpenclawRunTurnCorrelation({ workspaceDir, sessionId: 'oc-embedded-no-native-id', runId: 'run-embedded-no-native-id' })).toBeUndefined();
+  });
+
+  it('a native id without an explicit original currentUserMessage never uses rebuilt prompt text as evidence', () => {
+    grantOpenclawConsent();
+    const ordinal = prepareOpenClawPromptRound({
+      prompt: 'SYSTEM HISTORY\nowner correction rebuilt into prompt',
+      currentUserMessageId: 'turn-without-original-message',
+      messages: [{ role: 'user', content: 'owner correction' }],
+    }, {
+      workspaceDir,
+      sessionId: 'oc-missing-original-message',
+      trigger: 'user',
+      runId: 'run-missing-original-message',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+    expect(readOpenclawTargetTurnEvidence(workspaceDir, 'oc-missing-original-message', 'turn-without-original-message').status).toBe('not_found');
+    expect(countGovernanceObservations()).toBe(0);
+  });
+
+  it('repeat hooks for the same native message id are idempotent', () => {
+    grantOpenclawConsent();
+    for (const runId of ['run-native-1', 'run-native-2']) {
+      prepareOpenClawPromptRound({
+        prompt: 'prompt',
+        currentUserMessage: 'same native owner correction',
+        currentUserMessageId: 'native-turn-1',
+        messages: [{ role: 'user', content: 'same native owner correction' }],
+      }, {
+        workspaceDir,
+        sessionId: 'oc-idempotent-capture',
+        trigger: 'user',
+        runId,
+        logger,
+      });
+    }
+    expect(countGovernanceObservations()).toBe(1);
+    expect(readOpenclawTargetTurnEvidence(workspaceDir, 'oc-idempotent-capture', 'native-turn-1')).toMatchObject({ status: 'available' });
+  });
+
+  it('embedded chat without a native message id captures unique user-turn row identities', () => {
+    const session = 'oc-session-pri1296-embedded';
+    const consent = recordConversationIngestionConsent(workspaceDir, 'openclaw', {
+      decision: 'granted', decidedVia: 'owner_directive', disclosureVersion: 'test-v1', evidenceRef: 'pri-1296-embedded-test',
+    });
+    expect(consent.ok).toBe(true);
+
+    const ordinal = prepareOpenClawPromptRound({
+      // The real embedded producer supplies prompt + messages, not native
+      // currentUserMessage/currentUserMessageId fields.
+      prompt: 'EMBEDDED-T10-OWNER-CORRECTION',
+      messages: [{ role: 'user', content: 'EMBEDDED-T10-OWNER-CORRECTION' }],
+    }, {
+      workspaceDir,
+      sessionId: session,
+      trigger: 'user',
+      runId: 'run-pri1296-embedded-turn-10',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+
+    const firstDb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    let firstRowId: number | undefined;
+    try {
+      const row = firstDb.prepare('SELECT id FROM user_turns WHERE session_id = ? ORDER BY id DESC LIMIT 1').get(session) as { id: number } | undefined;
+      firstRowId = row?.id;
+      expect(firstRowId).toEqual(expect.any(Number));
+      // Simulate host-side trajectory cleanup deleting the visible user turn.
+      // SQLite AUTOINCREMENT must still make the next embedded fallback key unique
+      // even when the prompt-window ordinal is reused.
+      firstDb.prepare('DELETE FROM user_turns WHERE id = ?').run(firstRowId);
+    } finally {
+      firstDb.close();
+    }
+
+    const secondOrdinal = prepareOpenClawPromptRound({
+      prompt: 'EMBEDDED-T11-OWNER-CORRECTION',
+      messages: [{ role: 'user', content: 'EMBEDDED-T11-OWNER-CORRECTION' }],
+    }, {
+      workspaceDir,
+      sessionId: session,
+      trigger: 'user',
+      runId: 'run-pri1296-embedded-turn-11',
+      logger,
+    });
+    expect(Number.isInteger(secondOrdinal)).toBe(true);
+
+    const secondDb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const row = secondDb.prepare('SELECT id FROM user_turns WHERE session_id = ? ORDER BY id DESC LIMIT 1').get(session) as { id: number } | undefined;
+      expect(row?.id).toEqual(expect.any(Number));
+      expect(row?.id).toBeGreaterThan(firstRowId ?? 0);
+      const firstHostTurnId = `user-turn-row:${firstRowId}`;
+      const secondHostTurnId = `user-turn-row:${row?.id}`;
+      expect(resolveOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-10',
+        consume: false,
+      })).toBe(firstHostTurnId);
+      expect(resolveOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-11',
+        consume: false,
+      })).toBe(secondHostTurnId);
+      expect(confirmOpenclawRunTurnMessage({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-11',
+        message: 'EMBEDDED-T11-OWNER-CORRECTION',
+      })).toBe(true);
+      expect(confirmOpenclawRunTurnMessage({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-11',
+        message: 'a different message on a reused run id',
+      })).toBe(false);
+      expect(resolveOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-11',
+      })).toBeUndefined();
+      // A reused run id that points to a different persisted turn is ambiguous,
+      // so a late after_tool_call event cannot be silently retargeted.
+      expect(rememberOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-10',
+        targetTurnId: 'user-turn-row:999999',
+        message: 'a different owner message for a reused run id',
+      })).toBe(false);
+      expect(resolveOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-10',
+      })).toBeUndefined();
+      expect(readOpenclawTargetTurnEvidence(workspaceDir, session, firstHostTurnId)).toMatchObject({
+        status: 'available',
+        entries: expect.arrayContaining([expect.objectContaining({ note: 'EMBEDDED-T10-OWNER-CORRECTION' })]),
+      });
+      expect(readOpenclawTargetTurnEvidence(workspaceDir, session, secondHostTurnId)).toMatchObject({
+        status: 'available',
+        entries: expect.arrayContaining([expect.objectContaining({ note: 'EMBEDDED-T11-OWNER-CORRECTION' })]),
+      });
+    } finally {
+      secondDb.close();
+    }
+  });
+
+  it('negative control: the same real prompt collection writes no target evidence before consent is granted', () => {
+    const session = 'oc-session-pri1296-no-consent';
+    const turn = 'turn-11';
+    const ordinal = prepareOpenClawPromptRound({
+      prompt: 'prompt',
+      currentUserMessage: 'uncollected owner correction',
+      currentUserMessageId: turn,
+      messages: [{ role: 'user', content: 'uncollected owner correction' }],
+    }, {
+      workspaceDir,
+      sessionId: session,
+      trigger: 'user',
+      runId: 'run-pri1296-no-consent',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+    expect(readOpenclawTargetTurnEvidence(workspaceDir, session, turn).status).toBe('blocked_by_consent');
+
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'governance_observations'").get();
+      const count = table === undefined
+        ? 0
+        : Number((db.prepare('SELECT COUNT(*) AS count FROM governance_observations').get() as { count: number }).count);
+      expect(count).toBe(0);
+    } finally {
+      db.close();
+    }
   });
 });

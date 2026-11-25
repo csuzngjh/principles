@@ -13,7 +13,8 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { runWorkbuddyWorkspaceWorkerCycle, readWorkbuddyWorkerLiveness } from '../src/worker/workspace-worker.js';
-import { HOST_TOOL_DECLARATION_VERSION } from '@principles/host-runtime';
+import { HOST_TOOL_DECLARATION_VERSION, ensureGovernanceSchema, recordConversationIngestionConsent } from '@principles/host-runtime';
+import { createDiagnosticianTaskId, createRuntimeStateHandle, disposePainSignalBridgesForWorkspace } from '@principles/core/runtime';
 import { makeHome, makeGovernance, cleanupTempDirs } from './helpers/workbench.js';
 
 const TRAJECTORY_DDL = [
@@ -387,5 +388,110 @@ describe('P2-01 final-remediation — paused path aggregates EVERY earlier stage
     expect(result.mode).toBe('paused');
     expect(result.reason).toBe('internalization_auto_consumer_disabled');
     expect(result.degradations).toBeUndefined();
+  });
+});
+
+describe('PRI-1296 — WorkBuddy target-evidence reconcile before diagnostician picking', () => {
+  const SESSION = 'wb-session-pri1296';
+  const TURN = 'turn-10';
+
+  async function seedWaitingTask(governance: string): Promise<{ painId: string; taskId: string }> {
+    const painId = 'mcp_1700000001296_wb001296';
+    const taskId = createDiagnosticianTaskId(painId);
+    const handle = await createRuntimeStateHandle({ workspaceDir: governance, readonly: false, bootstrapIfMissing: true });
+    const now = new Date().toISOString();
+    try {
+      await handle.stateManager.createTask({
+        taskId,
+        taskKind: 'diagnostician',
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        inputRef: painId,
+        diagnosticJson: JSON.stringify({
+          painId,
+          hostKind: 'workbuddy',
+          evidence: [],
+          painIngress: {
+            verifiedHostSession: { status: 'verified', sessionId: SESSION, targetTurnId: TURN },
+            evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+          },
+          recovery: {
+            schemaVersion: 1,
+            state: 'waiting_for_target_evidence',
+            reasonCode: 'target_turn_text_pending',
+            attemptCount: 1,
+            lastCheckedAt: now,
+          },
+        }),
+      });
+    } finally {
+      await handle.close();
+    }
+    return { painId, taskId };
+  }
+
+  function writeTargetTurn(governance: string): void {
+    const db = new Database(path.join(governance, '.state', 'trajectory.db'));
+    try {
+      ensureGovernanceSchema(db);
+      db.prepare(`INSERT INTO governance_rollouts (host_kind, rollout_identity, root_session_id, created_at, updated_at)
+        VALUES ('workbuddy', ?, ?, ?, ?)`).run(SESSION, SESSION, now(), now());
+      const rolloutId = Number((db.prepare('SELECT id FROM governance_rollouts WHERE rollout_identity = ?').get(SESSION) as { id: number }).id);
+      db.prepare(`INSERT INTO governance_observations (
+          rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key,
+          source_order, visible_text, source, completeness, retention_class, observed_at
+        ) VALUES (?, 'workbuddy', ?, ?, ?, 'user_turn', ?, 1, ?, 'workbuddy-hook', 'complete', 'operational', ?)`)
+        .run(rolloutId, SESSION, SESSION, TURN, 'workbuddy|wb-session-pri1296|turn-10|user_turn', 'WB-T10-OWNER-CORRECTION', now());
+    } finally {
+      db.close();
+    }
+  }
+
+  function now(): string {
+    return new Date().toISOString();
+  }
+
+  it('late target evidence backfills the SAME waiting task in one worker cycle; repeat cycles are no-ops', async () => {
+    const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
+    const consent = recordConversationIngestionConsent(governance, 'workbuddy', {
+      decision: 'granted', decidedVia: 'owner_directive', disclosureVersion: 'test-v1', evidenceRef: 'pri-1296-test',
+    });
+    expect(consent.ok).toBe(true);
+    const { painId, taskId } = await seedWaitingTask(governance);
+
+    const first = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(first.mode).toBe('ready');
+    expect(first.report?.targetEvidenceReconcile).toMatchObject({ checked: 1, flipped: 0, backfilled: 0, stillWaiting: 1 });
+    expect(first.report?.diagnostician).toBeNull();
+
+    writeTargetTurn(governance);
+    const second = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    // The same cycle then reaches the picker: this intentionally minimal
+    // fixture fails payload validation before any model/provider boundary,
+    // which also proves reconcile ran BEFORE candidate execution with zero LLM.
+    expect(second.mode).toBe('degraded');
+    expect(second.report?.diagnostician).toMatchObject({ status: 'failed', errorCategory: 'input_invalid' });
+    expect(second.report?.targetEvidenceReconcile).toMatchObject({ checked: 1, flipped: 1, backfilled: 1, blocked: 0 });
+
+    const verify = await createRuntimeStateHandle({ workspaceDir: governance, readonly: true });
+    try {
+      const task = await verify.stateManager.getTask(taskId);
+      expect(task?.inputRef).toBe(painId);
+      const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}') as Record<string, any>;
+      expect(diagnostic.evidence).toEqual([
+        { sourceRef: 'governance_observation:workbuddy|wb-session-pri1296|turn-10|user_turn', note: 'WB-T10-OWNER-CORRECTION' },
+      ]);
+      expect(diagnostic.painIngress.evidenceClass).toEqual({ status: 'available', entryCount: 1 });
+      expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
+    } finally {
+      await verify.close();
+    }
+
+    const third = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(third.report?.targetEvidenceReconcile).toMatchObject({ checked: 0, flipped: 0, backfilled: 0 });
+    // The worker's diagnosis bridge is workspace-scoped/cached; release its
+    // SQLite handle explicitly so Windows cleanup can unlink state.db.
+    await disposePainSignalBridgesForWorkspace(governance);
   });
 });

@@ -56,7 +56,7 @@ function unboundMcpIngress(evidenceCount = 0): PainIngressV1Payload {
   };
 }
 
-async function persistUnboundPain(painId: string, evidence: { sourceRef: string; note: string }[] = []): Promise<string> {
+async function persistUnboundPain(painId: string, evidence: { sourceRef: string; note: string }[] = [], hostKind: 'codex' | 'openclaw' = 'codex'): Promise<string> {
   const bridge = makeBridge();
   const { taskId } = await bridge.submitPainSignal({
     painId,
@@ -64,7 +64,7 @@ async function persistUnboundPain(painId: string, evidence: { sourceRef: string;
     source: 'mcp_agent_assisted',
     reason: 'receipt fallback fixture',
     provenance: 'agent_reported_owner_approved',
-    hostKind: 'codex',
+    hostKind,
     evidence,
     painIngress: unboundMcpIngress(evidence.length),
   });
@@ -104,6 +104,19 @@ function identity(overrides: Record<string, unknown> = {}) {
 
 function authorize(granted: boolean): { minimalMetadataGranted: boolean } {
   return { minimalMetadataGranted: granted };
+}
+
+const TARGET_ENTRIES = [
+  { sourceRef: 'governance_observation:codex|codex-rollout-r1|turn-42|user_turn', note: 'owner correction in target turn' },
+  { sourceRef: 'governance_observation:codex|codex-rollout-r1|turn-42|assistant_turn', note: 'assistant reply in target turn' },
+];
+
+const AUTHORIZED_SOURCE_MATERIAL = {
+  isHostSourceMaterialAuthorized: () => ({ authorized: true }) as const,
+};
+
+function availableTargetEntries(entries: unknown[] = TARGET_ENTRIES) {
+  return () => ({ status: 'available' as const, entries: entries as never });
 }
 
 async function readDiagnostic(taskId: string): Promise<Record<string, unknown>> {
@@ -423,6 +436,8 @@ describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () =>
       receipt: validated.receipt,
       identity: identity(),
       authorization: authorize(true),
+      readTargetTurnEvidence: () => ({ status: 'not_found' }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
     });
     expect(outcome.status).toBe('recovered');
     if (outcome.status !== 'recovered') return;
@@ -468,9 +483,44 @@ describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () =>
     expect(recovery.schemaVersion).toBe(1);
   });
 
-  it('a target turn whose text IS available resolves to ready_for_diagnosis (P1-3)', async () => {
+  it('C01: valid target-turn entries persist atomically with identity, evidenceClass and ready_for_diagnosis', async () => {
     const painId = 'mcp_1700000000016_0a000016';
-    await persistUnboundPain(painId);
+    const taskId = await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+      readTargetTurnEvidence: availableTargetEntries(),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(outcome.status).toBe('recovered');
+    if (outcome.status !== 'recovered') return;
+    expect(outcome.disposition.state).toBe('ready_for_diagnosis');
+    expect(outcome.disposition.reasonCode).toBe('receipt_recovered');
+    expect(outcome.disposition.resolvedAt).toBeDefined();
+
+    // Read the SAME raw SQLite task back: identity, real evidence, count class
+    // and disposition are all present from the one CAS result.
+    const task = await stateManager.getTask(taskId);
+    expect(task?.taskId).toBe(taskId);
+    expect(task?.inputRef).toBe(painId);
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.sessionIdHint).toBe('codex-rollout-r1');
+    const ingress = diagnostic.painIngress as Record<string, unknown>;
+    expect(ingress.verifiedHostSession).toEqual({
+      status: 'verified', sessionId: 'codex-rollout-r1', submissionTurnId: 'turn-42', targetTurnId: 'turn-42',
+    });
+    expect(diagnostic.evidence).toEqual(TARGET_ENTRIES);
+    expect(ingress.evidenceClass).toEqual({ status: 'available', entryCount: TARGET_ENTRIES.length });
+    const recovery = diagnostic.recovery as Record<string, unknown>;
+    expect(recovery.state).toBe('ready_for_diagnosis');
+    expect((recovery.receiptRef as Record<string, unknown>).toolCallId).toBe('toolu_call_1');
+  });
+
+  it('PRI-1296: a legacy boolean true is never sufficient evidence for ready', async () => {
+    const painId = 'mcp_1700000000018_0a000018';
+    const taskId = await persistUnboundPain(painId);
     const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
     if (!validated.ok) throw new Error('fixture receipt invalid');
     const outcome = await recoverTaskIdentityFromReceipt({
@@ -480,9 +530,11 @@ describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () =>
     });
     expect(outcome.status).toBe('recovered');
     if (outcome.status !== 'recovered') return;
-    expect(outcome.disposition.state).toBe('ready_for_diagnosis');
-    expect(outcome.disposition.reasonCode).toBe('receipt_recovered');
-    expect(outcome.disposition.resolvedAt).toBeDefined();
+    expect(outcome.disposition.state).toBe('waiting_for_target_evidence');
+    expect(outcome.disposition.reasonCode).toBe('target_turn_evidence_reader_unavailable');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual([]);
+    expect((diagnostic.recovery as Record<string, unknown>).state).toBe('waiting_for_target_evidence');
   });
 
   it('a task that already carries evidence resolves to ready_for_diagnosis', async () => {
@@ -529,6 +581,108 @@ describe('recoverTaskIdentityFromReceipt — T2 happy path (real SQLite)', () =>
   });
 });
 
+describe('recoverTaskIdentityFromReceipt — PRI-1296 structured evidence admission matrix (real SQLite)', () => {
+  async function recoverWithEvidenceRead(painId: string, options: {
+    readonly read?: (sessionId: string, turnId: string) => unknown;
+    readonly authorization?: unknown;
+  }): Promise<{ outcome: Awaited<ReturnType<typeof recoverTaskIdentityFromReceipt>>; diagnostic: Record<string, unknown> }> {
+    const taskId = await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+      ...(options.read !== undefined ? { readTargetTurnEvidence: options.read as never } : {}),
+      ...(options.authorization !== undefined ? { sourceMaterialAuthorization: options.authorization as never } : {}),
+    });
+    return { outcome, diagnostic: await readDiagnostic(taskId) };
+  }
+
+  it('C03-C06: every source-material consent denial becomes blocked without persisting evidence', async () => {
+    const reasons = ['consent_missing', 'consent_revoked', 'consent_not_granted', 'consent_unreadable'] as const;
+    for (const [index, reason] of reasons.entries()) {
+      const painId = `mcp_17000000002${index}_c30000${index}`;
+      const { outcome, diagnostic } = await recoverWithEvidenceRead(painId, {
+        read: () => ({ status: 'blocked_by_consent', reason }),
+        authorization: AUTHORIZED_SOURCE_MATERIAL,
+      });
+      expect(outcome.status).toBe('recovered');
+      if (outcome.status !== 'recovered') return;
+      expect(outcome.disposition.state).toBe('blocked_by_source_material_consent');
+      expect(outcome.disposition.reasonCode).toBe(`target_turn_source_material_${reason}`);
+      expect(diagnostic.sessionIdHint).toBe('codex-rollout-r1');
+      expect(diagnostic.evidence).toEqual([]);
+    }
+  });
+
+  it('C07-C11: read failure, empty/malformed entries, missing reader and missing pre-write authorization never become ready', async () => {
+    const cases = [
+      { suffix: '01', read: () => ({ status: 'read_failed', reason: 'sqlite_locked' }), authorization: AUTHORIZED_SOURCE_MATERIAL, reasonCode: 'target_turn_read_failed' },
+      { suffix: '02', read: availableTargetEntries([]), authorization: AUTHORIZED_SOURCE_MATERIAL, reasonCode: 'target_turn_evidence_invalid' },
+      { suffix: '03', read: availableTargetEntries([{ sourceRef: 'x', note: 'ok', extra: true }]), authorization: AUTHORIZED_SOURCE_MATERIAL, reasonCode: 'target_turn_evidence_invalid' },
+      { suffix: '04', read: undefined, authorization: AUTHORIZED_SOURCE_MATERIAL, reasonCode: 'target_turn_evidence_reader_unavailable' },
+      { suffix: '05', read: availableTargetEntries(), authorization: undefined, reasonCode: 'target_turn_source_material_authorization_unavailable' },
+    ] as const;
+    for (const testCase of cases) {
+      const { outcome, diagnostic } = await recoverWithEvidenceRead(`mcp_17000000003${testCase.suffix}_c70000${testCase.suffix}`, {
+        ...(testCase.read !== undefined ? { read: testCase.read } : {}),
+        ...(testCase.authorization !== undefined ? { authorization: testCase.authorization } : {}),
+      });
+      expect(outcome.status).toBe('recovered');
+      if (outcome.status !== 'recovered') return;
+      expect(outcome.disposition.state).toBe('waiting_for_target_evidence');
+      expect(outcome.disposition.reasonCode).toBe(testCase.reasonCode);
+      expect(diagnostic.sessionIdHint).toBe('codex-rollout-r1');
+      expect(diagnostic.evidence).toEqual([]);
+      expect((diagnostic.recovery as Record<string, unknown>).state).toBe('waiting_for_target_evidence');
+    }
+  });
+
+  it('C12: consent revoked after a valid read but before the CAS gate blocks the evidence write', async () => {
+    const revokedPort = {
+      isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'consent_revoked' as const }),
+    };
+    const { outcome, diagnostic } = await recoverWithEvidenceRead('mcp_1700000000306_c1200006', {
+      read: availableTargetEntries(),
+      authorization: revokedPort,
+    });
+    expect(outcome.status).toBe('recovered');
+    if (outcome.status !== 'recovered') return;
+    expect(outcome.disposition.state).toBe('blocked_by_source_material_consent');
+    expect(outcome.disposition.reasonCode).toBe('target_turn_source_material_consent_revoked');
+    expect(diagnostic.evidence).toEqual([]);
+  });
+
+  it('C18: an owner_expectation anchor stays independently admissible without reading target evidence', async () => {
+    const painId = 'mcp_1700000000307_c1800007';
+    const bridge = makeBridge();
+    await bridge.submitPainSignal({
+      painId,
+      painType: 'principle_deviation',
+      source: 'mcp_agent_assisted',
+      reason: 'owner statement fixture',
+      provenance: 'agent_reported_owner_approved',
+      hostKind: 'codex',
+      evidence: [],
+      anchor: { type: 'owner_expectation', ref: 'owner statement' },
+      painIngress: unboundMcpIngress(0),
+    });
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    let readCalled = false;
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+      readTargetTurnEvidence: () => { readCalled = true; return { status: 'not_found' as const }; },
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(outcome.status).toBe('recovered');
+    if (outcome.status !== 'recovered') return;
+    expect(outcome.disposition.state).toBe('ready_for_diagnosis');
+    expect(readCalled).toBe(false);
+  });
+});
+
 describe('recoverTaskIdentityFromReceipt — idempotence and ambiguity (T4/T7)', () => {
   it('same physical call replayed folds into already_bound with no second write (T7)', async () => {
     const painId = 'mcp_1700000000004_dd000004';
@@ -547,6 +701,119 @@ describe('recoverTaskIdentityFromReceipt — idempotence and ambiguity (T4/T7)',
     const diagnostic = await readDiagnostic(createDiagnosticianTaskId(painId));
     const recovery = diagnostic.recovery as Record<string, unknown>;
     expect(recovery.attemptCount).toBe(1);
+  });
+
+  it('PRI-1296 review: an already-bound replay backfills target evidence onto a legacy boolean-flipped empty task', async () => {
+    const painId = 'mcp_1700000001296_rb000296';
+    const taskId = await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const base = {
+      workspaceDir: tmpDir, hostKind: 'codex' as const, receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+    };
+    const first = await recoverTaskIdentityFromReceipt(base);
+    expect(first.status).toBe('recovered');
+
+    const waiting = await readDiagnostic(taskId);
+    const legacyReady = {
+      ...waiting,
+      recovery: {
+        ...(waiting.recovery as Record<string, unknown>),
+        state: 'ready_for_diagnosis',
+        reasonCode: 'target_evidence_arrived',
+        resolvedAt: new Date().toISOString(),
+      },
+    };
+    await stateManager.updateTaskIfDiagnosticJsonUnchanged(taskId, JSON.stringify(waiting), { diagnosticJson: JSON.stringify(legacyReady) });
+
+    const replay = await recoverTaskIdentityFromReceipt({
+      ...base,
+      readTargetTurnEvidence: availableTargetEntries(),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(replay.status).toBe('already_bound');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual(TARGET_ENTRIES);
+    expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'available', entryCount: TARGET_ENTRIES.length });
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
+  });
+
+  it('PRI-1296 review: an already-bound replay returns a legacy invalid READY task to waiting when evidence is absent', async () => {
+    const painId = 'mcp_1700000001296_rb000297';
+    const taskId = await persistUnboundPain(painId);
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const base = {
+      workspaceDir: tmpDir, hostKind: 'codex' as const, receipt: validated.receipt,
+      identity: identity(), authorization: authorize(true),
+    };
+    expect((await recoverTaskIdentityFromReceipt(base)).status).toBe('recovered');
+
+    const waiting = await readDiagnostic(taskId);
+    const legacyReady = {
+      ...waiting,
+      recovery: {
+        ...(waiting.recovery as Record<string, unknown>),
+        state: 'ready_for_diagnosis',
+        reasonCode: 'target_evidence_arrived',
+        resolvedAt: new Date().toISOString(),
+      },
+    };
+    await stateManager.updateTaskIfDiagnosticJsonUnchanged(taskId, JSON.stringify(waiting), { diagnosticJson: JSON.stringify(legacyReady) });
+
+    const replay = await recoverTaskIdentityFromReceipt({
+      ...base,
+      readTargetTurnEvidence: () => ({ status: 'not_found' as const }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(replay.status).toBe('already_bound');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual([]);
+    expect(diagnostic.recovery).toMatchObject({ state: 'waiting_for_target_evidence', reasonCode: 'target_turn_text_pending' });
+    expect((diagnostic.recovery as Record<string, unknown>).resolvedAt).toBeUndefined();
+  });
+
+  it('PRI-1296 review: malformed persisted evidence is not admissible and is replaced only by validated target entries', async () => {
+    const painId = 'mcp_1700000001296_ev000301';
+    const taskId = await persistUnboundPain(painId);
+    const before = await readDiagnostic(taskId);
+    const malformed = { ...before, evidence: [{ sourceRef: '', note: 'malformed legacy evidence' }] };
+    const seeded = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      JSON.stringify(before),
+      { diagnosticJson: JSON.stringify(malformed) },
+    );
+    expect(seeded).not.toBeNull();
+
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const base = {
+      workspaceDir: tmpDir,
+      hostKind: 'codex' as const,
+      receipt: validated.receipt,
+      identity: identity(),
+      authorization: authorize(true),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    };
+    const waiting = await recoverTaskIdentityFromReceipt({
+      ...base,
+      readTargetTurnEvidence: () => ({ status: 'not_found' as const }),
+    });
+    expect(waiting.status).toBe('recovered');
+    if (waiting.status !== 'recovered') return;
+    expect(waiting.disposition.state).toBe('waiting_for_target_evidence');
+
+    const replay = await recoverTaskIdentityFromReceipt({
+      ...base,
+      readTargetTurnEvidence: () => ({ status: 'available' as const, entries: TARGET_ENTRIES }),
+    });
+    expect(replay.status).toBe('already_bound');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual(TARGET_ENTRIES);
+    expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass)
+      .toEqual({ status: 'available', entryCount: TARGET_ENTRIES.length });
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
   });
 
   it('a DIFFERENT toolCallId matching the same task is ambiguous — identity untouched', async () => {
@@ -701,6 +968,66 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4/T8/T9 negat
     // identity binding is blocked, but the owner-manual report remains eligible.
     const candidate = await pickDiagnosticianCandidate(stateManager, 1, new Date().toISOString());
     expect(candidate?.taskId).toBe(taskId);
+  });
+
+  it('rejects a malformed adapter-resolved target identity before any bind', async () => {
+    const painId = 'mcp_1700000001298_cc001298';
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir, {
+      sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' },
+    }), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir,
+      hostKind: 'openclaw',
+      receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-strict', toolCallId: 'call-strict-invalid', targetTurnId: 'unknown' },
+      authorization: authorize(true),
+    });
+    expect(outcome).toMatchObject({ status: 'rejected', reasonCode: 'event_identity_invalid' });
+  });
+
+  it('strict OpenClaw target gate persists waiting_for_receipt, blocks diagnosis, and allows a corrected retry', async () => {
+    const painId = 'mcp_1700000001297_cc001297';
+    const taskId = await persistUnboundPain(painId, [], 'openclaw');
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir, {
+      sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' },
+    }), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+
+    const first = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir,
+      hostKind: 'openclaw',
+      receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-strict', toolCallId: 'call-strict-1' },
+      authorization: authorize(true),
+      requireTargetTurnIdentity: true,
+      readTargetTurnEvidence: availableTargetEntries(),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(first).toMatchObject({ status: 'rejected', reasonCode: 'target_turn_identity_unavailable', taskUnbound: true });
+    const blockedDiagnostic = await readDiagnostic(taskId);
+    expect(blockedDiagnostic.sessionIdHint).toBeNull();
+    expect(blockedDiagnostic.recovery).toMatchObject({
+      state: 'waiting_for_receipt',
+      reasonCode: 'target_turn_identity_unavailable',
+    });
+    expect(await pickDiagnosticianCandidate(stateManager, 5, new Date().toISOString())).toBeNull();
+
+    const retry = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir,
+      hostKind: 'openclaw',
+      receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-strict', toolCallId: 'call-strict-2', targetTurnId: 'user-turn-row:8' },
+      authorization: authorize(true),
+      requireTargetTurnIdentity: true,
+      readTargetTurnEvidence: availableTargetEntries(),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(retry.status).toBe('recovered');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis' });
+    expect(diagnostic.evidence).toEqual(TARGET_ENTRIES);
   });
 
   it('T9: with the authorization OFF, ZERO identity metadata is persisted — no receiptRef, no toolCallId anywhere', async () => {
@@ -1031,13 +1358,14 @@ describe('recoverTaskIdentityFromReceipt — I: the historical target hint passe
       workspaceDir: tmpDir, hostKind: 'codex', receipt: validated.receipt,
       identity: identity({ submissionTurnId: 'turn-99' }),
       authorization: authorize(true),
-      // Target text availability is only consulted for the RESOLVED target.
-      targetTurnTextAvailable: (sessionId, turnId) => {
+      // Target evidence is only consulted for the RESOLVED target.
+      readTargetTurnEvidence: (sessionId, turnId) => {
         expect(sessionId).toBe('codex-rollout-r1');
         // The padded historical hint must resolve to the TRIMMED id.
         expect(turnId).toBe('turn-42');
-        return true;
+        return { status: 'available' as const, entries: TARGET_ENTRIES };
       },
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
     });
     expect(outcome.status).toBe('recovered');
     if (outcome.status !== 'recovered') return;
@@ -1064,10 +1392,11 @@ describe('recoverTaskIdentityFromReceipt — I: the historical target hint passe
       workspaceDir: tmpDir, hostKind: 'codex', receipt: validated2.receipt,
       identity: identity({ submissionTurnId: 'turn-7' }),
       authorization: authorize(true),
-      targetTurnTextAvailable: (_sessionId, turnId) => {
+      readTargetTurnEvidence: (_sessionId, turnId) => {
         observedTurn = turnId;
-        return true;
+        return { status: 'available' as const, entries: TARGET_ENTRIES };
       },
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
     });
     expect(outcome2.status).toBe('recovered');
     expect(observedTurn).toBe('turn-7');

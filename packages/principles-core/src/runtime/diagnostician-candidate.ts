@@ -10,6 +10,7 @@
  * starting point and no task data (rollback = restore the old key).
  */
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
+import { diagnosticJsonIsUnprovenReadyTargetEvidence } from './pain-target-evidence-reconcile.js';
 import type { TaskRecord } from './task-status.js';
 import type { RuntimeStateManager } from './store/runtime-state-manager.js';
 
@@ -49,19 +50,20 @@ export async function pickDiagnosticianCandidate(
     status: 'pending',
     orderBy: 'updated_at_asc',
     limit,
-    excludeRecoveryStates: ['waiting_for_target_evidence', 'blocked_by_source_material_consent'],
+    excludeRecoveryStates: ['waiting_for_receipt', 'waiting_for_target_evidence', 'blocked_by_source_material_consent'],
   });
-  const [pendingTask] = pending;
+  const pendingTask = pending.find((candidate) => !diagnosticJsonIsUnprovenReadyTargetEvidence(candidate.diagnosticJson));
   let retryTask: TaskRecord | null = null;
   const retrying = await stateManager.listTasks({
     taskKind: 'diagnostician',
     status: 'retry_wait',
     orderBy: 'updated_at_asc',
     limit,
-    excludeRecoveryStates: ['waiting_for_target_evidence', 'blocked_by_source_material_consent'],
+    excludeRecoveryStates: ['waiting_for_receipt', 'waiting_for_target_evidence', 'blocked_by_source_material_consent'],
   });
   for (const candidate of retrying) {
-    if (isRetryWaitBackoffElapsed(candidate.status, candidate.leaseExpiresAt)) {
+    if (isRetryWaitBackoffElapsed(candidate.status, candidate.leaseExpiresAt)
+      && !diagnosticJsonIsUnprovenReadyTargetEvidence(candidate.diagnosticJson)) {
       retryTask = candidate;
       break;
     }

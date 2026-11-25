@@ -63,6 +63,24 @@ const WAITING_JSON = JSON.stringify({
 });
 
 
+const WAITING_RECEIPT_JSON = JSON.stringify({
+  sourcePainId: 'mcp_waiting_gate_1',
+  reasonSummary: 'exact target-bearing receipt is unavailable',
+  source: 'manual',
+  severity: 'moderate',
+  sessionIdHint: null,
+  provenance: 'agent_reported_owner_approved',
+  evidence: [],
+  recovery: {
+    schemaVersion: 1,
+    state: 'waiting_for_receipt',
+    reasonCode: 'target_turn_identity_unavailable',
+    attemptCount: 1,
+    lastCheckedAt: '2026-11-22T10:00:00.000Z',
+  },
+  workspaceDir: null,
+});
+
 const BLOCKED_JSON = JSON.stringify({
   sourcePainId: 'mcp_waiting_gate_1',
   reasonSummary: 'target turn is unavailable after source revocation',
@@ -149,6 +167,35 @@ describe('PRI-1274 r2 H — atomic waiting gate on the split/manual diagnosis en
     expect(task?.diagnosticJson).toBe(WAITING_JSON);
     const runs = await stateManager.getRunsByTask(PARENT_TASK_ID);
     expect(runs.length).toBe(0);
+  });
+
+  it('a waiting_for_receipt task cannot lease or call providers before a target-bearing retry binds it', async () => {
+    await stateManager.createTask({
+      taskId: PARENT_TASK_ID,
+      taskKind: 'diagnostician',
+      inputRef: 'mcp_waiting_gate_1',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: WAITING_RECEIPT_JSON,
+    });
+
+    const { runner, rootCause } = makeRunner(stateManager);
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.errorCategory).toBe('input_invalid');
+      expect(result.failureReason).toContain('target_receipt_pending');
+      expect(result.failureReason).toContain('target_turn_identity_unavailable');
+      expect(result.attemptCount).toBe(0);
+    }
+    expect(rootCause.run).not.toHaveBeenCalled();
+    const task = await stateManager.getTask(PARENT_TASK_ID);
+    expect(task?.status).toBe('pending');
+    expect(task?.leaseGeneration).toBe(0);
+    expect(task?.diagnosticJson).toBe(WAITING_RECEIPT_JSON);
+    expect(await stateManager.getRunsByTask(PARENT_TASK_ID)).toEqual([]);
   });
 
   it('a consent-blocked task cannot lease or call providers even when the fast pre-check is stale', async () => {

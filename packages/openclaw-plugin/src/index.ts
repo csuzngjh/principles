@@ -746,7 +746,9 @@ const plugin = {
           // normal-entry submission legally persists unbound; THIS event's
           // receipt + host-authoritative identity (sessionId on the context,
           // toolCallId from the execution record) restores the SAME task via
-          // the Core CAS recovery. Exact tool-name gate (only
+          // the Core CAS recovery. event.runId joins only to the exact
+          // target-turn identity captured for that same run; absent/ambiguous
+          // correlation leaves target-dependent tasks unbound. Exact tool-name gate (only
           // `pd-recall__pd_submit_pain`), fail-open (a fallback failure never
           // changes the tool outcome), one bounded ids-only line.
           if (isPainSubmitOpenclawToolName(event.toolName)) {

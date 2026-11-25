@@ -9,6 +9,10 @@ import type { PDTaskStatus } from '../../task-status.js';
 
 export interface TaskStoreFilter {
   status?: PDTaskStatus;
+  /** Multi-status membership filter. Used by bounded repair scans that must
+   * cover legacy rows already moved to retry_wait without widening the page
+   * to terminal/leased tasks. */
+  statuses?: readonly PDTaskStatus[];
   taskKind?: string;
   /** Filter tasks whose lease_expires_at is before this ISO timestamp. */
   leaseExpiresAtBefore?: string;
@@ -39,6 +43,12 @@ export interface TaskStoreFilter {
    * inside the picker's bounded LIMIT window.
    */
   excludeRecoveryStates?: readonly string[];
+  /**
+   * PRI-1296: match tasks whose root `diagnostic_json.hostKind` equals this
+   * governed host. Applied in the SAME WHERE clause before ORDER BY/LIMIT so
+   * a host-scoped bounded scan only spends its window on its own candidates.
+   */
+  diagnosticHostKind?: string;
 }
 
 /** Narrow patch type — only the fields that are mutable in practice.

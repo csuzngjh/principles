@@ -37,6 +37,8 @@ import {
   createPainSignalBridge,
   isRetryWaitBackoffElapsed,
   pickDiagnosticianCandidate,
+  reconcileWaitingTargetEvidenceTasks,
+  type TargetEvidenceReconcileReport,
   PrincipleTreeLedgerAdapter,
   resolveDiagnosticianCapability,
   type TaskRecord,
@@ -59,6 +61,7 @@ import {
 } from '@principles/host-runtime';
 import { WORKBUDDY_TOOL_SEMANTICS, WORKBUDDY_TOOL_SEMANTIC_MAPPINGS } from '../tool-semantics.js';
 import { catchUpWorkbuddyIngestion, type WorkbuddyCatchUpResult } from '../ingestion/catch-up.js';
+import { readWorkbuddyTargetTurnEvidence } from '../ingestion/pain-receipt-fallback.js';
 
 export type WorkbuddyWorkerMode = 'ready' | 'manual_action_required' | 'paused' | 'degraded';
 
@@ -75,6 +78,8 @@ export interface WorkbuddyWorkerCycleStepReport {
     readonly nextAction?: string;
   } | null;
   readonly downstream: InternalizationConsumerCycleOutcome | null;
+  /** PRI-1296: bounded exact-target evidence reconcile, before candidate picking. */
+  readonly targetEvidenceReconcile?: TargetEvidenceReconcileReport;
   /** Phase B Stage-2 review step (always last, ≤2 candidates / ≤60s aggregate). */
   readonly stage2?: Stage2CorrectionCycleReport;
 }
@@ -327,6 +332,8 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
 
   // Steps 3–5 — execution authority: internalization_auto_consumer.
   let diagnostician: WorkbuddyWorkerCycleStepReport['diagnostician'] = null;
+  // PRI-1296: filled by the exact-target evidence reconcile below.
+  let targetEvidenceReconcile: TargetEvidenceReconcileReport | null = null;
   if (diagnosticianDisabled) {
     diagnostician = {
       taskId: '',
@@ -380,33 +387,47 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
     try {
       const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
       try {
+        // SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): ONE assembly
+        // point for the five host collaborators. The target-evidence reconcile
+        // and any diagnostician bridge in this cycle share the SAME consent
+        // authorization instance.
+        const hostDeps = resolveWorkspacePipelineHostDeps({
+          workspaceDir,
+          effectiveConfig: config.effective,
+          telemetryPersistenceFailureHandler: (detail) => {
+            try {
+              emitEvent('WORKBUDDY_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
+            } catch {
+              // Telemetry persistence warnings must never fail the worker cycle.
+            }
+          },
+        });
         const sweep = await handle.stateManager.runRecoverySweep();
         if (sweep.recovered > 0 || sweep.errors.length > 0) {
           emitEvent('WORKBUDDY_WORKER_RECOVERY_SWEEP', JSON.stringify({ recovered: sweep.recovered, failed: sweep.errors.length }));
+        }
+        // PRI-1296: reconcile waiting target evidence BEFORE the candidate
+        // picker. Catch-up may have just delivered the exact target turn, and
+        // the picker SQL excludes waiting tasks; doing this after picking
+        // would let diagnosis consume a task before its evidence exists.
+        targetEvidenceReconcile = await reconcileWaitingTargetEvidenceTasks({
+          stateManager: handle.stateManager,
+          readTargetTurnEvidence: (sessionId, turnId) => readWorkbuddyTargetTurnEvidence(workspaceDir, sessionId, turnId),
+          sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
+          hostKind: 'workbuddy',
+          nowIso: new Date().toISOString(),
+        });
+        if (targetEvidenceReconcile.flipped > 0 || targetEvidenceReconcile.blocked > 0 || targetEvidenceReconcile.errors.length > 0) {
+          emitEvent('WORKBUDDY_WORKER_TARGET_EVIDENCE_RECONCILE', JSON.stringify(targetEvidenceReconcile));
         }
         const candidate = await pickNextDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT);
         if (candidate !== null) {
           const stateDir = path.join(workspaceDir, '.state');
           let releaseBridge: (() => Promise<void>) | undefined;
           try {
-            // SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): ONE assembly
-            // point for the five host collaborators. The trajectory reader and
-            // the source-material gate share the SAME consent-ledger
-            // authorization instance (previously two separate instances per
-            // call). PRI-1233 / SPEC §9.2: this worker is where Stage A
-            // actually runs for governance-admitted WorkBuddy pains;
-            // PRI-1265: the Stage A gets the bound session's ORIGINAL turns.
-            const hostDeps = resolveWorkspacePipelineHostDeps({
-              workspaceDir,
-              effectiveConfig: config.effective,
-              telemetryPersistenceFailureHandler: (detail) => {
-                try {
-                  emitEvent('WORKBUDDY_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
-                } catch {
-                  // Telemetry persistence warnings must never fail the worker cycle.
-                }
-              },
-            });
+            // PRI-1233 / SPEC §9.2: this worker is where Stage A actually runs
+            // for governance-admitted WorkBuddy pains; PRI-1265: the Stage A gets
+            // the bound session's ORIGINAL turns through the shared host deps.
             const bridge = await createPainSignalBridge({
               workspaceDir,
               stateDir,
@@ -454,7 +475,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
         mode: 'degraded',
         reason,
         nextAction: 'Inspect the governance workspace runtime profile and provider configuration; the task keeps its pending/retry state and no evidence was mutated.',
-        report: { catchUp, reconcile, diagnostician: null, downstream: null },
+        report: { catchUp, reconcile, diagnostician: null, downstream: null, ...(targetEvidenceReconcile !== null ? { targetEvidenceReconcile } : {}) },
       };
     }
   }
@@ -478,7 +499,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
       mode: 'degraded',
       reason,
       nextAction: 'Repair WorkBuddy host declaration persistence (.pd/host-tool-semantics/workbuddy.json) before running the downstream internalization cycle; the worker retries automatically on the next cycle.',
-      report: { catchUp, reconcile, diagnostician, downstream: null },
+      report: { catchUp, reconcile, diagnostician, downstream: null, ...(targetEvidenceReconcile !== null ? { targetEvidenceReconcile } : {}) },
     };
   }
   writeLiveness(workspaceDir, { runningStage: 'downstream_cycle', stageDeadline: new Date(Date.now() + LIVENESS_STAGE_DEADLINE_MS.downstream_cycle).toISOString() });
@@ -534,6 +555,6 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
     ...base,
     mode: degradedReason !== undefined ? 'degraded' : 'ready',
     ...(degradedReason !== undefined ? { reason: degradedReason, nextAction: 'Inspect the governance workspace .pd/config.yaml runtime profile and the per-step report above; the worker retries automatically on the next cycle.' } : {}),
-    report: { catchUp, reconcile, diagnostician, downstream, stage2 },
+    report: { catchUp, reconcile, diagnostician, downstream, ...(targetEvidenceReconcile !== null ? { targetEvidenceReconcile } : {}), stage2 },
   };
 }

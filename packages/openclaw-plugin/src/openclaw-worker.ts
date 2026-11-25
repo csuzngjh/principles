@@ -33,6 +33,7 @@ import {
   runInternalizationConsumerCycle,
   runPendingDiagnosticianOnce,
   saveHostToolDeclaration,
+  createConsentLedgerSourceMaterialAuthorization,
   type ConsumerCycleLogger,
   type InternalizationConsumerCycleOutcome,
   type PendingDiagnosticianRunResult,
@@ -52,11 +53,14 @@ import {
   isRuntimeConfigError,
   resolveAgentRuntimeBinding,
   resolveRuntimeConfigForAgent,
+  reconcileWaitingTargetEvidenceTasks,
   type InternalAgentName,
+  type TargetEvidenceReconcileReport,
 } from '@principles/core/runtime';
 import { AGENT_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, READ_ONLY_TOOL_NAMES } from './constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS, OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from './constants/tool-semantics.js';
 import { SystemLogger } from './core/system-logger.js';
+import { readOpenclawTargetTurnEvidence } from './hooks/pain-receipt-fallback.js';
 
 // Handover-command read surface: the pd-cli handover/rollback commands need
 // the ack READER; re-exported here so they consume ONE subpath
@@ -75,6 +79,8 @@ export interface OpenClawWorkerCycleStepReport {
   ownership: { state: string; generation: number; source: string };
   declaration: { persisted: boolean; validated: boolean; version?: number; reason?: string };
   downstream: { ran: boolean; runStatus?: string; skipReason?: string; taskId?: string; taskKind?: string };
+  /** PRI-1296: exact target-turn evidence reconcile before diagnosis. */
+  targetEvidenceReconcile?: TargetEvidenceReconcileReport;
   diagnostician: { served: boolean; status: 'succeeded' | 'no_candidate' | 'skipped' | 'failed'; reason?: string; taskId?: string };
 }
 
@@ -529,6 +535,39 @@ export async function runOpenClawWorkspaceWorkerCycle(
     emitEvent('INTERNALIZATION_CONSUMER_CYCLE_FAILED', JSON.stringify({ message: cycleError.message.slice(0, 200), driver: openclawWorkerCycleDriver() }));
   }
 
+  // ── PRI-1296 — exact target-turn evidence reconcile BEFORE the L3
+  // diagnosis candidate pick. The shared picker excludes waiting tasks, so a
+  // reconcile failure cannot make waiting evidence consumable; the failure is
+  // still reported as bounded worker evidence (rc-9). ──
+  let targetEvidenceReconcile: TargetEvidenceReconcileReport | undefined;
+  try {
+    const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+    try {
+      targetEvidenceReconcile = await reconcileWaitingTargetEvidenceTasks({
+        stateManager: handle.stateManager,
+        readTargetTurnEvidence: (sessionId, turnId) => readOpenclawTargetTurnEvidence(workspaceDir, sessionId, turnId),
+        sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+        hostKind: 'openclaw',
+        nowIso: new Date().toISOString(),
+      });
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 80) : 'unknown';
+    targetEvidenceReconcile = {
+      checked: 0,
+      flipped: 0,
+      backfilled: 0,
+      blocked: 0,
+      stillWaiting: 0,
+      errors: [`target_evidence_reconcile_failed:${detail}`],
+    };
+  }
+  if (targetEvidenceReconcile.flipped > 0 || targetEvidenceReconcile.blocked > 0 || targetEvidenceReconcile.errors.length > 0) {
+    emitEvent('OPENCLAW_WORKER_TARGET_EVIDENCE_RECONCILE', JSON.stringify(targetEvidenceReconcile));
+  }
+
   // ── L3 — one bounded diagnosis per cycle, same contract as the Gateway
   // tick (flag + capability + consent checks live inside). ──
   beginStage(workspaceDir, 'diagnosis_execution');
@@ -564,6 +603,7 @@ export async function runOpenClawWorkspaceWorkerCycle(
     ownership: { state: ownership.status, generation: ownership.generation, source: 'record' },
     declaration: declarationReport,
     downstream,
+    targetEvidenceReconcile,
     diagnostician: diagnosticianReport,
   };
 

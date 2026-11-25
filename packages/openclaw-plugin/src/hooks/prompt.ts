@@ -64,6 +64,8 @@ import {
 } from './prompt-helpers.js';
 import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
 import { createLiveSignalKeywordStore } from '../core/signal-keyword-store.js';
+import { captureOpenclawUserTurnForTargetEvidence } from './openclaw-target-turn-capture.js';
+import { confirmOpenclawRunTurnMessage, rememberOpenclawRunTurnCorrelation } from './openclaw-run-turn-correlation.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 
@@ -116,6 +118,83 @@ function hasMessageRole(message: unknown, role: string): boolean {
     return false;
   }
   return Object.getOwnPropertyDescriptor(message, 'role')?.value === role;
+}
+
+function resolveOriginalUserMessageForTargetEvidence(
+  event: PluginHookBeforePromptBuildEvent,
+  resolvedMessage: string,
+): string | undefined {
+  // The explicit host field is authoritative, including explicit empty/invalid
+  // values (which must not revive prompt-derived history).
+  const supplied = Object.getOwnPropertyDescriptor(event, 'currentUserMessage');
+  if (supplied !== undefined) {
+    return typeof supplied.value === 'string' && supplied.value.length > 0
+      ? supplied.value
+      : undefined;
+  }
+
+  // Embedded OpenClaw omits currentUserMessage/currentUserMessageId. Its
+  // messages snapshot is usable only when the last user message is a plain
+  // string and byte-for-byte equals the independently extracted prompt
+  // message. A rebuilt prompt, history fragment or wrapper mismatch is not
+  // promoted into source evidence.
+  const messages = getOwnValue(event, 'messages');
+  if (!Array.isArray(messages) || messages.length === 0) return undefined;
+  // Only the final host message can be the turn that triggered this run.
+  // Never walk backward to a prior user message if an assistant/tool message
+  // follows it in the snapshot.
+  const lastMessage = messages[messages.length - 1];
+  if (
+    typeof lastMessage !== 'object'
+    || lastMessage === null
+    || Array.isArray(lastMessage)
+    || !hasMessageRole(lastMessage, 'user')
+  ) {
+    return undefined;
+  }
+  const content = getOwnValue(lastMessage, 'content');
+  return typeof content === 'string' && content.length > 0 && content === resolvedMessage
+    ? content
+    : undefined;
+}
+
+function captureOpenclawTargetTurnForRun(input: {
+  readonly event: PluginHookBeforePromptBuildEvent;
+  readonly workspaceDir: string;
+  readonly sessionId: string;
+  readonly runId: string | undefined;
+  readonly userTurnRowid: number;
+  readonly resolvedMessage: string;
+  readonly logger?: Partial<PluginLogger>;
+}): void {
+  const text = resolveOriginalUserMessageForTargetEvidence(input.event, input.resolvedMessage);
+  if (text === undefined) return;
+  const nativeTurnId = getOwnValue(input.event, 'currentUserMessageId');
+  const fallbackHostTurnId = `user-turn-row:${input.userTurnRowid}`;
+  const targetTurnId = typeof nativeTurnId === 'string'
+    && nativeTurnId.length > 0
+    && nativeTurnId.length <= 200
+    && nativeTurnId.trim() === nativeTurnId
+    ? nativeTurnId
+    : fallbackHostTurnId;
+
+  captureOpenclawUserTurnForTargetEvidence({
+    workspaceDir: input.workspaceDir,
+    sessionId: input.sessionId,
+    hostTurnId: nativeTurnId,
+    fallbackHostTurnId,
+    text,
+    ...(input.logger !== undefined ? { logger: input.logger } : {}),
+  });
+  if (input.runId !== undefined) {
+    rememberOpenclawRunTurnCorrelation({
+      workspaceDir: input.workspaceDir,
+      sessionId: input.sessionId,
+      runId: input.runId,
+      targetTurnId,
+      message: input.resolvedMessage,
+    });
+  }
 }
 
 function nextUserTurnIndex(wctx: WorkspaceContext, sessionId: string, messages: readonly unknown[]): number {
@@ -452,6 +531,22 @@ export function prepareOpenClawPromptRound(
   // own write produced, not on a foreign one.
   const sessionIdentity = sessionKey ?? sessionId;
   if (runId !== undefined && sessionIdentity !== undefined && hasClaimedSignalRun(wctx.workspaceDir, sessionIdentity, runId)) {
+    // runId may be reused after a run ends. Confirm that the prompt still
+    // resolves to the exact persisted user-turn text before reusing its row id.
+    if (sessionId !== undefined) {
+      let replayMessage = '';
+      try {
+        replayMessage = resolveCurrentUserMessage(event, sessionId).message;
+      } catch {
+        // Empty text intentionally quarantines the mapping below.
+      }
+      confirmOpenclawRunTurnMessage({
+        workspaceDir: wctx.workspaceDir,
+        sessionId,
+        runId,
+        message: replayMessage,
+      });
+    }
     const replayed = claimedSignalRunOrdinal(wctx.workspaceDir, sessionIdentity, runId);
     if (typeof replayed === 'number' && Number.isInteger(replayed) && replayed >= 1) {
       logger?.info?.(`[PD:Prompt] round key replayed for claimed run: round=${replayed}, sessionId=${sessionId?.substring(0, 20)}`);
@@ -541,6 +636,15 @@ export function prepareOpenClawPromptRound(
       );
       return undefined;
     }
+    captureOpenclawTargetTurnForRun({
+      event,
+      workspaceDir: wctx.workspaceDir,
+      sessionId,
+      runId,
+      userTurnRowid: outcome.userTurnRowid,
+      resolvedMessage: currentUserMessage,
+      ...(logger !== undefined ? { logger } : {}),
+    });
   } catch (error) {
     // Detection failure means "no confirmed persistence" — no round key.
     logger?.warn?.(`[PD:Prompt] pre-selection signal collection failed: ${String(error)} → legacy_fifo_prefix_v1`);
@@ -752,6 +856,12 @@ export async function handleBeforePromptBuild(
       _roundPreparedEvents.delete(event);
       logger?.info?.('[PD:Prompt] signal collection already performed by the pre-selection round phase');
     } else if (runId && hasClaimedSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
+      confirmOpenclawRunTurnMessage({
+        workspaceDir: wctx.workspaceDir,
+        sessionId,
+        runId,
+        message: currentUserMessage,
+      });
       logger?.info?.(`[PD:Prompt] duplicate signal run skipped: runId=${runId}, sessionId=${sessionId.substring(0, 20)}`);
     } else {
       if (!runId) {
@@ -766,6 +876,17 @@ export async function handleBeforePromptBuild(
           turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages),
         },
       );
+      if (outcome?.status === 'user_turn_persisted') {
+        captureOpenclawTargetTurnForRun({
+          event,
+          workspaceDir: wctx.workspaceDir,
+          sessionId,
+          runId,
+          userTurnRowid: outcome.userTurnRowid,
+          resolvedMessage: currentUserMessage,
+          ...(logger !== undefined ? { logger } : {}),
+        });
+      }
       // PRI-1137: a run is claimed only when its user_turns row really landed,
       // so a failed write stays retryable instead of looking "already
       // collected". P1-3: the claim carries the ordinal this write produced,
