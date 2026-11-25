@@ -542,11 +542,13 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
         workspaceDir,
         sessionId: session,
         runId: 'run-pri1296-embedded-turn-10',
+        consume: false,
       })).toBe(firstHostTurnId);
       expect(resolveOpenclawRunTurnCorrelation({
         workspaceDir,
         sessionId: session,
         runId: 'run-pri1296-embedded-turn-11',
+        consume: false,
       })).toBe(secondHostTurnId);
       // A reused run id that points to a different persisted turn is ambiguous,
       // so a late after_tool_call event cannot be silently retargeted.
