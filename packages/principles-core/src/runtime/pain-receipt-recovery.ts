@@ -466,11 +466,11 @@ function evaluateAlreadyBoundTargetEvidence(input: {
   const verified = painIngress !== undefined && isRecord(painIngress.verifiedHostSession)
     ? painIngress.verifiedHostSession
     : undefined;
-  const targetIdentityPatch = painIngress !== undefined && verified !== undefined
+  const updatedPainIngress = painIngress !== undefined && verified !== undefined
     && targetTurnId !== undefined
     && (typeof verified.targetTurnId !== 'string' || verified.targetTurnId.length === 0)
-    ? { painIngress: { ...painIngress, verifiedHostSession: { ...verified, targetTurnId } } }
-    : {};
+    ? { ...painIngress, verifiedHostSession: { ...verified, targetTurnId } }
+    : painIngress;
   const existingRecovery = diagnostic.record.recovery;
   const existingState = isRecord(existingRecovery) && typeof existingRecovery.state === 'string'
     ? existingRecovery.state
@@ -533,10 +533,9 @@ function evaluateAlreadyBoundTargetEvidence(input: {
     const {entries} = evidenceAdmission;
     newRecord = {
       ...diagnostic.record,
-      ...targetIdentityPatch,
       evidence: [...entries],
       painIngress: {
-        ...(painIngress ?? {}),
+        ...(updatedPainIngress ?? {}),
         evidenceClass: { status: 'available', entryCount: entries.length },
       },
       recovery: disposition,
@@ -547,14 +546,14 @@ function evaluateAlreadyBoundTargetEvidence(input: {
       state: 'blocked_by_source_material_consent',
       reasonCode: `target_turn_source_material_${evidenceAdmission.reason}`,
     };
-    newRecord = { ...diagnostic.record, ...targetIdentityPatch, recovery: disposition };
+    newRecord = { ...diagnostic.record, ...(updatedPainIngress !== undefined ? { painIngress: updatedPainIngress } : {}), recovery: disposition };
   } else {
     disposition = {
       ...dispositionBase,
       state: 'waiting_for_target_evidence',
       reasonCode: evidenceAdmission.reasonCode,
     };
-    newRecord = { ...diagnostic.record, ...targetIdentityPatch, recovery: disposition };
+    newRecord = { ...diagnostic.record, ...(updatedPainIngress !== undefined ? { painIngress: updatedPainIngress } : {}), recovery: disposition };
   }
   return {
     action: 'cas',
