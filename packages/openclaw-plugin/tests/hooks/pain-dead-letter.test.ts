@@ -128,11 +128,16 @@ function makeStubWctx(workspaceDir: string): StubWctx {
 describe('emitPainDetectedEvent — dead letter on recordPain failure (Task 3, rc-9)', () => {
   let tempWorkspaceDir: string;
   let logSpy: ReturnType<typeof vi.spyOn>;
+  let previousOpenclawConfigPath: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
     lastPainServiceOptions = null;
+    previousOpenclawConfigPath = process.env.OPENCLAW_CONFIG_PATH;
     tempWorkspaceDir = makeTempWorkspace();
+    const openclawConfigPath = path.join(tempWorkspaceDir, 'openclaw-test-config.json');
+    fs.writeFileSync(openclawConfigPath, JSON.stringify({ plugins: { entries: { 'principles-disciple': { hooks: { allowConversationAccess: true } } } } }));
+    process.env.OPENCLAW_CONFIG_PATH = openclawConfigPath;
     primeStateDb(tempWorkspaceDir);
     disposeAllSystemLoggers();
     logSpy = vi.spyOn(SystemLogger, 'log');
@@ -141,6 +146,8 @@ describe('emitPainDetectedEvent — dead letter on recordPain failure (Task 3, r
   afterEach(() => {
     logSpy?.mockRestore();
     disposeAllSystemLoggers();
+    if (previousOpenclawConfigPath === undefined) delete process.env.OPENCLAW_CONFIG_PATH;
+    else process.env.OPENCLAW_CONFIG_PATH = previousOpenclawConfigPath;
     try {
       fs.rmSync(tempWorkspaceDir, { recursive: true, force: true });
     } catch {

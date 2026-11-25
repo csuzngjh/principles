@@ -47,6 +47,7 @@ const SESSION = 'sess-openclaw-canary';
 const ENV_KEY = 'PD_OPENCLAW_TURN_TEXT_CANARY_KEY';
 
 const previousWorkspaceDir = process.env.PD_WORKSPACE_DIR;
+const previousOpenclawConfigPath = process.env.OPENCLAW_CONFIG_PATH;
 let workspaceDir = '';
 let startRunInputs: string[] = [];
 
@@ -133,6 +134,9 @@ beforeEach(() => {
   // pin the PD explicit workspace so command-side resolution cannot divert
   // to a real host workspace on a dev machine
   process.env.PD_WORKSPACE_DIR = workspaceDir;
+  const openclawConfigPath = path.join(workspaceDir, 'openclaw-test-config.json');
+  fs.writeFileSync(openclawConfigPath, JSON.stringify({ plugins: { entries: { 'principles-disciple': { hooks: { allowConversationAccess: true } } } } }));
+  process.env.OPENCLAW_CONFIG_PATH = openclawConfigPath;
   const config = getDefaultPdConfig() as ReturnType<typeof getDefaultPdConfig> & {
     features: Record<string, { enabled?: boolean } & Record<string, unknown>>;
     runtimeProfiles: Record<string, unknown>;
@@ -177,6 +181,8 @@ afterEach(async () => {
   if (previousWorkspaceDir === undefined) delete process.env.PD_WORKSPACE_DIR;
   else process.env.PD_WORKSPACE_DIR = previousWorkspaceDir;
   delete process.env[ENV_KEY];
+  if (previousOpenclawConfigPath === undefined) delete process.env.OPENCLAW_CONFIG_PATH;
+  else process.env.OPENCLAW_CONFIG_PATH = previousOpenclawConfigPath;
   await disposePainSignalBridgesForWorkspace(workspaceDir).catch(() => undefined);
   try {
     fs.rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
