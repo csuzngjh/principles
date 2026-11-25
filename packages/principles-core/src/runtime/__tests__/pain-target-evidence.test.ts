@@ -1040,6 +1040,21 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect(diagnostic.evidence).toEqual([{ sourceRef: '', note: 'malformed legacy evidence' }]);
     expect(diagnostic.recovery).toMatchObject({ state: 'waiting_for_target_evidence' });
     expect(await pickDiagnosticianCandidate(stateManager, 5, new Date().toISOString())).toBeNull();
+
+    // A structured exact-target read may replace the malformed legacy array;
+    // only its validated entries can restore READY admission.
+    const repaired = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+      nowIso: new Date().toISOString(),
+    });
+    expect(repaired).toMatchObject({ checked: 1, flipped: 1, backfilled: 1, blocked: 0 });
+    const repairedDiagnostic = await readDiagnostic(taskId);
+    expect(repairedDiagnostic.evidence).toEqual(TURN10_ENTRIES);
+    expect((repairedDiagnostic.painIngress as Record<string, unknown>).evidenceClass)
+      .toEqual({ status: 'available', entryCount: TURN10_ENTRIES.length });
+    expect(repairedDiagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis' });
   });
 
   it('PRI-1296 review: a pre-upgrade boolean-flipped empty-evidence READY task is re-admitted and backfilled', async () => {
