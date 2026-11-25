@@ -4390,4 +4390,78 @@ describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2A: pipeline-spine assembly wiring', 
       ).toBe(false);
     }
   });
+
+  it('dependency direction: principles-core never depends on host-runtime, CLI, or concrete host adapters', () => {
+    const pkg = JSON.parse(readProductionSource('principles-core/package.json')) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const forbidden = ['@principles/host-runtime', '@principles/pd-cli', '@principles/codex-adapter', '@principles/workbuddy-adapter', 'principles-disciple'];
+    const allDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    expect(forbidden.filter((name) => Object.hasOwn(allDeps, name))).toEqual([]);
+    const coreSrc = readProductionSource('principles-core/src/runtime/pain-signal-runtime-factory.ts')
+      + readProductionSource('principles-core/src/runtime/pain-to-principle-service.ts');
+    for (const token of forbidden) expect(coreSrc).not.toContain(token);
+  });
+
+  it('dependency direction: host-runtime never depends on concrete host adapters', () => {
+    const pkg = JSON.parse(readProductionSource('host-runtime/package.json')) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const forbidden = ['@principles/codex-adapter', '@principles/workbuddy-adapter', 'principles-disciple'];
+    const allDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    expect(forbidden.filter((name) => Object.hasOwn(allDeps, name))).toEqual([]);
+  });
+
+  it('OpenClaw hook/command entries do not reconstruct PainToPrincipleService outside the shared pain service', () => {
+    for (const rel of [
+      'openclaw-plugin/src/hooks/pain.ts',
+      'openclaw-plugin/src/commands/pain.ts',
+    ] as const) {
+      const src = readProductionSource(rel);
+      expect(src.includes('new PainToPrincipleService'), `${rel} must use the shared OpenClaw pain service assembly`).toBe(false);
+      expect(src.includes('createDiagnosticianRunnerBundle'), `${rel} must not assemble a runner locally`).toBe(false);
+    }
+    expect(readProductionSource('openclaw-plugin/src/core/pain-service.ts')).toContain('new PainToPrincipleService');
+  });
+
+  it('one CLI execution context has one authoritative telemetry sink', () => {
+    const diagnose = readProductionSource('pd-cli/src/commands/diagnose.ts');
+    expect(diagnose).not.toContain('createWorkspaceTelemetryEmitter');
+    expect((diagnose.match(/resolveWorkspacePipelineHostDeps\(/g) ?? []).length).toBe(1);
+    expect(diagnose).toContain('telemetrySink: hostDeps.telemetrySink');
+    expect(diagnose).toContain('const diagnoseTelemetry = hostDeps.telemetrySink');
+
+    const retry = readProductionSource('pd-cli/src/commands/pain-retry.ts');
+    expect(retry).not.toContain('createWorkspaceTelemetryEmitter');
+    expect((retry.match(/resolveWorkspacePipelineHostDeps\(/g) ?? []).length).toBe(1);
+    expect(retry).toContain('telemetrySink: hostDeps.telemetrySink');
+  });
+
+  it('normal runner construction sites pass all three executable collaborators from host deps', () => {
+    for (const rel of ['pd-cli/src/commands/diagnose.ts', 'pd-cli/src/commands/pain-retry.ts'] as const) {
+      const src = readProductionSource(rel);
+      for (const token of [
+        'intentDocReader: hostDeps.intentDocReader',
+        'trajectoryTurnReader: hostDeps.trajectoryTurnReader',
+        'sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization',
+      ]) {
+        expect(src, `${rel} missing ${token}`).toContain(token);
+      }
+    }
+  });
+
+  it('constructBridge has an explicit ownership transfer and failure cleanup boundary', () => {
+    const src = readProductionSource('principles-core/src/runtime/pain-signal-runtime-factory.ts');
+    const start = src.indexOf('async function constructBridge');
+    const end = src.indexOf('/**\n * PRI-624: dispose + drop every cached bridge', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const body = src.slice(start, end);
+    expect(body).toContain('let bridgeOwnsStateManager = false');
+    expect(body).toContain('bridgeOwnsStateManager = true');
+    expect(body).toContain('await stateManager.close().catch(() => undefined)');
+  });
+
 });

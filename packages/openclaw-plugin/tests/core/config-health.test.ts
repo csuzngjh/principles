@@ -95,32 +95,82 @@ describe('config-health', () => {
 });
 
 describe('shouldBlockOpenClawConversationReads', () => {
-  const testHome = join('/tmp', 'pd-test-config-health-read-' + Date.now());
-  const configDir = join(testHome, '.openclaw');
-  const configPath = join(configDir, 'openclaw.json');
+  const testRoot = join('/tmp', 'pd-test-openclaw-config-' + Date.now());
+  const defaultDir = join(testRoot, 'default-home', '.openclaw');
+  const customDir = join(testRoot, 'custom-state');
+  const defaultPath = join(defaultDir, 'openclaw.json');
+  const customPath = join(customDir, 'openclaw.json');
+  const customFilePath = join(testRoot, 'explicit-config.json');
+  const envKeys = ['OPENCLAW_CONFIG_PATH', 'OPENCLAW_STATE_DIR', 'HOME', 'USERPROFILE'] as const;
+  let savedEnv: Record<string, string | undefined> = {};
+
+  function writeConfig(filePath: string, allow: boolean): void {
+    writeFileSync(filePath, JSON.stringify({ plugins: { entries: { 'principles-disciple': { hooks: { allowConversationAccess: allow } } } } }), 'utf8');
+  }
 
   beforeEach(() => {
-    vi.mocked(os.homedir).mockReturnValue(testHome);
-    mkdirSync(configDir, { recursive: true });
+    savedEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    for (const key of envKeys) delete process.env[key];
+    process.env.HOME = join(testRoot, 'default-home');
+    mkdirSync(defaultDir, { recursive: true });
+    mkdirSync(customDir, { recursive: true });
   });
 
   afterEach(() => {
-    rmSync(testHome, { recursive: true, force: true });
-    vi.clearAllMocks();
+    for (const key of envKeys) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+    rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('re-reads the current global config from disk on every call', () => {
-    writeFileSync(configPath, JSON.stringify({ plugins: { entries: { 'principles-disciple': { hooks: { allowConversationAccess: true } } } } }), 'utf8');
+  it('allows only explicit allowConversationAccess=true in the default effective config', () => {
+    writeConfig(defaultPath, true);
     expect(shouldBlockOpenClawConversationReads()).toBe(false);
-
-    writeFileSync(configPath, JSON.stringify({ plugins: { entries: { 'principles-disciple': { hooks: { allowConversationAccess: false } } } } }), 'utf8');
+    writeConfig(defaultPath, false);
     expect(shouldBlockOpenClawConversationReads()).toBe(true);
   });
 
-  it('keeps missing config on the fallback path but fails closed when an existing config is unreadable', () => {
-    rmSync(configPath, { force: true });
+  it('custom config wins over the default config in BOTH directions', () => {
+    process.env.OPENCLAW_STATE_DIR = customDir;
+    writeConfig(defaultPath, true);
+    writeConfig(customPath, false);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    writeConfig(defaultPath, false);
+    writeConfig(customPath, true);
     expect(shouldBlockOpenClawConversationReads()).toBe(false);
-    writeFileSync(configPath, '{broken', 'utf8');
+  });
+
+  it('OPENCLAW_CONFIG_PATH wins over OPENCLAW_STATE_DIR', () => {
+    process.env.OPENCLAW_STATE_DIR = customDir;
+    process.env.OPENCLAW_CONFIG_PATH = customFilePath;
+    writeConfig(customPath, false);
+    writeConfig(customFilePath, true);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('missing, damaged, or indeterminate effective config fails closed', () => {
+    rmSync(defaultPath, { force: true });
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    writeFileSync(defaultPath, '{broken', 'utf8');
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    writeFileSync(defaultPath, JSON.stringify({ plugins: { entries: { 'principles-disciple': { hooks: {} } } } }), 'utf8');
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+  });
+
+  it('relative override paths fail closed instead of falling back to the default config', () => {
+    writeConfig(defaultPath, true);
+    process.env.OPENCLAW_STATE_DIR = 'relative-state';
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    delete process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_CONFIG_PATH = 'relative-openclaw.json';
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+  });
+
+  it('revocation is visible on the immediately following check', () => {
+    writeConfig(defaultPath, true);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+    writeConfig(defaultPath, false);
     expect(shouldBlockOpenClawConversationReads()).toBe(true);
   });
 });

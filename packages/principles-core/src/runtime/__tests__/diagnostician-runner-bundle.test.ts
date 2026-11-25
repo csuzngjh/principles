@@ -44,6 +44,10 @@ function testDoubleAdapter(): PDRuntimeAdapter {
   return new TestDoubleRuntimeAdapter();
 }
 
+const testTrajectoryTurnReader = { listUserTurnsForSession: () => [], listAssistantTurns: () => [] };
+const testSourceMaterialAuthorization = { isHostSourceMaterialAuthorized: () => ({ authorized: false, reason: 'consent_missing' as const }) };
+const testIntentDocReader = { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) };
+
 function bundleOptions(overrides: Partial<Parameters<typeof createDiagnosticianRunnerBundle>[0]> = {}) {
   return {
     workspaceDir,
@@ -52,6 +56,9 @@ function bundleOptions(overrides: Partial<Parameters<typeof createDiagnosticianR
     runtimeAdapter: testDoubleAdapter(),
     runtimeKind: 'test-double',
     stageTimeoutMs: 1_200_000,
+    intentDocReader: testIntentDocReader,
+    trajectoryTurnReader: testTrajectoryTurnReader,
+    sourceMaterialAuthorization: testSourceMaterialAuthorization,
     ...overrides,
   };
 }
@@ -190,6 +197,19 @@ describe('createDiagnosticianRunnerBundle — bridgeCache isolation (§4.4)', ()
 });
 
 // ── Type-level contract (checked by `typecheck --workspace=@principles/core`,
+// which includes this file; rc-2: no `as` may bypass required dependencies).
+export function typeNegativeRunnerBundleRequiresCollaborators(dir: string): void {
+  const base = bundleOptions({ workspaceDir: dir });
+  // @ts-expect-error normal executable mode requires intentDocReader
+  createDiagnosticianRunnerBundle({ ...base, intentDocReader: undefined });
+  // @ts-expect-error normal executable mode requires trajectoryTurnReader
+  createDiagnosticianRunnerBundle({ ...base, trajectoryTurnReader: undefined });
+  // @ts-expect-error normal executable mode requires sourceMaterialAuthorization
+  createDiagnosticianRunnerBundle({ ...base, sourceMaterialAuthorization: undefined });
+  // Positive control: all three required dependencies compile.
+  void createDiagnosticianRunnerBundle(base);
+}
+
 // which includes this file; rc-2: no `as` may bypass the sync-mode requirement).
 // SPEC §3.1.2: sync (or possibly-sync) options REQUIRE both collaborators at
 // compile time — if anyone re-widens them to optional, the ts-expect-error
@@ -198,6 +218,7 @@ describe('createDiagnosticianRunnerBundle — bridgeCache isolation (§4.4)', ()
 export function typeNegativeSyncOptionsRequireCollaborators(dir: string): void {
   // @ts-expect-error sync mode requires trajectoryTurnReader even when authorization is present
   new PainToPrincipleService({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
     workspaceDir: dir,
     stateDir: `${dir}/.state`,
     ledgerAdapter: {} as LedgerAdapter,
@@ -206,6 +227,7 @@ export function typeNegativeSyncOptionsRequireCollaborators(dir: string): void {
   });
   // @ts-expect-error sync mode requires sourceMaterialAuthorization even when the trajectory reader is present
   new PainToPrincipleService({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
     workspaceDir: dir,
     stateDir: `${dir}/.state`,
     ledgerAdapter: {} as LedgerAdapter,
@@ -218,6 +240,7 @@ export function typeNegativeSyncOptionsRequireCollaborators(dir: string): void {
     stateDir: `${dir}/.state`,
     ledgerAdapter: {} as LedgerAdapter,
     asyncMode: false,
+    intentDocReader: testIntentDocReader,
     trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
     sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false, reason: 'consent_missing' as const }) },
   });

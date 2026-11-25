@@ -11,8 +11,8 @@
  */
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'fs';
 import { homedir } from 'os';
-import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
+import { resolveOpenClawConfigPath } from '@principles/install-layout';
 
 /**
  * PRI-348: Extract the full plugin entry (including hooks) from the global OpenClaw config.
@@ -77,8 +77,9 @@ export function checkConversationAccessConfig(pluginConfig: unknown): Conversati
 
 const PLUGIN_ID = 'principles-disciple';
 
-function getOpenClawConfigPath(): string {
-  return path.join(homedir(), '.openclaw', 'openclaw.json');
+function getOpenClawConfigPath(): string | null {
+  const resolved = resolveOpenClawConfigPath(process.env, homedir());
+  return resolved.ok ? resolved.path : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -109,15 +110,20 @@ function writeConfigAtomic(configPath: string, cfg: Record<string, unknown>): vo
  */
 export function shouldBlockOpenClawConversationReads(pluginId: string = PLUGIN_ID): boolean {
   const configPath = getOpenClawConfigPath();
-  if (!existsSync(configPath)) return false;
+  // Fail closed whenever the EFFECTIVE host config cannot be identified,
+  // read, or parsed. Missing/default-absent is not permission.
+  if (configPath === null || !existsSync(configPath)) return true;
   const config = readConfig(configPath);
   if (config === null) return true;
-  return isExplicitConversationAccessOptOut(getPluginEntry(config, pluginId));
+  const entry = getPluginEntry(config, pluginId);
+  if (isExplicitConversationAccessOptOut(entry)) return true;
+  const access = checkConversationAccessConfig(entry);
+  return !access.authorized;
 }
 
 export function ensureConversationAccessInConfig(): boolean {
   const configPath = getOpenClawConfigPath();
-  if (!existsSync(configPath)) return false;
+  if (configPath === null || !existsSync(configPath)) return false;
 
   return withLock(configPath, () => {
     const cfg = readConfig(configPath);

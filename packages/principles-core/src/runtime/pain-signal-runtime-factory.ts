@@ -70,17 +70,12 @@ export interface PainSignalRuntimeFactoryOptions {
   /** PRI-306: Env var accessor for readiness checks. Defaults to process.env. */
   getEnvVar?: (name: string) => string | undefined;
   /**
-   * PRI-468: Optional INTENT.md reader for Stage A intent tension check.
-   *
-   * Provided by the plugin layer (which owns filesystem I/O). When present
-   * AND `intent_engineering` flag is on, Stage A reads INTENT.md and
-   * injects it into the prompt. When absent, intent_engineering degrades
-   * silently to off (telemetry emitted by the runner).
-   *
-   * Core never performs filesystem I/O — it only consumes the port.
+   * Required INTENT.md reader for the executable Stage A path. Core never
+   * performs filesystem I/O — the host injects the port. There is no implicit
+   * non-executing runner mode, so this cannot remain optional at construction.
    */
-  intentDocReader?: IntentDocReader;
-  trajectoryTurnReader?: TrajectoryTurnReader;
+  intentDocReader: IntentDocReader;
+  trajectoryTurnReader: TrajectoryTurnReader;
   /**
    * PRI-939 Option A: optional workspace-scoped telemetry sink (host-runtime
    * WorkspaceTelemetryEmitter) for short-lived CLI processes. Bridge telemetry
@@ -104,7 +99,7 @@ export interface PainSignalRuntimeFactoryOptions {
    * = fail-closed for governance-sourced material (deny-all): consuming
    * consent-gated excerpts without an authorization check is the R2 gap.
    */
-  sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+  sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
 }
 
 /** Funnel name for the Runtime v2 diagnosis path. */
@@ -845,17 +840,14 @@ export interface CreateDiagnosticianRunnerBundleOptions {
    */
   readonly stateManager?: RuntimeStateManager;
   /**
-   * Pass-through collaborators. Absent values keep the stage runners'
-   * existing semantics (intent reader absent → Stage A skips the intent
-   * check; authorization absent → the runners and the assembler fall back to
-   * deny-all). The production cache-free callers (`diagnose.ts`,
-   * `pain-retry.ts`) always provide all three; the cached-bridge factory path
-   * forwards its own optional options verbatim (e.g. post-processing resumes
-   * construct a bridge whose runner never executes).
+   * Required executable-runner collaborators. Every production path constructs
+   * an executable runner; post-processing-only reuse goes through the same
+   * bridge and therefore must not be able to bypass this dependency contract.
+   * There is no implicit non-executing runner mode.
    */
-  readonly intentDocReader?: IntentDocReader;
-  readonly trajectoryTurnReader?: TrajectoryTurnReader;
-  readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+  readonly intentDocReader: IntentDocReader;
+  readonly trajectoryTurnReader: TrajectoryTurnReader;
+  readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
   /** Workspace-scoped sink for runner telemetry; absent = storeEmitter singleton. */
   readonly telemetrySink?: { emitTelemetry: (event: TelemetryEvent) => void };
 }
@@ -1033,7 +1025,11 @@ async function constructBridge(
 ): Promise<PainSignalBridge> {
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
   await stateManager.initialize();
-
+  // Ownership rule: constructBridge owns this manager until PainSignalBridge
+  // construction succeeds. Any adapter/bundle/bridge constructor failure closes
+  // it exactly once here; after success the bridge's dispose() is the only owner.
+  let bridgeOwnsStateManager = false;
+  try {
   // ADR-0029: one adapter, one construction site. validateRuntimeConfig already
   // rejected every other kind before this point.
   const runtimeAdapter: PDRuntimeAdapter = new PiAiRuntimeAdapter({
@@ -1107,7 +1103,14 @@ async function constructBridge(
     ownedResources: [],
   });
 
+  bridgeOwnsStateManager = true;
   return bridge;
+  } catch (err) {
+    if (!bridgeOwnsStateManager) {
+      await stateManager.close().catch(() => undefined);
+    }
+    throw err;
+  }
 }
 
 /**

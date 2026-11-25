@@ -45,9 +45,8 @@ export function createPluginPainToPrincipleService(wctx: WorkspaceContext): Pain
     // OpenClaw's legacy trajectory consent authority is the host plugin
     // setting, not the Codex/WorkBuddy ingestion ledger. Read the global
     // config fresh on every access so changing it to explicit false revokes
-    // even previously collected rows immediately; a missing config keeps the
-    // documented before_message_write fallback semantics, while an existing
-    // unreadable config fails closed.
+    // even previously collected rows immediately. Missing, unreadable, or
+    // unresolvable effective config fails closed.
     trajectoryTurnReaderOverrideAuthorization: () => !shouldBlockOpenClawConversationReads(),
   });
   return new PainToPrincipleService({

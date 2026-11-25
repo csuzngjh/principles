@@ -35,7 +35,6 @@ import {
 import type { PDRuntimeAdapter } from '@principles/core/runtime';
 import { resolveWorkspacePipelineHostDeps } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, resolveDiagnosticianCapability } from '@principles/core/runtime';
 import { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from '../services/runtime-adapter-resolver.js';
@@ -379,11 +378,19 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // chain and its collaborators are assembled below by the ONE cache-free
     // bundle; the five host collaborators come from the ONE workspace deps
     // resolver (the admission gate at :732 reuses the SAME authorization
-    // instance from those deps).
-
-    // PRI-939 Option A: workspace-scoped sink — allowlisted critical events
-    // (persisted to critical-events.jsonl) must not emit into the bare singleton.
-    const diagnoseTelemetry = createWorkspaceTelemetryEmitter(workspaceDir);
+    // instance from those deps). The deps object is created once for this
+    // execution context, so runtime selection and the runner share ONE sink.
+    if (!configLoadResult.ok) {
+      const errSummary = configLoadResult.errors
+        .map((e) => `${e.path}: ${e.reason}`)
+        .join('; ');
+      console.warn(
+        `[pd diagnose] .pd/config.yaml at ${configLoadResult.configPath} is malformed — falling back to default feature flags. Errors: ${errSummary}. Next action: ${configLoadResult.errors[0]?.nextAction ?? 'fix config errors and retry'}`,
+      );
+    }
+    const effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
+    const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig });
+    const diagnoseTelemetry = hostDeps.telemetrySink;
     // Select runtime adapter based on --runtime flag (CLI-02)
     // PRI-431: migrated to shared resolveRuntimeAdapterFromConfig
     let runtimeAdapter: PDRuntimeAdapter;
@@ -481,22 +488,6 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       throw err;
     }
 
-    // BUG-1 (PRI-442): extract effectiveConfig so ADR-0019 LLM rate-limit
-    // degradation (isDegradationEnabled in base-peer-runner) can read the
-    // diagnostician_llm_degradation feature flag. Without this, the runners
-    // receive no effectiveConfig and degradation silently never fires.
-    // CR-1 (CodeRabbit P2, rc-9): warn when config load failed so the
-    // fallback to defaults is observable — no silent degradation.
-    if (!configLoadResult.ok) {
-      const errSummary = configLoadResult.errors
-        .map((e) => `${e.path}: ${e.reason}`)
-        .join('; ');
-      console.warn(
-        `[pd diagnose] .pd/config.yaml at ${configLoadResult.configPath} is malformed — falling back to default feature flags. Errors: ${errSummary}. Next action: ${configLoadResult.errors[0]?.nextAction ?? 'fix config errors and retry'}`,
-      );
-    }
-    const effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
-
     // PRI-935: derive pain_diagnosis_persistence from the SAME canonical
     // authority the production factory uses (pain-signal-runtime-factory),
     // so a manual `pd diagnose run` ledger write is gated identically to the
@@ -527,7 +518,6 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // (created + initialized above), so the bundle reuses its connection and
     // dispose() never closes it — the outer finally keeps the original
     // ownership.
-    const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig });
     const bundle = await createDiagnosticianRunnerBundle({
       workspaceDir,
       ledgerAdapter,
@@ -540,7 +530,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       intentDocReader: hostDeps.intentDocReader,
       trajectoryTurnReader: hostDeps.trajectoryTurnReader,
       sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
-      telemetrySink: diagnoseTelemetry,
+      telemetrySink: hostDeps.telemetrySink,
     });
     const { runner } = bundle;
 

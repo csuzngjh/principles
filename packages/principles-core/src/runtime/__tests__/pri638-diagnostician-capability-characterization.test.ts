@@ -139,6 +139,9 @@ describe('PRI-638 — unified disabled semantics (capability = internalAgents.di
     startRunSpy.mockClear();
 
     const bridge = await createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
       workspaceDir,
       stateDir,
       ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
@@ -183,6 +186,9 @@ describe('PRI-638 — unified disabled semantics (capability = internalAgents.di
       fs.mkdirSync(stateDir, { recursive: true });
 
       const bridge = await createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
         workspaceDir,
         stateDir,
         ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
@@ -220,6 +226,9 @@ describe('PRI-638 — unified disabled semantics (capability = internalAgents.di
     fs.mkdirSync(stateDir, { recursive: true });
 
     const bridge = await createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
       workspaceDir,
       stateDir,
       ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
@@ -247,6 +256,9 @@ describe('PRI-638 — recovery contract (disabled → re-enable → diagnosis re
 
     // Phase 1 — capability disabled: the pain lands, no diagnosis runs.
     const disabledBridge = await createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
       workspaceDir,
       stateDir,
       ledgerAdapter,
@@ -328,6 +340,9 @@ describe('PRI-638 — recovery contract (disabled → re-enable → diagnosis re
 describe('PRI-638 P1-A — disabled re-trigger preserves durable task state', () => {
   async function makeDisabledBridge(workspaceDir: string, stateDir: string) {
     return createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
       workspaceDir,
       stateDir,
       ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),

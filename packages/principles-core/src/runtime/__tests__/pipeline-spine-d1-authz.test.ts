@@ -73,6 +73,7 @@ function makeSyncOpts(overrides: Partial<SyncServiceOptions> = {}): SyncServiceO
     ledgerAdapter: {} as never,
     isAutoPainSubmissionAuthorized: () => true,
     asyncMode: false,
+    intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
     trajectoryTurnReader: reader,
     sourceMaterialAuthorization: allowAll,
     ...overrides,
@@ -128,7 +129,8 @@ describe('D1 — PainToPrincipleService sync path forwards authorization + traje
     // the reader and NO authorization (the deny-all default stays explicit
     // downstream).
     // @ts-expect-error -- deliberate: the sync union member requires sourceMaterialAuthorization (compile-time contract under test)
-    const service = new PainToPrincipleService({ ...makeSyncOpts(), sourceMaterialAuthorization: undefined });
+    const service = new PainToPrincipleService({
+      ...makeSyncOpts(), sourceMaterialAuthorization: undefined });
     await service.recordPain({ painId: 'pain-004', painType: 'user_frustration', source: 'manual', reason: 'D1' });
     const factoryOpts = requireFactoryOpts(lastFactoryOpts);
     expect(factoryOpts.trajectoryTurnReader).toBe(reader);

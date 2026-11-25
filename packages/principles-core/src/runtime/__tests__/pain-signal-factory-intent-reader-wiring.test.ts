@@ -53,6 +53,10 @@ import {
   disposePainSignalBridgesForWorkspace,
 } from '../pain-signal-runtime-factory.js';
 import { computeEffectivePdConfig } from '../config/pd-config-effective.js';
+
+const NULL_INTENT_READER = { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) };
+const EMPTY_TRAJECTORY_READER = { listUserTurnsForSession: () => [], listAssistantTurns: () => [] };
+const DENY_AUTHORIZATION = { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) };
 import { getDefaultPdConfig } from '../config/pd-config-defaults.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import type { IntentDocReader } from '../intent/intent-doc-reader-port.js';
@@ -116,6 +120,8 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
     try {
       const reader = makeReader('deps-check');
       await createPainSignalBridge({
+      trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
+      sourceMaterialAuthorization: DENY_AUTHORIZATION,
         workspaceDir,
         stateDir: join(workspaceDir, '.state'),
         ledgerAdapter: {} as never,
@@ -135,10 +141,13 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
     }
   });
 
-  it('no reader wired → Stage A runner deps carry undefined reader (legacy callers unchanged)', async () => {
+  it('an explicit null reader reaches Stage A (no implicit missing-reader mode)', async () => {
     const workspaceDir = makeWorkspace();
     try {
       await createPainSignalBridge({
+      intentDocReader: NULL_INTENT_READER,
+      trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
+      sourceMaterialAuthorization: DENY_AUTHORIZATION,
         workspaceDir,
         stateDir: join(workspaceDir, '.state'),
         ledgerAdapter: {} as never,
@@ -150,7 +159,7 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
       const captures = rootCauseCaptures();
       expect(captures).toHaveLength(1);
       const deps = captures[0]?.deps as Record<string, unknown>;
-      expect(deps?.intentDocReader).toBeUndefined();
+      expect(deps?.intentDocReader).toBe(NULL_INTENT_READER);
     } finally {
       await disposePainSignalBridgesForWorkspace(workspaceDir).catch(() => undefined);
       rmSync(join(workspaceDir, '..'), { recursive: true, force: true });
@@ -162,6 +171,8 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
     try {
       const readerOn = makeReader('flag-on');
       const first = await createPainSignalBridge({
+      trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
+      sourceMaterialAuthorization: DENY_AUTHORIZATION,
         workspaceDir,
         stateDir: join(workspaceDir, '.state'),
         ledgerAdapter: {} as never,
@@ -177,6 +188,8 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
       // new runner — leaving Stage A pinned to the flag-on reader forever.
       const readerOff = makeReader('flag-off');
       const second = await createPainSignalBridge({
+      trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
+      sourceMaterialAuthorization: DENY_AUTHORIZATION,
         workspaceDir,
         stateDir: join(workspaceDir, '.state'),
         ledgerAdapter: {} as never,
@@ -196,6 +209,8 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
       // reader binding, same flag state) — but never the flag-off bridge, and
       // no additional runner construction happens.
       const third = await createPainSignalBridge({
+      trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
+      sourceMaterialAuthorization: DENY_AUTHORIZATION,
         workspaceDir,
         stateDir: join(workspaceDir, '.state'),
         ledgerAdapter: {} as never,
@@ -224,6 +239,8 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
         effectiveConfig: makeEffectiveConfig(true),
         getEnvVar: (name: string) => (name === ENV_KEY ? 'sentinel' : undefined),
         intentDocReader: reader,
+        trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
+        sourceMaterialAuthorization: DENY_AUTHORIZATION,
       };
       const first = await createPainSignalBridge(options);
       const second = await createPainSignalBridge(options);
@@ -235,12 +252,15 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
     }
   });
 
-  it('reader PRESENCE participates in the cache key — a reader-less bridge is never reused for a reader-equipped diagnosis (CodeRabbit PR #2684)', async () => {
+  it('reader IDENTITY participates in the cache key — a null-reader bridge is never reused for a reader-equipped diagnosis', async () => {
     const workspaceDir = makeWorkspace();
     try {
-      // First call WITHOUT a reader (e.g. the codex worker's post-processing
-      // resume path). This caches a bridge whose Stage A has no reader.
+      // First call with the explicit null reader. This caches a bridge whose
+      // Stage A intentionally has intent disabled.
       const first = await createPainSignalBridge({
+      intentDocReader: NULL_INTENT_READER,
+      trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
+      sourceMaterialAuthorization: DENY_AUTHORIZATION,
         workspaceDir,
         stateDir: join(workspaceDir, '.state'),
         ledgerAdapter: {} as never,
@@ -254,6 +274,8 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
       // otherwise Stage A silently skips the snapshot with no error.
       const reader = makeReader('presence-check');
       const second = await createPainSignalBridge({
+      trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
+      sourceMaterialAuthorization: DENY_AUTHORIZATION,
         workspaceDir,
         stateDir: join(workspaceDir, '.state'),
         ledgerAdapter: {} as never,

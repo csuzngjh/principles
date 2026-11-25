@@ -11,6 +11,7 @@ import {
   installManifestHostsForPersist,
   parseInstallManifest,
   resolveInstallLayout,
+  resolveOpenClawConfigPath,
   mergeInstallManifestWorkspaces,
   setInstallManifestBackgroundExecution,
   type BackgroundExecutionRecord,
@@ -23,6 +24,34 @@ import {
 // the injected-platform test at the bottom of this file.
 const WS_ROOT = path.resolve(os.tmpdir(), 'pd-install-layout-test');
 const ws = (name: string): string => path.join(WS_ROOT, name);
+
+
+describe('resolveOpenClawConfigPath', () => {
+  const home = path.join(os.tmpdir(), 'oc-home');
+
+  it('uses OPENCLAW_CONFIG_PATH before OPENCLAW_STATE_DIR before the default home config', () => {
+    expect(resolveOpenClawConfigPath({}, home)).toEqual({
+      ok: true,
+      path: path.join(home, '.openclaw', 'openclaw.json'),
+      source: 'default',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: '/state' }, home)).toEqual({
+      ok: true,
+      path: path.join('/state', 'openclaw.json'),
+      source: 'state_dir',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: '/state', OPENCLAW_CONFIG_PATH: '/explicit/openclaw.json' }, home)).toEqual({
+      ok: true,
+      path: path.resolve('/explicit/openclaw.json'),
+      source: 'config_path',
+    });
+  });
+
+  it('relative overrides fail closed instead of silently using the default config', () => {
+    expect(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: 'relative-state' }, home)).toEqual({ ok: false, reason: 'openclaw_state_dir_not_absolute' });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_CONFIG_PATH: 'relative.json' }, home)).toEqual({ ok: false, reason: 'openclaw_config_path_not_absolute' });
+  });
+});
 
 describe('install layout', () => {
   it('resolves a canonical Codex-only install without OpenClaw', () => {
