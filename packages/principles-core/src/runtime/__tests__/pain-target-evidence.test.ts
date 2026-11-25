@@ -1127,6 +1127,37 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect(foreign.recovery as Record<string, unknown>).toMatchObject({ state: 'waiting_for_target_evidence' });
   });
 
+  it('PRI-1296 review: host-scoped cursors cannot starve a task when another host interleaves', async () => {
+    const foreignTaskIds: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const painId = `mcp_170000000120${index}_hx00020${index}`;
+      foreignTaskIds.push(createDiagnosticianTaskId(painId));
+      await submitTargetingTurn10(painId, 'agent_instruction', 'workbuddy');
+    }
+    const codexPainId = 'mcp_1700000001299_hx000299';
+    const codexTaskId = createDiagnosticianTaskId(codexPainId);
+    await submitTargetingTurn10(codexPainId);
+
+    const runHost = (hostKind: 'codex' | 'workbuddy') => reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      hostKind,
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+      nowIso: new Date().toISOString(),
+    });
+
+    // The first codex page is filled by the five older WorkBuddy tasks. When
+    // WorkBuddy interleaves, its independent cursor must not reset the codex
+    // cursor before the sixth (codex) task is examined.
+    expect((await runHost('codex')).flipped).toBe(0);
+    expect((await runHost('workbuddy')).flipped).toBe(5);
+    expect((await runHost('codex')).flipped).toBe(1);
+    expect((await readDiagnostic(codexTaskId)).recovery as Record<string, unknown>).toMatchObject({ state: 'ready_for_diagnosis' });
+    for (const taskId of foreignTaskIds) {
+      expect((await readDiagnostic(taskId)).recovery as Record<string, unknown>).toMatchObject({ state: 'ready_for_diagnosis' });
+    }
+  });
+
   it('devin BUG_0001: a caller wiring NEITHER probe gets a loud per-task error, never a throw that degrades the whole cycle', async () => {
     const painId = 'mcp_1700000001273_a0000012';
     const taskId = createDiagnosticianTaskId(painId);

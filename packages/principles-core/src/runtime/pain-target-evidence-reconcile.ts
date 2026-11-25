@@ -424,7 +424,10 @@ export async function reconcileWaitingTargetEvidenceTasks(
   // the last examined task of the previous FULL page; a short page means the
   // set's tail was reached, so the cursor resets and the next pass wraps to
   // the oldest again. No waiting task can permanently occupy the window.
-  const cursor = await input.stateManager.getDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE);
+  const cursorScope = input.hostKind === undefined
+    ? TARGET_EVIDENCE_RECONCILE_SCOPE
+    : `${TARGET_EVIDENCE_RECONCILE_SCOPE}:${input.hostKind}`;
+  const cursor = await input.stateManager.getDiagnosticianServiceCursor(cursorScope);
   const resumeAfter = cursor !== null && cursor.lastUpdatedAt.length > 0
     ? { updatedAt: cursor.lastUpdatedAt, taskId: cursor.lastTaskId }
     : undefined;
@@ -459,12 +462,12 @@ export async function reconcileWaitingTargetEvidenceTasks(
     const nextCursor = waiting.length === limit
       ? { lastUpdatedAt: last.updatedAt, lastTaskId: last.taskId }
       : { lastUpdatedAt: '', lastTaskId: '' };
-    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE, nextCursor);
+    await input.stateManager.setDiagnosticianServiceCursor(cursorScope, nextCursor);
   } else if (resumeAfter !== undefined) {
     // The stale resume point yielded nothing even after the wrap — the
     // waiting set drained. Clear the cursor so the next pass scans cleanly
     // from the start rather than resuming past a dead position forever.
-    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE, { lastUpdatedAt: '', lastTaskId: '' });
+    await input.stateManager.setDiagnosticianServiceCursor(cursorScope, { lastUpdatedAt: '', lastTaskId: '' });
   }
 
   // PRI-1296 legacy repair: pre-upgrade boolean-probe builds could already
@@ -473,7 +476,10 @@ export async function reconcileWaitingTargetEvidenceTasks(
   // the same bounded rotation contract. This second cursor matters: valid
   // ready tasks parse as not-applicable but can occupy the oldest page, and
   // without rotation they would permanently hide legacy rows behind them.
-  const legacyReadyCursor = await input.stateManager.getDiagnosticianServiceCursor(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE);
+  const legacyReadyCursorScope = input.hostKind === undefined
+    ? TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE
+    : `${TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE}:${input.hostKind}`;
+  const legacyReadyCursor = await input.stateManager.getDiagnosticianServiceCursor(legacyReadyCursorScope);
   const legacyResumeAfter = legacyReadyCursor !== null && legacyReadyCursor.lastUpdatedAt.length > 0
     ? { updatedAt: legacyReadyCursor.lastUpdatedAt, taskId: legacyReadyCursor.lastTaskId }
     : undefined;
@@ -497,11 +503,11 @@ export async function reconcileWaitingTargetEvidenceTasks(
   if (readyCandidates.length > 0) {
     const last = readyCandidates[readyCandidates.length - 1];
     if (last === undefined) throw new Error('unreachable: non-empty ready page has a last element');
-    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE, readyCandidates.length === limit
+    await input.stateManager.setDiagnosticianServiceCursor(legacyReadyCursorScope, readyCandidates.length === limit
       ? { lastUpdatedAt: last.updatedAt, lastTaskId: last.taskId }
       : { lastUpdatedAt: '', lastTaskId: '' });
   } else if (legacyResumeAfter !== undefined) {
-    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE, { lastUpdatedAt: '', lastTaskId: '' });
+    await input.stateManager.setDiagnosticianServiceCursor(legacyReadyCursorScope, { lastUpdatedAt: '', lastTaskId: '' });
   }
 
   for (const task of [...waiting, ...readyCandidates]) {
