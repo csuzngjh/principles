@@ -557,6 +557,7 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
         sessionId: session,
         runId: 'run-pri1296-embedded-turn-10',
         targetTurnId: 'user-turn-row:999999',
+        message: 'a different owner message for a reused run id',
       })).toBe(false);
       expect(resolveOpenclawRunTurnCorrelation({
         workspaceDir,
