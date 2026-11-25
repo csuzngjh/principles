@@ -139,18 +139,18 @@ function resolveOriginalUserMessageForTargetEvidence(
   // message. A rebuilt prompt, history fragment or wrapper mismatch is not
   // promoted into source evidence.
   const messages = getOwnValue(event, 'messages');
-  if (!Array.isArray(messages)) return undefined;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (typeof message !== 'object' || message === null || Array.isArray(message) || !hasMessageRole(message, 'user')) {
-      continue;
-    }
-    const content = getOwnValue(message, 'content');
-    return typeof content === 'string' && content.length > 0 && content === resolvedMessage
-      ? content
-      : undefined;
+  if (!Array.isArray(messages) || messages.length === 0) return undefined;
+  // Only the final host message can be the turn that triggered this run.
+  // Never walk backward to a prior user message if an assistant/tool message
+  // follows it in the snapshot.
+  const lastMessage = messages[messages.length - 1];
+  if (typeof lastMessage !== 'object' || lastMessage === null || Array.isArray(lastMessage) || !hasMessageRole(lastMessage, 'user')) {
+    return undefined;
   }
-  return undefined;
+  const content = getOwnValue(lastMessage, 'content');
+  return typeof content === 'string' && content.length > 0 && content === resolvedMessage
+    ? content
+    : undefined;
 }
 
 function captureOpenclawTargetTurnForRun(input: {
