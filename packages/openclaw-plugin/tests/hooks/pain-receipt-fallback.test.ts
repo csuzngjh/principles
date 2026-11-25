@@ -63,7 +63,8 @@ import {
 
 /** Identity shape of the REAL after_tool_call emission (installed 2026.11.5
  * dist, embedded-agent-subscribe): context `sessionId` + execution-record
- * `toolCallId`. NO submission turn — OpenClaw exposes none (audit §2.4). */
+ * `toolCallId`. No native submission-turn field; the local exact-turn join
+ * is supplied separately by the same-run correlation map. */
 const EVENT_IDENTITY = {
   sessionId: '0c1a2d3e-4f50-4a11-bcde-ac1234567890',
   toolCallId: 'call_01a20d41fdfd758fab694df2fe1fe263',
