@@ -387,6 +387,21 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
     try {
       const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
       try {
+        // SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): ONE assembly
+        // point for the five host collaborators. The target-evidence reconcile
+        // and any diagnostician bridge in this cycle share the SAME consent
+        // authorization instance.
+        const hostDeps = resolveWorkspacePipelineHostDeps({
+          workspaceDir,
+          effectiveConfig: config.effective,
+          telemetryPersistenceFailureHandler: (detail) => {
+            try {
+              emitEvent('WORKBUDDY_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
+            } catch {
+              // Telemetry persistence warnings must never fail the worker cycle.
+            }
+          },
+        });
         const sweep = await handle.stateManager.runRecoverySweep();
         if (sweep.recovered > 0 || sweep.errors.length > 0) {
           emitEvent('WORKBUDDY_WORKER_RECOVERY_SWEEP', JSON.stringify({ recovered: sweep.recovered, failed: sweep.errors.length }));
@@ -398,7 +413,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
         targetEvidenceReconcile = await reconcileWaitingTargetEvidenceTasks({
           stateManager: handle.stateManager,
           readTargetTurnEvidence: (sessionId, turnId) => readWorkbuddyTargetTurnEvidence(workspaceDir, sessionId, turnId),
-          sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+          sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
           hostKind: 'workbuddy',
           nowIso: new Date().toISOString(),
         });
@@ -410,24 +425,9 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
           const stateDir = path.join(workspaceDir, '.state');
           let releaseBridge: (() => Promise<void>) | undefined;
           try {
-            // SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): ONE assembly
-            // point for the five host collaborators. The trajectory reader and
-            // the source-material gate share the SAME consent-ledger
-            // authorization instance (previously two separate instances per
-            // call). PRI-1233 / SPEC §9.2: this worker is where Stage A
-            // actually runs for governance-admitted WorkBuddy pains;
-            // PRI-1265: the Stage A gets the bound session's ORIGINAL turns.
-            const hostDeps = resolveWorkspacePipelineHostDeps({
-              workspaceDir,
-              effectiveConfig: config.effective,
-              telemetryPersistenceFailureHandler: (detail) => {
-                try {
-                  emitEvent('WORKBUDDY_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
-                } catch {
-                  // Telemetry persistence warnings must never fail the worker cycle.
-                }
-              },
-            });
+            // PRI-1233 / SPEC §9.2: this worker is where Stage A actually runs
+            // for governance-admitted WorkBuddy pains; PRI-1265: the Stage A gets
+            // the bound session's ORIGINAL turns through the shared host deps.
             const bridge = await createPainSignalBridge({
               workspaceDir,
               stateDir,
