@@ -548,6 +548,19 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
         sessionId: session,
         runId: 'run-pri1296-embedded-turn-11',
       })).toBe(secondHostTurnId);
+      // A reused run id that points to a different persisted turn is ambiguous,
+      // so a late after_tool_call event cannot be silently retargeted.
+      expect(rememberOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-10',
+        targetTurnId: 'user-turn-row:999999',
+      })).toBe(false);
+      expect(resolveOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-10',
+      })).toBeUndefined();
       expect(readOpenclawTargetTurnEvidence(workspaceDir, session, firstHostTurnId)).toMatchObject({
         status: 'available',
         entries: expect.arrayContaining([expect.objectContaining({ note: 'EMBEDDED-T10-OWNER-CORRECTION' })]),
