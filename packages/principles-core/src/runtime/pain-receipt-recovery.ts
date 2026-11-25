@@ -635,19 +635,6 @@ function evaluateRecoveryPass(input: {
   const targetTurnId = existingVerifiedTargetTurnId ?? requestedTargetTurnId ?? identity.submissionTurnId;
   const evidenceCount = countEvidence(diagnostic);
   const hasOwnerStatement = isRecord(diagnostic.record.anchor) && diagnostic.record.anchor.type === 'owner_expectation';
-  if (requireTargetTurnIdentity && targetTurnId === undefined && evidenceCount === 0 && !hasOwnerStatement) {
-    return {
-      action: 'report',
-      outcome: {
-        status: 'rejected',
-        reasonCode: 'target_turn_identity_unavailable',
-        painId: receipt.painId,
-        taskId: receipt.taskId,
-        ...(!hintPresent ? { taskUnbound: true as const } : {}),
-      },
-    };
-  }
-
 
   const existingRecovery = diagnostic.record.recovery;
   const existingRef = isRecord(existingRecovery) && isRecord(existingRecovery.receiptRef)
@@ -663,6 +650,9 @@ function evaluateRecoveryPass(input: {
     // bound this session): identity remains idempotent, but evidence admission
     // is re-evaluated because pre-PRI-1296 boolean flips could have left an
     // empty-evidence task ready. A no-change replay still writes nothing.
+    if (requireTargetTurnIdentity && targetTurnId === undefined && evidenceCount === 0 && !hasOwnerStatement) {
+      return { action: 'report', outcome: { status: 'rejected', reasonCode: 'target_turn_identity_unavailable', painId: receipt.painId, taskId: receipt.taskId } };
+    }
     return evaluateAlreadyBoundTargetEvidence({
       diagnostic,
       sessionId: identity.sessionId,
@@ -702,6 +692,18 @@ function evaluateRecoveryPass(input: {
     // An original pd_submit_pain task always carries the versioned ingress
     // block; without it this is not that task — fail closed, no mutation.
     return { action: 'report', outcome: { status: 'rejected', reasonCode: 'diagnostic_payload_invalid:pain_ingress_missing', painId: receipt.painId, taskId: receipt.taskId, taskUnbound: true } };
+  }
+  if (requireTargetTurnIdentity && targetTurnId === undefined && evidenceCount === 0 && !hasOwnerStatement) {
+    return {
+      action: 'report',
+      outcome: {
+        status: 'rejected',
+        reasonCode: 'target_turn_identity_unavailable',
+        painId: receipt.painId,
+        taskId: receipt.taskId,
+        taskUnbound: true,
+      },
+    };
   }
   // P1-3 (r2b, devin finding 0001) + review round 2 (directive I3): the
   // target is the original submission's EXPLICIT request when it named one
