@@ -79,6 +79,8 @@ export function resolveOpenclawRunTurnCorrelation(input: {
   readonly workspaceDir: string;
   readonly sessionId: string | undefined;
   readonly runId: string | undefined;
+  /** Production consumes the mapping once so a reused runId cannot retarget a later tool call. */
+  readonly consume?: boolean;
   readonly now?: number;
 }): string | undefined {
   if (input.sessionId === undefined || input.runId === undefined) return undefined;
@@ -91,10 +93,15 @@ export function resolveOpenclawRunTurnCorrelation(input: {
     entries.delete(entryKey);
     return undefined;
   }
-  // Refresh insertion order for bounded LRU eviction without extending the
-  // correlation lifetime beyond its original TTL.
-  entries.delete(entryKey);
-  entries.set(entryKey, entry);
+  if (input.consume !== false) {
+    // A target association is for one receipt completion. Consuming it prevents
+    // a delayed or later tool call from reusing a stale runId mapping.
+    entries.delete(entryKey);
+  } else {
+    // Test/diagnostic peek: refresh insertion order without extending TTL.
+    entries.delete(entryKey);
+    entries.set(entryKey, entry);
+  }
   return entry.targetTurnId;
 }
 
