@@ -1,5 +1,122 @@
 # create-principles-disciple
 
+## 1.156.0
+
+### Minor Changes
+
+- c895c64: Service Host Phase 5 — the PD-owned Service Host is the fresh-install default
+  background lifecycle owner.
+  
+  - install-layout: new `provision_fresh_install` ownership transition
+    (legacy_owned with NO record → service_host_owned in one CAS write,
+    generation 1). It refuses without `freshInstall=true` and refuses any
+    workspace that already carries an ownership record, so upgrades keep using
+    the quiescing `begin_handover` sequence. Service-Host-only manifests
+    (`hosts: []` + declared workspaces) are now valid; an empty manifest with
+    neither stays structural damage.
+  - create-principles-disciple: `--host` has no default (no silent OpenClaw);
+    `none` installs no host adapter. Fresh installs default to registering AND
+    enabling the user-level OS scheduler, then provision the ACTUAL bound host
+    workspaces into Service Host ownership (active-release no-consume readiness →
+    CAS → first real managed cycle → `<pdHome>/service/install-provisioning.json`
+    evidence). A failed/deferred attempt records a PER-WORKSPACE pending entry
+    (`<pdHome>/service/pending-provisioning.json`), so `--host all` keeps every
+    deferred workspace resumable; each entry persists the REAL resolved directory
+    (a re-pointed symlink cannot claim a new target later); a later explicit
+    `--enable-service-host` install verifies each workspace's CURRENT host
+    binding, probes that host, and refuses to flip while a legacy OpenClaw
+    Gateway may still consume it.
+    Historical installs never wrote a pending entry and are never resumed
+    implicitly. `--yes` accepts the recommended default, `--json`/
+    `--non-interactive` without consent reports `consent_required` instead of
+    creating a trigger, `--no-service-host` opts out, and upgrades keep
+    refresh-if-registered. Refreshing an installed host reads its real binding
+    (Codex plugin-data / payload copy) and reuses that workspace instead of this
+    run's target; the console update resolves a legal empty `hosts` record to
+    `none`; the interactive install mode is recommended from the FINAL workspace
+    directory, never from another default.
+  - pd-cli: `pd service run-once --trigger installer` records the fresh-install
+    first cycle; `pd service status` exposes `hostBindingState`
+    (`bound` / `waiting_for_host_binding`) so a Service-Host-only workspace is
+    truthful instead of implying a worker that does not exist.
+
+### Patch Changes
+
+- 46494e3: The Console update routes (`/api/update/check`, `/api/update/apply-full`) no
+  longer hold the server's event loop while the readiness gate re-hashes the
+  deployed bootstrap executor. The gate gains an async factory
+  (`createReleaseManagerAuthorityAsync`, exported through the `./update-console`
+  seam) that reads the executor tree without blocking; both factories run one
+  readiness rule. The Console prefers the async factory and falls back to the
+  synchronous one against an older deployed release-manager (an update swaps
+  runtime components one by one). The synchronous factory and the bootstrap
+  executor are unchanged.
+  
+  The Update page no longer waits for the network-bound version check before it
+  renders: history and recovery show immediately, the check reports in place
+  (with its reason when it fails, and with an explanation when it runs long), a
+  finished update's result stays on screen while data re-reads, the pre-update
+  status is not carried past the update, and transaction polls never stack.
+  
+  An update in progress is narrated instead of looking stuck. The update
+  executor reports where it is — downloading (with bytes received, a rate and a
+  time left), verifying, deploying, finishing — through an observational
+  progress sidecar beside the transaction journal (never an authority: it is
+  removed when the transaction ends, and a stale or malformed one reads as
+  "unknown"). The page shows the stage, a progress number and the elapsed time,
+  and reads `readTransactionProgress` only when the deployed release-manager
+  exports it.
+  
+  An update no longer starts a second console. The installer's run mode gains
+  `launchConsole`; the update executor turns it off, so no `pd console open`
+  runs beside the console the update was asked from and no welcome tab opens.
+  A fresh install keeps opening the console in the browser.
+  
+  A console hands itself over to the release an update just activated: it
+  watches `<pdHome>/active.json` (written after the transaction reached
+  `confirmed`), starts a successor from the installed code on the same port,
+  and exits once the successor answers. It never leaves the port unserved — the
+  predecessor stops accepting only after the successor exists and takes the
+  port back if the successor never comes up. Two consoles do not hand
+  thems over: one the Companion launched (`PD_INVOCATION_SOURCE=companion` —
+  the Companion relaunches the console it owns) and one that does not run from
+  the installed runtime (its successor would be the same code).
+  `PD_CONSOLE_RELEASE_HANDOVER=off` disables the watch. The transaction
+  endpoint reports the answering `serverPid` and `handover` (`console`,
+  `companion` or `manual`); the page reloads into the successor, waits for the
+  Companion on its own beat, or asks for a restart when nobody switches.
+- c7b2856: On Windows, an update no longer opens a trail of terminal windows. The update
+  runs in the bootstrap executor, which is started detached and therefore has no
+  console; every console program it started without `windowsHide: true` got a
+  new, visible terminal window. The installer now hides the console of every
+  child process it starts (tar, `cmd /c npm`, the `pd` verification probes, the
+  console probe, the environment probes), and `pd console open` hides the console
+  of the Console server and of the stale-console probes it runs — that server
+  window used to stay open until the server was killed. An interactive
+  `pd console open` in a terminal is unchanged: the server still shares that
+  terminal.
+  
+  The OpenClaw plugin's tool probes (`pd capabilities`: rg, sg, fd, qmd,
+  ast-grep, shellcheck) hide their console for the same reason — the host process
+  they run in has no console on Windows.
+  
+  A fail-closed source guard (`scripts/lib/child-process-window-scan.mjs`) now
+  runs in the test suites of the installer, the CLI, the plugin, the Console
+  server and the Companion: a child_process call that does not hide its console,
+  or that the scan cannot attribute, fails the suite.
+- 0e96c58: Bump fs-extra from 11.4.0 to 11.4.1 in the installer runtime dependencies (dependabot PR #2781).
+- 51d3fce: Dependency bump: tailwindcss 4.3.3 -> 4.3.5 for the bundled @principles/pd-console UI; console release-lock re-synced to keep staged reproduction reproducible (dependabot PR #2785).
+- d9c3051: Bump @earendil-works/pi-ai from 1.4.0 to 1.6.0 in the installer runtime dependencies (dependabot PR #2786).
+- 500c199: Bump @earendil-works/pi-agent-core from 1.2.0 to 1.6.0 in the installer runtime dependencies (dependabot PR #2787).
+- bdccc28: Bump ora from 9.4.1 to 10.0.0 in the installer runtime dependencies (dependabot PR #2788).
+- b99dc3d: Pipeline Spine Phase 1 (PRI-1291): fix the three verified pipeline breaks. D1 — `PainToPrincipleServiceOptions` is now a discriminated union on `asyncMode` (sync mode requires `sourceMaterialAuthorization` + `trajectoryTurnReader`), the sync bridge call forwards the authorization, and the three sync entry points (pd pain record --wait, OpenClaw hook, OpenClaw /pd-pain command) wire the workspace consent-ledger authorization and trajectory reader. D2 — `deviationAnchorToPainAnchor` single-tracks the anchor: the ingress/bridge write side derives the canonical `anchor`, the assembler recovers historical `deviationAnchor` rows and surfaces malformed ones in ambiguityNotes. D4 — `pd candidate internalize` gains the authority gate (dedup-first ordering, raw-kind validation, admission-document fail-closed, seed suppression, rule seeding window preserved) and both automatic seed entries (`diagnose`, PainSignalBridge) refuse invalid RAW kinds with zero seeding; `validateRecommendationKind` is exported from the runtime barrel with admission records.
+  
+  Owner recovery and bridge lifecycle: preserve persisted Owner parks during failed automatic retries, and give each production bridge acquisition an explicit release scope. Workspace retirement drains active borrowers and pending constructors before closing SQLite resources.
+- 42159cf: 为产品版本 2.8.12 重铸安装器 payload 身份戳：main 上已有多轮 cohort 以 productVersion=2.8.11 发布且 stable 渠道已服务 2.8.11，已装 2.8.11 的运行时按"不高于已装版本则禁止升级"规则收不到本批合并 PR；需要一个新的 patch cohort 让签名频道能以 `product_version=auto` 发出 2.8.12。
+- Updated dependencies [db6fb22]
+- Updated dependencies [c895c64]
+  - @principles/install-layout@0.11.0
+
 ## 1.155.3
 
 ### Patch Changes

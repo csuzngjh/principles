@@ -1,5 +1,33 @@
 # @principles/host-runtime
 
+## 4.7.0
+
+### Minor Changes
+
+- d738de4: PRI-1273 (A2): automatic evidence backfill when a known target turn's body arrives late
+  
+  - The Codex worker's waiting-task reconcile now BACKFILLS the arrived target-turn evidence in the SAME expected-value CAS that flips `waiting_for_target_evidence` → `ready_for_diagnosis`: the original task's top-level `evidence` array and its versioned `painIngress.evidenceClass` (`available`/`entryCount`) are persisted together with the disposition, so the real array and count stay consistent for the read-back validator — exactly like a submission whose target text existed up front (SPEC-PD-FEEDBACK-RESILIENCE-001 TD §3 step 6). An already non-empty evidence array is preserved untouched (only the disposition flips). The flip's CAS preconditions now also carry lease generation + attempt count (P1-4 parity with the receipt recovery).
+  - A source-material consent denial is no longer mixed into the waiting set: when the consent-ledger decision denies the read (missing / revoked / not granted / unreadable), the reconcile reclassifies the task to `blocked_by_source_material_consent` with the reason code `target_turn_source_material_<reason>` — no evidence is persisted from a denied source, the diagnosis gates keep refusing it, and only a newly authorized target turn may unblock it.
+  - New shared `TargetTurnEvidenceRead` vocabulary (Core export): the structured exact-turn read (`available` entries / `not_found` / `blocked_by_consent` / `read_failed`) that the submit path's opportunistic enrichment and the worker reconcile's backfill now share — one authority for the entries shape both paths persist. `pd-mcp-server` imports the shared type (its local duplicate removed).
+  - New `listGovernanceConversationTextsForHostTurn` (host-runtime, devin BUG_0002): the ONE SQL selection rule for an exact target turn's readable text — host/session/turn + conversational kind + retained readable text filtered inside the query, keeping the turn's LAST N rows (reversed to capture order) so a final answer sitting behind dozens of tool/reasoning observations still surfaces. The worker backfill reader, the diagnosis-time exact-turn reader and the submit path's enrichment all consume it; the old generic early-window (`ORDER BY id LIMIT`) reads are gone from all three.
+  - New `readCodexTargetTurnEvidence` (codex-adapter): the consent-gated EXACT (rollout identity, host turn id) governance-store read behind the reconcile — the source-material ledger is consulted BEFORE any store query (PRI-1283 R2 parity with the submit path), rows keep the same retention/excerpt contract as submit-time enrichment (user/assistant turns, `operational`/`promoted` retention, `governance_observation:<logicalKey>` sourceRef, bounded note, last 12), and another session's rows, another host's same-key rows and retention-expired rows never qualify. `codexTargetTurnTextAvailable` becomes its `available` projection.
+  - Read failures surface as bounded per-task errors (`target_evidence_read_failed`) instead of a silent false; malformed entries from the reader are rejected element-wise (rc-4), never partially persisted.
+  - E2E acceptance (real hook ingestion → real dist MCP server submit over stdio → transcript growth → real worker cycle with catch-up → backfill → real split-pipeline diagnosis with the deterministic LLM boundary → candidate admission): same painId/taskId, evidence exactly the target turn's rows, evidenceClass consistent, the model call contains the target turn and never turns 11/12, repeated cycles are no-ops, and consent revocation between submit and arrival blocks instead of diagnosing. An oversized record and an incomplete JSONL tail around the arrival converge without corrupting or duplicating the backfill.
+
+### Patch Changes
+
+- b99dc3d: Pipeline Spine Phase 1 (PRI-1291): fix the three verified pipeline breaks. D1 — `PainToPrincipleServiceOptions` is now a discriminated union on `asyncMode` (sync mode requires `sourceMaterialAuthorization` + `trajectoryTurnReader`), the sync bridge call forwards the authorization, and the three sync entry points (pd pain record --wait, OpenClaw hook, OpenClaw /pd-pain command) wire the workspace consent-ledger authorization and trajectory reader. D2 — `deviationAnchorToPainAnchor` single-tracks the anchor: the ingress/bridge write side derives the canonical `anchor`, the assembler recovers historical `deviationAnchor` rows and surfaces malformed ones in ambiguityNotes. D4 — `pd candidate internalize` gains the authority gate (dedup-first ordering, raw-kind validation, admission-document fail-closed, seed suppression, rule seeding window preserved) and both automatic seed entries (`diagnose`, PainSignalBridge) refuse invalid RAW kinds with zero seeding; `validateRecommendationKind` is exported from the runtime barrel with admission records.
+  
+  Owner recovery and bridge lifecycle: preserve persisted Owner parks during failed automatic retries, and give each production bridge acquisition an explicit release scope. Workspace retirement drains active borrowers and pending constructors before closing SQLite resources.
+- Updated dependencies [d738de4]
+- Updated dependencies [2b8ac42]
+- Updated dependencies [49a7713]
+- Updated dependencies [b99dc3d]
+- Updated dependencies [db6fb22]
+- Updated dependencies [c895c64]
+  - @principles/core@8.2.0
+  - @principles/install-layout@0.11.0
+
 ## 4.6.0
 
 ### Minor Changes
