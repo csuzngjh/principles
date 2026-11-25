@@ -371,10 +371,15 @@ export async function runAfterToolCallReceiptFallback(input: {
     : typeof ctxToolCallId === 'string' && ctxToolCallId.length > 0
       ? ctxToolCallId
       : undefined;
+  // Peek first: validation may reject a malformed submission that the agent
+  // can correct and retry in the same run. Consume the association only after
+  // a validated receipt reaches a non-rejected recovery outcome; otherwise a
+  // first rejection would exhaust the exact-turn join before the retry.
   const targetTurnId = resolveOpenclawRunTurnCorrelation({
     workspaceDir: input.workspaceDir,
     sessionId: input.ctx.sessionId,
     runId: input.event.runId,
+    consume: false,
   });
   const fallback = await attemptPainReceiptFallback({
     workspaceDir: input.workspaceDir,
@@ -391,5 +396,12 @@ export async function runAfterToolCallReceiptFallback(input: {
     requireTargetTurnIdentity: true,
     minimalMetadataGranted,
   });
+  if (targetTurnId !== undefined && fallback.status === 'attempted' && fallback.outcome.status !== 'rejected') {
+    resolveOpenclawRunTurnCorrelation({
+      workspaceDir: input.workspaceDir,
+      sessionId: input.ctx.sessionId,
+      runId: input.event.runId,
+    });
+  }
   return { line: painReceiptFallbackDiagnostic(fallback) };
 }

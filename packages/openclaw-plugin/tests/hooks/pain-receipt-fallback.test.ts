@@ -50,7 +50,7 @@ vi.mock('@principles/core/runtime', async (importOriginal) => {
 });
 
 import { captureOpenclawUserTurnForTargetEvidence } from '../../src/hooks/openclaw-target-turn-capture.js';
-import { clearOpenclawRunTurnCorrelationsForTest, rememberOpenclawRunTurnCorrelation } from '../../src/hooks/openclaw-run-turn-correlation.js';
+import { clearOpenclawRunTurnCorrelationsForTest, rememberOpenclawRunTurnCorrelation, resolveOpenclawRunTurnCorrelation } from '../../src/hooks/openclaw-run-turn-correlation.js';
 import {
   OPENCLAW_PAIN_SUBMIT_SERVER_ID,
   attemptPainReceiptFallback,
@@ -383,6 +383,75 @@ describe('runAfterToolCallReceiptFallback — exact same-run target-turn associa
     expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'receipt_recovered' });
   });
 
+  it('keeps the same-run target association after a rejected submission so a corrected retry can bind', async () => {
+    const ws = workspace({ minimalMetadata: true });
+    const painId = 'mcp_1764000000032_cc000032';
+    const taskId = await persistUnboundPain(ws, painId);
+    const sessionId = EVENT_IDENTITY.sessionId;
+    const runId = 'openclaw-run-rejected-then-corrected';
+    const targetTurnId = 'user-turn-row:78';
+    const consent = recordConversationIngestionConsent(ws, 'openclaw', {
+      decision: 'granted',
+      decidedVia: 'owner_directive',
+      disclosureVersion: 'test-v1',
+      evidenceRef: 'pri-1296-rejected-retry-target',
+    });
+    expect(consent.ok).toBe(true);
+    captureOpenclawUserTurnForTargetEvidence({
+      workspaceDir: ws,
+      sessionId,
+      hostTurnId: undefined,
+      fallbackHostTurnId: targetTurnId,
+      text: 'the exact owner message behind the retry',
+    });
+    expect(rememberOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId,
+      runId,
+      targetTurnId,
+      message: 'the exact owner message behind the retry',
+    })).toBe(true);
+
+    const rejected = await runAfterToolCallReceiptFallback({
+      workspaceDir: ws,
+      event: {
+        toolName: 'pd-recall__pd_submit_pain',
+        runId,
+        toolCallId: 'call_rejected_first',
+        result: openclawEnvelope({ note: 'Pain submitted successfully.' }),
+      },
+      ctx: { sessionId },
+    });
+    expect(rejected.line).toContain('pain_receipt_rejected:receipt_');
+    expect(resolveOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId,
+      runId,
+      consume: false,
+    })).toBe(targetTurnId);
+
+    const corrected = await runAfterToolCallReceiptFallback({
+      workspaceDir: ws,
+      event: {
+        toolName: 'pd-recall__pd_submit_pain',
+        runId,
+        toolCallId: 'call_corrected_retry',
+        result: envelopeForReceipt(painId, ws),
+      },
+      ctx: { sessionId },
+    });
+    expect(corrected.line).toBe(`pain_receipt_recovered:taskId=${taskId}:state=ready_for_diagnosis`);
+    const diagnostic = await readDiagnostic(ws, taskId);
+    const verified = ((diagnostic.painIngress as Record<string, unknown>).verifiedHostSession) as Record<string, unknown>;
+    expect(verified.targetTurnId).toBe(targetTurnId);
+    expect(resolveOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId,
+      runId,
+      consume: false,
+    })).toBeUndefined();
+  });
+
   it('keeps a task unbound when the after_tool_call run has no same-run turn mapping', async () => {
     const ws = workspace({ minimalMetadata: true });
     const painId = 'mcp_1764000000031_cc000031';
@@ -638,9 +707,32 @@ describe('runAfterToolCallReceiptFallback — hook entry (flags from the CURRENT
     const ws = workspace({ minimalMetadata: true });
     const painId = 'mcp_1764000000006_ff000006';
     await persistUnboundPain(ws, painId);
+    const runId = 'openclaw-run-hook-authorized';
+    const targetTurnId = 'user-turn-row:90';
+    expect(recordConversationIngestionConsent(ws, 'openclaw', {
+      decision: 'granted',
+      decidedVia: 'owner_directive',
+      disclosureVersion: 'test-v1',
+      evidenceRef: 'hook-authorized-target',
+    }).ok).toBe(true);
+    captureOpenclawUserTurnForTargetEvidence({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      hostTurnId: undefined,
+      fallbackHostTurnId: targetTurnId,
+      text: 'authorized hook owner message',
+    });
+    expect(rememberOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      runId,
+      targetTurnId,
+      message: 'authorized hook owner message',
+    })).toBe(true);
     const first = await runAfterToolCallReceiptFallback({
       event: {
         toolName: 'pd-recall__pd_submit_pain',
+        runId,
         toolCallId: EVENT_IDENTITY.toolCallId,
         result: envelopeForReceipt(painId, ws),
       },
@@ -664,8 +756,30 @@ describe('runAfterToolCallReceiptFallback — hook entry (flags from the CURRENT
     const ws = workspace({ minimalMetadata: true });
     const painId = 'mcp_1764000000007_aa000007';
     await persistUnboundPain(ws, painId);
+    const runId = 'openclaw-run-before-revocation';
+    const targetTurnId = 'user-turn-row:91';
+    expect(recordConversationIngestionConsent(ws, 'openclaw', {
+      decision: 'granted',
+      decidedVia: 'owner_directive',
+      disclosureVersion: 'test-v1',
+      evidenceRef: 'before-revocation-target',
+    }).ok).toBe(true);
+    captureOpenclawUserTurnForTargetEvidence({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      hostTurnId: undefined,
+      fallbackHostTurnId: targetTurnId,
+      text: 'before revocation owner message',
+    });
+    expect(rememberOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      runId,
+      targetTurnId,
+      message: 'before revocation owner message',
+    })).toBe(true);
     const before = await runAfterToolCallReceiptFallback({
-      event: { toolName: 'pd-recall__pd_submit_pain', toolCallId: EVENT_IDENTITY.toolCallId, result: envelopeForReceipt(painId, ws) },
+      event: { toolName: 'pd-recall__pd_submit_pain', runId, toolCallId: EVENT_IDENTITY.toolCallId, result: envelopeForReceipt(painId, ws) },
       ctx: { sessionId: EVENT_IDENTITY.sessionId },
       workspaceDir: ws,
     });
