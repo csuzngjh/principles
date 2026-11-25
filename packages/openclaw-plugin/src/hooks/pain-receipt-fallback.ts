@@ -342,10 +342,10 @@ export function painReceiptFallbackDiagnostic(result: PainReceiptFallbackResult)
  * `host_identity_minimal_metadata` verdict from the CURRENT workspace config
  * (per-event re-read — a Workspace-side revocation stops binding on the next
  * event without a gateway restart; a malformed config fails closed for the
- * identity path) and aggregates the host-authoritative identity from the
- * EVENT and its hook context (`sessionId` on the context, `toolCallId` on
- * the event — both real host fields, audit §2.4). Never throws; the caller
- * logs the returned line.
+ * identity path) and aggregates the host-authoritative identity from
+ * the event and context (`sessionId` on context, `toolCallId` on event).
+ * The event's `runId` joins only to the exact target-turn identity captured
+ * by the prompt hook; it is never treated as a turn id itself. Never throws.
  */
 export async function runAfterToolCallReceiptFallback(input: {
   readonly event: PluginHookAfterToolCallEvent;
