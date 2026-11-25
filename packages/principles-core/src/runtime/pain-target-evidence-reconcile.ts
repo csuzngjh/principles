@@ -221,6 +221,50 @@ export function validateTargetTurnEvidenceEntries(entries: readonly unknown[]): 
   return validated;
 }
 
+/** Count only entries that satisfy the evidence contract. A malformed legacy
+ * array is not partial evidence: it proves nothing and must not make a target
+ * task independently ready. */
+function persistedValidEvidenceCount(diagnostic: Record<string, unknown>): number {
+  if (!Array.isArray(diagnostic.evidence)) return 0;
+  return validateTargetTurnEvidenceEntries(diagnostic.evidence)?.length ?? 0;
+}
+
+function targetEvidenceStillRequired(diagnostic: Record<string, unknown>, targetTurnId: string): boolean {
+  const {anchor} = diagnostic;
+  return targetEvidenceWaitRequired({
+    hasVerifiedSession: true,
+    targetTurnId,
+    submittedEvidenceCount: persistedValidEvidenceCount(diagnostic),
+    hasOwnerStatement: isRecord(anchor) && anchor.type === 'owner_expectation',
+  });
+}
+
+/**
+ * True for the unsafe legacy shape the worker sweep repairs: a task already
+ * says `ready_for_diagnosis`, but its verified target turn still requires
+ * evidence that the persisted task does not validly carry. The diagnostician
+ * candidate picker uses the same predicate as a fail-closed guard so a row
+ * cannot be executed merely because the bounded repair sweep has not reached
+ * its page yet.
+ */
+export function diagnosticJsonIsUnprovenReadyTargetEvidence(diagnosticJson: string | null | undefined): boolean {
+  if (diagnosticJson === null || diagnosticJson === undefined) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagnosticJson);
+  } catch {
+    return false;
+  }
+  if (!isRecord(parsed)) return false;
+  const {recovery, painIngress} = parsed;
+  if (!isRecord(recovery) || recovery.state !== 'ready_for_diagnosis') return false;
+  const verified = isRecord(painIngress) ? painIngress.verifiedHostSession : undefined;
+  if (!isRecord(verified) || verified.status !== 'verified') return false;
+  const {targetTurnId} = verified;
+  return typeof targetTurnId === 'string' && targetTurnId.length > 0
+    && targetEvidenceStillRequired(parsed, targetTurnId);
+}
+
 /** Parse a reconcilable task's persisted facts. Waiting tasks are ordinary
  * candidates; a ready task is a candidate ONLY when the current admission
  * rule says its target evidence is still required — the exact shape left
@@ -275,15 +319,7 @@ function parseWaitingTaskFacts(task: TaskRecord): ParsedTargetEvidenceTask {
       receivedAt: rawRef.receivedAt,
     }
     : undefined;
-  const existingEvidence = Array.isArray(parsed.evidence) ? parsed.evidence : [];
-  const {anchor} = parsed;
-  const hasOwnerStatement = isRecord(anchor) && anchor.type === 'owner_expectation';
-  const evidenceRequired = targetEvidenceWaitRequired({
-    hasVerifiedSession: true,
-    targetTurnId,
-    submittedEvidenceCount: existingEvidence.length,
-    hasOwnerStatement,
-  });
+  const evidenceRequired = targetEvidenceStillRequired(parsed, targetTurnId);
   const invalidReady = recoveryState === 'ready_for_diagnosis' && evidenceRequired;
   if (recoveryState === 'ready_for_diagnosis' && !invalidReady) return { status: 'not_applicable' };
   return {
