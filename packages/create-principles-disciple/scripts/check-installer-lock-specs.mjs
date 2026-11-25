@@ -84,7 +84,15 @@ for (const section of sections) {
       continue;
     }
     if (lockDeps[name] !== spec) {
-      if (cohortBump) { cohortTolerated.add(`${section}.${name}`); continue; }
+      // Tolerance only holds while nothing already locked satisfies the new
+      // spec: if the locked version does satisfy it, a published version
+      // matching the spec exists and the lockfile could have been regenerated
+      // — the drift is not cohort-forced.
+      const lockedVersion = lock.packages?.[`node_modules/${name}`]?.version;
+      const lockedSatisfies = Boolean(lockedVersion)
+        && Boolean(semver.validRange(spec))
+        && semver.satisfies(lockedVersion, spec, { includePrerelease: true });
+      if (cohortBump && !lockedSatisfies) { cohortTolerated.add(`${section}.${name}`); continue; }
       problems.push(`${section}.${name}: manifest spec "${spec}" != lock spec "${lockDeps[name]}"`);
     }
   }
