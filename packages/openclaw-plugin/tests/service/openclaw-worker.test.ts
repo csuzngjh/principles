@@ -31,7 +31,7 @@ import type { WorkspaceBackgroundOwnership } from '@principles/install-layout';
 import type { InternalizationConsumerCyclePorts } from '@principles/host-runtime';
 import { prepareOpenClawPromptRound } from '../../src/hooks/prompt.js';
 import { readOpenclawTargetTurnEvidence } from '../../src/hooks/pain-receipt-fallback.js';
-import { clearOpenclawRunTurnCorrelationsForTest, resolveOpenclawRunTurnCorrelation } from '../../src/hooks/openclaw-run-turn-correlation.js';
+import { clearOpenclawRunTurnCorrelationsForTest, rememberOpenclawRunTurnCorrelation, resolveOpenclawRunTurnCorrelation } from '../../src/hooks/openclaw-run-turn-correlation.js';
 
 vi.mock('../../src/core/system-logger.js');
 // Spread-mock host-runtime (ERR-115 pattern): default delegates to the real
