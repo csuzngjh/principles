@@ -39,6 +39,7 @@ import {
   pickDiagnosticianCandidate,
   PrincipleTreeLedgerAdapter,
   resolveDiagnosticianCapability,
+  storeEmitter,
   type TaskRecord,
 } from '@principles/core/runtime';
 import {
@@ -51,6 +52,7 @@ import {
   createGovernanceTrajectoryTurnReader,
   createConsentLedgerSourceMaterialAuthorization,
   createHostIntentDocReader,
+  WorkspaceTelemetryEmitter,
   isAutomaticPainSubmissionAuthorized,
   saveHostToolDeclaration,
   HOST_TOOL_DECLARATION_VERSION,
@@ -403,6 +405,16 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
               // for governance-admitted WorkBuddy pains — the neutral host reader
               // must ride along (flag-off = zero filesystem access inside it).
               intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
+              // PRI-1287 review round: this worker is also a Stage A entry point.
+              // Bind the same workspace-scoped critical-event sink as the L3
+              // auto-run so Intent degradation evidence survives the process.
+              telemetrySink: new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {
+                try {
+                  emitEvent('WORKBUDDY_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
+                } catch {
+                  // Telemetry persistence warnings must never fail the worker cycle.
+                }
+              }),
               // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
               // turns from the workspace's own consent-tiered governance store.
               trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
