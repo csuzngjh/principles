@@ -144,7 +144,12 @@ function resolveOriginalUserMessageForTargetEvidence(
   // Never walk backward to a prior user message if an assistant/tool message
   // follows it in the snapshot.
   const lastMessage = messages[messages.length - 1];
-  if (typeof lastMessage !== 'object' || lastMessage === null || Array.isArray(lastMessage) || !hasMessageRole(lastMessage, 'user')) {
+  if (
+    typeof lastMessage !== 'object'
+    || lastMessage === null
+    || Array.isArray(lastMessage)
+    || !hasMessageRole(lastMessage, 'user')
+  ) {
     return undefined;
   }
   const content = getOwnValue(lastMessage, 'content');
