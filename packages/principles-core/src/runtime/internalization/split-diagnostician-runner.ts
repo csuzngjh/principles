@@ -105,6 +105,10 @@ function diagnosisAdmissionBlockReason(diagnosticJson: string | null | undefined
   // runtime-contract-exempt: ERR-001 the guards above narrow recovery to a
   // non-null non-array object; the single field read below is typeof-checked.
   const {state, reasonCode} = (recovery as Record<string, unknown>);
+  if (state === 'waiting_for_receipt') {
+    const reason = typeof reasonCode === 'string' ? reasonCode : 'receipt_pending';
+    return 'target_receipt_pending: ' + reason + '; the task waits for a target-bearing receipt before diagnosis';
+  }
   if (state === 'waiting_for_target_evidence') {
     return 'target_evidence_pending: the task waits for its named target turn text; the workspace worker reconcile flips it once the evidence exists';
   }
