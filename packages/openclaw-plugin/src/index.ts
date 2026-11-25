@@ -447,7 +447,8 @@ const plugin = {
         api.logger.info(
           `[PD:health] conversation hooks (llm_output / trajectory) disabled by explicit configuration — ` +
           `honoring Owner opt-out (allowConversationAccess=false). ` +
-          `nextAction: set the flag to true or remove it to re-enable conversation capture.`,
+          `nextAction: explicitly set plugins.entries.principles-disciple.hooks.allowConversationAccess ` +
+          `to true in the original OpenClaw config file and restart; direct editing preserves JSON5 comments/formatting.`,
         );
       } else if (!accessCheck.authorized) {
         let fixed = false;

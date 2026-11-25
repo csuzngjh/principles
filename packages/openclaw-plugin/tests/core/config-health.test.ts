@@ -34,7 +34,15 @@ describe('config-health', () => {
       expect(result.reason).toContain('missing or invalid');
     });
 
-    it('returns unauthorized when hooks is missing', () => {
+    it('manual repair guidance prefers direct editing and warns that CLI rewrite can drop JSON5 comments', () => {
+    const result = checkConversationAccessConfig({ hooks: {} });
+    expect(result.authorized).toBe(false);
+    expect(result.nextAction).toContain('directly edit the active OpenClaw config file');
+    expect(result.nextAction).toContain('preserves JSON5 comments/formatting');
+    expect(result.nextAction).toContain('may remove comments');
+  });
+
+  it('returns unauthorized when hooks is missing', () => {
       const result = checkConversationAccessConfig({});
       expect(result.authorized).toBe(false);
       expect(result.reason).toContain('allowConversationAccess');

@@ -38,8 +38,11 @@ export interface ConversationAccessCheckResult {
   nextAction?: string;
 }
 
-const CONVERSATION_ACCESS_FIX_COMMAND =
-  'openclaw config set plugins.entries.principles-disciple.hooks.allowConversationAccess true --strict-json';
+const CONVERSATION_ACCESS_FIX_GUIDANCE =
+  'directly edit the active OpenClaw config file and set ' +
+  'plugins.entries.principles-disciple.hooks.allowConversationAccess to true; ' +
+  'direct editing preserves JSON5 comments/formatting. ' +
+  '`openclaw config set ... --strict-json` can enable the flag but rewrites the config and may remove comments.';
 
 /**
  * PRI-343: Pure function — checks if pluginConfig has hooks.allowConversationAccess === true.
@@ -50,7 +53,7 @@ export function checkConversationAccessConfig(pluginConfig: unknown): Conversati
     return {
       authorized: false,
       reason: 'pluginConfig is missing or invalid — conversation hooks cannot be registered',
-      nextAction: CONVERSATION_ACCESS_FIX_COMMAND,
+      nextAction: CONVERSATION_ACCESS_FIX_GUIDANCE,
     };
   }
 
@@ -60,7 +63,7 @@ export function checkConversationAccessConfig(pluginConfig: unknown): Conversati
     return {
       authorized: false,
       reason: 'allowConversationAccess is not set to true',
-      nextAction: CONVERSATION_ACCESS_FIX_COMMAND,
+      nextAction: CONVERSATION_ACCESS_FIX_GUIDANCE,
     };
   }
 
@@ -69,7 +72,7 @@ export function checkConversationAccessConfig(pluginConfig: unknown): Conversati
     return {
       authorized: false,
       reason: 'allowConversationAccess is not set to true',
-      nextAction: CONVERSATION_ACCESS_FIX_COMMAND,
+      nextAction: CONVERSATION_ACCESS_FIX_GUIDANCE,
     };
   }
 
