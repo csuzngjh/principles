@@ -239,12 +239,16 @@ export function isReceiptSessionAssociationRecoverable(
   return { ok: true };
 }
 
-/** Host-authoritative identity taken from the completion EVENT context. */
+/** Host identity plus an exact adapter-resolved target-turn key from the completion path. */
 export interface ReceiptEventIdentity {
   /** Host session id (`session_id` on the Codex PostToolUse payload). */
   readonly sessionId: string;
-  /** Optional submission turn (`turn_id`). Absence never blocks recovery. */
+  /** Optional native host submission turn (`turn_id`). Absence never blocks recovery. */
   readonly submissionTurnId?: string;
+  /** Exact target-turn key resolved by the adapter. It may be a PD-owned persisted row id,
+   * not a fabricated native host message id. When absent, Core falls back to the
+   * native submissionTurnId (or an explicit requested target stored on the task). */
+  readonly targetTurnId?: string;
   /** The physical tool call id (`tool_use_id`) — the ambiguity key. */
   readonly toolCallId: string;
 }
@@ -634,7 +638,7 @@ function evaluateRecoveryPass(input: {
     && typeof existingVerified.targetTurnId === 'string' && existingVerified.targetTurnId.length > 0
     ? existingVerified.targetTurnId
     : undefined;
-  const targetTurnId = existingVerifiedTargetTurnId ?? requestedTargetTurnId ?? identity.submissionTurnId;
+  const targetTurnId = existingVerifiedTargetTurnId ?? requestedTargetTurnId ?? identity.targetTurnId ?? identity.submissionTurnId;
   const evidenceCount = countEvidence(diagnostic);
   const hasOwnerStatement = isRecord(diagnostic.record.anchor) && diagnostic.record.anchor.type === 'owner_expectation';
 
