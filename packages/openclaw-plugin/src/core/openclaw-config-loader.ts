@@ -48,7 +48,7 @@ function deepMerge(base: unknown, override: unknown): unknown {
 
 function isInside(root: string, candidate: string): boolean {
   const rel = path.relative(root, candidate);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
 }
 
 function realpathOrSelf(value: string): string {
@@ -85,7 +85,14 @@ function containsIncludeKey(value: unknown): boolean {
 function includeRootAllows(configPath: string, candidate: string): boolean {
   const configRoot = path.dirname(configPath);
   const lexicalRoots = [configRoot, ...includeAllowedRoots()];
-  return lexicalRoots.some((root) => isInside(path.normalize(root), candidate) && isInside(path.normalize(realpathOrSelf(root)), realpathOrSelf(candidate)));
+  const lexicalAllowed = lexicalRoots.some((root) => isInside(path.normalize(root), candidate));
+  // OpenClaw checks the lexical path against lexical roots and the resolved
+  // symlink target against real roots independently. A lexical link inside the
+  // config directory may therefore legitimately target a separately allowed
+  // include root; an unallowed outside target remains rejected.
+  const realCandidate = realpathOrSelf(candidate);
+  const realAllowed = lexicalRoots.some((root) => isInside(path.normalize(realpathOrSelf(root)), realCandidate));
+  return lexicalAllowed && realAllowed;
 }
 
 function resolveIncludeValue(value: unknown, context: IncludeContext, configPath: string): unknown {

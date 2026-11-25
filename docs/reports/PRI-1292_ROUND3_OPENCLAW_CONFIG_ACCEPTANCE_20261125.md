@@ -80,6 +80,10 @@ Real gateway evidence:
 
 No `typed hook ... blocked because ... allowConversationAccess=true` line appeared in the true run.
 
+## Follow-up review hardening
+
+Post-acceptance review additionally fixed and covered by unit regression: atomic repair preserves the original config mode (0600 stays 0600), include lexical roots and symlink real roots are checked independently exactly like the host, ordinary `..`-prefixed filenames inside a permitted root are not misclassified as traversal, and startup repair is blocked only when a permission-parent node (`root/plugins/entries/principles-disciple/hooks`) is itself include-managed.
+
 ## Limitations honestly recorded
 
 - The temporary experiment workspace was intentionally independent and triggered PD's existing experiment-isolation warnings because it was outside the smaller temporary `PD_EXPERIMENT_ROOT` subdirectory. Those warnings concern workspace isolation, not the OpenClaw config authorization decision; the authorization evidence above is produced before/independently of workspace ingestion.

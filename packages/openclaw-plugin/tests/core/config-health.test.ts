@@ -422,6 +422,8 @@ describe('OpenClaw 2026.11.5 JSON5 and $include effective config compatibility',
     // canonical nested object form for the effective boolean assertion.
     write('nested/deep.json5', `{ allowConversationAccess: false }`);
     expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    write('nested/deep.json5', `{ allowConversationAccess: true }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
   });
 
   it('merges multiple includes in order with later includes winning scalar conflicts', () => {
@@ -538,6 +540,60 @@ describe('OpenClaw 2026.11.5 JSON5 and $include effective config compatibility',
     expect(shouldBlockOpenClawConversationReads()).toBe(false);
   });
 
+  it('accepts a symlinked include target inside an explicitly allowed root', () => {
+    if (process.platform === 'win32') return;
+    const shared = join(root, 'shared');
+    mkdirSync(shared, { recursive: true });
+    write('shared/plugins.json5', pluginConfig(true));
+    const { symlinkSync } = require('node:fs') as typeof import('node:fs');
+    symlinkSync(join(shared, 'plugins.json5'), join(root, 'linked-plugins.json5'));
+    process.env.OPENCLAW_INCLUDE_ROOTS = shared;
+    main(`{ plugins: { $include: './linked-plugins.json5' } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('rejects a symlinked include target outside all allowed roots', () => {
+    if (process.platform === 'win32') return;
+    const outside = join('/tmp', 'pd-include-outside-' + process.pid + '.json5');
+    writeFileSync(outside, pluginConfig(true), 'utf8');
+    const { symlinkSync } = require('node:fs') as typeof import('node:fs');
+    symlinkSync(outside, join(root, 'linked-outside.json5'));
+    main(`{ plugins: { $include: './linked-outside.json5' } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    rmSync(outside, { force: true });
+  });
+
+  it('does not treat ordinary dotdot-prefixed filenames inside the root as traversal', () => {
+    write('..plugins.json5', pluginConfig(true));
+    main(`{ plugins: { $include: './..plugins.json5' } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('repairs a direct plugin entry even when unrelated plugins.allow is include-backed', () => {
+    write('allow.json5', `['other-plugin']`);
+    main(`{
+      plugins: {
+        allow: { $include: './allow.json5' },
+        entries: { 'principles-disciple': { enabled: true, hooks: {} } },
+      },
+    }`);
+    expect(ensureConversationAccessInConfig()).toBe(true);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('still refuses repair when the direct hooks parent is include-backed', () => {
+    write('hooks.json5', `{ otherHook: true }`);
+    main(`{
+      plugins: { entries: { 'principles-disciple': {
+        enabled: true,
+        hooks: { $include: './hooks.json5' },
+      } } },
+    }`);
+    const before = sha();
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
+  });
+
   it('missing flag without includes keeps the existing startup repair behavior', () => {
     main(`{ plugins: { entries: { 'principles-disciple': { enabled: true } } } }`);
     expect(shouldBlockOpenClawConversationReads()).toBe(true);
@@ -551,5 +607,29 @@ describe('OpenClaw 2026.11.5 JSON5 and $include effective config compatibility',
     expect(shouldBlockOpenClawConversationReads()).toBe(true);
     expect(ensureConversationAccessInConfig()).toBe(false);
     expect(sha()).toBe(before);
+  });
+});
+
+
+describe('config auto-fix file permissions', () => {
+  it('preserves the original config mode across atomic replacement', () => {
+    if (process.platform === 'win32') return;
+    const root = join('/tmp', 'pd-config-mode-' + process.pid + '-' + Date.now());
+    const dir = join(root, '.openclaw');
+    const file = join(dir, 'openclaw.json');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, JSON.stringify({ plugins: { entries: { 'principles-disciple': { enabled: true, hooks: {} } } } }), 'utf8');
+    const { chmodSync, statSync } = require('node:fs') as typeof import('node:fs');
+    chmodSync(file, 0o600);
+    const saved = process.env.OPENCLAW_CONFIG_PATH;
+    process.env.OPENCLAW_CONFIG_PATH = file;
+    try {
+      expect(ensureConversationAccessInConfig()).toBe(true);
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    } finally {
+      if (saved === undefined) delete process.env.OPENCLAW_CONFIG_PATH;
+      else process.env.OPENCLAW_CONFIG_PATH = saved;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -9,7 +9,7 @@
  * Extracted from index.ts to avoid circular imports when trajectory-collector.ts
  * needs to check conversation access state (PRI-346).
  */
-import { existsSync, writeFileSync, renameSync } from 'fs';
+import { chmodSync, existsSync, renameSync, statSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { withLock } from '../utils/file-lock.js';
 import { resolveOpenClawConfigPath } from '@principles/install-layout';
@@ -97,16 +97,29 @@ function readRawAndEffectiveConfig(configPath: string): { rawConfig: Record<stri
   return result.ok ? { rawConfig: result.rawConfig, config: result.config, usesInclude: result.usesInclude } : null;
 }
 
-function containsIncludeKey(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsIncludeKey);
-  if (!isRecord(value)) return false;
-  if (Object.hasOwn(value, '$include')) return true;
-  return Object.values(value).some(containsIncludeKey);
+function ownershipPathIncludeManaged(cfg: Record<string, unknown>): boolean {
+  // Only ancestors capable of supplying plugins.entries.<id>.hooks can make
+  // the write target ambiguous. Includes in unrelated sibling branches (for
+  // example plugins.allow) neither own nor can override the permission flag.
+  let node: unknown = cfg;
+  if (isRecord(node) && Object.hasOwn(node, '$include')) return true;
+  for (const key of ['plugins', 'entries', PLUGIN_ID, 'hooks']) {
+    if (!isRecord(node)) return false;
+    node = node[key];
+    if (!isRecord(node)) return false;
+    if (Object.hasOwn(node, '$include')) return true;
+  }
+  return false;
 }
 
 function writeConfigAtomic(configPath: string, cfg: Record<string, unknown>): void {
   const tmpPath = configPath + '.tmp.' + Date.now();
+  const originalMode = statSync(configPath).mode & 0o777;
   writeFileSync(tmpPath, JSON.stringify(cfg, null, 2), 'utf8');
+  // Replacing the host-owned config must not widen its disclosure scope: a
+  // newly-created temp file otherwise inherits the process umask (often 0644)
+  // even when the Owner kept credentials in a 0600 config.
+  chmodSync(tmpPath, originalMode);
   renameSync(tmpPath, configPath);
 }
 
@@ -141,7 +154,7 @@ export function ensureConversationAccessInConfig(): boolean {
     // auto-repair in that case; unrelated include branches do not block the
     // historical absent-flag repair in the main config.
     const cfg = loaded.rawConfig;
-    if (Object.hasOwn(cfg, '$include') || containsIncludeKey(cfg.plugins)) return false;
+    if (ownershipPathIncludeManaged(cfg)) return false;
 
     if (!isRecord(cfg.plugins)) {
       cfg.plugins = {};
