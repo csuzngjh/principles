@@ -170,6 +170,9 @@ function makeVariant(): Collaborators {
  * production call sites do — to prove none of it defeats the reuse. */
 function call(workspaceDir: string, collaborators: Partial<Collaborators> = {}, registerBorrow?: (release: () => Promise<void>) => void): Promise<PainSignalBridge> {
   return createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
     workspaceDir,
     stateDir: join(workspaceDir, '.state'),
     ledgerAdapter: {},
@@ -273,7 +276,7 @@ describe('P1-1 — bridge cache identity follows the captured collaborators (obj
     });
   });
 
-  it('absent and present collaborators are different cache identities (deny-all fallback never shadows a wired authorization)', async () => {
+  it('default and overridden collaborators are different cache identities (deny-all fallback never shadows a wired authorization)', async () => {
     await withWorkspace(async (workspaceDir) => {
       const withoutAny = await call(workspaceDir);
       const onlyReader = makeVariant();
@@ -282,7 +285,7 @@ describe('P1-1 — bridge cache identity follows the captured collaborators (obj
       const withAuthorization = await call(workspaceDir, { sourceMaterialAuthorization: onlyAuthorization.sourceMaterialAuthorization });
       expect(new Set([withoutAny, withReader, withAuthorization]).size).toBe(3);
       expect(lastAssemblerOptions()).toMatchObject({
-        trajectoryTurnReader: undefined,
+        trajectoryTurnReader: expect.objectContaining({ listUserTurnsForSession: expect.any(Function) }),
         sourceMaterialAuthorization: onlyAuthorization.sourceMaterialAuthorization,
       });
 

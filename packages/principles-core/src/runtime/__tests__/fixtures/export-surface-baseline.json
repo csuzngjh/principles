@@ -431,7 +431,7 @@
     {
       "entry": "./runtime",
       "source": "src/runtime/index.ts",
-      "count": 2067,
+      "count": 2068,
       "symbols": [
         "ADAPTIVE_DELIVERY_RECORD_ENUMS",
         "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -2114,6 +2114,7 @@
         "createAdapterConfigFromProfile",
         "createBridgeTelemetryEventEmitter",
         "createDemoSandboxEvaluate",
+        "createDiagnosticianRunnerBundle",
         "createDiagnosticianTaskId",
         "createEmptyDailyStats",
         "createEmptyHygieneStats",

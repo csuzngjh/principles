@@ -149,11 +149,21 @@ vi.mock('../../src/resolve-workspace.js', () => ({
 }));
 
 // BUG-1 (PRI-442): capture runner constructor args to verify effectiveConfig wiring
-const { diagRootCauseRunnerCtor, diagDistillerRunnerCtor, diagRouterRunnerCtor } = vi.hoisted(() => {
-  const diagRootCauseRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
-  const diagDistillerRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
-  const diagRouterRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
-  return { diagRootCauseRunnerCtor, diagDistillerRunnerCtor, diagRouterRunnerCtor };
+// PRI-1292 Phase 2A: the runner assembly moved behind the ONE cache-free
+// bundle, so the assembly contract is asserted at THAT boundary (the bundle
+// internals — per-stage runner construction, timing derivation, resource
+// ownership — are pinned by diagnostician-runner-bundle.test.ts in core).
+const { mockCreateDiagnosticianRunnerBundle } = vi.hoisted(() => {
+  const mockCreateDiagnosticianRunnerBundle = vi.fn(async (options: { stateManager?: unknown }) => ({
+    stateManager: options.stateManager,
+    ownsStateManager: options.stateManager === undefined,
+    contextAssembler: {},
+    committer: {},
+    runner: { run: vi.fn() },
+    executionTiming: { stageTimeoutMs: 100_000, parentBudgetMs: 300_000, leaseTtlMs: 120_000, heartbeatIntervalMs: 40_000 },
+    dispose: vi.fn(),
+  }));
+  return { mockCreateDiagnosticianRunnerBundle };
 });
 
 vi.mock('../../src/services/pd-config-loader.js', () => ({
@@ -197,9 +207,10 @@ vi.mock('@principles/core/runtime', async (importOriginal) => {
     StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
-    DiagRootCauseRunner: diagRootCauseRunnerCtor,
-    DiagDistillerRunner: diagDistillerRunnerCtor,
-    DiagRouterRunner: diagRouterRunnerCtor,
+    DiagRootCauseRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DiagDistillerRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DiagRouterRunner: vi.fn().mockImplementation(function () { return {}; }),
+    createDiagnosticianRunnerBundle: mockCreateDiagnosticianRunnerBundle,
     DefaultDiagRootCauseValidator: vi.fn().mockImplementation(function () { return {}; }),
     DefaultDiagDistillerValidator: vi.fn().mockImplementation(function () { return {}; }),
     DisabledDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
@@ -1243,7 +1254,7 @@ describe('BUG-1 (PRI-442): pain retry — effectiveConfig wiring to split-pipeli
     });
   });
 
-  it('passes effectiveConfig to all three runners when split pipeline is enabled', async () => {
+  it('passes effectiveConfig + ownership to the shared runner bundle when split pipeline is enabled', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -1256,18 +1267,21 @@ describe('BUG-1 (PRI-442): pain retry — effectiveConfig wiring to split-pipeli
       json: true,
     });
 
-    expect(diagRootCauseRunnerCtor).toHaveBeenCalled();
-    const rootOptions = diagRootCauseRunnerCtor.mock.calls[0]?.[1];
-    expect(rootOptions?.effectiveConfig).toBeDefined();
-    expect(rootOptions?.effectiveConfig).toEqual(
+    // The bundle receives the effectiveConfig that reaches every stage runner
+    // (BUG-1/PRI-442 semantics, now at the assembly boundary) plus the CLI's
+    // own stateManager — bundle.dispose() must never close it.
+    expect(mockCreateDiagnosticianRunnerBundle).toHaveBeenCalledTimes(1);
+    const bundleOptions = mockCreateDiagnosticianRunnerBundle.mock.calls[0]?.[0];
+    expect(bundleOptions?.owner).toBe('pd-cli-pain-retry');
+    expect(bundleOptions?.workspaceDir).toBe('/tmp/fake-workspace');
+    expect(bundleOptions?.effectiveConfig).toBeDefined();
+    expect(bundleOptions?.effectiveConfig).toEqual(
       expect.objectContaining({ config: expect.anything(), source: 'file' }),
     );
-
-    const distillerOptions = diagDistillerRunnerCtor.mock.calls[0]?.[1];
-    expect(distillerOptions?.effectiveConfig).toBeDefined();
-
-    const routerOptions = diagRouterRunnerCtor.mock.calls[0]?.[1];
-    expect(routerOptions?.effectiveConfig).toBeDefined();
+    expect(bundleOptions?.stateManager).toBeDefined();
+    expect(bundleOptions?.intentDocReader).toBeDefined();
+    expect(bundleOptions?.trajectoryTurnReader).toBeDefined();
+    expect(bundleOptions?.sourceMaterialAuthorization).toBeDefined();
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

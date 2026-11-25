@@ -11,6 +11,7 @@ import {
   installManifestHostsForPersist,
   parseInstallManifest,
   resolveInstallLayout,
+  resolveOpenClawConfigPath,
   mergeInstallManifestWorkspaces,
   setInstallManifestBackgroundExecution,
   type BackgroundExecutionRecord,
@@ -23,6 +24,96 @@ import {
 // the injected-platform test at the bottom of this file.
 const WS_ROOT = path.resolve(os.tmpdir(), 'pd-install-layout-test');
 const ws = (name: string): string => path.join(WS_ROOT, name);
+
+
+describe('resolveOpenClawConfigPath', () => {
+  const resolvedPath = (result: ReturnType<typeof resolveOpenClawConfigPath>): string => {
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    return result.path;
+  };
+  const home = path.join(os.tmpdir(), 'oc-home');
+
+  it('uses OPENCLAW_CONFIG_PATH before OPENCLAW_STATE_DIR before the default home config', () => {
+    expect(resolveOpenClawConfigPath({}, home)).toEqual({
+      ok: true,
+      path: path.join(home, '.openclaw', 'openclaw.json'),
+      source: 'default',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: '/state' }, home)).toEqual({
+      ok: true,
+      path: path.join('/state', 'openclaw.json'),
+      source: 'state_dir',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: '/state', OPENCLAW_CONFIG_PATH: '/explicit/openclaw.json' }, home)).toEqual({
+      ok: true,
+      path: path.resolve('/explicit/openclaw.json'),
+      source: 'config_path',
+    });
+  });
+
+  it('resolves relative user-supplied paths with OpenClaw host cwd semantics', () => {
+    const cwd = path.join(os.tmpdir(), 'oc-cwd');
+    expect(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: 'relative-state' }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(cwd, 'relative-state', 'openclaw.json'),
+      source: 'state_dir',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_CONFIG_PATH: 'relative.json' }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(cwd, 'relative.json'),
+      source: 'config_path',
+    });
+  });
+
+  it('matches OpenClaw 2026.11.5 HOME, profile, tilde and precedence rules', () => {
+    const cwd = path.join(os.tmpdir(), 'oc-cwd');
+    const ocHome = path.join(os.tmpdir(), 'oc-openclaw-home');
+    expect(resolveOpenClawConfigPath({ OPENCLAW_HOME: ocHome }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(ocHome, '.openclaw', 'openclaw.json'),
+      source: 'openclaw_home',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_HOME: ocHome, OPENCLAW_PROFILE: 'client-a' }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(ocHome, '.openclaw-client-a', 'openclaw.json'),
+      source: 'profile',
+    });
+    expect(resolvedPath(resolveOpenClawConfigPath({ OPENCLAW_PROFILE: 'default' }, home, cwd))).toBe(path.join(home, '.openclaw', 'openclaw.json'));
+    expect(resolvedPath(resolveOpenClawConfigPath({ OPENCLAW_PROFILE: 'not valid!' }, home, cwd))).toBe(path.join(home, '.openclaw', 'openclaw.json'));
+    expect(resolveOpenClawConfigPath({ OPENCLAW_CONFIG_PATH: '~/isolated/openclaw.json' }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(home, 'isolated', 'openclaw.json'),
+      source: 'config_path',
+    });
+    expect(resolvedPath(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: '~/state' }, home, cwd))).toBe(path.join(home, 'state', 'openclaw.json'));
+    expect(resolvedPath(resolveOpenClawConfigPath({
+      OPENCLAW_CONFIG_PATH: '/explicit/openclaw.json',
+      OPENCLAW_STATE_DIR: '/state',
+      OPENCLAW_HOME: ocHome,
+      OPENCLAW_PROFILE: 'client-a',
+    }, home, cwd))).toBe(path.resolve('/explicit/openclaw.json'));
+    expect(resolvedPath(resolveOpenClawConfigPath({
+      OPENCLAW_STATE_DIR: '/state',
+      OPENCLAW_HOME: ocHome,
+      OPENCLAW_PROFILE: 'client-a',
+    }, home, cwd))).toBe(path.join('/state', 'openclaw.json'));
+  });
+
+  it('falls back to cwd when no home is available, matching OpenClaw resolveRequiredHomeDir', () => {
+    const cwd = path.join(os.tmpdir(), 'oc-no-home-cwd');
+    expect(resolveOpenClawConfigPath({}, '', cwd)).toEqual({
+      ok: true,
+      path: path.join(cwd, '.openclaw', 'openclaw.json'),
+      source: 'default',
+    });
+  });
+
+  it('uses host-platform absolute path semantics for explicit paths', () => {
+    const explicit = process.platform === 'win32' ? 'C:\\openclaw\\openclaw.json' : '/explicit/openclaw.json';
+    expect(resolvedPath(resolveOpenClawConfigPath({ OPENCLAW_CONFIG_PATH: explicit }, home))).toBe(path.resolve(explicit));
+  });
+});
 
 describe('install layout', () => {
   it('resolves a canonical Codex-only install without OpenClaw', () => {

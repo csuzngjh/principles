@@ -124,12 +124,22 @@ const { mockResolveRuntimeFromPdConfig } = vi.hoisted(() => {
   return { mockResolveRuntimeFromPdConfig };
 });
 
-// BUG-1: capture runner constructor args to verify effectiveConfig wiring
-const { diagRootCauseRunnerCtor, diagDistillerRunnerCtor, diagRouterRunnerCtor } = vi.hoisted(() => {
-  const diagRootCauseRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
-  const diagDistillerRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
-  const diagRouterRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
-  return { diagRootCauseRunnerCtor, diagDistillerRunnerCtor, diagRouterRunnerCtor };
+// PRI-1292 Phase 2A: the runner assembly moved behind the ONE cache-free
+// bundle, so the effectiveConfig wiring contract is asserted at THAT boundary
+// (bundle internals — per-stage runner construction, timing derivation,
+// resource ownership — are pinned by diagnostician-runner-bundle.test.ts in
+// core).
+const { mockCreateDiagnosticianRunnerBundle } = vi.hoisted(() => {
+  const mockCreateDiagnosticianRunnerBundle = vi.fn(async (options: { stateManager?: unknown }) => ({
+    stateManager: options.stateManager,
+    ownsStateManager: options.stateManager === undefined,
+    contextAssembler: {},
+    committer: {},
+    runner: { run: vi.fn() },
+    executionTiming: { stageTimeoutMs: 100_000, parentBudgetMs: 300_000, leaseTtlMs: 120_000, heartbeatIntervalMs: 40_000 },
+    dispose: vi.fn(),
+  }));
+  return { mockCreateDiagnosticianRunnerBundle };
 });
 
 // BUG-2: capture buildDreamerSeedFromCandidate sourcePainId arg + mock resolver
@@ -164,9 +174,10 @@ vi.mock('@principles/core/runtime', async (importOriginal) => {
     SqliteSourceTraceLocator: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
-    DiagRootCauseRunner: diagRootCauseRunnerCtor,
-    DiagDistillerRunner: diagDistillerRunnerCtor,
-    DiagRouterRunner: diagRouterRunnerCtor,
+    DiagRootCauseRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DiagDistillerRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DiagRouterRunner: vi.fn().mockImplementation(function () { return {}; }),
+    createDiagnosticianRunnerBundle: mockCreateDiagnosticianRunnerBundle,
     DefaultDiagRootCauseValidator: vi.fn().mockImplementation(function () { return {}; }),
     DefaultDiagDistillerValidator: vi.fn().mockImplementation(function () { return {}; }),
     DisabledDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
@@ -1941,11 +1952,12 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
   });
 });
 
-// BUG-1 (PRI-442): effectiveConfig must be passed to split-pipeline runners
-// so that ADR-0019 LLM rate-limit degradation (isDegradationEnabled) can fire.
-// Without this wiring, isDegradationEnabled() always returns false because
-// this.config.effectiveConfig is undefined. EP-02: production path wiring.
-describe('BUG-1 (PRI-442): effectiveConfig wiring to split-pipeline runners', () => {
+// BUG-1 (PRI-442): effectiveConfig must reach the split-pipeline runners so
+// that ADR-0019 LLM rate-limit degradation (isDegradationEnabled) can fire.
+// Since PRI-1292 Phase 2A the assembly happens inside the ONE cache-free
+// bundle, so the CLI contract is asserted at the bundle boundary (per-stage
+// hand-off is pinned in core's diagnostician-runner-bundle.test.ts).
+describe('BUG-1 (PRI-442): effectiveConfig wiring to the shared runner bundle', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     const { run } = await import('@principles/core/runtime');
@@ -1955,7 +1967,7 @@ describe('BUG-1 (PRI-442): effectiveConfig wiring to split-pipeline runners', ()
     mockIntake.mockReset();
   });
 
-  it('passes effectiveConfig to DiagRootCauseRunner when split pipeline is enabled', async () => {
+  it('passes effectiveConfig + ownership + collaborators to the bundle when split pipeline is enabled', async () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
@@ -1966,33 +1978,21 @@ describe('BUG-1 (PRI-442): effectiveConfig wiring to split-pipeline runners', ()
       json: true,
     } as DiagnoseRunOptions);
 
-    expect(diagRootCauseRunnerCtor).toHaveBeenCalled();
-    const optionsArg = diagRootCauseRunnerCtor.mock.calls[0]?.[1];
+    expect(mockCreateDiagnosticianRunnerBundle).toHaveBeenCalledTimes(1);
+    const optionsArg = mockCreateDiagnosticianRunnerBundle.mock.calls[0]?.[0];
+    expect(optionsArg?.owner).toBe('pd-cli-diagnose');
+    expect(optionsArg?.workspaceDir).toBe('/tmp/fake-workspace');
     expect(optionsArg?.effectiveConfig).toBeDefined();
     expect(optionsArg?.effectiveConfig).toEqual(
       expect.objectContaining({ config: expect.anything(), source: 'file' }),
     );
-
-    consoleSpy.mockRestore();
-    exitSpy.mockRestore();
-  });
-
-  it('passes effectiveConfig to DiagDistillerRunner and DiagRouterRunner', async () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
-
-    await handleDiagnoseRun({
-      taskId: 'test-task-1',
-      workspace: '/tmp/fake-workspace',
-      runtime: 'test-double',
-      json: true,
-    } as DiagnoseRunOptions);
-
-    const distillerOptions = diagDistillerRunnerCtor.mock.calls[0]?.[1];
-    expect(distillerOptions?.effectiveConfig).toBeDefined();
-
-    const routerOptions = diagRouterRunnerCtor.mock.calls[0]?.[1];
-    expect(routerOptions?.effectiveConfig).toBeDefined();
+    // The CLI keeps stateManager ownership: the bundle receives it and must
+    // never close it (the outer finally closes it exactly once).
+    expect(optionsArg?.stateManager).toBeDefined();
+    expect(optionsArg?.intentDocReader).toBeDefined();
+    expect(optionsArg?.trajectoryTurnReader).toBeDefined();
+    expect(optionsArg?.sourceMaterialAuthorization).toBeDefined();
+    expect(optionsArg?.telemetrySink).toBeDefined();
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
@@ -2036,9 +2036,9 @@ describe('BUG-1 (PRI-442): effectiveConfig wiring to split-pipeline runners', ()
       expect.stringContaining('malformed'),
     );
 
-    // Assert runners still received effectiveConfig (the defaults-based one)
-    expect(diagRootCauseRunnerCtor).toHaveBeenCalled();
-    const optionsArg = diagRootCauseRunnerCtor.mock.calls[0]?.[1];
+    // Assert the bundle still received effectiveConfig (the defaults-based one)
+    expect(mockCreateDiagnosticianRunnerBundle).toHaveBeenCalled();
+    const optionsArg = mockCreateDiagnosticianRunnerBundle.mock.calls[0]?.[0];
     expect(optionsArg?.effectiveConfig).toBeDefined();
     expect(optionsArg?.effectiveConfig).toEqual(
       expect.objectContaining({ source: 'defaults' }),

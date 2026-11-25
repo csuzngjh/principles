@@ -24,14 +24,10 @@ import {
   createRuntimeStateHandle,
   pickDiagnosticianCandidate,
   resolveDiagnosticianCapability,
-  storeEmitter,
 } from '@principles/core/runtime';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from './pd-config.js';
-import { WorkspaceTelemetryEmitter } from './workspace-telemetry-emitter.js';
 import { isAutomaticPainSubmissionAuthorized } from './auto-pain-authorization.js';
-import { createHostIntentDocReader } from './intent-doc-reader.js';
-import { createGovernanceTrajectoryTurnReader } from './governance-trajectory-turn-reader.js';
-import { createConsentLedgerSourceMaterialAuthorization } from './source-material-authorization.js';
+import { resolveWorkspacePipelineHostDeps } from './workspace-pipeline-host-deps.js';
 
 /** Quiet flag that owns the L3 half of the ladder. */
 export const DIAGNOSTICIAN_AUTO_RUN_FLAG = 'openclaw_diagnostician_consumer';
@@ -157,6 +153,18 @@ export async function runPendingDiagnosticianOnce(
     try {
       let releaseBridge: (() => Promise<void>) | undefined;
       try {
+        // SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): ONE assembly
+        // point for the five host collaborators. The trajectory reader and the
+        // source-material gate now share the SAME consent-ledger authorization
+        // instance (previously two separate instances were created per call).
+        // PRI-1233 / SPEC §9.2: this path executes Stage A for
+        // governance-admitted pains, so the neutral host reader must ride
+        // along (flag-off keeps zero filesystem access); PRI-1265: the
+        // auto-run path sees the bound session's ORIGINAL turns.
+        const hostDeps = resolveWorkspacePipelineHostDeps({
+          workspaceDir: options.workspaceDir,
+          effectiveConfig: config.effective,
+        });
         const bridge = await createPainSignalBridge({
           workspaceDir: options.workspaceDir,
           stateDir,
@@ -164,35 +172,15 @@ export async function runPendingDiagnosticianOnce(
           owner: options.owner ?? DIAGNOSTICIAN_AUTO_RUN_OWNER,
           effectiveConfig: config.effective,
           getEnvVar: options.getEnvVar ?? ((name: string) => process.env[name]),
-          // PRI-1233 / SPEC §9.2: the L3 consumer executes admitted tasks, so it
-          // is where Stage A actually runs for governance-admitted pains — the
-          // neutral host reader must ride along or admission would never capture
-          // a snapshot on this path. Flag-off keeps zero filesystem access.
-          intentDocReader: createHostIntentDocReader({ workspaceDir: options.workspaceDir, effectiveConfig: config.effective }),
-          // PRI-1287 (rc-9): the factory defaults runner telemetry to the
-          // process-wide storeEmitter, which has no production subscriber — an
-          // emitted degradation event was therefore unobservable. Bind the
-          // workspace-scoped sink (same construction as the consumer cycle and
-          // `pd diagnose`) so allowlisted critical events, including the Intent
-          // chain's degradation reason + nextAction, survive the process.
-          telemetrySink: new WorkspaceTelemetryEmitter(storeEmitter, options.workspaceDir, (detail) => {
-            // Non-fatal by contract (PRI-634): one lost telemetry line must
-            // never fail the diagnosis round, but the loss stays observable.
-            try {
-              process.stderr.write(`[PD:telemetry] WARNING: critical event persistence failed: ${detail}\n`);
-            } catch {
-              // stderr already closed (hostless/detached process): no further
-              // channel exists for this warning; the diagnosis still proceeds.
-            }
-          }),
-          // PRI-1265: the auto-run path sees the bound session's ORIGINAL turns
-          // like every other diagnosis entry.
-          trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir: options.workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(options.workspaceDir) }),
-          // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
-          sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(options.workspaceDir),
+          intentDocReader: hostDeps.intentDocReader,
+          trajectoryTurnReader: hostDeps.trajectoryTurnReader,
+          sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
+          // PRI-939 Option A: allowlisted runner/bridge events persist to the
+          // workspace sink instead of vanishing in the unsubscribed singleton.
+          telemetrySink: hostDeps.telemetrySink,
           // SPEC §9.6: lazy probe — a flag revoked between candidate pick and
           // execution still stops the run at the bridge boundary.
-          isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(options.workspaceDir),
+          isAutoPainSubmissionAuthorized: hostDeps.isAutoPainSubmissionAuthorized,
         }, (release) => { releaseBridge = release; });
         const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
         if (executed.status === 'failed') {

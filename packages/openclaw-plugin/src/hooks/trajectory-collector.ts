@@ -28,7 +28,7 @@ import { MAX_STRING_LENGTH } from '../config/defaults/runtime.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { sanitizeForEvidence } from './message-sanitize.js';
-import { checkConversationAccessConfig } from '../core/config-health.js';
+import { checkConversationAccessConfig, isExplicitConversationAccessOptOut } from '../core/config-health.js';
 import { recordSelfReportFromText } from '../core/principle-application-ledger.js';
 
 /**
@@ -115,6 +115,12 @@ export function handleBeforeMessageWrite(
 
   // ── SQLite fallback (PRI-346): only when conversation hooks are blocked ──
   const accessCheck = checkConversationAccessConfig(ctx.pluginConfig);
+  // An explicit `false` is the Owner's opt-out decision, not a missing
+  // permission that the fallback may work around. Missing/malformed config
+  // keeps the legacy fallback; explicit false means NO conversation capture.
+  if (isExplicitConversationAccessOptOut(ctx.pluginConfig)) {
+    return;
+  }
   if (accessCheck.authorized) {
     // llm_output is working — do NOT duplicate write to SQLite (de-dup, case D)
     return;

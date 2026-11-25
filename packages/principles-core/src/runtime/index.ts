@@ -546,7 +546,8 @@ export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOption
 export { DEFAULT_PAIN_SCORE } from './pain-severity.js';
 export { sanitizeString, sanitizeValue, sanitizeToolParams, convergePath, MAX_EVIDENCE_VALUE_CHARS } from './evidence-sanitizer.js';
 /** @deprecated Internal factory — use PainToPrincipleService constructor instead */
-export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, resolveRuntimeConfigForAgent, resolveRuntimeConfigForProfile, AGENT_NAME_FOR_TASK_KIND, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, mapBridgeTelemetryToStoreEvent, createBridgeTelemetryEventEmitter, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
+export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, resolveRuntimeConfigForAgent, resolveRuntimeConfigForProfile, AGENT_NAME_FOR_TASK_KIND, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, mapBridgeTelemetryToStoreEvent, createBridgeTelemetryEventEmitter, // SPEC-PD-PIPELINE-SPINE-001 §4.3 (PRI-1292): cache-free diagnostician runner assembly shared by the cached bridge and the two CLI commands. Option/bundle types stay module-internal: callers pass literals and bind results by inference.
+createDiagnosticianRunnerBundle, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
 
 // Pain-to-Principle service facade (PRI-12)
 export { PainToPrincipleService } from './pain-to-principle-service.js';

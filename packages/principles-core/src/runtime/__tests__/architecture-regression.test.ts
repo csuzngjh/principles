@@ -388,6 +388,9 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'pd-config-loader.ts',
   // PRI-346: Pure function for checking conversation access config (extracted for circular import avoidance)
   'config-health.ts',
+  // PRI-1292 round 3: read-only host effective-config I/O adapter for OpenClaw
+  // JSON5/$include compatibility; no domain mutation or second config authority.
+  'openclaw-config-loader.ts',
   // PRI-467: Plugin I/O boundary — reads .principles/INTENT.md with TTL+mtime cache,
   // delegates parsing/validation/hashing to @principles/core. Never throws.
   'intent-doc-reader.ts',
@@ -395,6 +398,12 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // mapping from safeReadIntentDoc result to the core-owned IntentDocReadResult.
   // No new I/O; delegates to intent-doc-reader.ts above.
   'intent-doc-reader-adapter.ts',
+  // PRI-1292 Phase 2A (SPEC-PD-PIPELINE-SPINE-001 §4.2 point 3): plugin I/O
+  // boundary — the ONE PainToPrincipleService factory shared by the pain hook
+  // and the /pd pain command. Binds WorkspaceContext (the Gateway's in-process
+  // trajectory) and loadPdConfigForPlugin to the shared host-runtime
+  // resolveWorkspacePipelineHostDeps assembly; no new I/O beyond those bindings.
+  'pain-service.ts',
   // RuleCode safety containment I/O boundary — reads approved artifact scope and
   // persists circuit-breaker isolation through the core-owned SQLite safety store.
   // Pure threshold policy remains in principles-core.
@@ -541,7 +550,11 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // E2E R3: Added correction-anchor.ts (96 → 97) — plugin I/O boundary that
     // resolves a user correction to the assistant turn that actually executed a
     // write (trajectory reads), replacing the "most recent turn" heuristic.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
+    // PRI-1292 Phase 2A: Added pain-service.ts (97 → 98) — the ONE plugin
+    // PainToPrincipleService factory shared by the pain hook and the /pd pain
+    // command (plugin I/O boundary binding WorkspaceContext + plugin config
+    // loader to the shared host collaborator assembly).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(99);
   });
 });
 
@@ -4281,4 +4294,177 @@ describe('SEC-BASE-5: network & config isolation guards', () => {
       '(expected in hooks/gate.ts). If removed, the code_tool_hook safety boundary is broken.',
     ).toBe(true);
   });
+});
+
+// ===========================================================================
+// SPEC-PD-PIPELINE-SPINE-001 §4.2/§4.3 (PRI-1292 Phase 2A) — pipeline-spine
+// assembly wiring guards.
+//
+// A new entry must not re-introduce hand-rolled host collaborator assembly
+// (the drift that produced PRI-1230/1233, PRI-1265 and D1), and the cache-free
+// runner bundle must stay free of bridgeCache contact so the CLI override
+// paths (--runtime test-double / --no-intake, pain-retry dead-letter) can
+// never pollute or be swallowed by the process-level cache.
+// ===========================================================================
+describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2A: pipeline-spine assembly wiring', () => {
+  const REPO_ROOT = pathSync.resolve(__dirname, '../../../../..');
+
+  function readProductionSource(relFromPackages: string): string {
+    return fsSync.readFileSync(pathSync.join(REPO_ROOT, 'packages', relFromPackages), 'utf8');
+  }
+
+  const MUST_USE_HOST_DEPS_RESOLVER = [
+    // The eight migrated production assembly points (per real call sites).
+    'pd-cli/src/commands/pain-record.ts',
+    'openclaw-plugin/src/hooks/pain.ts',
+    'openclaw-plugin/src/commands/pain.ts',
+    'openclaw-plugin/src/core/pain-service.ts',
+    'host-runtime/src/diagnostician-auto-run.ts',
+    'codex-adapter/src/worker/workspace-worker.ts',
+    'workbuddy-adapter/src/worker/workspace-worker.ts',
+    'pd-cli/src/commands/diagnose.ts',
+    'pd-cli/src/commands/pain-retry.ts',
+  ] as const;
+
+  it('every migrated pipeline entry assembles collaborators via resolveWorkspacePipelineHostDeps', () => {
+    const missing = MUST_USE_HOST_DEPS_RESOLVER.filter((rel) => {
+      let src: string;
+      try {
+        src = readProductionSource(rel);
+      } catch {
+        return true;
+      }
+      return !src.includes('resolveWorkspacePipelineHostDeps');
+    });
+    expect(
+      missing,
+      `files that must call resolveWorkspacePipelineHostDeps but no longer do: ${missing.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('the codex/workbuddy workers and the auto-run no longer create per-call inline collaborators', () => {
+    // The three host-runtime-consuming diagnostician entries previously built
+    // their own createGovernanceTrajectoryTurnReader / createHostIntentDocReader /
+    // isAutomaticPainSubmissionAuthorized closures per call (the double
+    // authorization-instance defect). They must go through the resolver now.
+    // The codex worker may KEEP createConsentLedgerSourceMaterialAuthorization:
+    // its target-evidence reconcile is a separate consumption surface that
+    // still constructs the port directly.
+    for (const rel of [
+      'host-runtime/src/diagnostician-auto-run.ts',
+      'workbuddy-adapter/src/worker/workspace-worker.ts',
+      'codex-adapter/src/worker/workspace-worker.ts',
+    ] as const) {
+      const src = readProductionSource(rel);
+      expect(
+        src.includes('createGovernanceTrajectoryTurnReader') || src.includes('createHostIntentDocReader'),
+        `${rel} still hand-assembles trajectory/intent collaborators instead of resolveWorkspacePipelineHostDeps`,
+      ).toBe(false);
+    }
+  });
+
+  it('createDiagnosticianRunnerBundle never touches bridgeCache', () => {
+    // SPEC §4.4: the bundle is the cache-free assembly shared by the cached
+    // bridge, `pd diagnose run` and `pd pain retry`. Any bridgeCache contact
+    // would let the CLI override paths pollute the process cache.
+    const factorySrc = readProductionSource('principles-core/src/runtime/pain-signal-runtime-factory.ts');
+    const bundleStart = factorySrc.indexOf('export async function createDiagnosticianRunnerBundle');
+    expect(bundleStart, 'bundle factory must exist in pain-signal-runtime-factory.ts').toBeGreaterThan(-1);
+    const bundleEnd = factorySrc.indexOf('async function constructBridge', bundleStart);
+    expect(bundleEnd, 'constructBridge must follow the bundle in the factory file').toBeGreaterThan(bundleStart);
+    const bundleBody = factorySrc.slice(bundleStart, bundleEnd);
+    expect(bundleBody, 'bundle body must not reference bridgeCache').not.toContain('bridgeCache');
+    expect(bundleBody, 'bundle body must not call createPainSignalBridge').not.toContain('createPainSignalBridge');
+  });
+
+  it('the two CLI commands assemble their runners through createDiagnosticianRunnerBundle', () => {
+    for (const rel of [
+      'pd-cli/src/commands/diagnose.ts',
+      'pd-cli/src/commands/pain-retry.ts',
+    ] as const) {
+      const src = readProductionSource(rel);
+      expect(
+        src.includes('createDiagnosticianRunnerBundle'),
+        `${rel} must assemble its diagnostician runner via createDiagnosticianRunnerBundle`,
+      ).toBe(true);
+      expect(
+        /\bnew (DiagRootCause|DiagDistiller|DiagRouter|SplitDiagnostician)Runner\(/.test(src),
+        `${rel} still hand-rolls a Diag*Runner/SplitDiagnosticianRunner instead of the shared bundle`,
+      ).toBe(false);
+    }
+  });
+
+  it('dependency direction: principles-core never depends on host-runtime, CLI, or concrete host adapters', () => {
+    const pkg = JSON.parse(readProductionSource('principles-core/package.json')) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const forbidden = ['@principles/host-runtime', '@principles/pd-cli', '@principles/codex-adapter', '@principles/workbuddy-adapter', 'principles-disciple'];
+    const allDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    expect(forbidden.filter((name) => Object.hasOwn(allDeps, name))).toEqual([]);
+    const coreSrc = readProductionSource('principles-core/src/runtime/pain-signal-runtime-factory.ts')
+      + readProductionSource('principles-core/src/runtime/pain-to-principle-service.ts');
+    for (const token of forbidden) expect(coreSrc).not.toContain(token);
+  });
+
+  it('dependency direction: host-runtime never depends on concrete host adapters', () => {
+    const pkg = JSON.parse(readProductionSource('host-runtime/package.json')) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const forbidden = ['@principles/codex-adapter', '@principles/workbuddy-adapter', 'principles-disciple'];
+    const allDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    expect(forbidden.filter((name) => Object.hasOwn(allDeps, name))).toEqual([]);
+  });
+
+  it('OpenClaw hook/command entries do not reconstruct PainToPrincipleService outside the shared pain service', () => {
+    for (const rel of [
+      'openclaw-plugin/src/hooks/pain.ts',
+      'openclaw-plugin/src/commands/pain.ts',
+    ] as const) {
+      const src = readProductionSource(rel);
+      expect(src.includes('new PainToPrincipleService'), `${rel} must use the shared OpenClaw pain service assembly`).toBe(false);
+      expect(src.includes('createDiagnosticianRunnerBundle'), `${rel} must not assemble a runner locally`).toBe(false);
+    }
+    expect(readProductionSource('openclaw-plugin/src/core/pain-service.ts')).toContain('new PainToPrincipleService');
+  });
+
+  it('one CLI execution context has one authoritative telemetry sink', () => {
+    const diagnose = readProductionSource('pd-cli/src/commands/diagnose.ts');
+    expect(diagnose).not.toContain('createWorkspaceTelemetryEmitter');
+    expect((diagnose.match(/resolveWorkspacePipelineHostDeps\(/g) ?? []).length).toBe(1);
+    expect(diagnose).toContain('telemetrySink: hostDeps.telemetrySink');
+    expect(diagnose).toContain('const diagnoseTelemetry = hostDeps.telemetrySink');
+
+    const retry = readProductionSource('pd-cli/src/commands/pain-retry.ts');
+    expect(retry).not.toContain('createWorkspaceTelemetryEmitter');
+    expect((retry.match(/resolveWorkspacePipelineHostDeps\(/g) ?? []).length).toBe(1);
+    expect(retry).toContain('telemetrySink: hostDeps.telemetrySink');
+  });
+
+  it('normal runner construction sites pass all three executable collaborators from host deps', () => {
+    for (const rel of ['pd-cli/src/commands/diagnose.ts', 'pd-cli/src/commands/pain-retry.ts'] as const) {
+      const src = readProductionSource(rel);
+      for (const token of [
+        'intentDocReader: hostDeps.intentDocReader',
+        'trajectoryTurnReader: hostDeps.trajectoryTurnReader',
+        'sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization',
+      ]) {
+        expect(src, `${rel} missing ${token}`).toContain(token);
+      }
+    }
+  });
+
+  it('constructBridge has an explicit ownership transfer and failure cleanup boundary', () => {
+    const src = readProductionSource('principles-core/src/runtime/pain-signal-runtime-factory.ts');
+    const start = src.indexOf('async function constructBridge');
+    const end = src.indexOf('/**\n * PRI-624: dispose + drop every cached bridge', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const body = src.slice(start, end);
+    expect(body).toContain('let bridgeOwnsStateManager = false');
+    expect(body).toContain('bridgeOwnsStateManager = true');
+    expect(body).toContain('await stateManager.close().catch(() => undefined)');
+  });
+
 });

@@ -22,6 +22,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import Database from 'better-sqlite3';
 import type { Database as BetterSqliteDatabase } from 'better-sqlite3';
 import {
@@ -31,6 +32,7 @@ import {
   getPdConfigPath,
 } from './pd-config-loader.js';
 import { MVP_CHANNEL_IDS, pdProviderCredentials } from '@principles/core/runtime';
+import { resolveOpenClawConfigPath } from '@principles/install-layout';
 import type {
   RedactedAgentSummary,
   RedactedRuntimeProfileSummary,
@@ -181,9 +183,11 @@ export function getOpenClawHome(): string {
 
 /** The OpenClaw config file, honouring an explicit `OPENCLAW_CONFIG_PATH`. */
 export function getOpenClawConfigPath(): string {
-  const explicitConfigPath = process.env.OPENCLAW_CONFIG_PATH?.trim();
-  if (explicitConfigPath && path.isAbsolute(explicitConfigPath)) return path.resolve(explicitConfigPath);
-  return path.join(getOpenClawHome(), 'openclaw.json');
+  // Shared install-layout authority (same implementation as the OpenClaw
+  // plugin read gate). Invalid overrides are diagnostics input here, not an
+  // authorization decision, so the doctor still reports the historical default.
+  const resolved = resolveOpenClawConfigPath(process.env, os.homedir());
+  return resolved.ok ? resolved.path : path.join(getOpenClawHome(), 'openclaw.json');
 }
 
 function pathEntry(p: string): ConfigPathEntry {

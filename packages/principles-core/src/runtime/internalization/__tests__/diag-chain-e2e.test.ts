@@ -460,6 +460,9 @@ describe('Diag chain e2e', () => {
 
     try {
       const result = createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
         workspaceDir: tmpRoot,
         stateDir: tmpRoot,
         effectiveConfig,
@@ -492,6 +495,9 @@ describe('Diag chain e2e', () => {
 
     // Should NOT throw the factory guard (so it will proceed to DB init and fail with a filesystem/db error, not PDRuntimeError input_invalid)
     const result = createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
       workspaceDir: tmpRoot,
       stateDir: tmpRoot,
       effectiveConfig: defaults,
@@ -550,6 +556,9 @@ describe('Diag chain e2e', () => {
 
     // Verify it does NOT throw the factory guard
     const result = createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
       workspaceDir: tmpRoot,
       stateDir: tmpRoot,
       effectiveConfig,

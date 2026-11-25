@@ -734,6 +734,7 @@ export {
   type PdHomeResolution,
   type ResolvePdHomeOptions,
 } from './pd-home.js';
+export { resolveOpenClawConfigPath, type OpenClawConfigPathResolution } from './openclaw-config-path.js';
 export {
   ACTIVE_RELEASE_SCHEMA_VERSION,
   activeReleaseRecordPath,

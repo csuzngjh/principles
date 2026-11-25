@@ -6,12 +6,9 @@ import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js
 import type { EmpathyEventStats } from '../types/event-types.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import { computeHash } from '../utils/hashing.js';
-import { PainToPrincipleService, PrincipleTreeLedgerAdapter } from '@principles/core/runtime';
-import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
-import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
-import { ingressDecisionForPluginPain } from '../hooks/pain-ingress-adapter.js';
 import type { PainEvidenceEntry } from '@principles/core/runtime';
-import { createConsentLedgerSourceMaterialAuthorization, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
+import { createPluginPainToPrincipleService } from '../core/pain-service.js';
+import { ingressDecisionForPluginPain } from '../hooks/pain-ingress-adapter.js';
 
 /**
  * Creates a mini bar for daily trends
@@ -327,32 +324,12 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
   };
 
   try {
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
-    // PRI-306: Load .pd/config.yaml for config-driven runtime binding
-    const configResult = loadPdConfigForPlugin(wctx.workspaceDir);
-    // SPEC-PD-PIPELINE-SPINE-001 D1: this entry is ALWAYS synchronous (no
-    // asyncMode), so both sync collaborators are mandatory — the in-process
-    // reader over WorkspaceContext.trajectory (same delegation the hook entry
-    // uses) and the workspace consent-ledger authorization.
-    const trajectoryTurnReader = {
-      listUserTurnsForSession: (sessionId: string) => wctx.trajectory.listUserTurnsForSession(sessionId),
-      listAssistantTurns: (sessionId: string) => wctx.trajectory.listAssistantTurns(sessionId),
-    };
-    const service = new PainToPrincipleService({
-      workspaceDir: wctx.workspaceDir,
-      stateDir: wctx.stateDir,
-      ledgerAdapter,
-      owner: 'openclaw-plugin',
-      autoIntakeEnabled: true,
-      effectiveConfig: configResult.effective,
-      getEnvVar: (name: string) => process.env[name],
-      intentDocReader: createIntentDocReader(wctx.workspaceDir, resolveIntentLang(wctx.workspaceDir)),
-      trajectoryTurnReader,
-      sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(wctx.workspaceDir),
-      // SPEC §9.6: lazy Workspace authorization probe for automatic_hook
-      // provenance; the manual `pd pain` command itself is owner_manual.
-      isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(wctx.workspaceDir),
-    });
+    // SPEC-PD-PIPELINE-SPINE-001 §4.2 point 3 (PRI-1292 Phase 2A): the same
+    // plugin factory the hook entry uses — ONE collaborator assembly
+    // (resolveWorkspacePipelineHostDeps with the WorkspaceContext.trajectory
+    // override) instead of a duplicated block. This entry is ALWAYS
+    // synchronous (no asyncMode), so both sync collaborators are mandatory.
+    const service = createPluginPainToPrincipleService(wctx);
 
     const result = await service.recordPain({
       painId: painData.painId,
