@@ -31,6 +31,7 @@ import type { WorkspaceBackgroundOwnership } from '@principles/install-layout';
 import type { InternalizationConsumerCyclePorts } from '@principles/host-runtime';
 import { prepareOpenClawPromptRound } from '../../src/hooks/prompt.js';
 import { readOpenclawTargetTurnEvidence } from '../../src/hooks/pain-receipt-fallback.js';
+import { clearOpenclawRunTurnCorrelationsForTest, resolveOpenclawRunTurnCorrelation } from '../../src/hooks/openclaw-run-turn-correlation.js';
 
 vi.mock('../../src/core/system-logger.js');
 // Spread-mock host-runtime (ERR-115 pattern): default delegates to the real
@@ -57,6 +58,7 @@ const SERVICE_HOST_OWNED: WorkspaceBackgroundOwnership = {
 const UNREADABLE: WorkspaceBackgroundOwnership = { status: 'manifest_unreadable', reason: 'install_manifest_missing', nextAction: 'restore' };
 
 beforeEach(() => {
+  clearOpenclawRunTurnCorrelationsForTest();
   vi.clearAllMocks();
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-openclaw-worker-'));
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
@@ -441,6 +443,7 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
     });
     expect(Number.isInteger(ordinal)).toBe(true);
     expect(countGovernanceObservations()).toBe(0);
+    expect(resolveOpenclawRunTurnCorrelation({ workspaceDir, sessionId: 'oc-embedded-no-native-id', runId: 'run-embedded-no-native-id' })).toBeUndefined();
   });
 
   it('a native id without an explicit original currentUserMessage never uses rebuilt prompt text as evidence', () => {
@@ -489,8 +492,9 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
     expect(consent.ok).toBe(true);
 
     const ordinal = prepareOpenClawPromptRound({
-      prompt: 'prompt',
-      currentUserMessage: 'EMBEDDED-T10-OWNER-CORRECTION',
+      // The real embedded producer supplies prompt + messages, not native
+      // currentUserMessage/currentUserMessageId fields.
+      prompt: 'EMBEDDED-T10-OWNER-CORRECTION',
       messages: [{ role: 'user', content: 'EMBEDDED-T10-OWNER-CORRECTION' }],
     }, {
       workspaceDir,
@@ -516,8 +520,7 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
     }
 
     const secondOrdinal = prepareOpenClawPromptRound({
-      prompt: 'prompt',
-      currentUserMessage: 'EMBEDDED-T11-OWNER-CORRECTION',
+      prompt: 'EMBEDDED-T11-OWNER-CORRECTION',
       messages: [{ role: 'user', content: 'EMBEDDED-T11-OWNER-CORRECTION' }],
     }, {
       workspaceDir,
@@ -535,6 +538,16 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
       expect(row?.id).toBeGreaterThan(firstRowId ?? 0);
       const firstHostTurnId = `user-turn-row:${firstRowId}`;
       const secondHostTurnId = `user-turn-row:${row?.id}`;
+      expect(resolveOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-10',
+      })).toBe(firstHostTurnId);
+      expect(resolveOpenclawRunTurnCorrelation({
+        workspaceDir,
+        sessionId: session,
+        runId: 'run-pri1296-embedded-turn-11',
+      })).toBe(secondHostTurnId);
       expect(readOpenclawTargetTurnEvidence(workspaceDir, session, firstHostTurnId)).toMatchObject({
         status: 'available',
         entries: expect.arrayContaining([expect.objectContaining({ note: 'EMBEDDED-T10-OWNER-CORRECTION' })]),
