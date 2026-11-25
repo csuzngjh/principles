@@ -1,5 +1,59 @@
 # create-principles-disciple
 
+## 1.156.1
+
+### Patch Changes
+
+- e4f4337: PRI-1276 (B2) — OpenClaw 正常入口身份与回执兜底
+  
+  - Core：`recoverTaskIdentityFromReceipt` 的 `hostKind` 联合类型纳入 `'openclaw'`（共享 CAS 恢复权威，OpenClaw 指定回执领地 `host_session_claim_empty` 已在既有白名单）。
+  - openclaw-plugin：新增 `after_tool_call` 结构化回执兜底（`hooks/pain-receipt-fallback.ts`）。真实探针确认的 OpenClaw 自有 envelope（单层编码 + `details.mcpServer` 交叉验证 + 精确工具名门 `pd-recall__pd_submit_pain`），身份取事件 ctx `sessionId` 与执行上下文 `toolCallId`；按事件重读 `host_identity_minimal_metadata` 授权；fail-open + 单行 ids-only 结构化诊断；经 Core CAS 恢复原 Task，不产生第二条 Pain/Task。
+  - `PluginHookAfterToolCallEvent` 本地镜像补齐宿主真实字段（`params`/`runId`/`toolCallId`）。
+  - pd-mcp-server：MCP 写入超时的 reconciled/submitted 与 `submit_unconfirmed` 回执保留原请求已判定的 `sessionAssociation`；缺失 association 的回执仍 fail-closed，`submit_unconfirmed` 仍需精确 ID 读回。
+  - 真实隔离安装 E2E（OpenClaw 2026.11.5）：场景 B（缺失 `_meta` → 合法 unbound → 事件回执 → CAS 恢复原 Task，SQLite 读回证据）与场景 D（授权关闭 → 零身份持久化 + blocked_by_consent 处置）PASS。安装版 runtime materializer 尚无 `_meta` 生产者（无插件可达扩展点），宿主级主路径标注不支持；上游补丁卡见 `docs/reports/PRI1276_OPENCLAW_HOST_IDENTITY_AUDIT_20261125.md` §10。
+- b7134ff: The Intent chain can no longer degrade to `not_configured` without leaving a
+  reason. Stage A already emitted `intent_doc_template_only`, but the event rode
+  the process-wide `storeEmitter` (no production subscriber) and was absent from
+  the workspace critical-event allowlist, so an emitted degradation and a silent
+  one were indistinguishable afterwards — the shape that hid a whole broken chain
+  during the 2026-11-22 intent ON/OFF pilot.
+  
+  The degradation record now carries a structured reason and an actionable
+  nextAction: `no_parsed_section` (canonical headings were never recognised — the
+  PRI-1284 class, where the Owner did write content) versus `placeholder_only`
+  (sections parsed but still carry template/TODO text). Telling an Owner who
+  already wrote five sections to "fill in a section" is no longer the only
+  available message.
+  
+  The same event types are now allowlisted into
+  `<workspace>/.pd/telemetry/critical-events.jsonl`, and the L3 automatic
+  diagnosis path binds the workspace-scoped sink instead of the bare singleton, so
+  the record survives the process on the path automatic Pain actually takes.
+  Normal (authored) INTENT.md behaviour is unchanged and produces no record.
+  
+  
+  Review follow-ups in the same bounded contract: mixed localized/canonical
+  headings now tell the Owner that only recognised sections are template-only and
+  point them at the supported headings; a fresh-read truncation that hides an
+  authored answer behind earlier TODO material is reported as a truncation
+  recovery problem rather than as a document with no answer; missing-file recovery
+  guidance now includes the CLI's required `--confirm` write acknowledgement; and
+  the Codex/WorkBuddy worker Stage A entry points bind the same durable critical
+  telemetry sink as the L3 automatic path.
+  
+  The recovery text keeps the workspace path separate from the copyable POSIX
+  command instead of emitting a shell-quoted path that can be expanded
+  incorrectly, and truncation analysis remains internal: degradation telemetry
+  never carries the untruncated INTENT.md section bodies it inspects.
+- ce6049a: Pipeline Spine Phase 2A (PRI-1292): ONE assembly point for the workspace pipeline host collaborators and ONE cache-free diagnostician runner assembly. `resolveWorkspacePipelineHostDeps` (@principles/host-runtime, new export) returns the five required collaborators (intentDocReader / trajectoryTurnReader / sourceMaterialAuthorization / telemetrySink / isAutoPainSubmissionAuthorized) with the default trajectory reader bound to the SAME consent-ledger authorization instance the gate consumers receive — removing the double-authorization-instance defect where diagnostician-auto-run, both codex worker sites and the workbuddy worker built two independent consent ports per call. All eight production assembly points migrate: pd pain record, the OpenClaw hook and /pd pain command (via the new shared plugin factory `createPluginPainToPrincipleService`, which passes the Gateway's in-process trajectory as an authorization-wrapped reader override — explicit OpenClaw `allowConversationAccess=false` revokes even previously collected rows immediately — and the entry's effectiveConfig as the intent flag authority per SPEC §13.1), diagnostician-auto-run, both codex worker sites, the workbuddy worker, and `pd diagnose run` + `pd pain retry`. `createDiagnosticianRunnerBundle` (@principles/core/runtime, new export, admitted) extracts in place the Diag*Runner + SplitDiagnosticianRunner assembly from the cached-bridge factory so the factory, diagnose and pain-retry share one construction sequence; it never touches bridgeCache, derives the same timing contract both CLIs relied on (stage = input, parent = 3×, lease 120s / heartbeat 40s), and with an externally provided stateManager reuses its connection and never closes it — dispose() is idempotent and closes only a factory-created manager. The bundle also refuses a stateManager whose canonical workspace differs from the bundle workspace, preventing cross-workspace task/consent/Intent/telemetry mixing. CLI contracts unchanged: --no-intake, --runtime test-double, ERR-067 retry loop, dead-letter replay and task-rerun semantics, JSON output shapes and exit codes are pinned by the existing suites plus new ownership/isolation tests.
+  
+  Round-2 hardening: the OpenClaw read gate now resolves the host-effective config through the shared install-layout authority (`OPENCLAW_CONFIG_PATH` > `OPENCLAW_STATE_DIR` > default home) and fails closed when that config is missing, unreadable, malformed, or indeterminate. Normal executable runner construction now requires Intent, trajectory, and source-material authorization collaborators at the type level; constructBridge owns its StateManager until bridge construction succeeds and closes it exactly once on adapter/bundle/bridge construction failure. `pd diagnose run` uses the single host-deps telemetry sink rather than constructing a second workspace sink.
+  
+  
+  Round-3 hardening: OpenClaw effective-config compatibility now mirrors 2026.11.5 host behavior: JSON5 fallback parsing, bounded read-only `$include` resolution (nested/multiple includes, host merge order, cycle/escape/missing-file fail-closed), and complete path resolution for OPENCLAW_HOME, valid non-default OPENCLAW_PROFILE, OPENCLAW_CONFIG_PATH, OPENCLAW_STATE_DIR, `~` expansion and host relative-path semantics. Explicit Owner `allowConversationAccess=false` remains authoritative through includes; startup repair never flattens include-backed ownership or writes when the effective config is indeterminate. No new cross-package public API is added. Follow-up hardening preserves the original config file mode across atomic repair, mirrors OpenClaw’s independent lexical/real include-root checks for allowed cross-root symlinks, limits include-managed write refusal to the actual permission parent chain, and keeps json5 as a runtime dependency in the root lockfile, and refuses startup auto-repair through a symlinked main config rather than replacing the link with a detached copy. Include file reads now enforce resolved-path length, descriptor-based regular-file/no-hardlink/2MiB validation, open-time root revalidation, and bounded reads; JSON5-only main configs are not auto-rewritten because rewriting would discard Owner comments, while strict-JSON repair creates its temporary file with the original mode from the first open. Health guidance no longer suggests deleting an explicit deny as a universal recovery path and directs Owners to edit the original config file directly so JSON5 comments are preserved; the CLI rewrite path is explicitly described as comment-losing.
+- Updated dependencies [ce6049a]
+  - @principles/install-layout@0.11.1
+
 ## 1.156.0
 
 ### Minor Changes
