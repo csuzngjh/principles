@@ -774,6 +774,48 @@ describe('recoverTaskIdentityFromReceipt — idempotence and ambiguity (T4/T7)',
     expect((diagnostic.recovery as Record<string, unknown>).resolvedAt).toBeUndefined();
   });
 
+  it('PRI-1296 review: malformed persisted evidence is not admissible and is replaced only by validated target entries', async () => {
+    const painId = 'mcp_1700000001296_ev000301';
+    const taskId = await persistUnboundPain(painId);
+    const before = await readDiagnostic(taskId);
+    const malformed = { ...before, evidence: [{ sourceRef: '', note: 'malformed legacy evidence' }] };
+    const seeded = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      JSON.stringify(before),
+      { diagnosticJson: JSON.stringify(malformed) },
+    );
+    expect(seeded).not.toBeNull();
+
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+    const base = {
+      workspaceDir: tmpDir,
+      hostKind: 'codex' as const,
+      receipt: validated.receipt,
+      identity: identity(),
+      authorization: authorize(true),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    };
+    const waiting = await recoverTaskIdentityFromReceipt({
+      ...base,
+      readTargetTurnEvidence: () => ({ status: 'not_found' as const }),
+    });
+    expect(waiting.status).toBe('recovered');
+    if (waiting.status !== 'recovered') return;
+    expect(waiting.disposition.state).toBe('waiting_for_target_evidence');
+
+    const replay = await recoverTaskIdentityFromReceipt({
+      ...base,
+      readTargetTurnEvidence: () => ({ status: 'available' as const, entries: TARGET_ENTRIES }),
+    });
+    expect(replay.status).toBe('already_bound');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual(TARGET_ENTRIES);
+    expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass)
+      .toEqual({ status: 'available', entryCount: TARGET_ENTRIES.length });
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
+  });
+
   it('a DIFFERENT toolCallId matching the same task is ambiguous — identity untouched', async () => {
     const painId = 'mcp_1700000000005_ee000005';
     await persistUnboundPain(painId);
