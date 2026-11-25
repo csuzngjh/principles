@@ -452,24 +452,66 @@ describe('runAfterToolCallReceiptFallback — exact same-run target-turn associa
     })).toBeUndefined();
   });
 
-  it('keeps a task unbound when the after_tool_call run has no same-run turn mapping', async () => {
+  it('keeps a task out of READY without a turn mapping, then recovers the same task when a target-bearing retry arrives', async () => {
     const ws = workspace({ minimalMetadata: true });
     const painId = 'mcp_1764000000031_cc000031';
     const taskId = await persistUnboundPain(ws, painId);
+    const runId = 'openclaw-run-without-capture';
+    const event = {
+      toolName: 'pd-recall__pd_submit_pain',
+      runId,
+      toolCallId: EVENT_IDENTITY.toolCallId,
+      result: envelopeForReceipt(painId, ws),
+    };
     const result = await runAfterToolCallReceiptFallback({
       workspaceDir: ws,
-      event: {
-        toolName: 'pd-recall__pd_submit_pain',
-        runId: 'openclaw-run-without-capture',
-        toolCallId: EVENT_IDENTITY.toolCallId,
-        result: envelopeForReceipt(painId, ws),
-      },
+      event,
       ctx: { sessionId: EVENT_IDENTITY.sessionId },
     });
     expect(result.line).toBe(`pain_receipt_rejected:target_turn_identity_unavailable:stage=after_tool_call:unbound=true:taskId=${taskId}`);
+    const waiting = await readDiagnostic(ws, taskId);
+    expect(waiting.sessionIdHint).toBeNull();
+    expect(waiting.recovery).toMatchObject({
+      state: 'waiting_for_receipt',
+      reasonCode: 'target_turn_identity_unavailable',
+    });
+
+    // A corrected same-run target join may recover the original task; it does
+    // not create a replacement Pain/Task or promote an unrelated turn.
+    expect(recordConversationIngestionConsent(ws, 'openclaw', {
+      decision: 'granted',
+      decidedVia: 'owner_directive',
+      disclosureVersion: 'test-v1',
+      evidenceRef: 'target-bearing-retry',
+    }).ok).toBe(true);
+    const targetTurnId = 'user-turn-row:78';
+    captureOpenclawUserTurnForTargetEvidence({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      hostTurnId: undefined,
+      fallbackHostTurnId: targetTurnId,
+      text: 'the original owner message for the corrected retry',
+    });
+    expect(rememberOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      runId,
+      targetTurnId,
+      message: 'the original owner message for the corrected retry',
+    })).toBe(true);
+    const recovered = await runAfterToolCallReceiptFallback({
+      workspaceDir: ws,
+      event,
+      ctx: { sessionId: EVENT_IDENTITY.sessionId },
+    });
+    expect(recovered.line).toBe(`pain_receipt_recovered:taskId=${taskId}:state=ready_for_diagnosis`);
     const diagnostic = await readDiagnostic(ws, taskId);
-    expect(diagnostic.sessionIdHint).toBeNull();
-    expect((diagnostic.recovery as Record<string, unknown> | undefined)?.state).not.toBe('ready_for_diagnosis');
+    expect(diagnostic.sessionIdHint).toBe(EVENT_IDENTITY.sessionId);
+    expect((diagnostic.painIngress as Record<string, unknown>).verifiedHostSession).toMatchObject({
+      targetTurnId,
+      sessionId: EVENT_IDENTITY.sessionId,
+    });
+    expect((diagnostic.recovery as Record<string, unknown>).state).toBe('ready_for_diagnosis');
   });
 });
 
