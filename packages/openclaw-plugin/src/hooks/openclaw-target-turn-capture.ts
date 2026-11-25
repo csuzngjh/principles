@@ -7,9 +7,10 @@
  * hook persists a user interaction and the workspace has granted OpenClaw
  * conversation-ingestion consent, the SAME admitted utterance is appended as
  * one live governance observation keyed by the host's exact turn identity:
- * the native message id when OpenClaw supplies one, otherwise the per-session
- * user-turn index already persisted with that same interaction. The fallback
- * is therefore a host-persisted exact identity, never a nearby-turn guess.
+ * the native message id when OpenClaw supplies one, otherwise the AUTOINCREMENT
+ * rowid of the `user_turns` row persisted with that same interaction. The rowid
+ * is unique for the life of the host store and is identical for a cached replay,
+ * so the fallback is a host-persisted exact identity, never a nearby-turn guess.
  *
  * No transcript scan, no retry queue, no second evidence authority: the write
  * is idempotent on the logical observation key and missing/revoked consent is
@@ -31,8 +32,9 @@ export function captureOpenclawUserTurnForTargetEvidence(input: {
   readonly workspaceDir: string;
   readonly sessionId: string;
   readonly hostTurnId: unknown;
-  /** Exact persisted per-session user-turn index used when the embedded
-   * OpenClaw entry supplies no native message id. */
+  /** Exact persisted user_turns row identity used when the embedded OpenClaw
+   * entry supplies no native message id. Callers prefix it `user-turn-row:` so
+   * it cannot be confused with a per-session ordinal. */
   readonly fallbackHostTurnId?: string;
   readonly text: string;
   readonly logger?: Partial<PluginLogger>;
