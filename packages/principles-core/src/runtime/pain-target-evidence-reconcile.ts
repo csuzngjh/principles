@@ -86,6 +86,10 @@ export const TARGET_EVIDENCE_RECONCILE_SCOPE = 'target-evidence-reconcile';
  * rows behind them instead of starving permanently. */
 export const TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE = 'target-evidence-legacy-ready-reconcile';
 
+function hostScopedReconcileCursorScope(baseScope: string, hostKind: SourceMaterialHostKind | undefined): string {
+  return hostKind === undefined ? baseScope : `${baseScope}:${hostKind}`;
+}
+
 export interface TargetEvidenceReconcileReport {
   /** Waiting or legacy-invalid-ready tasks examined this run (bounded by `limit` per scan). */
   readonly checked: number;
@@ -424,7 +428,8 @@ export async function reconcileWaitingTargetEvidenceTasks(
   // the last examined task of the previous FULL page; a short page means the
   // set's tail was reached, so the cursor resets and the next pass wraps to
   // the oldest again. No waiting task can permanently occupy the window.
-  const cursor = await input.stateManager.getDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE);
+  const waitingCursorScope = hostScopedReconcileCursorScope(TARGET_EVIDENCE_RECONCILE_SCOPE, input.hostKind);
+  const cursor = await input.stateManager.getDiagnosticianServiceCursor(waitingCursorScope);
   const resumeAfter = cursor !== null && cursor.lastUpdatedAt.length > 0
     ? { updatedAt: cursor.lastUpdatedAt, taskId: cursor.lastTaskId }
     : undefined;
@@ -432,6 +437,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
     taskKind: 'diagnostician',
     status: 'pending',
     recoveryState: 'waiting_for_target_evidence',
+    ...(input.hostKind !== undefined ? { diagnosticHostKind: input.hostKind } : {}),
     orderBy: 'updated_at_asc',
     ...(resumeAfter !== undefined ? { afterCursor: resumeAfter } : {}),
     limit,
@@ -448,6 +454,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
       taskKind: 'diagnostician',
       status: 'pending',
       recoveryState: 'waiting_for_target_evidence',
+      ...(input.hostKind !== undefined ? { diagnosticHostKind: input.hostKind } : {}),
       orderBy: 'updated_at_asc',
       limit,
     });
@@ -459,12 +466,12 @@ export async function reconcileWaitingTargetEvidenceTasks(
     const nextCursor = waiting.length === limit
       ? { lastUpdatedAt: last.updatedAt, lastTaskId: last.taskId }
       : { lastUpdatedAt: '', lastTaskId: '' };
-    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE, nextCursor);
+    await input.stateManager.setDiagnosticianServiceCursor(waitingCursorScope, nextCursor);
   } else if (resumeAfter !== undefined) {
     // The stale resume point yielded nothing even after the wrap — the
     // waiting set drained. Clear the cursor so the next pass scans cleanly
     // from the start rather than resuming past a dead position forever.
-    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_RECONCILE_SCOPE, { lastUpdatedAt: '', lastTaskId: '' });
+    await input.stateManager.setDiagnosticianServiceCursor(waitingCursorScope, { lastUpdatedAt: '', lastTaskId: '' });
   }
 
   // PRI-1296 legacy repair: pre-upgrade boolean-probe builds could already
@@ -473,7 +480,8 @@ export async function reconcileWaitingTargetEvidenceTasks(
   // the same bounded rotation contract. This second cursor matters: valid
   // ready tasks parse as not-applicable but can occupy the oldest page, and
   // without rotation they would permanently hide legacy rows behind them.
-  const legacyReadyCursor = await input.stateManager.getDiagnosticianServiceCursor(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE);
+  const legacyReadyCursorScope = hostScopedReconcileCursorScope(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE, input.hostKind);
+  const legacyReadyCursor = await input.stateManager.getDiagnosticianServiceCursor(legacyReadyCursorScope);
   const legacyResumeAfter = legacyReadyCursor !== null && legacyReadyCursor.lastUpdatedAt.length > 0
     ? { updatedAt: legacyReadyCursor.lastUpdatedAt, taskId: legacyReadyCursor.lastTaskId }
     : undefined;
@@ -481,6 +489,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
     taskKind: 'diagnostician',
     status: 'pending',
     recoveryState: 'ready_for_diagnosis',
+    ...(input.hostKind !== undefined ? { diagnosticHostKind: input.hostKind } : {}),
     orderBy: 'updated_at_asc',
     ...(legacyResumeAfter !== undefined ? { afterCursor: legacyResumeAfter } : {}),
     limit,
@@ -490,6 +499,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
       taskKind: 'diagnostician',
       status: 'pending',
       recoveryState: 'ready_for_diagnosis',
+      ...(input.hostKind !== undefined ? { diagnosticHostKind: input.hostKind } : {}),
       orderBy: 'updated_at_asc',
       limit,
     });
@@ -497,11 +507,11 @@ export async function reconcileWaitingTargetEvidenceTasks(
   if (readyCandidates.length > 0) {
     const last = readyCandidates[readyCandidates.length - 1];
     if (last === undefined) throw new Error('unreachable: non-empty ready page has a last element');
-    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE, readyCandidates.length === limit
+    await input.stateManager.setDiagnosticianServiceCursor(legacyReadyCursorScope, readyCandidates.length === limit
       ? { lastUpdatedAt: last.updatedAt, lastTaskId: last.taskId }
       : { lastUpdatedAt: '', lastTaskId: '' });
   } else if (legacyResumeAfter !== undefined) {
-    await input.stateManager.setDiagnosticianServiceCursor(TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE, { lastUpdatedAt: '', lastTaskId: '' });
+    await input.stateManager.setDiagnosticianServiceCursor(legacyReadyCursorScope, { lastUpdatedAt: '', lastTaskId: '' });
   }
 
   for (const task of [...waiting, ...readyCandidates]) {
@@ -513,7 +523,6 @@ export async function reconcileWaitingTargetEvidenceTasks(
       errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
       continue;
     }
-    checked += 1;
     const {facts} = parsedFacts;
     if (input.hostKind !== undefined && facts.hostKind !== input.hostKind) {
       if (!isSourceMaterialHostKind(facts.hostKind)) {
@@ -521,6 +530,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
       }
       continue;
     }
+    checked += 1;
     let read = resolveRead(facts.sessionId, facts.targetTurnId);
     let parsedRecord: Record<string, unknown>;
     try {
@@ -534,6 +544,39 @@ export async function reconcileWaitingTargetEvidenceTasks(
       if (!facts.invalidReady) return;
       try {
         await writeInvalidReadyWaiting({ stateManager: input.stateManager, facts, diagnostic: parsedRecord, reasonCode, nowIso: input.nowIso });
+      } catch (error: unknown) {
+        errors.push(`target_evidence_reconcile_failed:taskId=${task.taskId}:${error instanceof Error ? Array.from(error.message).slice(0, 80).join('') : 'unknown'}`);
+      }
+    };
+    const writeBlocked = async (reason: SourceMaterialDenialReason): Promise<void> => {
+      // PRI-1273 / PRI-1283: a source-material denial is a DIFFERENT state
+      // from waiting — persist the block with its reason code so the read
+      // model shows why, and never mix it back into the waiting set.
+      try {
+        const disposition: PainRecoveryDisposition = {
+          ...facts.existingDisposition,
+          state: 'blocked_by_source_material_consent',
+          reasonCode: `target_turn_source_material_${reason}`,
+          attemptCount: facts.existingDisposition.attemptCount + 1,
+          lastCheckedAt: input.nowIso,
+        };
+        const updated = await input.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+          task.taskId,
+          facts.diagnosticText,
+          { diagnosticJson: JSON.stringify({ ...parsedRecord, recovery: disposition }) },
+          {
+            expectedStatus: task.status,
+            expectedLeaseOwner: task.leaseOwner ?? null,
+            expectedLeaseExpiresAt: task.leaseExpiresAt ?? null,
+            expectedLeaseGeneration: task.leaseGeneration ?? 0,
+            expectedAttemptCount: task.attemptCount,
+          },
+        );
+        if (updated !== null) {
+          blocked += 1;
+        } else {
+          stillWaiting += 1;
+        }
       } catch (error: unknown) {
         errors.push(`target_evidence_reconcile_failed:taskId=${task.taskId}:${error instanceof Error ? Array.from(error.message).slice(0, 80).join('') : 'unknown'}`);
       }
@@ -557,69 +600,8 @@ export async function reconcileWaitingTargetEvidenceTasks(
       stillWaiting += 1;
       continue;
     }
-    // TD §2.2 ruling 4 (devin SEC_0001): the LAST authorization check before
-    // any evidence is written. Only `available` reaches a write of source
-    // material — the legacy flip-only mode persists nothing from the source,
-    // so it is not gated here. A denial found at this point reclassifies the
-    // task exactly like a read-time denial: nothing from the revoked source
-    // is persisted.
-    if (read.status === 'available') {
-      if (input.sourceMaterialAuthorization === undefined) {
-        // PRI-1296: no final authorization port means no source-material
-        // write at all. This is a caller misconfiguration, not evidence absence.
-        errors.push(`target_evidence_reconcile_authorization_unavailable:taskId=${task.taskId}`);
-        await repairInvalidReady('target_turn_source_material_authorization_unavailable');
-        stillWaiting += 1;
-        continue;
-      }
-      const gate = preWriteAuthorizationGate(facts.hostKind, input.sourceMaterialAuthorization);
-      if (gate.outcome === 'host_invalid') {
-        // Fail closed: a write whose governing host cannot be determined
-        // cannot be authorization-checked, so it does not happen (rc-9).
-        errors.push(`target_evidence_reconcile_host_kind_invalid:taskId=${task.taskId}`);
-        await repairInvalidReady('target_turn_host_kind_invalid');
-        stillWaiting += 1;
-        continue;
-      }
-      if (gate.outcome === 'denied') read = { status: 'blocked_by_consent', reason: gate.reason };
-    }
     if (read.status === 'blocked_by_consent') {
-      // PRI-1273 / PRI-1283: a source-material denial is a DIFFERENT state
-      // from waiting — persist the block with its reason code so the read
-      // model shows why, and never mix it back into the waiting set.
-      // CodeRabbit: this write is inside the per-task error boundary — a
-      // transient store failure becomes one bounded error line and the loop
-      // continues with the next task; it must never abort the whole pass
-      // (the already-flipped tasks' report would be lost with it).
-      try {
-        const disposition: PainRecoveryDisposition = {
-          ...facts.existingDisposition,
-          state: 'blocked_by_source_material_consent',
-          reasonCode: `target_turn_source_material_${read.reason}`,
-          attemptCount: facts.existingDisposition.attemptCount + 1,
-          lastCheckedAt: input.nowIso,
-        };
-        const updated = await input.stateManager.updateTaskIfDiagnosticJsonUnchanged(
-          task.taskId,
-          facts.diagnosticText,
-          { diagnosticJson: JSON.stringify({ ...parsedRecord, recovery: disposition }) },
-          {
-            expectedStatus: task.status,
-            expectedLeaseOwner: task.leaseOwner ?? null,
-            expectedLeaseExpiresAt: task.leaseExpiresAt ?? null,
-            expectedLeaseGeneration: task.leaseGeneration ?? 0,
-            expectedAttemptCount: task.attemptCount,
-          },
-        );
-        if (updated !== null) {
-          blocked += 1;
-        } else {
-          // Lost a race — the concurrent writer's state wins; re-checked next cycle.
-          stillWaiting += 1;
-        }
-      } catch (error: unknown) {
-        errors.push(`target_evidence_reconcile_failed:taskId=${task.taskId}:${error instanceof Error ? Array.from(error.message).slice(0, 80).join('') : 'unknown'}`);
-      }
+      await writeBlocked(read.reason);
       continue;
     }
     try {
@@ -653,6 +635,31 @@ export async function reconcileWaitingTargetEvidenceTasks(
           continue;
         }
         patch = buildBackfillPatch({ diagnostic: parsedRecord, facts, entries, nowIso: input.nowIso });
+      }
+      // TD §2.2 ruling 4 (devin SEC_0001): entries are validated and the full
+      // patch is built BEFORE the final live authorization read. After this
+      // gate there is no intervening async work other than the conditional CAS
+      // itself; only `available` reaches a write of source material — the
+      // legacy flip-only mode persists nothing from the source, so it is not
+      // gated here.
+      if (read.status === 'available') {
+        if (input.sourceMaterialAuthorization === undefined) {
+          errors.push(`target_evidence_reconcile_authorization_unavailable:taskId=${task.taskId}`);
+          await repairInvalidReady('target_turn_source_material_authorization_unavailable');
+          stillWaiting += 1;
+          continue;
+        }
+        const gate = preWriteAuthorizationGate(facts.hostKind, input.sourceMaterialAuthorization);
+        if (gate.outcome === 'host_invalid') {
+          errors.push(`target_evidence_reconcile_host_kind_invalid:taskId=${task.taskId}`);
+          await repairInvalidReady('target_turn_host_kind_invalid');
+          stillWaiting += 1;
+          continue;
+        }
+        if (gate.outcome === 'denied') {
+          await writeBlocked(gate.reason);
+          continue;
+        }
       }
       // Status/lease preconditions (P1-4 parity): a worker that leased or
       // finished the task in the read→write window defeats the flip in the

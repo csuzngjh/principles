@@ -39,6 +39,12 @@ export interface TaskStoreFilter {
    * inside the picker's bounded LIMIT window.
    */
   excludeRecoveryStates?: readonly string[];
+  /**
+   * PRI-1296: match tasks whose root `diagnostic_json.hostKind` equals this
+   * governed host. Applied in the SAME WHERE clause before ORDER BY/LIMIT so
+   * a host-scoped bounded scan only spends its window on its own candidates.
+   */
+  diagnosticHostKind?: string;
 }
 
 /** Narrow patch type — only the fields that are mutable in practice.

@@ -28,11 +28,11 @@ export function captureOpenclawUserTurnForTargetEvidence(input: {
   readonly workspaceDir: string;
   readonly sessionId: string;
   readonly hostTurnId: unknown;
-  readonly text: string;
+  readonly text: unknown;
   readonly logger?: Partial<PluginLogger>;
   readonly now?: Date;
 }): void {
-  if (!usableHostId(input.sessionId) || !usableHostId(input.hostTurnId) || input.text.length === 0) return;
+  if (!usableHostId(input.sessionId) || !usableHostId(input.hostTurnId) || typeof input.text !== 'string' || input.text.length === 0) return;
   const authorization = readSourceMaterialAuthorization({ workspaceDir: input.workspaceDir, hostKind: 'openclaw' });
   if (authorization.status === 'blocked') return;
   try {

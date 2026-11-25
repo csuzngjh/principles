@@ -24,7 +24,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { pickDiagnosticianCandidate } from '../diagnostician-candidate.js';
-import { reconcileWaitingTargetEvidenceTasks, TARGET_EVIDENCE_RECONCILE_SCOPE, type TargetTurnEvidenceRead } from '../pain-target-evidence-reconcile.js';
+import { reconcileWaitingTargetEvidenceTasks, TARGET_EVIDENCE_RECONCILE_SCOPE, TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE, type TargetTurnEvidenceRead } from '../pain-target-evidence-reconcile.js';
 import { submitPainCapability } from '../pain-submit-capability.js';
 import { createDiagnosticianTaskId } from '../pain-signal-bridge.js';
 import { PainSignalBridge } from '../pain-signal-bridge.js';
@@ -1127,6 +1127,65 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect(foreign.recovery as Record<string, unknown>).toMatchObject({ state: 'waiting_for_target_evidence' });
   });
 
+  it('PRI-1296 R2: interleaved Codex/WorkBuddy/OpenClaw waiting tasks use database host filtering and independent cursors', async () => {
+    const hosts = ['codex', 'workbuddy', 'openclaw'] as const;
+    for (let round = 0; round < 5; round += 1) {
+      for (const [hostIndex, hostKind] of hosts.entries()) {
+        const serial = round * 3 + hostIndex;
+        const receipt = await submitTargetingTurn10(`mcp_1700000001296_x${String(serial).padStart(5, '0')}`, 'agent_instruction', hostKind);
+        expect(receipt.status).toBe('submitted');
+      }
+    }
+
+    const readCounts: Record<(typeof hosts)[number], number> = { codex: 0, workbuddy: 0, openclaw: 0 };
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      for (const hostKind of hosts) {
+        const before = readCounts[hostKind];
+        const report = await reconcileWaitingTargetEvidenceTasks({
+          stateManager,
+          hostKind,
+          readTargetTurnEvidence: () => {
+            readCounts[hostKind] += 1;
+            return { status: 'not_found' };
+          },
+          sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+          nowIso: new Date().toISOString(),
+          limit: 2,
+        });
+        expect(report.errors).toEqual([]);
+        expect(report.checked).toBe(2);
+        expect(readCounts[hostKind] - before).toBe(2);
+      }
+    }
+    expect(readCounts).toEqual({ codex: 4, workbuddy: 4, openclaw: 4 });
+    for (const hostKind of hosts) {
+      expect(await stateManager.getDiagnosticianServiceCursor(`${TARGET_EVIDENCE_RECONCILE_SCOPE}:${hostKind}`)).not.toBeNull();
+    }
+
+    // Legacy-ready repair uses the same host filtering/cursor isolation: one
+    // pre-upgrade invalid ready row per host is repaired by its own worker scope.
+    for (const [hostIndex, hostKind] of hosts.entries()) {
+      const taskId = createDiagnosticianTaskId(`mcp_1700000001296_x${String(hostIndex).padStart(5, '0')}`);
+      const waiting = await readDiagnostic(taskId);
+      const legacyReady = {
+        ...waiting,
+        recovery: { ...(waiting.recovery as Record<string, unknown>), state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' },
+      };
+      await stateManager.updateTaskIfDiagnosticJsonUnchanged(taskId, JSON.stringify(waiting), { diagnosticJson: JSON.stringify(legacyReady) });
+      const report = await reconcileWaitingTargetEvidenceTasks({
+        stateManager,
+        hostKind,
+        readTargetTurnEvidence: () => ({ status: 'not_found' }),
+        sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+        nowIso: new Date().toISOString(),
+        limit: 1,
+      });
+      expect(report.errors).toEqual([]);
+      expect((await readDiagnostic(taskId)).recovery).toMatchObject({ state: 'waiting_for_target_evidence', reasonCode: 'target_turn_text_pending' });
+      expect(await stateManager.getDiagnosticianServiceCursor(`${TARGET_EVIDENCE_LEGACY_READY_RECONCILE_SCOPE}:${hostKind}`)).not.toBeNull();
+    }
+  });
+
   it('devin BUG_0001: a caller wiring NEITHER probe gets a loud per-task error, never a throw that degrades the whole cycle', async () => {
     const painId = 'mcp_1700000001273_a0000012';
     const taskId = createDiagnosticianTaskId(painId);
@@ -1191,6 +1250,27 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
       expect(await pickDiagnosticianCandidate(stateManager, 5, new Date().toISOString())).toBeNull();
     });
 
+    it('missing, not-granted, and unreadable consent all block the write without evidence/evidenceClass inconsistency', async () => {
+      for (const [index, reason] of (['consent_missing', 'consent_not_granted', 'consent_unreadable'] as const).entries()) {
+        const painId = `mcp_1700000001296_d000130${index}`;
+        const taskId = createDiagnosticianTaskId(painId);
+        await submitTargetingTurn10(painId);
+        const report = await reconcileWaitingTargetEvidenceTasks({
+          stateManager,
+          readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+          sourceMaterialAuthorization: portReturning({ authorized: false, reason }),
+          nowIso: new Date().toISOString(),
+          limit: 25,
+        });
+        expect(report.backfilled).toBe(0);
+        expect(report.blocked).toBeGreaterThanOrEqual(1);
+        const diagnostic = await readDiagnostic(taskId);
+        expect(diagnostic.evidence).toEqual([]);
+        expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual(creationTimeClass);
+        expect((diagnostic.recovery as Record<string, unknown>).reasonCode).toBe(`target_turn_source_material_${reason}`);
+      }
+    });
+
     it('positive control: a GRANTED ledger at the pre-write check still backfills — the gate never over-blocks', async () => {
       const painId = 'mcp_1700000001273_a0000014';
       const taskId = createDiagnosticianTaskId(painId);
@@ -1203,6 +1283,57 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
       });
       expect(report).toMatchObject({ flipped: 1, backfilled: 1, blocked: 0 });
       expect((await readDiagnostic(taskId)).evidence).toEqual(TURN10_ENTRIES);
+    });
+
+    it('the final authorization read is immediately before the evidence CAS: read → authorize → write', async () => {
+      const painId = 'mcp_1700000001296_a0001297';
+      await submitTargetingTurn10(painId);
+      const events: string[] = [];
+      const originalUpdate = stateManager.updateTaskIfDiagnosticJsonUnchanged.bind(stateManager);
+      const instrumentedStateManager = Object.assign(Object.create(stateManager), {
+        updateTaskIfDiagnosticJsonUnchanged: async (...args: Parameters<typeof originalUpdate>) => {
+          events.push('cas');
+          return originalUpdate(...args);
+        },
+      }) as RuntimeStateManager;
+      const report = await reconcileWaitingTargetEvidenceTasks({
+        stateManager: instrumentedStateManager,
+        readTargetTurnEvidence: () => {
+          events.push('read');
+          return { status: 'available', entries: TURN10_ENTRIES };
+        },
+        sourceMaterialAuthorization: {
+          isHostSourceMaterialAuthorized: () => {
+            events.push('authorize');
+            return { authorized: true };
+          },
+        },
+        nowIso: new Date().toISOString(),
+      });
+      expect(report).toMatchObject({ flipped: 1, backfilled: 1 });
+      expect(events).toEqual(['read', 'authorize', 'cas']);
+    });
+
+    it('invalid entries are rejected before the final authorization read and never reach a write', async () => {
+      const painId = 'mcp_1700000001296_a0001298';
+      const taskId = createDiagnosticianTaskId(painId);
+      await submitTargetingTurn10(painId);
+      let authorizationCalls = 0;
+      const report = await reconcileWaitingTargetEvidenceTasks({
+        stateManager,
+        readTargetTurnEvidence: () => ({ status: 'available', entries: [{ sourceRef: '', note: 'bad' }] }),
+        sourceMaterialAuthorization: {
+          isHostSourceMaterialAuthorized: () => {
+            authorizationCalls += 1;
+            return { authorized: true };
+          },
+        },
+        nowIso: new Date().toISOString(),
+      });
+      expect(report.flipped + report.backfilled + report.blocked).toBe(0);
+      expect(report.errors.some((line) => line.includes('target_evidence_read_invalid_entries') && line.includes(taskId))).toBe(true);
+      expect(authorizationCalls).toBe(0);
+      expect((await readDiagnostic(taskId)).evidence).toEqual([]);
     });
 
     it('the check is a LIVE read PER TASK, never hoisted once per pass: a revocation landing mid-pass blocks only the later task', async () => {

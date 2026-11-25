@@ -317,6 +317,23 @@ describe('parity with the Gateway AutoConsumer ports (instruction §5.3)', () =>
 });
 
 describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execution', () => {
+  const countGovernanceObservations = (): number => {
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'governance_observations'").get();
+      return table === undefined
+        ? 0
+        : Number((db.prepare('SELECT COUNT(*) AS count FROM governance_observations').get() as { count: number }).count);
+    } finally {
+      db.close();
+    }
+  };
+  const grantOpenclawConsent = (): void => {
+    const consent = recordConversationIngestionConsent(workspaceDir, 'openclaw', {
+      decision: 'granted', decidedVia: 'owner_directive', disclosureVersion: 'test-v1', evidenceRef: 'pri-1296-test',
+    });
+    expect(consent.ok).toBe(true);
+  };
   it('backfills real authorized target evidence on the SAME waiting task before the diagnostician is invoked', async () => {
     const session = 'oc-session-pri1296';
     const turn = 'turn-10';
@@ -327,10 +344,14 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
     });
     expect(consent.ok).toBe(true);
 
-    // Real collection path: the production before_prompt_build pre-selection
-    // hook persists the admitted user message and connects it to the exact
-    // native message id the evidence reader later queries. No direct
-    // governance_observations fixture — the row must arrive through the hook.
+    // Supporting-host native identity contract: when an OpenClaw path does
+    // supply own currentUserMessage + currentUserMessageId, the production
+    // before_prompt_build pre-selection hook persists that admitted message
+    // and connects it to the exact id the evidence reader later queries. No
+    // direct governance_observations fixture — the row must arrive through the
+    // hook. Embedded OpenClaw 2026.11.1 does NOT supply those fields; the
+    // embedded-shaped negative tests below are the production evidence for
+    // that runtime and must not be overwritten by this supporting-path fixture.
     const ordinal = prepareOpenClawPromptRound({
       prompt: 'prompt',
       currentUserMessage: 'OC-T10-OWNER-CORRECTION',
@@ -401,6 +422,63 @@ describe('PRI-1296 — OpenClaw target-evidence reconcile before diagnosis execu
     } finally {
       await verify.close();
     }
+  });
+
+  it('embedded-shaped before_prompt_build events without native message identity write no evidence', () => {
+    grantOpenclawConsent();
+    const ordinal = prepareOpenClawPromptRound({
+      // OpenClaw 2026.11.1 embedded producer shape documented in
+      // docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md:
+      // prompt + messages only; no own currentUserMessage/currentUserMessageId.
+      prompt: 'rebuilt prompt containing the owner correction',
+      messages: [{ role: 'user', content: 'owner correction' }],
+    }, {
+      workspaceDir,
+      sessionId: 'oc-embedded-no-native-id',
+      trigger: 'user',
+      runId: 'run-embedded-no-native-id',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+    expect(countGovernanceObservations()).toBe(0);
+  });
+
+  it('a native id without an explicit original currentUserMessage never uses rebuilt prompt text as evidence', () => {
+    grantOpenclawConsent();
+    const ordinal = prepareOpenClawPromptRound({
+      prompt: 'SYSTEM HISTORY\nowner correction rebuilt into prompt',
+      currentUserMessageId: 'turn-without-original-message',
+      messages: [{ role: 'user', content: 'owner correction' }],
+    }, {
+      workspaceDir,
+      sessionId: 'oc-missing-original-message',
+      trigger: 'user',
+      runId: 'run-missing-original-message',
+      logger,
+    });
+    expect(Number.isInteger(ordinal)).toBe(true);
+    expect(readOpenclawTargetTurnEvidence(workspaceDir, 'oc-missing-original-message', 'turn-without-original-message').status).toBe('not_found');
+    expect(countGovernanceObservations()).toBe(0);
+  });
+
+  it('repeat hooks for the same native message id are idempotent', () => {
+    grantOpenclawConsent();
+    for (const runId of ['run-native-1', 'run-native-2']) {
+      prepareOpenClawPromptRound({
+        prompt: 'prompt',
+        currentUserMessage: 'same native owner correction',
+        currentUserMessageId: 'native-turn-1',
+        messages: [{ role: 'user', content: 'same native owner correction' }],
+      }, {
+        workspaceDir,
+        sessionId: 'oc-idempotent-capture',
+        trigger: 'user',
+        runId,
+        logger,
+      });
+    }
+    expect(countGovernanceObservations()).toBe(1);
+    expect(readOpenclawTargetTurnEvidence(workspaceDir, 'oc-idempotent-capture', 'native-turn-1')).toMatchObject({ status: 'available' });
   });
 
   it('negative control: the same real prompt collection writes no target evidence before consent is granted', () => {

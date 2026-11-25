@@ -546,7 +546,7 @@ export function prepareOpenClawPromptRound(
       workspaceDir: wctx.workspaceDir,
       sessionId,
       hostTurnId: getOwnValue(event, 'currentUserMessageId'),
-      text: currentUserMessage,
+      text: getOwnValue(event, 'currentUserMessage'),
       ...(logger !== undefined ? { logger } : {}),
     });
   } catch (error) {
@@ -779,7 +779,7 @@ export async function handleBeforePromptBuild(
           workspaceDir: wctx.workspaceDir,
           sessionId,
           hostTurnId: getOwnValue(event, 'currentUserMessageId'),
-          text: currentUserMessage,
+          text: getOwnValue(event, 'currentUserMessage'),
           ...(logger !== undefined ? { logger } : {}),
         });
       }

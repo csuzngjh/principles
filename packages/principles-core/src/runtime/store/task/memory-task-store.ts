@@ -25,6 +25,17 @@ function readRecoveryStateFromDiagnosticJson(diagnosticJson: string | null | und
   }
 }
 
+function readDiagnosticHostKind(diagnosticJson: string | null | undefined): string | null {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(diagnosticJson);
+    if (!isPlainObject(parsed)) return null;
+    return typeof parsed.hostKind === 'string' ? parsed.hostKind : null;
+  } catch {
+    return null;
+  }
+}
+
 export class MemoryTaskStore implements TaskStore {
   private readonly tasks = new Map<string, TaskRecord>();
 
@@ -100,6 +111,9 @@ export class MemoryTaskStore implements TaskStore {
     if (filter?.excludeRecoveryStates !== undefined && filter.excludeRecoveryStates.length > 0) {
       const excluded = new Set<string>(filter.excludeRecoveryStates);
       results = results.filter((t) => !excluded.has(readRecoveryStateFromDiagnosticJson(t.diagnosticJson) ?? ''));
+    }
+    if (filter?.diagnosticHostKind !== undefined) {
+      results = results.filter((t) => readDiagnosticHostKind(t.diagnosticJson) === filter.diagnosticHostKind);
     }
     // Parity with SqliteTaskStore (A-liveness): silently ignoring
     // orderBy/afterCursor here would make cursor-based scans return wrong

@@ -305,6 +305,10 @@ export class SqliteTaskStore implements TaskStore {
       conditions.push(`COALESCE(json_extract(diagnostic_json, '$.recovery.state'), '') NOT IN (${placeholders})`);
       values.push(...filter.excludeRecoveryStates);
     }
+    if (filter?.diagnosticHostKind !== undefined) {
+      conditions.push("COALESCE(json_extract(diagnostic_json, '$.hostKind'), '') = ?");
+      values.push(filter.diagnosticHostKind);
+    }
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
     if (filter?.orderBy === 'updated_at_asc') { sql += ' ORDER BY updated_at ASC, task_id ASC'; }
     else if (filter?.orderBy === 'updated_at_desc') { sql += ' ORDER BY updated_at DESC, task_id DESC'; }
