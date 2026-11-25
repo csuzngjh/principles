@@ -388,6 +388,9 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'pd-config-loader.ts',
   // PRI-346: Pure function for checking conversation access config (extracted for circular import avoidance)
   'config-health.ts',
+  // PRI-1292 round 3: read-only host effective-config I/O adapter for OpenClaw
+  // JSON5/$include compatibility; no domain mutation or second config authority.
+  'openclaw-config-loader.ts',
   // PRI-467: Plugin I/O boundary — reads .principles/INTENT.md with TTL+mtime cache,
   // delegates parsing/validation/hashing to @principles/core. Never throws.
   'intent-doc-reader.ts',
@@ -551,7 +554,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PainToPrincipleService factory shared by the pain hook and the /pd pain
     // command (plugin I/O boundary binding WorkspaceContext + plugin config
     // loader to the shared host collaborator assembly).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(99);
   });
 });
 
