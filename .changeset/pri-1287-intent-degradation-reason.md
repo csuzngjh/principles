@@ -3,6 +3,7 @@
 "@principles/host-runtime": patch
 "@principles/codex-adapter": patch
 "@principles/workbuddy-adapter": patch
+"@principles/pd-cli": patch
 "principles-disciple": patch
 "create-principles-disciple": patch
 ---

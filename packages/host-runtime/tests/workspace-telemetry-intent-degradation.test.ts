@@ -62,7 +62,7 @@ function readFailedEvent(): TelemetryEvent {
     agentId: 'diagnostician',
     payload: {
       reason: 'not_found',
-      nextAction: 'From workspace directory /ws, create .principles/INTENT.zh-CN.md using "pd intent init --confirm --lang zh-CN".',
+      nextAction: 'From workspace directory /ws, create .principles/INTENT.zh-CN.md using "pd intent init --confirm --lang zh-CN --workspace .".',
       flagEnabled: true,
       found: false,
     },

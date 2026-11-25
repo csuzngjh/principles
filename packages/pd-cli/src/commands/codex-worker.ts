@@ -240,7 +240,7 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
   }
 
   if (options.once === true) {
-    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME } });
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME }, emitEvent: (event, payloadJson) => console.error(`[PD:CodexWorker] ${event}: ${payloadJson}`) });
     runRetentionAfterCycle(workspace);
     printCycleReport(result, options.json === true);
     if (result.mode === 'degraded') process.exitCode = 1;
@@ -257,7 +257,7 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
       // handler (commander's sync parse does not catch action rejections) and
       // crash the process. Log with a next action and keep the loop alive.
       try {
-        const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME } });
+        const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME }, emitEvent: (event, payloadJson) => console.error(`[PD:CodexWorker] ${event}: ${payloadJson}`) });
         runRetentionAfterCycle(workspace);
         printCycleReport(result, false);
       } catch (err) {

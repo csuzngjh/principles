@@ -212,9 +212,9 @@ describe('createHostIntentDocReader', () => {
     const result = reader.readIntentDoc();
 
     expect(result).toMatchObject({ ok: false, found: false, flagEnabled: true, reason: 'not_found' });
-    expect(result.nextAction).toContain('pd intent init --confirm --lang zh-CN');
+    expect(result.nextAction).toContain('pd intent init --confirm --lang zh-CN --workspace .');
     expect(result.nextAction).toContain(`workspace directory ${dollarWorkspace}`);
-    expect(result.nextAction).not.toContain('--workspace');
+    expect(result.nextAction).toContain('--workspace .');
   });
 
   it('file above 32KB returns oversized (both initial size and read-bytes guarded)', () => {

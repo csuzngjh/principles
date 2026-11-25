@@ -156,9 +156,9 @@ describe('safeReadIntentDoc (PRI-467)', () => {
     expect(result.found).toBe(false);
     expect(result.flagEnabled).toBe(true);
     expect(result.reason).toBe('not_found');
-    expect(result.nextAction).toContain('pd intent init --confirm --lang zh-CN');
+    expect(result.nextAction).toContain('pd intent init --confirm --lang zh-CN --workspace .');
     expect(result.nextAction).toContain(`workspace directory ${dollarWorkspace}`);
-    expect(result.nextAction).not.toContain('--workspace');
+    expect(result.nextAction).toContain('--workspace .');
     expect(result.doc).toBeUndefined();
   });
 
