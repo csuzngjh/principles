@@ -627,7 +627,9 @@ function evaluateRecoveryPass(input: {
   const existingVerified = painIngressForTarget !== undefined && isRecord(painIngressForTarget.verifiedHostSession)
     ? painIngressForTarget.verifiedHostSession
     : undefined;
-  const existingVerifiedTargetTurnId = existingVerified !== undefined
+  const existingVerifiedTargetTurnId = hintPresent
+    && existingHint === identity.sessionId
+    && existingVerified !== undefined
     && existingVerified.status === 'verified'
     && typeof existingVerified.targetTurnId === 'string' && existingVerified.targetTurnId.length > 0
     ? existingVerified.targetTurnId
