@@ -1,6 +1,10 @@
 ---
 "@principles/core": patch
 "@principles/host-runtime": patch
+"@principles/codex-adapter": patch
+"@principles/workbuddy-adapter": patch
+"principles-disciple": patch
+"create-principles-disciple": patch
 ---
 
 The Intent chain can no longer degrade to `not_configured` without leaving a
@@ -22,3 +26,13 @@ The same event types are now allowlisted into
 diagnosis path binds the workspace-scoped sink instead of the bare singleton, so
 the record survives the process on the path automatic Pain actually takes.
 Normal (authored) INTENT.md behaviour is unchanged and produces no record.
+
+
+Review follow-ups in the same bounded contract: mixed localized/canonical
+headings now tell the Owner that only recognised sections are template-only and
+point them at the supported headings; a fresh-read truncation that hides an
+authored answer behind earlier TODO material is reported as a truncation
+recovery problem rather than as a document with no answer; missing-file recovery
+guidance now includes the CLI's required `--confirm` write acknowledgement; and
+the Codex/WorkBuddy worker Stage A entry points bind the same durable critical
+telemetry sink as the L3 automatic path.

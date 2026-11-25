@@ -330,6 +330,9 @@ export const INTENT_DOC_CANONICAL_HEADINGS =
 export type IntentDocDegradationReason =
   | 'no_parsed_section'
   | 'placeholder_only'
+  /** Fresh-read only: the untruncated document has Owner-authored content,
+   * but template/TODO material before it fills the bounded snapshot. */
+  | 'authored_content_truncated'
   | 'no_authored_section';
 
 export interface IntentDocDegradation {
@@ -369,6 +372,6 @@ export function deriveIntentDocDegradation(
     reason: 'placeholder_only',
     parsedSectionCount,
     nextAction:
-      'INTENT.md still carries only the shipped template questions or TODO noise. Replace at least one section with the Owner\'s own answer; template text is not treated as Owner intent.',
+      `The recognised INTENT.md sections still carry only the shipped template questions or TODO noise. Replace at least one recognised section with the Owner's own answer. If an answer already exists elsewhere in the document, move it under one of the supported headings (${INTENT_DOC_CANONICAL_HEADINGS}); content under any other heading is never read as Owner intent.`,
   };
 }

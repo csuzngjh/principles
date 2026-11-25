@@ -34,8 +34,11 @@ import type { TaskRecord } from '../task-status.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import type { IntentDocReader } from '../intent/intent-doc-reader-port.js';
 import {
+  analyzeIntentDocSections,
   deriveIntentDocDegradation,
   getIntentFilename,
+  parseIntentDocSections,
+  type IntentDocSections,
   type IntentLang,
 } from '../intent/intent-doc.js';
 import {
@@ -312,7 +315,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
       // on every retry.
       this.emitIntentDegradation(
         task.taskId,
-        { source: 'fresh_read', docPath: doc.path },
+        { source: 'fresh_read', docPath: doc.path, untruncatedSections: parseIntentDocSections(doc.raw) },
         snapshot,
       );
       return undefined;
@@ -355,10 +358,14 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
    */
   private emitIntentDegradation(
     taskId: string,
-    origin: { readonly source: 'persisted_snapshot' | 'fresh_read'; readonly docPath?: string },
+    origin: {
+      readonly source: 'persisted_snapshot' | 'fresh_read';
+      readonly docPath?: string;
+      readonly untruncatedSections?: IntentDocSections;
+    },
     snapshot: IntentSnapshot,
   ): void {
-    const degradation = deriveIntentDocDegradation(
+    let degradation = deriveIntentDocDegradation(
       intentSnapshotToUnfilteredDocSections(snapshot),
       snapshot.lang,
     ) ?? {
@@ -369,6 +376,21 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
       parsedSectionCount: snapshot.sections.filter((section) => section.missing !== true).length,
       nextAction: 'Fill in at least one INTENT.md section with your own content; template text is not treated as Owner intent.',
     };
+    if (
+      origin.source === 'fresh_read'
+      && origin.untruncatedSections !== undefined
+      && snapshot.sections.some((section) => section.truncated === true)
+    ) {
+      const untruncatedAnalyses = analyzeIntentDocSections(origin.untruncatedSections, snapshot.lang);
+      if (untruncatedAnalyses.some((analysis) => analysis.state === 'authored')) {
+        degradation = {
+          reason: 'authored_content_truncated',
+          parsedSectionCount: untruncatedAnalyses.filter((analysis) => analysis.state !== 'missing').length,
+          nextAction:
+            'INTENT.md contains Owner-authored content, but template or TODO material before it fills the per-section snapshot limit, so Stage A cannot see the answer. Shorten the section or move the answer ahead of the draft/template text, then retry diagnosis.',
+        };
+      }
+    }
     this.emitEvent('intent_doc_template_only', taskId, {
       ...origin,
       reason: degradation.reason,

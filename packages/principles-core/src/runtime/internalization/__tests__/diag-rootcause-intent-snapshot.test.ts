@@ -934,6 +934,74 @@ Every principle is traceable to the strategic basis it came from.
     expect(harness.persistedSnapshot()).toBeUndefined();
   });
 
+  it('mixed localized and canonical headings point the Owner at the supported heading instead of denying the existing answer', async () => {
+    const mixed = `# INTENT.md
+
+## 1. 为什么存在
+Owner trust is the long-term asset we are protecting.
+
+## 2. Desired Outcome
+TODO
+`;
+    const harness = createHarness({
+      intentEngineering: true,
+      reader: {
+        readIntentDoc: () => ({
+          ok: true,
+          found: true,
+          flagEnabled: true,
+          doc: { raw: mixed, contentHash: HASH_UNRECOGNIZED, path: '/ws/.principles/INTENT.zh-CN.md' },
+        }),
+      },
+      output: makeOutput({ intentTension: tensionFor(['why']) }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const payloads = emittedPayloads(harness.eventEmitter, EVENT);
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toMatchObject({ reason: 'placeholder_only', parsedSectionCount: 1 });
+    expect(String(payloads[0]?.nextAction)).toContain('recognised INTENT.md sections');
+    expect(String(payloads[0]?.nextAction)).toContain('move it under one of the supported headings');
+    expect(String(payloads[0]?.nextAction)).toContain('## 1. Why');
+  });
+
+  it('a fresh read whose answer is hidden by truncation reports truncation recovery guidance', async () => {
+    const placeholderDraft = Array.from(
+      { length: 40 },
+      (_, index) => `TODO draft line ${index} xxxxxxxxxxxxxxxxx`,
+    ).join('\n');
+    const truncatedBeforeAnswer = `# INTENT.md
+
+## 1. Why
+${placeholderDraft}
+
+Owner trust is the long-term asset we are protecting.
+`;
+    const harness = createHarness({
+      intentEngineering: true,
+      reader: {
+        readIntentDoc: () => ({
+          ok: true,
+          found: true,
+          flagEnabled: true,
+          doc: { raw: truncatedBeforeAnswer, contentHash: HASH_UNRECOGNIZED, path: '/ws/.principles/INTENT.en.md' },
+        }),
+      },
+      output: makeOutput({ intentTension: tensionFor(['why']) }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const payloads = emittedPayloads(harness.eventEmitter, EVENT);
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toMatchObject({ reason: 'authored_content_truncated' });
+    expect(String(payloads[0]?.nextAction)).toContain('Shorten the section or move the answer ahead');
+    expect(harness.persistedSnapshot()).toBeUndefined();
+  });
+
   it('a historical snapshot the trust boundary refuses reports its reason too', async () => {
     const historical = buildIntentSnapshot({
       raw: INTENT_TEMPLATE_ONLY,

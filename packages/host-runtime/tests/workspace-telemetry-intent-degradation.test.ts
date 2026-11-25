@@ -62,7 +62,7 @@ function readFailedEvent(): TelemetryEvent {
     agentId: 'diagnostician',
     payload: {
       reason: 'not_found',
-      nextAction: 'Create .principles/INTENT.zh-CN.md using "pd intent init".',
+      nextAction: 'Create .principles/INTENT.zh-CN.md using "pd intent init --confirm --lang zh-CN --workspace \\"/ws\\"".',
       flagEnabled: true,
       found: false,
     },
@@ -115,7 +115,7 @@ describe('PRI-1287 Intent degradation is durable and still forwarded', () => {
     const persisted = readSink(workspaceDir);
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toEqual(event);
-    expect(persisted[0]?.payload.nextAction).toContain('pd intent init');
+    expect(persisted[0]?.payload.nextAction).toContain('pd intent init --confirm');
     expect(upstreamSpy).toHaveBeenCalledWith(event);
   });
 
