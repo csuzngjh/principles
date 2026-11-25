@@ -65,6 +65,7 @@ import {
 import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
 import { createLiveSignalKeywordStore } from '../core/signal-keyword-store.js';
 import { captureOpenclawUserTurnForTargetEvidence } from './openclaw-target-turn-capture.js';
+import { rememberOpenclawRunTurnCorrelation } from './openclaw-run-turn-correlation.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 
@@ -117,6 +118,77 @@ function hasMessageRole(message: unknown, role: string): boolean {
     return false;
   }
   return Object.getOwnPropertyDescriptor(message, 'role')?.value === role;
+}
+
+function resolveOriginalUserMessageForTargetEvidence(
+  event: PluginHookBeforePromptBuildEvent,
+  resolvedMessage: string,
+): string | undefined {
+  // The explicit host field is authoritative, including explicit empty/invalid
+  // values (which must not revive prompt-derived history).
+  const supplied = Object.getOwnPropertyDescriptor(event, 'currentUserMessage');
+  if (supplied !== undefined) {
+    return typeof supplied.value === 'string' && supplied.value.length > 0
+      ? supplied.value
+      : undefined;
+  }
+
+  // Embedded OpenClaw omits currentUserMessage/currentUserMessageId. Its
+  // messages snapshot is usable only when the last user message is a plain
+  // string and byte-for-byte equals the independently extracted prompt
+  // message. A rebuilt prompt, history fragment or wrapper mismatch is not
+  // promoted into source evidence.
+  const messages = getOwnValue(event, 'messages');
+  if (!Array.isArray(messages)) return undefined;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (typeof message !== 'object' || message === null || Array.isArray(message) || !hasMessageRole(message, 'user')) {
+      continue;
+    }
+    const content = getOwnValue(message, 'content');
+    return typeof content === 'string' && content.length > 0 && content === resolvedMessage
+      ? content
+      : undefined;
+  }
+  return undefined;
+}
+
+function captureOpenclawTargetTurnForRun(input: {
+  readonly event: PluginHookBeforePromptBuildEvent;
+  readonly workspaceDir: string;
+  readonly sessionId: string;
+  readonly runId: string | undefined;
+  readonly userTurnRowid: number;
+  readonly resolvedMessage: string;
+  readonly logger?: Partial<PluginLogger>;
+}): void {
+  const text = resolveOriginalUserMessageForTargetEvidence(input.event, input.resolvedMessage);
+  if (text === undefined) return;
+  const nativeTurnId = getOwnValue(input.event, 'currentUserMessageId');
+  const fallbackHostTurnId = `user-turn-row:${input.userTurnRowid}`;
+  const targetTurnId = typeof nativeTurnId === 'string'
+    && nativeTurnId.length > 0
+    && nativeTurnId.length <= 200
+    && nativeTurnId.trim() === nativeTurnId
+    ? nativeTurnId
+    : fallbackHostTurnId;
+
+  captureOpenclawUserTurnForTargetEvidence({
+    workspaceDir: input.workspaceDir,
+    sessionId: input.sessionId,
+    hostTurnId: nativeTurnId,
+    fallbackHostTurnId,
+    text,
+    ...(input.logger !== undefined ? { logger: input.logger } : {}),
+  });
+  if (input.runId !== undefined) {
+    rememberOpenclawRunTurnCorrelation({
+      workspaceDir: input.workspaceDir,
+      sessionId: input.sessionId,
+      runId: input.runId,
+      targetTurnId,
+    });
+  }
 }
 
 function nextUserTurnIndex(wctx: WorkspaceContext, sessionId: string, messages: readonly unknown[]): number {
@@ -542,12 +614,13 @@ export function prepareOpenClawPromptRound(
       );
       return undefined;
     }
-    captureOpenclawUserTurnForTargetEvidence({
+    captureOpenclawTargetTurnForRun({
+      event,
       workspaceDir: wctx.workspaceDir,
       sessionId,
-      hostTurnId: getOwnValue(event, 'currentUserMessageId'),
-      fallbackHostTurnId: `user-turn-row:${outcome.userTurnRowid}`,
-      text: getOwnValue(event, 'currentUserMessage'),
+      runId,
+      userTurnRowid: outcome.userTurnRowid,
+      resolvedMessage: currentUserMessage,
       ...(logger !== undefined ? { logger } : {}),
     });
   } catch (error) {
@@ -776,12 +849,13 @@ export async function handleBeforePromptBuild(
         },
       );
       if (outcome?.status === 'user_turn_persisted') {
-        captureOpenclawUserTurnForTargetEvidence({
+        captureOpenclawTargetTurnForRun({
+          event,
           workspaceDir: wctx.workspaceDir,
           sessionId,
-          hostTurnId: getOwnValue(event, 'currentUserMessageId'),
-          fallbackHostTurnId: `user-turn-row:${outcome.userTurnRowid}`,
-          text: getOwnValue(event, 'currentUserMessage'),
+          runId,
+          userTurnRowid: outcome.userTurnRowid,
+          resolvedMessage: currentUserMessage,
           ...(logger !== undefined ? { logger } : {}),
         });
       }
