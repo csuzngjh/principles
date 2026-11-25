@@ -14,7 +14,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { runWorkbuddyWorkspaceWorkerCycle, readWorkbuddyWorkerLiveness } from '../src/worker/workspace-worker.js';
 import { HOST_TOOL_DECLARATION_VERSION, ensureGovernanceSchema, recordConversationIngestionConsent } from '@principles/host-runtime';
-import { createDiagnosticianTaskId, createRuntimeStateHandle } from '@principles/core/runtime';
+import { createDiagnosticianTaskId, createRuntimeStateHandle, disposePainSignalBridgesForWorkspace } from '@principles/core/runtime';
 import { makeHome, makeGovernance, cleanupTempDirs } from './helpers/workbench.js';
 
 const TRAJECTORY_DDL = [
@@ -490,5 +490,8 @@ describe('PRI-1296 — WorkBuddy target-evidence reconcile before diagnostician 
 
     const third = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
     expect(third.report?.targetEvidenceReconcile).toMatchObject({ checked: 0, flipped: 0, backfilled: 0 });
+    // The worker's diagnosis bridge is workspace-scoped/cached; release its
+    // SQLite handle explicitly so Windows cleanup can unlink state.db.
+    await disposePainSignalBridgesForWorkspace(governance);
   });
 });
