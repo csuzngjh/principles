@@ -426,6 +426,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
           stateManager: handle.stateManager,
           readTargetTurnEvidence: (sessionId, turnId) => readCodexTargetTurnEvidence(path.resolve(workspaceDir), sessionId, turnId),
           sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(path.resolve(workspaceDir)),
+          hostKind: 'codex',
           nowIso: new Date().toISOString(),
         });
         if (targetEvidenceReconcile.flipped > 0 || targetEvidenceReconcile.blocked > 0 || targetEvidenceReconcile.errors.length > 0) {

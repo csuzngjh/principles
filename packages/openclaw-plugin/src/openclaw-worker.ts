@@ -547,6 +547,7 @@ export async function runOpenClawWorkspaceWorkerCycle(
         stateManager: handle.stateManager,
         readTargetTurnEvidence: (sessionId, turnId) => readOpenclawTargetTurnEvidence(workspaceDir, sessionId, turnId),
         sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+        hostKind: 'openclaw',
         nowIso: new Date().toISOString(),
       });
     } finally {

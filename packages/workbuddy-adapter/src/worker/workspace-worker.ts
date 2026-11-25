@@ -404,6 +404,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
           stateManager: handle.stateManager,
           readTargetTurnEvidence: (sessionId, turnId) => readWorkbuddyTargetTurnEvidence(workspaceDir, sessionId, turnId),
           sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+          hostKind: 'workbuddy',
           nowIso: new Date().toISOString(),
         });
         if (targetEvidenceReconcile.flipped > 0 || targetEvidenceReconcile.blocked > 0 || targetEvidenceReconcile.errors.length > 0) {

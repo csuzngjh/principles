@@ -125,6 +125,10 @@ export interface ReconcileWaitingTargetEvidenceInput {
    * the task stays waiting with a bounded configuration error.
    */
   readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+  /** Host worker scope: when set, waiting tasks belonging to another governed
+   * host are left for that host's worker. This prevents one host's reader or
+   * consent state from reclassifying a foreign host's task in a shared workspace. */
+  readonly hostKind?: SourceMaterialHostKind;
   readonly nowIso: string;
   readonly limit?: number;
 }
@@ -380,6 +384,12 @@ export async function reconcileWaitingTargetEvidenceTasks(
       // A waiting task without its promised verified session + target turn
       // is a malformed payload — reported, never silently dropped (rc-9).
       errors.push(`target_evidence_reconcile_payload_invalid:taskId=${task.taskId}`);
+      continue;
+    }
+    if (input.hostKind !== undefined && facts.hostKind !== input.hostKind) {
+      if (!isSourceMaterialHostKind(facts.hostKind)) {
+        errors.push(`target_evidence_reconcile_host_invalid:taskId=${task.taskId}`);
+      }
       continue;
     }
     let read = resolveRead(facts.sessionId, facts.targetTurnId);

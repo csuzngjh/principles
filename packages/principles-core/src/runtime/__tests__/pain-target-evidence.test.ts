@@ -55,14 +55,14 @@ afterEach(async () => {
 
 /** A session-bound submission that NAMES turn 10 while living at turn 12 —
  * through the REAL capability (the exact production write path). */
-async function submitTargetingTurn10(painId: string, anchorType: 'agent_instruction' | 'owner_expectation' = 'agent_instruction') {
+async function submitTargetingTurn10(painId: string, anchorType: 'agent_instruction' | 'owner_expectation' = 'agent_instruction', hostKind: 'codex' | 'workbuddy' | 'openclaw' = 'codex') {
   const receipt = await submitPainCapability(
     {
       workspaceDir: tmpDir,
       stateDir: path.join(tmpDir, '.state'),
       painId,
       taskId: createDiagnosticianTaskId(painId),
-      hostKind: 'codex',
+      hostKind,
       verifyHostSession: () => ({
         status: 'verified',
         sessionId: 'rollout-target',
@@ -1014,6 +1014,31 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect((diagnostic.recovery as Record<string, unknown>).state).toBe('waiting_for_target_evidence');
     expect(diagnostic.evidence).toEqual([]);
     expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'unavailable', reason: 'not_applicable_unbound' });
+  });
+
+
+  it("PRI-1296 review: a host-scoped worker reconcile never reclassifies another host's waiting task", async () => {
+    const codexPainId = 'mcp_1700000001296_hx000296';
+    const workbuddyPainId = 'mcp_1700000001296_hx000297';
+    const codexTaskId = createDiagnosticianTaskId(codexPainId);
+    const workbuddyTaskId = createDiagnosticianTaskId(workbuddyPainId);
+    await submitTargetingTurn10(codexPainId);
+    await submitTargetingTurn10(workbuddyPainId, 'agent_instruction', 'workbuddy');
+
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      hostKind: 'codex',
+      readTargetTurnEvidence: () => ({ status: 'available', entries: TURN10_ENTRIES }),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+      nowIso: new Date().toISOString(),
+      limit: 25,
+    });
+    expect(report.flipped).toBe(1);
+    expect(report.blocked).toBe(0);
+    expect((await readDiagnostic(codexTaskId)).recovery as Record<string, unknown>).toMatchObject({ state: 'ready_for_diagnosis' });
+    const foreign = await readDiagnostic(workbuddyTaskId);
+    expect(foreign.evidence).toEqual([]);
+    expect(foreign.recovery as Record<string, unknown>).toMatchObject({ state: 'waiting_for_target_evidence' });
   });
 
   it('devin BUG_0001: a caller wiring NEITHER probe gets a loud per-task error, never a throw that degrades the whole cycle', async () => {
