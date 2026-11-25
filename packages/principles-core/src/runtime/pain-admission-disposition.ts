@@ -5,14 +5,18 @@
  *
  *  - the receipt fallback (`pain-receipt-recovery.ts`) after a PostToolUse
  *    receipt restores (or refuses to restore) the submission identity;
+ *    OpenClaw tasks without a provable same-run target identity remain in
+ *    `waiting_for_receipt` until a target-bearing retry arrives;
  *  - `pd_submit_pain` itself at creation time, when the submission bound a
  *    session and named a target turn whose text is not yet collectable
  *    (`waiting_for_target_evidence`).
  *
- * The candidate picker's SQL gate excludes `waiting_for_target_evidence`
- * tasks BEFORE its ORDER BY/LIMIT, and the workspace worker's reconcile
- * flips the state once the authorized target-turn evidence exists — the
- * states below are the whole vocabulary for that hand-off (no new
+ * The candidate picker's SQL gate excludes `waiting_for_receipt` and
+ * `waiting_for_target_evidence` tasks BEFORE its ORDER BY/LIMIT; the manual
+ * diagnosis entry point independently blocks `waiting_for_receipt`. The
+ * workspace worker's reconcile flips `waiting_for_target_evidence` once the
+ * authorized target-turn evidence exists — the states below are the whole
+ * vocabulary for that hand-off (no new
  * TaskStatus; SPEC-PD-FEEDBACK-RESILIENCE-001 TD §3 step 9).
  *
  * Leaf module: types and one constant only, so the bridge, the submit
