@@ -5,7 +5,7 @@
  * plugin SDK. It never writes config and never logs paths or content.
  */
 import JSON5 from 'json5';
-import { existsSync, readFileSync, realpathSync } from 'fs';
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, realpathSync, statSync } from 'fs';
 import os from 'os';
 import path from 'path';
 
@@ -14,7 +14,7 @@ const MAX_INCLUDE_DEPTH = 10;
 const MAX_INCLUDE_FILE_BYTES = 2_097_152;
 
 export type OpenClawEffectiveConfigResult =
-  | { readonly ok: true; readonly config: Record<string, unknown>; readonly rawConfig: Record<string, unknown>; readonly usesInclude: boolean }
+  | { readonly ok: true; readonly config: Record<string, unknown>; readonly rawConfig: Record<string, unknown>; readonly usesInclude: boolean; readonly strictJson: boolean }
   | { readonly ok: false; readonly reason: 'missing' | 'read_failed' | 'parse_failed' | 'include_failed' | 'not_object' };
 
 interface IncludeContext {
@@ -23,12 +23,30 @@ interface IncludeContext {
   readonly depth: number;
 }
 
+interface IncludeBoundaryRoot {
+  readonly rootDir: string;
+  readonly rootRealDir: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function stripBom(text: string): string {
+  return text.replace(/^\uFEFF/, '');
+}
+
+function isStrictJson(text: string): boolean {
+  try {
+    JSON.parse(stripBom(text));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseConfigText(text: string): unknown {
-  const withoutBom = text.replace(/^\uFEFF/, '');
+  const withoutBom = stripBom(text);
   try {
     return JSON.parse(withoutBom);
   } catch {
@@ -82,17 +100,73 @@ function containsIncludeKey(value: unknown): boolean {
   return Object.values(value).some(containsIncludeKey);
 }
 
-function includeRootAllows(configPath: string, candidate: string): boolean {
-  const configRoot = path.dirname(configPath);
-  const lexicalRoots = [configRoot, ...includeAllowedRoots()];
-  const lexicalAllowed = lexicalRoots.some((root) => isInside(path.normalize(root), candidate));
+function includeBoundaryRoots(configPath: string): IncludeBoundaryRoot[] {
+  return [path.dirname(configPath), ...includeAllowedRoots()].map((root) => {
+    const rootDir = path.normalize(root);
+    return { rootDir, rootRealDir: path.normalize(realpathOrSelf(rootDir)) };
+  });
+}
+
+function findContainingRoot(candidate: string, roots: readonly IncludeBoundaryRoot[], key: keyof IncludeBoundaryRoot): IncludeBoundaryRoot | null {
+  return roots.find((root) => isInside(root[key], candidate)) ?? null;
+}
+
+function resolveIncludeRoot(configPath: string, candidate: string): IncludeBoundaryRoot | null {
+  const roots = includeBoundaryRoots(configPath);
   // OpenClaw checks the lexical path against lexical roots and the resolved
   // symlink target against real roots independently. A lexical link inside the
   // config directory may therefore legitimately target a separately allowed
   // include root; an unallowed outside target remains rejected.
+  if (!findContainingRoot(candidate, roots, 'rootDir')) return null;
   const realCandidate = realpathOrSelf(candidate);
-  const realAllowed = lexicalRoots.some((root) => isInside(path.normalize(realpathOrSelf(root)), realCandidate));
-  return lexicalAllowed && realAllowed;
+  return findContainingRoot(realCandidate, roots, 'rootRealDir');
+}
+
+function realpathOfOpenFile(fd: number, fallback: string): string {
+  if (process.platform === 'linux') {
+    try {
+      return path.normalize(realpathSync.native(`/proc/self/fd/${fd}`));
+    } catch {
+      // Fall through to the path-based check; Linux /proc is best-effort on
+      // some restricted containers.
+    }
+  }
+  return path.normalize(realpathOrSelf(fallback));
+}
+
+function readIncludeFileWithOpenGuards(resolved: string, root: IncludeBoundaryRoot): string {
+  let fd: number | undefined;
+  try {
+    fd = openSync(resolved, 'r');
+    const stat = fstatSync(fd);
+    // Match OpenClaw openRootFileSync validation: regular file only, no
+    // hardlinked config fragments, and a bounded read. The checks are performed
+    // on the opened descriptor rather than on a pre-open stat snapshot.
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_INCLUDE_FILE_BYTES) {
+      throw new Error('include_failed_security_validation');
+    }
+    const openedPath = realpathOfOpenFile(fd, resolved);
+    if (!isInside(root.rootRealDir, openedPath)) throw new Error('include_escapes_open_root');
+    const openedStat = statSync(openedPath);
+    if (openedStat.dev !== stat.dev || openedStat.ino !== stat.ino) throw new Error('include_open_identity_changed');
+
+    const buffer = Buffer.allocUnsafe(MAX_INCLUDE_FILE_BYTES + 1);
+    let total = 0;
+    while (total <= MAX_INCLUDE_FILE_BYTES) {
+      const bytesRead = readSync(fd, buffer, total, MAX_INCLUDE_FILE_BYTES + 1 - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > MAX_INCLUDE_FILE_BYTES) throw new Error('include_too_large');
+    return buffer.toString('utf8', 0, total);
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error('include_missing');
+    }
+    throw error;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
 }
 
 function resolveIncludeValue(value: unknown, context: IncludeContext, configPath: string): unknown {
@@ -119,11 +193,12 @@ function resolveIncludeValue(value: unknown, context: IncludeContext, configPath
     const resolved = path.normalize(path.isAbsolute(includePath)
       ? includePath
       : path.resolve(path.dirname(context.basePath), includePath));
-    if (!includeRootAllows(configPath, resolved)) throw new Error('include_escapes_config_root');
+    if (resolved.length >= 4096) throw new Error('invalid_include_path');
+    const includeRoot = resolveIncludeRoot(configPath, resolved);
+    if (!includeRoot) throw new Error('include_escapes_config_root');
     if (context.visited.has(resolved)) throw new Error('circular_include');
     if (!existsSync(resolved)) throw new Error('include_missing');
-    const statText = readFileSync(resolved, 'utf8');
-    if (Buffer.byteLength(statText, 'utf8') > MAX_INCLUDE_FILE_BYTES) throw new Error('include_too_large');
+    const statText = readIncludeFileWithOpenGuards(resolved, includeRoot);
     const parsed = parseConfigText(statText);
     includedValues.push(resolveIncludeValue(parsed, {
       basePath: resolved,
@@ -160,7 +235,7 @@ export function readOpenClawEffectiveConfig(configPath: string): OpenClawEffecti
       depth: 0,
     }, path.normalize(configPath));
     if (!isRecord(config)) return { ok: false, reason: 'not_object' };
-    return { ok: true, config, rawConfig, usesInclude: containsIncludeKey(rawConfig) };
+    return { ok: true, config, rawConfig, usesInclude: containsIncludeKey(rawConfig), strictJson: isStrictJson(rawText) };
   } catch {
     return { ok: false, reason: 'include_failed' };
   }

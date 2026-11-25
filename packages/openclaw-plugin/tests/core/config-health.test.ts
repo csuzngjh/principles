@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { linkSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import * as os from 'os';
 import {
@@ -532,10 +532,10 @@ describe('OpenClaw 2026.11.5 JSON5 and $include effective config compatibility',
 
   it('an unrelated include branch does not block the normal absent-flag repair', () => {
     write('logging.json5', `{ level: 'debug' }`);
-    main(`{
+    main(JSON.stringify({
       logging: { $include: './logging.json5' },
       plugins: { entries: { 'principles-disciple': { enabled: true } } },
-    }`);
+    }));
     expect(ensureConversationAccessInConfig()).toBe(true);
     expect(shouldBlockOpenClawConversationReads()).toBe(false);
   });
@@ -571,12 +571,12 @@ describe('OpenClaw 2026.11.5 JSON5 and $include effective config compatibility',
 
   it('repairs a direct plugin entry even when unrelated plugins.allow is include-backed', () => {
     write('allow.json5', `['other-plugin']`);
-    main(`{
+    main(JSON.stringify({
       plugins: {
         allow: { $include: './allow.json5' },
         entries: { 'principles-disciple': { enabled: true, hooks: {} } },
       },
-    }`);
+    }));
     expect(ensureConversationAccessInConfig()).toBe(true);
     expect(shouldBlockOpenClawConversationReads()).toBe(false);
   });
@@ -611,8 +611,46 @@ describe('OpenClaw 2026.11.5 JSON5 and $include effective config compatibility',
     expect(sha()).toBe(before);
   });
 
+  it('does not auto-rewrite a JSON5-only main config because comments would be lost', () => {
+    main(`{
+      // Owner deployment notes must survive host configuration edits.
+      plugins: {
+        entries: {
+          'principles-disciple': { enabled: true, hooks: {} },
+        },
+      },
+    }`);
+    const before = sha();
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
+    expect(sha()).toContain('Owner deployment notes');
+  });
+
+  it('rejects hardlinked include files and leaves config unchanged', () => {
+    if (process.platform === 'win32') return;
+    write('linked-source.json5', pluginConfig(true));
+    linkSync(join(root, 'linked-source.json5'), join(root, 'linked-hardlink.json5'));
+    main(`{ plugins: { $include: './linked-hardlink.json5' } }`);
+    const before = sha();
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
+  });
+
+  it('rejects non-regular include targets before reading them', () => {
+    mkdirSync(join(root, 'include-dir'), { recursive: true });
+    main(`{ plugins: { $include: './include-dir' } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+  });
+
+  it('rejects oversized include files before reading them fully', () => {
+    write('oversized.json5', `{ padding: '${'x'.repeat(2_097_153)}' }`);
+    main(`{ plugins: { $include: './oversized.json5' } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+  });
+
   it('missing flag without includes keeps the existing startup repair behavior', () => {
-    main(`{ plugins: { entries: { 'principles-disciple': { enabled: true } } } }`);
+    main(JSON.stringify({ plugins: { entries: { 'principles-disciple': { enabled: true } } } }));
     expect(shouldBlockOpenClawConversationReads()).toBe(true);
     expect(ensureConversationAccessInConfig()).toBe(true);
     expect(shouldBlockOpenClawConversationReads()).toBe(false);

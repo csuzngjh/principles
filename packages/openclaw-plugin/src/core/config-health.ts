@@ -9,7 +9,7 @@
  * Extracted from index.ts to avoid circular imports when trajectory-collector.ts
  * needs to check conversation access state (PRI-346).
  */
-import { chmodSync, existsSync, lstatSync, renameSync, statSync, writeFileSync } from 'fs';
+import { chmodSync, closeSync, existsSync, lstatSync, openSync, renameSync, statSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { withLock } from '../utils/file-lock.js';
 import { resolveOpenClawConfigPath } from '@principles/install-layout';
@@ -92,9 +92,9 @@ function readConfig(configPath: string): Record<string, unknown> | null {
   return result.ok ? result.config : null;
 }
 
-function readRawAndEffectiveConfig(configPath: string): { rawConfig: Record<string, unknown>; config: Record<string, unknown>; usesInclude: boolean } | null {
+function readRawAndEffectiveConfig(configPath: string): { rawConfig: Record<string, unknown>; config: Record<string, unknown>; usesInclude: boolean; strictJson: boolean } | null {
   const result = readOpenClawEffectiveConfig(configPath);
-  return result.ok ? { rawConfig: result.rawConfig, config: result.config, usesInclude: result.usesInclude } : null;
+  return result.ok ? { rawConfig: result.rawConfig, config: result.config, usesInclude: result.usesInclude, strictJson: result.strictJson } : null;
 }
 
 function ownershipPathIncludeManaged(cfg: Record<string, unknown>): boolean {
@@ -115,10 +115,17 @@ function ownershipPathIncludeManaged(cfg: Record<string, unknown>): boolean {
 function writeConfigAtomic(configPath: string, cfg: Record<string, unknown>): void {
   const tmpPath = configPath + '.tmp.' + Date.now();
   const originalMode = statSync(configPath).mode & 0o777;
-  writeFileSync(tmpPath, JSON.stringify(cfg, null, 2), 'utf8');
-  // Replacing the host-owned config must not widen its disclosure scope: a
-  // newly-created temp file otherwise inherits the process umask (often 0644)
-  // even when the Owner kept credentials in a 0600 config.
+  // Create the replacement with the original disclosure mode from the first
+  // open. Waiting until after writeFileSync would leave a short window in
+  // which a 0600 Owner config existed as a umask-created 0644 temporary file.
+  const fd = openSync(tmpPath, 'wx', originalMode);
+  try {
+    writeFileSync(fd, JSON.stringify(cfg, null, 2), 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+  // Preserve bits the process umask may have removed; the creation-time mode
+  // above is the security-critical half that prevents temporary widening.
   chmodSync(tmpPath, originalMode);
   renameSync(tmpPath, configPath);
 }
@@ -160,6 +167,11 @@ export function ensureConversationAccessInConfig(): boolean {
     // historical absent-flag repair in the main config.
     const cfg = loaded.rawConfig;
     if (ownershipPathIncludeManaged(cfg)) return false;
+    // JSON5 comments and formatting are Owner-managed configuration content.
+    // JSON.stringify cannot preserve them, so a JSON5-only main config is
+    // never auto-rewritten; the Owner receives the manual repair command
+    // through the existing health guidance instead.
+    if (!loaded.strictJson) return false;
 
     if (!isRecord(cfg.plugins)) {
       cfg.plugins = {};
