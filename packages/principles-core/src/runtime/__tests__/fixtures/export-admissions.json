@@ -4,6 +4,19 @@
   "admissions": [
     {
       "entry": "./runtime",
+      "symbol": "createDiagnosticianRunnerBundle",
+      "kind": "value",
+      "addedIn": "PRI-1292",
+      "expiresAt": "2027-11-25",
+      "consumers": [
+        "packages/pd-cli/src/commands/diagnose.ts",
+        "packages/pd-cli/src/commands/pain-retry.ts"
+      ],
+      "whyNotInternal": "SPEC-PD-PIPELINE-SPINE-001 §4.3: the two CLI commands must share the ONE cache-free diagnostician runner assembly with the cached-bridge factory; keeping the assembly core-internal would force pd-cli to keep hand-rolling ~100 lines of Diag*Runner + SplitDiagnosticianRunner wiring that drifts from the production factory (the exact collaborator-drift class this SPEC removes).",
+      "alternativeConsidered": "Duplicating the assembly in pd-cli was rejected (three parallel implementations); routing the CLIs through the cached createPainSignalBridge was rejected (--runtime test-double / --no-intake overrides would pollute or be swallowed by bridgeCache)."
+    },
+    {
+      "entry": "./runtime",
       "symbol": "validateRecommendationKind",
       "kind": "value",
       "addedIn": "PRI-1291",

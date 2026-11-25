@@ -144,6 +144,22 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     expect(ensureConversationAccessInConfig).not.toHaveBeenCalled();
   });
 
+
+  it('explicit JSON5-config opt-out guidance requires setting true directly and never suggests deleting the flag', async () => {
+    const { api, info } = createApi();
+    const entries = (api.config as Record<string, any>).plugins.entries;
+    entries['principles-disciple'].hooks.allowConversationAccess = false;
+    plugin.register(api);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const messages = info.mock.calls.map(([message]) => String(message)).join('\n');
+    expect(messages).toContain('honoring Owner opt-out');
+    expect(messages).toContain('explicitly set plugins.entries.principles-disciple.hooks.allowConversationAccess');
+    expect(messages).toContain('direct editing preserves JSON5 comments/formatting');
+    expect(messages).not.toContain('remove it');
+  });
+
   it.each([
     ['before_prompt_build', { prompt: 'hello', messages: [] }, { prependContext: 'shared prompt' }],
     ['before_tool_call', { toolName: 'write_file', params: { path: 'x' } }, undefined],

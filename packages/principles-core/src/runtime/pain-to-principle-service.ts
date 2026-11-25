@@ -64,11 +64,6 @@ export interface PainToPrincipleServiceBaseOptions {
   /** PRI-306: Env var accessor for readiness checks. Defaults to process.env. */
   getEnvVar?: (name: string) => string | undefined;
   /**
-   * PRI-468: Optional INTENT.md reader for Stage A intent tension check.
-   * Plugin layer supplies the concrete I/O adapter; core only consumes the port.
-   */
-  intentDocReader?: IntentDocReader;
-  /**
    * PRI-939 Option A: optional workspace-scoped telemetry sink forwarded to
    * createPainSignalBridge so short-lived CLI processes persist the allowlisted
    * bridge events (reuse_gate_triggered / reuse_evaluation_unavailable).
@@ -91,12 +86,14 @@ export type PainToPrincipleServiceOptions =
        * (status='submitted'); the diagnosis runs in background via
        * orchestrator wakeOnce/recovery-sweep. */
       readonly asyncMode: true;
+      readonly intentDocReader?: IntentDocReader;
       readonly trajectoryTurnReader?: TrajectoryTurnReader;
       readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
     })
   | (PainToPrincipleServiceBaseOptions & {
       /** Synchronous diagnosis: the two collaborators below are REQUIRED. */
       readonly asyncMode?: false;
+      readonly intentDocReader: IntentDocReader;
       readonly trajectoryTurnReader: TrajectoryTurnReader;
       readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort;
     });

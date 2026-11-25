@@ -93,6 +93,9 @@ describe('PRI-818 R-08: createPainSignalBridge wiring passes effectiveConfig to 
       if (!effectiveConfig) throw new Error('computeEffectivePdConfig returned undefined');
 
       await createPainSignalBridge({
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
+      trajectoryTurnReader: { listUserTurnsForSession: () => [], listAssistantTurns: () => [] },
+      sourceMaterialAuthorization: { isHostSourceMaterialAuthorized: () => ({ authorized: false as const, reason: 'authorization_unavailable' as const }) },
         workspaceDir,
         stateDir,
         ledgerAdapter: {} as never,

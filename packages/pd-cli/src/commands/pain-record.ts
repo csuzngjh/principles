@@ -37,14 +37,8 @@ import {
   DEFAULT_PAIN_SCORE,
 } from '@principles/core/runtime';
 import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation, PainEvidenceBundle } from '@principles/core/runtime';
-import {
-  createConsentLedgerSourceMaterialAuthorization,
-  createGovernanceTrajectoryTurnReader,
-  createHostIntentDocReader,
-  isAutomaticPainSubmissionAuthorized,
-} from '@principles/host-runtime';
+import { resolveWorkspacePipelineHostDeps } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { acquireTrajectoryEvidenceFromDb, acquireCodexToolFailureEvidenceFromDb } from './build-trajectory-evidence.js';
 
@@ -454,18 +448,14 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   const asyncFlagEnabled = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
   const asyncMode = asyncFlagEnabled && !opts.wait; // --wait overrides flag to force sync
 
-  // SPEC-PD-PIPELINE-SPINE-001 D1: the runtime `asyncMode` boolean cannot be
-  // assigned to the literal-narrowed union directly — construct the two
-  // branches explicitly (no `as` assertion). The SYNC branch carries the two
-  // mandatory collaborators: the workspace consent-ledger authorization and
-  // the governance trajectory reader bound to the SAME authorization
-  // instance (the reference wiring diagnostician-auto-run and the codex
-  // worker already use).
-  const sourceMaterialAuthorization = createConsentLedgerSourceMaterialAuthorization(workspaceDir);
-  const trajectoryTurnReader = createGovernanceTrajectoryTurnReader({
-    workspaceDir,
-    sourceMaterialAuthorization,
-  });
+  // SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): the five host
+  // collaborators come from the ONE assembly point — the trajectory reader and
+  // the source-material gate share the SAME consent-ledger authorization
+  // instance. The runtime `asyncMode` boolean still cannot be assigned to the
+  // literal-narrowed union directly, so the two branches are constructed
+  // explicitly (no `as` assertion); the SYNC branch carries the two mandatory
+  // collaborators from the same deps object.
+  const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig });
   const baseServiceOptions = {
     workspaceDir,
     stateDir,
@@ -474,22 +464,19 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     autoIntakeEnabled: true,
     effectiveConfig,
     getEnvVar: (name: string) => process.env[name],
-    // PRI-939 Option A: persist allowlisted critical events (reuse gate /
-    // evaluation degradation) to <workspace>/.pd/telemetry/critical-events.jsonl.
-    telemetrySink: createWorkspaceTelemetryEmitter(workspaceDir),
-    // PRI-1230 / SPEC §9.2: Stage A reads INTENT.md through the neutral host
-    // reader — same Core semantics as every other entry point. Flag-off means
-    // zero filesystem access inside the reader; language resolution is lazy
-    // (zh-CN file first, then en) and only happens after the flag gate.
-    intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }),
-    // SPEC §9.6: lazy Workspace authorization probe for automatic_hook
-    // provenance (manual submissions are exempt by provenance, not by flag).
-    isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
+    intentDocReader: hostDeps.intentDocReader,
+    telemetrySink: hostDeps.telemetrySink,
+    isAutoPainSubmissionAuthorized: hostDeps.isAutoPainSubmissionAuthorized,
   };
   const service = new PainToPrincipleService(
     asyncMode
       ? { ...baseServiceOptions, asyncMode: true }
-      : { ...baseServiceOptions, asyncMode: false, trajectoryTurnReader, sourceMaterialAuthorization },
+      : {
+          ...baseServiceOptions,
+          asyncMode: false,
+          trajectoryTurnReader: hostDeps.trajectoryTurnReader,
+          sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
+        },
   );
 
   const result = await service.recordPain({

@@ -66,6 +66,7 @@ function makeOpts(): PainToPrincipleServiceOptions {
     // classification only, so the fail-closed defaults are made explicit —
     // the behavior the service had before D1.
     asyncMode: false,
+    intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
     trajectoryTurnReader: EMPTY_TRAJECTORY_READER,
     sourceMaterialAuthorization: denyAllSourceMaterialAuthorization,
   };

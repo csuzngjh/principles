@@ -74,7 +74,8 @@ function makeEvent(role: string, content: string | unknown[]): PluginHookBeforeM
   };
 }
 
-const unauthorizedConfig = { hooks: { allowConversationAccess: false } };
+const unauthorizedConfig = { hooks: {} };
+const explicitOptOutConfig = { hooks: { allowConversationAccess: false } };
 const authorizedConfig = { hooks: { allowConversationAccess: true } };
 
 function makeCtx(pluginConfig: unknown, workspaceDir: string | null = '/mock/workspace') {
@@ -173,6 +174,19 @@ describe('PRI-346: before_message_write hook', () => {
       const call = mockRecordAssistantTurn.mock.calls[0][0];
       expect(call.rawText).toContain('Part one');
       expect(call.rawText).toContain('Part two');
+    });
+  });
+
+  describe('Owner opt-out — explicit false disables every capture path', () => {
+    it('does NOT write user or assistant turns when allowConversationAccess is explicitly false', async () => {
+      for (const role of ['user', 'assistant']) {
+        handleBeforeMessageWrite(makeEvent(role, `${role} private text`), makeCtx(explicitOptOutConfig));
+      }
+      await flushQueue();
+
+      expect(mockRecordAssistantTurn).not.toHaveBeenCalled();
+      expect(mockRecordUserTurn).not.toHaveBeenCalled();
+      expect(SystemLogger.log).not.toHaveBeenCalled();
     });
   });
 

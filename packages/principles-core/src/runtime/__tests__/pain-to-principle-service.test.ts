@@ -106,6 +106,7 @@ function makeOpts(
     : {
       ...base,
       asyncMode: false,
+      intentDocReader: { readIntentDoc: () => ({ ok: false, found: false, flagEnabled: false, reason: 'flag_disabled' as const, nextAction: 'test-only disabled intent reader' }) },
       trajectoryTurnReader: trajectoryTurnReader ?? EMPTY_TRAJECTORY_READER,
       sourceMaterialAuthorization: sourceMaterialAuthorization ?? denyAllSourceMaterialAuthorization,
     };

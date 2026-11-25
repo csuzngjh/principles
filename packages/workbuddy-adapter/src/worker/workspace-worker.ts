@@ -39,7 +39,6 @@ import {
   pickDiagnosticianCandidate,
   PrincipleTreeLedgerAdapter,
   resolveDiagnosticianCapability,
-  storeEmitter,
   type TaskRecord,
 } from '@principles/core/runtime';
 import {
@@ -49,11 +48,7 @@ import {
   runInternalizationConsumerCycle,
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
-  createGovernanceTrajectoryTurnReader,
-  createConsentLedgerSourceMaterialAuthorization,
-  createHostIntentDocReader,
-  WorkspaceTelemetryEmitter,
-  isAutomaticPainSubmissionAuthorized,
+  resolveWorkspacePipelineHostDeps,
   saveHostToolDeclaration,
   HOST_TOOL_DECLARATION_VERSION,
   type InternalizationConsumerCycleOutcome,
@@ -394,6 +389,24 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
           const stateDir = path.join(workspaceDir, '.state');
           let releaseBridge: (() => Promise<void>) | undefined;
           try {
+            // SPEC-PD-PIPELINE-SPINE-001 §4.2 (PRI-1292 Phase 2A): ONE assembly
+            // point for the five host collaborators. The trajectory reader and
+            // the source-material gate share the SAME consent-ledger
+            // authorization instance (previously two separate instances per
+            // call). PRI-1233 / SPEC §9.2: this worker is where Stage A
+            // actually runs for governance-admitted WorkBuddy pains;
+            // PRI-1265: the Stage A gets the bound session's ORIGINAL turns.
+            const hostDeps = resolveWorkspacePipelineHostDeps({
+              workspaceDir,
+              effectiveConfig: config.effective,
+              telemetryPersistenceFailureHandler: (detail) => {
+                try {
+                  emitEvent('WORKBUDDY_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
+                } catch {
+                  // Telemetry persistence warnings must never fail the worker cycle.
+                }
+              },
+            });
             const bridge = await createPainSignalBridge({
               workspaceDir,
               stateDir,
@@ -401,28 +414,15 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
               owner: WORKER_OWNER,
               effectiveConfig: config.effective,
               getEnvVar: (name: string) => process.env[name],
-              // PRI-1233 / SPEC §9.2: this worker is where Stage A actually runs
-              // for governance-admitted WorkBuddy pains — the neutral host reader
-              // must ride along (flag-off = zero filesystem access inside it).
-              intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
-              // PRI-1287 review round: this worker is also a Stage A entry point.
-              // Bind the same workspace-scoped critical-event sink as the L3
-              // auto-run so Intent degradation evidence survives the process.
-              telemetrySink: new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {
-                try {
-                  emitEvent('WORKBUDDY_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
-                } catch {
-                  // Telemetry persistence warnings must never fail the worker cycle.
-                }
-              }),
-              // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
-              // turns from the workspace's own consent-tiered governance store.
-              trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) }),
-              // PRI-1283 R2: latest-consent gate consulted per assembly / model call.
-              sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir),
+              intentDocReader: hostDeps.intentDocReader,
+              trajectoryTurnReader: hostDeps.trajectoryTurnReader,
+              sourceMaterialAuthorization: hostDeps.sourceMaterialAuthorization,
+              // PRI-939 Option A: allowlisted runner/bridge events persist to
+              // the workspace sink instead of the unsubscribed singleton.
+              telemetrySink: hostDeps.telemetrySink,
               // SPEC §9.6: lazy probe — a revoked flag stops persisted
               // automatic_hook tasks at the bridge's execution boundary.
-              isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
+              isAutoPainSubmissionAuthorized: hostDeps.isAutoPainSubmissionAuthorized,
             }, (release) => { releaseBridge = release; });
             const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
             diagnostician = {

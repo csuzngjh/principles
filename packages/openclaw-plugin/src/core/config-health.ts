@@ -9,10 +9,11 @@
  * Extracted from index.ts to avoid circular imports when trajectory-collector.ts
  * needs to check conversation access state (PRI-346).
  */
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { chmodSync, closeSync, existsSync, lstatSync, openSync, renameSync, statSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
+import { resolveOpenClawConfigPath } from '@principles/install-layout';
+import { readOpenClawEffectiveConfig } from './openclaw-config-loader.js';
 
 /**
  * PRI-348: Extract the full plugin entry (including hooks) from the global OpenClaw config.
@@ -37,8 +38,11 @@ export interface ConversationAccessCheckResult {
   nextAction?: string;
 }
 
-const CONVERSATION_ACCESS_FIX_COMMAND =
-  'openclaw config set plugins.entries.principles-disciple.hooks.allowConversationAccess true --strict-json';
+const CONVERSATION_ACCESS_FIX_GUIDANCE =
+  'directly edit the active OpenClaw config file and set ' +
+  'plugins.entries.principles-disciple.hooks.allowConversationAccess to true; ' +
+  'direct editing preserves JSON5 comments/formatting. ' +
+  '`openclaw config set ... --strict-json` can enable the flag but rewrites the config and may remove comments.';
 
 /**
  * PRI-343: Pure function — checks if pluginConfig has hooks.allowConversationAccess === true.
@@ -49,7 +53,7 @@ export function checkConversationAccessConfig(pluginConfig: unknown): Conversati
     return {
       authorized: false,
       reason: 'pluginConfig is missing or invalid — conversation hooks cannot be registered',
-      nextAction: CONVERSATION_ACCESS_FIX_COMMAND,
+      nextAction: CONVERSATION_ACCESS_FIX_GUIDANCE,
     };
   }
 
@@ -59,7 +63,7 @@ export function checkConversationAccessConfig(pluginConfig: unknown): Conversati
     return {
       authorized: false,
       reason: 'allowConversationAccess is not set to true',
-      nextAction: CONVERSATION_ACCESS_FIX_COMMAND,
+      nextAction: CONVERSATION_ACCESS_FIX_GUIDANCE,
     };
   }
 
@@ -68,7 +72,7 @@ export function checkConversationAccessConfig(pluginConfig: unknown): Conversati
     return {
       authorized: false,
       reason: 'allowConversationAccess is not set to true',
-      nextAction: CONVERSATION_ACCESS_FIX_COMMAND,
+      nextAction: CONVERSATION_ACCESS_FIX_GUIDANCE,
     };
   }
 
@@ -77,8 +81,9 @@ export function checkConversationAccessConfig(pluginConfig: unknown): Conversati
 
 const PLUGIN_ID = 'principles-disciple';
 
-function getOpenClawConfigPath(): string {
-  return path.join(homedir(), '.openclaw', 'openclaw.json');
+function getOpenClawConfigPath(): string | null {
+  const resolved = resolveOpenClawConfigPath(process.env, homedir());
+  return resolved.ok ? resolved.path : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,29 +91,90 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function readConfig(configPath: string): Record<string, unknown> | null {
-  if (!existsSync(configPath)) return null;
-  try {
-    const raw = readFileSync(configPath, 'utf8').replace(/^\uFEFF/, '');
-    const parsed = JSON.parse(raw);
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
+  const result = readOpenClawEffectiveConfig(configPath);
+  return result.ok ? result.config : null;
+}
+
+function readRawAndEffectiveConfig(configPath: string): { rawConfig: Record<string, unknown>; config: Record<string, unknown>; usesInclude: boolean; strictJson: boolean } | null {
+  const result = readOpenClawEffectiveConfig(configPath);
+  return result.ok ? { rawConfig: result.rawConfig, config: result.config, usesInclude: result.usesInclude, strictJson: result.strictJson } : null;
+}
+
+function ownershipPathIncludeManaged(cfg: Record<string, unknown>): boolean {
+  // Only ancestors capable of supplying plugins.entries.<id>.hooks can make
+  // the write target ambiguous. Includes in unrelated sibling branches (for
+  // example plugins.allow) neither own nor can override the permission flag.
+  let node: unknown = cfg;
+  if (isRecord(node) && Object.hasOwn(node, '$include')) return true;
+  for (const key of ['plugins', 'entries', PLUGIN_ID, 'hooks']) {
+    if (!isRecord(node)) return false;
+    node = node[key];
+    if (!isRecord(node)) return false;
+    if (Object.hasOwn(node, '$include')) return true;
   }
+  return false;
 }
 
 function writeConfigAtomic(configPath: string, cfg: Record<string, unknown>): void {
   const tmpPath = configPath + '.tmp.' + Date.now();
-  writeFileSync(tmpPath, JSON.stringify(cfg, null, 2), 'utf8');
+  const originalMode = statSync(configPath).mode & 0o777;
+  // Create the replacement with the original disclosure mode from the first
+  // open. Waiting until after writeFileSync would leave a short window in
+  // which a 0600 Owner config existed as a umask-created 0644 temporary file.
+  const fd = openSync(tmpPath, 'wx', originalMode);
+  try {
+    writeFileSync(fd, JSON.stringify(cfg, null, 2), 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+  // Preserve bits the process umask may have removed; the creation-time mode
+  // above is the security-critical half that prevents temporary widening.
+  chmodSync(tmpPath, originalMode);
   renameSync(tmpPath, configPath);
+}
+
+/**
+ * Live read-side conversation access decision. A missing global config keeps
+ * the documented missing-flag fallback semantics; an unreadable existing
+ * config or explicit `allowConversationAccess=false` blocks reads.
+ */
+export function shouldBlockOpenClawConversationReads(pluginId: string = PLUGIN_ID): boolean {
+  const configPath = getOpenClawConfigPath();
+  // Fail closed whenever the EFFECTIVE host config cannot be identified,
+  // read, or parsed. Missing/default-absent is not permission.
+  if (configPath === null || !existsSync(configPath)) return true;
+  const config = readConfig(configPath);
+  if (config === null) return true;
+  const entry = getPluginEntry(config, pluginId);
+  if (isExplicitConversationAccessOptOut(entry)) return true;
+  const access = checkConversationAccessConfig(entry);
+  return !access.authorized;
 }
 
 export function ensureConversationAccessInConfig(): boolean {
   const configPath = getOpenClawConfigPath();
-  if (!existsSync(configPath)) return false;
+  if (configPath === null || !existsSync(configPath)) return false;
 
   return withLock(configPath, () => {
-    const cfg = readConfig(configPath);
-    if (!cfg) return false;
+    // Atomic replacement would replace the symlink directory entry rather
+    // than the linked host config, silently detaching future administrator
+    // edits to the real target. This ownership is ambiguous, so fail closed
+    // and leave manual repair to the Owner instead of following the link.
+    if (lstatSync(configPath).isSymbolicLink()) return false;
+    const loaded = readRawAndEffectiveConfig(configPath);
+    if (!loaded) return false;
+    // If the plugins ownership path (or the root object supplying it) crosses
+    // `$include`, the write target is ambiguous: adding a main-config sibling
+    // could override an Owner decision supplied by the include graph. Refuse
+    // auto-repair in that case; unrelated include branches do not block the
+    // historical absent-flag repair in the main config.
+    const cfg = loaded.rawConfig;
+    if (ownershipPathIncludeManaged(cfg)) return false;
+    // JSON5 comments and formatting are Owner-managed configuration content.
+    // JSON.stringify cannot preserve them, so a JSON5-only main config is
+    // never auto-rewritten; the Owner receives the manual repair command
+    // through the existing health guidance instead.
+    if (!loaded.strictJson) return false;
 
     if (!isRecord(cfg.plugins)) {
       cfg.plugins = {};
