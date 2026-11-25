@@ -36,3 +36,9 @@ recovery problem rather than as a document with no answer; missing-file recovery
 guidance now includes the CLI's required `--confirm` write acknowledgement; and
 the Codex/WorkBuddy worker Stage A entry points bind the same durable critical
 telemetry sink as the L3 automatic path.
+
+The recovery text keeps the workspace path separate from the copyable POSIX
+command instead of emitting a shell-quoted path that can be expanded
+incorrectly, and truncation analysis remains internal: degradation telemetry
+never carries the untruncated INTENT.md section bodies it inspects.
+

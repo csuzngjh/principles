@@ -999,6 +999,8 @@ Owner trust is the long-term asset we are protecting.
     expect(payloads).toHaveLength(1);
     expect(payloads[0]).toMatchObject({ reason: 'authored_content_truncated' });
     expect(String(payloads[0]?.nextAction)).toContain('Shorten the section or move the answer ahead');
+    expect(payloads[0]).not.toHaveProperty('untruncatedSections');
+    expect(JSON.stringify(payloads[0])).not.toContain('Owner trust is the long-term asset');
     expect(harness.persistedSnapshot()).toBeUndefined();
   });
 

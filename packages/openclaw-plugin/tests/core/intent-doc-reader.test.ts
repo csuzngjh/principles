@@ -147,14 +147,18 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   });
 
   // SPEC §12 — flag on + missing file → not_found with nextAction
-  it('returns not_found when INTENT.md does not exist (flag on)', () => {
-    writeConfig(workspaceDir, true);
-    const result = safeReadIntentDoc(workspaceDir, 'zh-CN');
+  it('returns not_found when INTENT.md does not exist (flag on), with shell-safe separated workspace guidance', () => {
+    const dollarWorkspace = path.join(workspaceDir, 'Client $100');
+    fs.mkdirSync(dollarWorkspace, { recursive: true });
+    writeConfig(dollarWorkspace, true);
+    const result = safeReadIntentDoc(dollarWorkspace, 'zh-CN');
     expect(result.ok).toBe(false);
     expect(result.found).toBe(false);
     expect(result.flagEnabled).toBe(true);
     expect(result.reason).toBe('not_found');
-    expect(result.nextAction).toBeTruthy();
+    expect(result.nextAction).toContain('pd intent init --confirm --lang zh-CN');
+    expect(result.nextAction).toContain(`workspace directory ${dollarWorkspace}`);
+    expect(result.nextAction).not.toContain('--workspace');
     expect(result.doc).toBeUndefined();
   });
 

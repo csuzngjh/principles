@@ -365,6 +365,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     },
     snapshot: IntentSnapshot,
   ): void {
+    const { untruncatedSections, ...eventOrigin } = origin;
     let degradation = deriveIntentDocDegradation(
       intentSnapshotToUnfilteredDocSections(snapshot),
       snapshot.lang,
@@ -378,10 +379,10 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     };
     if (
       origin.source === 'fresh_read'
-      && origin.untruncatedSections !== undefined
+      && untruncatedSections !== undefined
       && snapshot.sections.some((section) => section.truncated === true)
     ) {
-      const untruncatedAnalyses = analyzeIntentDocSections(origin.untruncatedSections, snapshot.lang);
+      const untruncatedAnalyses = analyzeIntentDocSections(untruncatedSections, snapshot.lang);
       if (untruncatedAnalyses.some((analysis) => analysis.state === 'authored')) {
         degradation = {
           reason: 'authored_content_truncated',
@@ -392,7 +393,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
       }
     }
     this.emitEvent('intent_doc_template_only', taskId, {
-      ...origin,
+      ...eventOrigin,
       reason: degradation.reason,
       nextAction: degradation.nextAction,
       parsedSectionCount: degradation.parsedSectionCount,
