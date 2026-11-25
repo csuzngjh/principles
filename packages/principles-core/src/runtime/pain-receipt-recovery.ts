@@ -288,6 +288,11 @@ export interface RecoverTaskIdentityFromReceiptOptions {
    * material; absent → the evidence is not written and the task waits.
    */
   readonly sourceMaterialAuthorization?: SourceMaterialAuthorizationPort;
+  /** OpenClaw receipt recovery requires a same-run target identity whenever
+   * the original task has neither an Owner statement nor valid submitted evidence.
+   * Missing correlation leaves the original task unbound; it must not silently
+   * degrade to session-only READY admission. */
+  readonly requireTargetTurnIdentity?: boolean;
   /**
    * Legacy boolean probe retained only for published-caller compatibility.
    * It is deliberately NOT evidence of completeness: a boolean can never by
@@ -448,6 +453,7 @@ function resolveTargetEvidenceAdmission(input: {
 function evaluateAlreadyBoundTargetEvidence(input: {
   readonly diagnostic: ParsedDiagnosticJson;
   readonly sessionId: string;
+  readonly targetTurnId: string | undefined;
   readonly hostKind: 'codex' | 'workbuddy' | 'openclaw';
   readonly readTargetTurnEvidence: ((sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead) | undefined;
   readonly sourceMaterialAuthorization: SourceMaterialAuthorizationPort | undefined;
@@ -455,14 +461,16 @@ function evaluateAlreadyBoundTargetEvidence(input: {
   readonly preconditions: TaskCasPreconditions;
   readonly outcome: PainReceiptRecoveryOutcome;
 }): Evaluation {
-  const { diagnostic, sessionId, hostKind, readTargetTurnEvidence, sourceMaterialAuthorization, nowIso, preconditions, outcome } = input;
+  const { diagnostic, sessionId, targetTurnId, hostKind, readTargetTurnEvidence, sourceMaterialAuthorization, nowIso, preconditions, outcome } = input;
   const painIngress = isRecord(diagnostic.record.painIngress) ? diagnostic.record.painIngress : undefined;
   const verified = painIngress !== undefined && isRecord(painIngress.verifiedHostSession)
     ? painIngress.verifiedHostSession
     : undefined;
-  const targetTurnId = verified !== undefined && typeof verified.targetTurnId === 'string' && verified.targetTurnId.length > 0
-    ? verified.targetTurnId
-    : undefined;
+  const targetIdentityPatch = painIngress !== undefined && verified !== undefined
+    && targetTurnId !== undefined
+    && (typeof verified.targetTurnId !== 'string' || verified.targetTurnId.length === 0)
+    ? { painIngress: { ...painIngress, verifiedHostSession: { ...verified, targetTurnId } } }
+    : {};
   const existingRecovery = diagnostic.record.recovery;
   const existingState = isRecord(existingRecovery) && typeof existingRecovery.state === 'string'
     ? existingRecovery.state
@@ -525,6 +533,7 @@ function evaluateAlreadyBoundTargetEvidence(input: {
     const {entries} = evidenceAdmission;
     newRecord = {
       ...diagnostic.record,
+      ...targetIdentityPatch,
       evidence: [...entries],
       painIngress: {
         ...(painIngress ?? {}),
@@ -538,14 +547,14 @@ function evaluateAlreadyBoundTargetEvidence(input: {
       state: 'blocked_by_source_material_consent',
       reasonCode: `target_turn_source_material_${evidenceAdmission.reason}`,
     };
-    newRecord = { ...diagnostic.record, recovery: disposition };
+    newRecord = { ...diagnostic.record, ...targetIdentityPatch, recovery: disposition };
   } else {
     disposition = {
       ...dispositionBase,
       state: 'waiting_for_target_evidence',
       reasonCode: evidenceAdmission.reasonCode,
     };
-    newRecord = { ...diagnostic.record, recovery: disposition };
+    newRecord = { ...diagnostic.record, ...targetIdentityPatch, recovery: disposition };
   }
   return {
     action: 'cas',
@@ -564,12 +573,13 @@ function evaluateRecoveryPass(input: {
   authorized: boolean;
   readTargetTurnEvidence: ((sessionId: string, targetTurnId: string) => TargetTurnEvidenceRead) | undefined;
   sourceMaterialAuthorization: SourceMaterialAuthorizationPort | undefined;
+  requireTargetTurnIdentity: boolean;
   nowIso: string;
   /** The host whose completion event produced this receipt (P1-2.7 owner
    * check — the original task must belong to the SAME host). */
   hostKind: 'codex' | 'workbuddy' | 'openclaw';
 }): Evaluation {
-  const { task, diagnostic, receipt, identity, authorized, readTargetTurnEvidence, sourceMaterialAuthorization, nowIso, hostKind } = input;
+  const { task, diagnostic, receipt, identity, authorized, readTargetTurnEvidence, sourceMaterialAuthorization, requireTargetTurnIdentity, nowIso, hostKind } = input;
   const preconditions: TaskCasPreconditions = {
     expectedStatus: task.status,
     expectedLeaseOwner: task.leaseOwner ?? null,
@@ -611,6 +621,34 @@ function evaluateRecoveryPass(input: {
     return { action: 'report', outcome: { status: 'rejected', reasonCode: 'identity_conflict', painId: receipt.painId, taskId: receipt.taskId } };
   }
 
+  const painIngressForTarget = isRecord(diagnostic.record.painIngress) ? diagnostic.record.painIngress : undefined;
+  const requestedRaw = painIngressForTarget?.requestedTargetTurnId;
+  const requestedNormalized = requestedRaw !== undefined ? normalizeRequestedTargetTurnId(requestedRaw) : undefined;
+  const requestedTargetTurnId = requestedNormalized !== undefined && requestedNormalized.ok ? requestedNormalized.value : undefined;
+  const existingVerified = painIngressForTarget !== undefined && isRecord(painIngressForTarget.verifiedHostSession)
+    ? painIngressForTarget.verifiedHostSession
+    : undefined;
+  const existingVerifiedTargetTurnId = existingVerified !== undefined
+    && typeof existingVerified.targetTurnId === 'string' && existingVerified.targetTurnId.length > 0
+    ? existingVerified.targetTurnId
+    : undefined;
+  const targetTurnId = existingVerifiedTargetTurnId ?? requestedTargetTurnId ?? identity.submissionTurnId;
+  const evidenceCount = countEvidence(diagnostic);
+  const hasOwnerStatement = isRecord(diagnostic.record.anchor) && diagnostic.record.anchor.type === 'owner_expectation';
+  if (requireTargetTurnIdentity && targetTurnId === undefined && evidenceCount === 0 && !hasOwnerStatement) {
+    return {
+      action: 'report',
+      outcome: {
+        status: 'rejected',
+        reasonCode: 'target_turn_identity_unavailable',
+        painId: receipt.painId,
+        taskId: receipt.taskId,
+        ...(!hintPresent ? { taskUnbound: true as const } : {}),
+      },
+    };
+  }
+
+
   const existingRecovery = diagnostic.record.recovery;
   const existingRef = isRecord(existingRecovery) && isRecord(existingRecovery.receiptRef)
     ? existingRecovery.receiptRef
@@ -628,6 +666,7 @@ function evaluateRecoveryPass(input: {
     return evaluateAlreadyBoundTargetEvidence({
       diagnostic,
       sessionId: identity.sessionId,
+      targetTurnId,
       hostKind,
       readTargetTurnEvidence,
       sourceMaterialAuthorization,
@@ -673,18 +712,7 @@ function evaluateRecoveryPass(input: {
   // guessed at or bound to another turn: it is discarded as unusable and the
   // documented default applies, exactly like its absence. Never inferred
   // further — no target turn means session-level policy.
-  const requestedRaw = isRecord(diagnostic.record.painIngress)
-    ? diagnostic.record.painIngress.requestedTargetTurnId
-    : undefined;
-  const requestedNormalized = requestedRaw !== undefined ? normalizeRequestedTargetTurnId(requestedRaw) : undefined;
-  const requestedTargetTurnId = requestedNormalized !== undefined && requestedNormalized.ok ? requestedNormalized.value : undefined;
-  const targetTurnId = requestedTargetTurnId ?? identity.submissionTurnId;
-  const evidenceCount = countEvidence(diagnostic);
-  // r2b (devin finding 0004): the SAME waiting rule the submit path applies
-  // — an explicit Owner statement (`owner_expectation` anchor) or any
-  // submitted evidence is independently admissible and never waits.
-  const {anchor} = diagnostic.record;
-  const hasOwnerStatement = isRecord(anchor) && anchor.type === 'owner_expectation';
+  // The same admission rule is shared by submit, receipt recovery and reconcile.
   const evidenceAdmission = resolveTargetEvidenceAdmission({
     sessionId: identity.sessionId,
     targetTurnId,
@@ -812,6 +840,7 @@ export async function recoverTaskIdentityFromReceipt(
         authorized: options.authorization.minimalMetadataGranted,
         readTargetTurnEvidence: options.readTargetTurnEvidence,
         sourceMaterialAuthorization: options.sourceMaterialAuthorization,
+        requireTargetTurnIdentity: options.requireTargetTurnIdentity === true,
         nowIso: now().toISOString(),
         hostKind: options.hostKind,
       });
