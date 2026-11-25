@@ -367,7 +367,7 @@ describe('runAfterToolCallReceiptFallback — exact same-run target-turn associa
       identity: {
         sessionId,
         toolCallId: EVENT_IDENTITY.toolCallId,
-        submissionTurnId: targetTurnId,
+        targetTurnId,
       },
       requireTargetTurnIdentity: true,
     }));
@@ -375,6 +375,7 @@ describe('runAfterToolCallReceiptFallback — exact same-run target-turn associa
     const diagnostic = await readDiagnostic(ws, taskId);
     const verified = ((diagnostic.painIngress as Record<string, unknown>).verifiedHostSession) as Record<string, unknown>;
     expect(verified.targetTurnId).toBe(targetTurnId);
+    expect(verified.submissionTurnId).toBeUndefined();
     expect(diagnostic.evidence).toEqual([{
       sourceRef: `governance_observation:openclaw|${sessionId}|${targetTurnId}|user`,
       note: 'the exact embedded owner message',
