@@ -63,7 +63,11 @@ export function rememberOpenclawRunTurnCorrelation(input: {
     // points at a different row, it is impossible to distinguish a late event
     // from the prior run; quarantine the key instead of silently retargeting it.
     if (existing.targetTurnId !== input.targetTurnId || existing.messageDigest !== messageDigest) {
-      entries.set(entryKey, { targetTurnId: undefined, messageDigest: undefined, expiresAt: Math.max(existing.expiresAt, now + TTL_MS) });
+      entries.set(entryKey, {
+        targetTurnId: undefined,
+        messageDigest: undefined,
+        expiresAt: Math.max(existing.expiresAt, now + TTL_MS),
+      });
       return false;
     }
     entries.delete(entryKey);
