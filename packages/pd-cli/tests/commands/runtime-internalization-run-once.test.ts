@@ -61,7 +61,13 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
   }),
 }));
 
-vi.mock('@principles/core/runtime', () => ({
+vi.mock('@principles/core/runtime', async (importOriginal) => {
+  // PRI-1293 Phase 2B: host-runtime 的真实共享执行器 (mock 透传) 会从 core
+  // barrel 取余量导出 (如 RECOVERY_CONTROL_SURFACES) — mock 必须在覆盖项之
+  // 外 spread 真实 barrel, 否则经 host-runtime dist 的传递导入会缺符号。
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
   RuntimeStateManager: vi.fn().mockImplementation(function () {
     return {
       initialize: mockInitialize,
@@ -197,7 +203,8 @@ vi.mock('@principles/core/runtime', () => ({
     rollout_reviewer: 'rolloutReviewer',
   },
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
-}));
+  };
+});
 
 vi.mock('../../src/config-reader.js', () => ({
   readOutputLanguageFromWorkspace: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
@@ -235,11 +242,18 @@ const { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mock
   });
   return { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mockResolveWorkspaceHostToolSemantics };
 });
-vi.mock('@principles/host-runtime', () => ({
-  createEvaluatorRuntimeContext: mockCreateEvaluatorRuntimeContext,
-  createRolloutGovernanceDeps: mockCreateRolloutGovernanceDeps,
-  resolveWorkspaceHostToolSemantics: mockResolveWorkspaceHostToolSemantics,
-}));
+vi.mock('@principles/host-runtime', async (importOriginal) => {
+  // PRI-1293 Phase 2B: runner 构造收编进 host-runtime 的共享执行器 — mock
+  // 必须保留真实 executeSelectedInternalizationTask (core 层 Runner mock 经
+  // 它触达), 只覆盖本文件关注的宿主接线。
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    createEvaluatorRuntimeContext: mockCreateEvaluatorRuntimeContext,
+    createRolloutGovernanceDeps: mockCreateRolloutGovernanceDeps,
+    resolveWorkspaceHostToolSemantics: mockResolveWorkspaceHostToolSemantics,
+  };
+});
 
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
 

@@ -85,6 +85,8 @@ function makeRawTask(overrides: {
   status: TaskRecord['status'];
   dependencyTaskIds?: string[];
   outputArtifactRefs?: { artifactType: string; ref: string }[];
+  /** PRI-1293 Phase 3: dreamer 根 seed 顶层 candidateId (血缘可证明)。 */
+  topCandidateId?: string;
 }): TaskRecord {
   const now = new Date().toISOString();
   return {
@@ -103,6 +105,7 @@ function makeRawTask(overrides: {
         inputArtifactRefs: [],
         outputArtifactRefs: overrides.outputArtifactRefs ?? [],
       },
+      ...(overrides.topCandidateId !== undefined ? { candidateId: overrides.topCandidateId } : {}),
     }),
   };
 }
@@ -239,6 +242,7 @@ describe('philosopher toggle — orchestration is toggle-blind (characterization
       taskKind: 'dreamer',
       status: 'succeeded',
       outputArtifactRefs: [{ artifactType: 'principle', ref: 'pi-art-dreamer-1' }],
+      topCandidateId: 'cand-dreamer-task-1',
     });
     stateManager.getTask.mockResolvedValue(dreamerTask);
     // findExistingSuccessor scans pending then retry_wait.

@@ -3,21 +3,9 @@ import {
   RuntimeStateManager,
   hydratePITaskRecord,
   InternalizationOrchestrator,
-  DreamerRunner,
-  PhilosopherRunner,
-  ScribeRunner,
-  ArtificerRunner,
-  EvaluatorRunner,
-  RolloutReviewerRunner,
   StoreEventEmitter,
-  DefaultDreamerValidator,
-  DefaultPhilosopherValidator,
-  DefaultScribeValidator,
-  DefaultArtificerValidator,
   DefaultEvaluatorValidator,
-  DefaultRolloutReviewerValidator,
   TestDoubleRuntimeAdapter,
-  PrincipleTreeLedgerAdapter,
   piTaskBelongsToCandidates,
 } from '@principles/core/runtime';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext, PITaskRecord } from '@principles/core/runtime';
@@ -30,10 +18,15 @@ import {
   resolveRuntimeAdapterFromConfig,
   ConfigResolutionError,
 } from '../services/runtime-adapter-resolver.js';
-// PRI-510 (DEFECT-004): centralize EvaluatorRunnerDeps construction so the
-// repair-loop wiring (isRepairLoopEnabled + seeder) is invoked in this CLI
-// path. EP-02: prior code passed only the 5 base deps, leaving the repair
-// loop as dead code at runtime.
+// PRI-1293 Phase 2B: 六种 Peer Runner 构造收编进 host-runtime 唯一执行器 —
+// 本文件不再手搓任何 Runner 构造 (架构守卫 B 类白名单随之移除本文件)。
+import {
+  executeSelectedInternalizationTask,
+  type ExecuteSelectedInternalizationTaskInput,
+  type SelectedInternalizationTaskRunnerOptions,
+} from '@principles/host-runtime';
+// PRI-510 (DEFECT-004): Evaluator repair-loop 接线仍来自这个 CLI 工厂 (EP-02),
+// 经执行器的类型化 repairDeps 透传 — 不因收编引入第三套 Evaluator 工厂。
 import { createEvaluatorRunnerDeps } from '../services/rulehost-pipeline-runner.js';
 // PRI-708: the canonical rollout governance factory — the ONE builder the
 // consumer cycle spreads (internalization-consumer-cycle.ts). Host-neutral
@@ -669,7 +662,6 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     }
 
     let runnerResult: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult | ArtificerRunnerResult | EvaluatorRunnerResult | RolloutReviewerRunnerResult | undefined = undefined;
-    let skipReason: string | undefined = undefined;
 
     if (wakeResult.decision === 'would_lease') {
       if (wakeResult.taskKind !== runnerKind) {
@@ -717,145 +709,127 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       });
 
       try {
-        if (runnerKind === 'dreamer') {
-          const validator = new DefaultDreamerValidator();
-          const runner = new DreamerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage, effectiveConfig },
-          );
-          runnerResult = await runner.run(wakeResult.taskId);
-        } else if (runnerKind === 'philosopher') {
-          const validator = new DefaultPhilosopherValidator();
-          const runner = new PhilosopherRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage, effectiveConfig },
-          );
-          runnerResult = await runner.run(wakeResult.taskId);
-        } else if (runnerKind === 'scribe') {
-          const validator = new DefaultScribeValidator({ requireRuleCodeContracts: true });
-          const runner = new ScribeRunner(
-            {
-              stateManager, runtimeAdapter, eventEmitter, validator, artifactStore,
-              // I2 — CHAIN STAMPING (Owner review of PR #1856, P1): stamp the
-              // ledger principle UUID (via dreamer lineage → candidateId →
-              // ledger) at write time; fail-soft on unresolvable chains.
-              ledgerIdentity: {
-              resolveForCandidate: async (candidateId: string) => {
-                const candidate = await stateManager.getCandidate(candidateId);
-                return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
-              },
-                // PRI-915: availability first — an unreadable ledger must not
-                // read as an unresolved chain.
-                isAvailable: (): boolean =>
-                  new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).isAvailable(),
-                listForCandidate: (candidateId: string) =>
-                  new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).listForCandidate(candidateId),
-              },
-            },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage, effectiveConfig },
-          );
-          runnerResult = await runner.run(wakeResult.taskId);
-        } else if (runnerKind === 'artificer') {
-          const validator = new DefaultArtificerValidator();
-          // PRI-741: artificer generation anchors on the workspace host
-          // declaration (same durable provenance the evaluator gate uses).
-          // Unresolvable provenance degrades OBSERVABLY (rc-9/EP-03) to a
-          // prompt without the host block — never a silent wrong-host guess.
-          const hostSemantics = resolveWorkspaceHostToolSemantics(workspaceDir);
-          if (!hostSemantics.ok) {
-            console.error(`[PD:run-once] artificer prompt without host tool semantics: ${hostSemantics.reason} — ${hostSemantics.nextAction}`);
-          }
-          const runner = new ArtificerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore,
-              ledgerIdentity: { resolveForCandidate: async (candidateId: string) => {
-                const candidate = await stateManager.getCandidate(candidateId);
-                return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
-              } },
-            },
-            {
-              owner: OWNER,
-              runtimeKind: runtimeAdapter.kind(),
-              pollIntervalMs: 100,
-              timeoutMs: effectiveTimeoutMs,
-              effectiveConfig,
-              outputLanguage,
+        // PRI-1293 Phase 2B: Runner 构造本体收编进 host-runtime 唯一执行器。
+        // 本入口只负责自己的宿主事实 (adapter/evaluator gate 上下文/artificer
+        // host 语义投影/rollout 治理接线) 并按判别联合装配类型化输入 — 六种
+        // kind 的 validator/ledgerIdentity/Runner 构造不再在本文件重复。
+        // 有意保留的入口差异 (SPEC §3.5.1): 本 CLI 无 evidence 装配端口 —
+        // artificer 输入不带 behaviorExamplePack/trustedFacts (code_tool_hook
+        // 任务已在上方租约前拒绝); rollout options 不带 effectiveConfig
+        // (历史语义, 与 consumer 的透传差异一致)。
+        const baseInput = {
+          taskId: wakeResult.taskId,
+          workspaceDir,
+          stateManager,
+          runtimeAdapter,
+          eventEmitter,
+          artifactStore,
+        };
+        const runnerOptionsWithConfig: SelectedInternalizationTaskRunnerOptions = {
+          owner: OWNER,
+          runtimeKind: runtimeAdapter.kind(),
+          pollIntervalMs: 100,
+          timeoutMs: effectiveTimeoutMs,
+          effectiveConfig,
+          outputLanguage,
+        };
+        let executionInput: ExecuteSelectedInternalizationTaskInput;
+        switch (runnerKind) {
+          case 'dreamer':
+            executionInput = { taskKind: 'dreamer', ...baseInput, runnerOptions: runnerOptionsWithConfig };
+            break;
+          case 'philosopher':
+            executionInput = { taskKind: 'philosopher', ...baseInput, runnerOptions: runnerOptionsWithConfig };
+            break;
+          case 'scribe':
+            executionInput = { taskKind: 'scribe', ...baseInput, runnerOptions: runnerOptionsWithConfig };
+            break;
+          case 'artificer': {
+            // PRI-741: artificer generation anchors on the workspace host
+            // declaration (same durable provenance the evaluator gate uses).
+            // Unresolvable provenance degrades OBSERVABLY (rc-9/EP-03) to a
+            // prompt without the host block — never a silent wrong-host guess.
+            const hostSemantics = resolveWorkspaceHostToolSemantics(workspaceDir);
+            if (!hostSemantics.ok) {
+              console.error(`[PD:run-once] artificer prompt without host tool semantics: ${hostSemantics.reason} — ${hostSemantics.nextAction}`);
+            }
+            executionInput = {
+              taskKind: 'artificer',
+              ...baseInput,
+              runnerOptions: runnerOptionsWithConfig,
               ...(hostSemantics.ok
                 ? { hostSemanticContext: buildArtificerHostSemanticContext(hostSemantics.registry, hostSemantics.hostKinds) }
                 : {}),
-            },
-          );
-          runnerResult = await runner.run(wakeResult.taskId);
-        } else if (runnerKind === 'evaluator') {
-          const validator = new DefaultEvaluatorValidator();
-          // PRI-510 (DEFECT-004): use createEvaluatorRunnerDeps so the repair
-          // loop is wired in this CLI path (EP-02: production path must
-          // invoke core logic, not just construct the runner).
-          const runner = new EvaluatorRunner(
-            createEvaluatorRunnerDeps({
-              stateManager,
-              runtimeAdapter,
-              eventEmitter,
-              validator,
-              artifactStore,
-              workspaceDir,
-            }),
+            };
+            break;
+          }
+          case 'evaluator': {
             // PRI-661: gateDeps resolved ABOVE via the ONE
             // createEvaluatorRuntimeContext builder (durable workspace
             // provenance + workspace root) — replay/production parity with
-            // the consumer cycle. Options argument (2nd), never deps (1st).
-            {
-              owner: OWNER,
-              runtimeKind: runtimeAdapter.kind(),
-              pollIntervalMs: 100,
-              timeoutMs: effectiveTimeoutMs,
-              effectiveConfig,
+            // the consumer cycle. PRI-510 (DEFECT-004): repair-loop wiring
+            // keeps coming from createEvaluatorRunnerDeps (EP-02), passed
+            // through the executor as typed repairDeps (no third factory).
+            if (evaluatorGateDeps === undefined) {
+              throw new Error('evaluator gate deps unresolved: createEvaluatorRuntimeContext must run before dispatch');
+            }
+            const evaluatorDeps = createEvaluatorRunnerDeps({
+              stateManager,
+              runtimeAdapter,
+              eventEmitter,
+              validator: new DefaultEvaluatorValidator(),
+              artifactStore,
+              workspaceDir,
+            });
+            // rc-3: 工厂契约必然接线 repair 轮 — 缺失即是装配错误, fail loud
+            // 而非静默降级 (执行器的 repairDeps 类型层面不可缺失)。
+            if (!evaluatorDeps.isRepairLoopEnabled || !evaluatorDeps.seedArtificerRepairTask) {
+              throw new Error('evaluator repair wiring missing from createEvaluatorRunnerDeps output');
+            }
+            executionInput = {
+              taskKind: 'evaluator',
+              ...baseInput,
+              runnerOptions: runnerOptionsWithConfig,
+              repairDeps: {
+                isRepairLoopEnabled: evaluatorDeps.isRepairLoopEnabled,
+                seedArtificerRepairTask: evaluatorDeps.seedArtificerRepairTask,
+              },
               gateDeps: evaluatorGateDeps,
-              // PRI-741: host-name parity replay case (same provenance as
-              // gateDeps; undefined = observable skip event in the runner).
               ...(evaluatorHostSemanticContext !== undefined ? { hostSemanticContext: evaluatorHostSemanticContext } : {}),
-              outputLanguage,
-            },
-          );
-          runnerResult = await runner.run(wakeResult.taskId);
-        } else if (runnerKind === 'rollout_reviewer') {
-          const validator = new DefaultRolloutReviewerValidator();
-          // PRI-708: canonical rollout revision routing — the SAME reopen
-          // callback (causeId-idempotent reopenTaskForRevision) the consumer
-          // cycle injects, so a manual needs_revision here reopens the
-          // scribe/artificer revision target instead of dead-ending in the
-          // recovery-only `rollout_revision_routing_not_wired` NHR (INV-04:
-          // needs_revision never enters the approval queue).
-          // PRI-713: canonical activation dispatch — the SAME
-          // dispatchActivation (approve_rollout → ActivationDispatcher:
-          // PRI-811 Phase B — every recommendation enqueues approvals.pending;
-          // activation only after Owner approval) the
-          // consumer cycle injects from this one factory, so a manual
-          // approve_rollout completes governance instead of dead-ending in
-          // the recovery-only `rollout_dispatch_not_wired` NHR. The Owner
-          // gate is NOT bypassed: all channels enqueue
-          // approvals.pending inside the dispatcher. toolSemantics comes
-          // from the durable workspace provenance (PRI-661 pattern — same
-          // resolver the evaluator context uses); when no declaration is
-          // persisted the dispatch wires without it, mirroring the consumer
-          // cycle's optional host port, with the structured reason surfaced
-          // on stderr (never a silent baseline fallback).
-          const dispatchSemantics = resolveWorkspaceHostToolSemantics(workspaceDir);
-          if (!dispatchSemantics.ok) {
-            console.error(`[PD:run-once] rollout dispatch without host tool semantics: ${dispatchSemantics.reason} — ${dispatchSemantics.nextAction}`);
+            };
+            break;
           }
-          const { dispatchActivation, reopenRevisionTarget } = createRolloutGovernanceDeps(
-            workspaceDir,
-            orchestrator,
-            dispatchSemantics.ok ? { toolSemantics: dispatchSemantics.registry } : {},
-          );
-          const runner = new RolloutReviewerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, dispatchActivation, reopenRevisionTarget },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
-          );
-          runnerResult = await runner.run(wakeResult.taskId);
-        } else {
-          skipReason = 'no_runner_implemented';
+          case 'rollout_reviewer': {
+            // PRI-708 / PRI-713: canonical rollout governance — the SAME
+            // dispatchActivation + reopenRevisionTarget factory the consumer
+            // cycle injects; Owner gate NOT bypassed (approvals.pending).
+            const dispatchSemantics = resolveWorkspaceHostToolSemantics(workspaceDir);
+            if (!dispatchSemantics.ok) {
+              console.error(`[PD:run-once] rollout dispatch without host tool semantics: ${dispatchSemantics.reason} — ${dispatchSemantics.nextAction}`);
+            }
+            const governanceDeps = createRolloutGovernanceDeps(
+              workspaceDir,
+              orchestrator,
+              dispatchSemantics.ok ? { toolSemantics: dispatchSemantics.registry } : {},
+            );
+            executionInput = {
+              taskKind: 'rollout_reviewer',
+              ...baseInput,
+              runnerOptions: {
+                owner: OWNER,
+                runtimeKind: runtimeAdapter.kind(),
+                pollIntervalMs: 100,
+                timeoutMs: effectiveTimeoutMs,
+                outputLanguage,
+              },
+              governanceDeps,
+            };
+            break;
+          }
+          default:
+            throw new Error(`no executor input for runner kind: ${runnerKind}`);
         }
+        runnerResult = await executeSelectedInternalizationTask(executionInput);
       } catch (runErr) {
         console.error(`Error: runner crashed: ${runErr instanceof Error ? runErr.message : String(runErr)}`);
         // SPEC §5.3: this process holds no lease fence (the runner died outside
@@ -872,7 +846,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       }
     }
 
-    const output = buildOutput(wakeResult, runnerResult, skipReason);
+    const output = buildOutput(wakeResult, runnerResult);
     // PRI-1221 (cli-6/rc-9): an EXPLICIT --runner can filter out candidates of
     // other kinds. Surface that as a next action instead of a bare
     // no_ready_tasks that reads as "the whole chain is idle". Only fires when

@@ -34,9 +34,34 @@ const RUN_ID = 'run-evaluator-001';
 const EVAL_ARTIFACT_ID = `pi-art-${EVAL_ID}-${RUN_ID}`;
 const SCRIBE_ARTIFACT_ID = 'pi-art-scribe-001';
 
+// PRI-1293 Phase 3: 血缘可证明的 dreamer 根 — 修复轮完成后的来源 evaluator
+// reopen 走新的血缘门禁, 夹具链必须可回溯根 dreamer (taskId 非 UUID + seed
+// 顶层 candidateId)。
+const RESUME_DREAMER_ROOT = 'dreamer-resume-root';
+
+function dreamerRootTask(): TaskRecord {
+  return {
+    taskId: RESUME_DREAMER_ROOT,
+    taskKind: 'dreamer',
+    status: 'succeeded',
+    attemptCount: 1,
+    maxAttempts: 3,
+    createdAt: '2026-08-28T00:00:00.000Z',
+    updatedAt: '2026-08-28T00:00:00.000Z',
+    diagnosticJson: JSON.stringify({
+      pi_metadata: {
+        dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+      },
+      candidateId: 'cand-resume-root',
+    }),
+  };
+}
+
 function meta(overrides: Partial<PITaskMetadata> = {}): PITaskMetadata {
   return {
     dependencyTaskIds: [ARTIFER_ID],
+    parentTaskId: RESUME_DREAMER_ROOT,
     channel: 'prompt',
     timeoutMs: 300_000,
     inputArtifactRefs: [],
@@ -295,7 +320,7 @@ function rolloutHarness(res: OwnerResolutionRecord, dispatchDecision: string | n
     {
       stateManager: stateManager,
       runtimeAdapter: { startRun, pollRun: vi.fn(), fetchOutput: vi.fn(), cancelRun: vi.fn() } as never,
-      eventEmitter: { emitTelemetry: vi.fn() } as never,
+      eventEmitter: { emitTelemetry: vi.fn() },
       artifactStore: artifacts,
       validator: new DefaultRolloutReviewerValidator(),
       ...(dispatchDecision !== null ? { dispatchActivation } : {}),
@@ -381,7 +406,7 @@ describe('PRI-629 P0: epoch-aware repair reopen (SPEC §12)', () => {
       }),
     });
     const store = new MemoryTaskStore();
-    for (const t of [evalTask, repair, scribeTask]) void store.createTask({ ...t });
+    for (const t of [dreamerRootTask(), evalTask, repair, scribeTask]) void store.createTask({ ...t });
     const stateManager = {
       async getTask(id: string) { return store.getTask(id); },
       async listTasks() { return [] as TaskRecord[]; },
@@ -451,7 +476,7 @@ describe('PRI-718: stale repair completion must not downgrade the evaluator dep'
       }),
     });
     const store = new MemoryTaskStore();
-    for (const t of [evalTask, r1, r2, scribeTask]) void store.createTask({ ...t });
+    for (const t of [dreamerRootTask(), evalTask, r1, r2, scribeTask]) void store.createTask({ ...t });
     const stateManager = {
       async getTask(id: string) { return store.getTask(id); },
       async listTasks() { return [] as TaskRecord[]; },

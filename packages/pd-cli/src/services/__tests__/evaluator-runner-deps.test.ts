@@ -257,16 +257,34 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     expect(deps.seedArtificerRepairTask).toBeDefined();
     expect(typeof deps.seedArtificerRepairTask).toBe('function');
     if (typeof deps.seedArtificerRepairTask !== 'function') throw new Error('seedArtificerRepairTask missing');
+    // PRI-1293 Phase 3: 来源 evaluator 必须真实存在且链可回溯根 dreamer —
+    // seeder 的血缘收口按设计拒绝不可证明的来源。
+    await stateManager.createTask({
+      taskId: 'dreamer-r0-src', taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }, candidateId: 'cand-r0' }),
+    });
+    await stateManager.createTask({
+      taskId: 'evaluator-r0', taskKind: 'evaluator', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'cand-r0', parentTaskId: 'dreamer-r0-src' } }),
+    });
     const repairTaskId = await deps.seedArtificerRepairTask(params);
 
     // Returns a non-empty task ID
     expect(typeof repairTaskId).toBe('string');
     expect(repairTaskId.length).toBeGreaterThan(0);
 
-    // Exactly one task created
-    expect(createdTasks).toHaveLength(1);
-    const [task] = createdTasks;
+    // Exactly one ARTIFICER task created (the two lineage fixtures above are
+    // the dreamer root and the source evaluator).
+    const createdArtificers = createdTasks.filter((t) => t.taskKind === 'artificer');
+    expect(createdArtificers).toHaveLength(1);
+    const [task] = createdArtificers;
     if (!task) throw new Error('task not created');
+
+    // PRI-1293 Phase 3: repair 任务血缘 — parentTaskId=来源 evaluator, id 经
+    // 权威解析恢复。
+    const createdPi = JSON.parse(task.diagnosticJson ?? '{}') as { pi_metadata?: Record<string, unknown> };
+    expect(createdPi.pi_metadata?.parentTaskId).toBe('evaluator-r0');
+    expect(createdPi.pi_metadata?.correlationId).toBe('cand-r0');
 
     // D1 (PRI-509): task kind is 'artificer' (reuses artificer-runner, not a
     // new runner type)
@@ -302,6 +320,15 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     tmpWorkspaces.push(workspaceDir);
     const { stateManager } = createMockStateManager();
     const params = makeValidSeedParams();
+    // PRI-1293 Phase 3: 可证明来源链 (同上)。
+    await stateManager.createTask({
+      taskId: 'dreamer-r0-src', taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }, candidateId: 'cand-r0' }),
+    });
+    await stateManager.createTask({
+      taskId: 'evaluator-r0', taskKind: 'evaluator', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'cand-r0', parentTaskId: 'dreamer-r0-src' } }),
+    });
 
     const deps = createEvaluatorRunnerDeps({
       stateManager,

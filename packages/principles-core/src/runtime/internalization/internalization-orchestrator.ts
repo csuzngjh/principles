@@ -20,6 +20,14 @@ import type { RunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from './pitask-metadata.js';
 import { reopenTaskForRevision, buildRepairRevisionCauseId } from './revision-reopen.js';
+// PRI-1293 Phase 3: 唯一 PeerRunnerKind 血缘权威解析器 (core 内部模块,
+// 不入 barrel — 跨包消费方经 InternalizationOrchestrator 静态只读包装访问)。
+import {
+  resolveAuthoritativeCorrelationId,
+  correlationLineageGetTask,
+  type CorrelationLineageGetTask,
+  type CorrelationLineageResolution,
+} from './correlation-lineage.js';
 import type { PITaskMetadata, SourceCorrectionReceiptV1 } from './pitask-metadata.js';
 import type { PITaskRecord } from './peer-runner-contracts.js';
 import { isPeerRunnerKind, isDiagnosticianStageKind, isRunnerKind } from './peer-runner-contracts.js';
@@ -182,7 +190,9 @@ export type CommitNextTaskResult =
   /** SPEC-PRI-1047: 定点续接失败（目标缺失等）— 可观测，receipt outcome 记 task_missing */
   | { decision: 'source_correction_reopen_failed'; sourceTaskId: string; reopenedTaskId: string; reason: string }
   /** P0-3: 决策型任务缺少 durable + legacy verdict — fail-closed, 不 seed 任何后继 */
-  | { decision: 'blocked_missing_verdict'; taskId: string; reason: string };
+  | { decision: 'blocked_missing_verdict'; taskId: string; reason: string }
+  /** PRI-1293 Phase 3: PeerRunnerKind 血缘校验拒绝 — 结构化 reason, 零后继零写入 */
+  | { decision: 'lineage_refused'; sourceTaskId: string; reason: string; detail: string };
 
 // ── Constructor Options ───────────────────────────────────────────────────────
 
@@ -227,6 +237,22 @@ export class InternalizationOrchestrator {
     this.owner = options.owner;
     this.runtimeKind = options.runtimeKind;
     this.dryRun = options.dryRun ?? false;
+  }
+
+  // ── PRI-1293 Phase 3: 跨包血缘解析通道 (静态只读) ─────────────────────────
+  //
+  // resolveAuthoritativeCorrelationId 是 core 内部模块 correlation-lineage.ts
+  // 的唯一实现; host-runtime (Evaluator Repair Seeder) 与 pd-cli
+  // (rulehost seeder) 需要同一判定结果, 但 resolver 不得成为新的 barrel 公开
+  // 符号 (PRI-775 冻结面), 也不得复制第二套父链遍历。既有公开类上的静态只读
+  // 薄包装是 SPEC §5.4 授权的共享通道: 零状态、零写入, 仅委托。
+
+  /** PeerRunnerKind 父链 correlationId 权威解析 — 只读, 详见 correlation-lineage.ts。 */
+  static resolveAuthoritativeCorrelationId(
+    leafTaskRecord: Parameters<typeof resolveAuthoritativeCorrelationId>[0],
+    getTask: CorrelationLineageGetTask,
+  ): Promise<CorrelationLineageResolution> {
+    return resolveAuthoritativeCorrelationId(leafTaskRecord, getTask);
   }
 
   // ── wakeOnce ──────────────────────────────────────────────────────────────
@@ -783,6 +809,30 @@ export class InternalizationOrchestrator {
       return this.reopenArtificerForSourceCorrection(taskId, piTask);
     }
 
+    // ── PRI-1293 Phase 3: PeerRunnerKind 血缘门禁 (ADVANCE 路径唯一写前关口) ──
+    // 严格作用域: 仅 PeerRunnerKind 源任务。DiagnosticianStageKind 子任务
+    // 继续走 proposeNextTask 的 getDiagSuccessors 分支 (parentTaskId +
+    // dependencyTaskIds 语义), 绝不套用 correlationId 门禁。
+    // 校验发生在任何后继创建之前: 拒绝 = 零 createTask、零状态写入、零
+    // reopen; 结构化 lineage_refused 让 host 层 (consumer cycle / run-once /
+    // enqueue-successors / reconciliation) 可观测, 不折叠成 no_successor。
+    // 校验同时负责历史无 id 链的根侧恢复 — 成功结果 (含 recoveredFromLegacyRoot)
+    // 写入新后继 metadata.correlationId; 后继 taskId 派生保持原样 (proposal.
+    // correlationId ?? stripTrailingChannel), 不漂移在途历史链的确定性去重。
+    let authoritativeCorrelation: Extract<CorrelationLineageResolution, { ok: true }> | null = null;
+    if (isPeerRunnerKind(piTask.taskKind)) {
+      const lineage = await resolveAuthoritativeCorrelationId(rawTask, correlationLineageGetTask(this.stateManager));
+      if (!lineage.ok) {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: lineage.reason,
+          detail: lineage.detail,
+        };
+      }
+      authoritativeCorrelation = lineage;
+    }
+
     const proposalResult = await this.proposeNextTask(taskId);
     if (!proposalResult) {
       return { decision: 'no_successor', sourceTaskId: taskId, reason: 'No valid successor in job graph for this task kind and channel' };
@@ -918,7 +968,10 @@ export class InternalizationOrchestrator {
       inputArtifactRefs: proposal.inputArtifactRefs,
       outputArtifactRefs: [],
       parentTaskId: proposal.parentTaskId,
-      correlationId: proposal.correlationId,
+      // PRI-1293 Phase 3: 写入的是经过权威校验/恢复的 correlationId —
+      // 历史无 id 链在此补入根侧恢复值 (§3.6.3 历史恢复), 正常链上与
+      // proposal.correlationId 相同 (校验保证链内一致 + 根佐证)。
+      correlationId: authoritativeCorrelation?.correlationId ?? proposal.correlationId,
     };
 
      
@@ -1245,11 +1298,35 @@ export class InternalizationOrchestrator {
         await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
         return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
       }
+      // PRI-1293 Phase 3: 定点续接是生产 reopen 路径 — 与 commit/reopen 核心
+      // 共享同一血缘权威。守卫通过后、CAS 写之前校验; 拒绝 = conflict 终态
+      // 可观测 (receipt outcome 落库), 零写入。
+      const artificerLineage = await resolveAuthoritativeCorrelationId(
+        artificerTask,
+        correlationLineageGetTask(this.stateManager),
+      );
+      if (!artificerLineage.ok) {
+        await this.recordSourceCorrectionOutcome(scribeTaskId, {
+          kind: 'conflict',
+          recordedAt: new Date().toISOString(),
+          detail: `lineage_refused:${artificerLineage.reason}`,
+        });
+        return {
+          decision: 'source_correction_reopen_conflict',
+          sourceTaskId: scribeTaskId,
+          reopenedTaskId: artificerTaskId,
+          reason: `lineage_refused:${artificerLineage.reason}`,
+        };
+      }
       const merged = mergePITaskMetadata(artificerPi, {
         runnerDecision: undefined,
         completionIntent: undefined,
         revisionCount: (artificerPi.revisionCount ?? 0) + 1,
         revisionCauseId: causeId,
+        // §5.3.7: 可恢复历史链在续接写中补入已验证的 correlationId。
+        ...(artificerLineage.correlationId !== (artificerPi.correlationId?.trim() ?? '')
+          ? { correlationId: artificerLineage.correlationId }
+          : {}),
       });
       const updated = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
         artificerTaskId,

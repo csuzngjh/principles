@@ -36,6 +36,8 @@ function makeRawTask(overrides: {
   outputArtifactRefs?: { artifactType: string; ref: string }[];
   parentTaskId?: string;
   correlationId?: string;
+  /** PRI-1293 Phase 3: dreamer 根 seed 顶层 candidateId (血缘佐证)。 */
+  topCandidateId?: string;
   attemptCount?: number;
   maxAttempts?: number;
   createdAt?: string;
@@ -52,6 +54,7 @@ function makeRawTask(overrides: {
     outputArtifactRefs = [],
     parentTaskId,
     correlationId,
+    topCandidateId,
     attemptCount = 0,
     maxAttempts = 3,
     createdAt = new Date().toISOString(),
@@ -68,7 +71,10 @@ function makeRawTask(overrides: {
   if (parentTaskId !== undefined) piMetadata.parentTaskId = parentTaskId;
   if (correlationId !== undefined) piMetadata.correlationId = correlationId;
 
-  const diagnosticJson = JSON.stringify({ pi_metadata: piMetadata });
+  const diagnosticJson = JSON.stringify({
+    pi_metadata: piMetadata,
+    ...(topCandidateId !== undefined ? { candidateId: topCandidateId } : {}),
+  });
 
   return {
     taskId,
@@ -774,6 +780,7 @@ describe('InternalizationOrchestrator', () => {
         taskKind: 'dreamer',
         status: 'succeeded',
         outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-dreamer-1' }],
+        topCandidateId: 'cand-dreamer-1',
       });
       mockStateManager.getTask.mockResolvedValue(succeededDreamer);
       mockStateManager.listTasks.mockResolvedValue([]);
@@ -807,6 +814,7 @@ describe('InternalizationOrchestrator', () => {
         taskKind: 'dreamer',
         status: 'succeeded',
         outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-dreamer-1' }],
+        topCandidateId: 'cand-dreamer-1',
       });
       const existingPhilosopher = makeRawTask({
         taskId: 'philosopher-dreamer-1-prompt',
@@ -925,6 +933,7 @@ describe('InternalizationOrchestrator', () => {
         status: 'succeeded',
         channel: 'prompt',
         outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-dreamer-1' }],
+        topCandidateId: 'cand-dreamer-1',
       });
       mockStateManager.getTask.mockResolvedValue(succeededDreamer);
       mockStateManager.listTasks.mockResolvedValue([]);

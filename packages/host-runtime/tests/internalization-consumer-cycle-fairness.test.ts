@@ -78,6 +78,9 @@ async function seedTask(workspaceDir: string, taskId: string, taskKind: string, 
         inputArtifactRefs: [],
         outputArtifactRefs: [],
         correlationId: 'corr-fair',
+        // PRI-1293 Phase 3: 线性挂链 — commit 血缘门禁要求后继创建者的链可
+        // 回溯根 dreamer (dreamer 无 deps 即根, 自带 correlationId 佐证)。
+        parentTaskId: deps[0],
       }),
     });
   });

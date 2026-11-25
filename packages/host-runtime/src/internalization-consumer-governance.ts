@@ -36,9 +36,11 @@ import {
   type ActivationDecision,
   type SeedArtificerRepairParams,
   type RuntimeStateManager,
-  type InternalizationOrchestrator,
   type ToolSemanticRegistry,
 } from '@principles/core/runtime';
+// PRI-1293 Phase 3: InternalizationOrchestrator.resolveAuthoritativeCorrelationId
+// 静态只读包装 — 跨包访问唯一血缘权威的授权通道 (core 内部模块不进 barrel)。
+import { InternalizationOrchestrator } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from './pd-config.js';
 
 /** Structural logger port — PluginLogger satisfies this without adaptation. */
@@ -213,6 +215,27 @@ export function createEvaluatorRepairDeps(
         logger?.info?.(`[PD:Consumer] repair task ${repairTaskId} already exists (in-flight ${existing.status}); reusing (idempotent seed)`);
         return repairTaskId;
       }
+      // PRI-1293 Phase 3 (§5.2): repair 任务创建前从来源 evaluator 恢复权威
+      // 血缘 — 校验失败结构化抛出 (流入 evaluator 的 repair_task_seed_failed →
+      // seed_failed 路径), 绝不创建无血缘后继; 成功则把验证过的 correlationId
+      // 与 parentTaskId=sourceEvaluatorTaskId 写入 repair metadata (既有
+      // createPITaskDiagnosticJson 机制), 使 repair 链可回溯根 dreamer、
+      // 下一轮 evaluator 经 mergePITaskMetadata 天然继承同一 id。不信任
+      // runner 调用方传入的任何 candidateId (SeedArtificerRepairParams 本就
+      // 无此字段)。
+      const sourceEvaluatorTask = await stateManager.getTask(params.repairPayload.sourceEvaluatorTaskId);
+      if (!sourceEvaluatorTask) {
+        throw new Error(
+          `evaluator_repair_seed_lineage_refused: source evaluator task ${params.repairPayload.sourceEvaluatorTaskId} not found`,
+        );
+      }
+      const lineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
+        sourceEvaluatorTask,
+        (taskId: string) => stateManager.getTask(taskId),
+      );
+      if (!lineage.ok) {
+        throw new Error(`evaluator_repair_seed_lineage_refused:${lineage.reason}:${lineage.detail}`);
+      }
       await stateManager.createTask({
         taskId: repairTaskId,
         taskKind: 'artificer',
@@ -226,13 +249,15 @@ export function createEvaluatorRepairDeps(
           timeoutMs: params.inheritedTimeoutMs,
           inputArtifactRefs: [...params.inheritedInputArtifactRefs],
           outputArtifactRefs: [],
+          parentTaskId: params.repairPayload.sourceEvaluatorTaskId,
+          correlationId: lineage.correlationId,
           ...(params.ownerEvidenceSelection !== undefined
             ? { ownerEvidenceSelection: params.ownerEvidenceSelection }
             : {}),
           repairPayload: params.repairPayload,
         }),
       });
-      logger?.info?.(`[PD:Consumer] seeded artificer repair task ${repairTaskId} (iteration ${params.repairPayload.repairIteration})`);
+      logger?.info?.(`[PD:Consumer] seeded artificer repair task ${repairTaskId} (iteration ${params.repairPayload.repairIteration}, correlationId ${lineage.correlationId}${lineage.recoveredFromLegacyRoot ? ', recovered from legacy root' : ''})`);
       return repairTaskId;
     },
   };

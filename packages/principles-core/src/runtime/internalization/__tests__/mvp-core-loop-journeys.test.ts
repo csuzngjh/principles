@@ -21,7 +21,7 @@ import { EvaluatorRunner } from '../evaluator-runner.js';
 import { DefaultEvaluatorValidator } from '../evaluator-output.js';
 import { DefaultRolloutReviewerValidator } from '../rollout-reviewer-output.js';
 import type { RolloutReviewerOutputV1 } from '../rollout-reviewer-output.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson } from '../pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from '../pitask-metadata.js';
 import { storeEmitter } from '../../store/event-emitter.js';
 import { ActivationDispatcher } from '../../activation/activation-dispatcher.js';
 import { PromptWriter, DeferArchiveWriter } from '../../activation/low-risk-writers.js';
@@ -72,9 +72,36 @@ function meta(overrides: Record<string, unknown> = {}): string {
 }
 
 async function createTask(taskId: string, taskKind: string, diagnosticJson: string): Promise<void> {
+  // PRI-1293 Phase 3: 链挂 dreamer 根 — commit/reopen 血缘门禁要求任务可
+  // 回溯根 dreamer。本文件全部是 scribe→…→rollout 线性链: scribe 按其
+  // correlationId 挂种子根 (顶层 candidateId 同值), 其余任务挂首个依赖。
+  const pi = hydratePITaskRecord({ taskKind, diagnosticJson } as unknown as TaskRecord);
+  let parentTaskId: string | undefined;
+  if (taskKind === 'scribe' && pi?.correlationId) {
+    const dreamerId = `dreamer-${pi.correlationId}-src`;
+    const existingDreamer = await stateManager.getTask(dreamerId);
+    if (!existingDreamer) {
+      await stateManager.createTask({
+        taskId: dreamerId, taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({
+          pi_metadata: {
+            dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain',
+            timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [],
+          },
+          candidateId: pi.correlationId,
+        }),
+      });
+    }
+    parentTaskId = dreamerId;
+  } else {
+    parentTaskId = pi?.dependencyTaskIds[0];
+  }
+  const finalJson = pi && parentTaskId !== undefined
+    ? createPITaskDiagnosticJson(mergePITaskMetadata(pi, { parentTaskId }))
+    : diagnosticJson;
   await stateManager.createTask({
     taskId, taskKind, status: 'pending', attemptCount: 0, maxAttempts: 3,
-    diagnosticJson,
+    diagnosticJson: finalJson,
   });
 }
 

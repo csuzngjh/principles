@@ -452,6 +452,16 @@ describe('runInternalizationConsumerCycle — PRI-982 evidence preflight + chann
     let repairTaskId: string;
     try {
       await completeTaskAsFencedOwner(handle.stateManager, ARTIFICER_TASK_ID, 'artificer://original');
+      // PRI-1293 Phase 3: 来源 evaluator 必须真实存在且链可回溯根 dreamer —
+      // seeder 的血缘收口按设计拒绝不可证明的来源。
+      await handle.stateManager.createTask({
+        taskId: 'dreamer-repair-seed-src', taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }, candidateId: 'corr-001' }),
+      });
+      await handle.stateManager.createTask({
+        taskId: 'evaluator-repair-seed', taskKind: 'evaluator', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [ARTIFICER_TASK_ID], channel: 'code_tool_hook', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'corr-001', parentTaskId: 'dreamer-repair-seed-src' } }),
+      });
       const repairDeps = createEvaluatorRepairDeps(workspaceDir, handle.stateManager);
       repairTaskId = await repairDeps.seedArtificerRepairTask({
         repairPayload: {

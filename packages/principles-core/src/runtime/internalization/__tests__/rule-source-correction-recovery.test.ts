@@ -114,6 +114,9 @@ describe('SPEC-PRI-1047 R03 — one bounded source-correction recovery through t
       dependencyTaskIds, channel: 'code_tool_hook', timeoutMs: 1_000,
       inputArtifactRefs: [], outputArtifactRefs: [], pipelineMode: 'standard',
       correlationId: candidateId,
+      // PRI-1293 Phase 3: parentTaskId 链 — reopen/续接血缘门禁要求任务可回溯
+      // 根 dreamer (线性链: 首个依赖即父)。
+      parentTaskId: dependencyTaskIds[0],
     });
     // dreamer/philosopher succeeded (upstream of the scribe).
     await stateManager.createTask({

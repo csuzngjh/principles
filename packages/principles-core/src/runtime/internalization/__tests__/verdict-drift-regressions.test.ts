@@ -64,7 +64,23 @@ function meta(o: Record<string, unknown> = {}): string {
 }
 
 async function mkTask(id: string, kind: string, deps: string[]): Promise<void> {
-  await stateManager.createTask({ taskId: id, taskKind: kind, status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ correlationId: 'd1', dependencyTaskIds: deps }) });
+  // PRI-1293 Phase 3: 链挂 dreamer 根 — reopen/commit 血缘门禁要求任务可
+  // 回溯根 dreamer。scribe 挂种子根 (seed candidateId 'd1'), 其余挂首个依赖。
+  if (kind === 'scribe') {
+    const dreamerId = 'dreamer-d1-src';
+    const existing = await stateManager.getTask(dreamerId);
+    if (!existing) {
+      await stateManager.createTask({
+        taskId: dreamerId, taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({
+          pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+          candidateId: 'd1',
+        }),
+      });
+    }
+  }
+  const parentTaskId = kind === 'scribe' ? 'dreamer-d1-src' : deps[0];
+  await stateManager.createTask({ taskId: id, taskKind: kind, status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ correlationId: 'd1', dependencyTaskIds: deps, parentTaskId }) });
 }
 
 async function succeed(id: string): Promise<void> {

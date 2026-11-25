@@ -10,6 +10,10 @@
 import type { TaskRecord } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PITaskRecord } from './peer-runner-contracts.js';
+import { isPeerRunnerKind } from './peer-runner-contracts.js';
+// PRI-1293 Phase 3: reopen 与 commit 共享同一唯一血缘权威 (§5.3 — 只包
+// orchestrator wrapper 不合格; 此处是四条生产 reopen 路径的共同核心)。
+import { resolveAuthoritativeCorrelationId } from './correlation-lineage.js';
 import {
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
@@ -80,6 +84,26 @@ export async function reopenTaskForRevision(
     return { ok: false, reason: `task_in_flight_${rawTask.status}` };
   }
 
+  // ── PRI-1293 Phase 3: 血缘门禁 (所有生产 reopen 路径的同一关口) ──
+  // 覆盖: Owner revise_once (owner-resolution 直接调本函数)、rollout
+  // needs_revision (governance 经 orchestrator 委托)、repair 完成后 reopen
+  // 来源 evaluator (orchestrator REOPEN_SOURCE_EVALUATOR)、revision cascade。
+  // causeId 幂等重放短路已在其上 — 同因重放不重复校验也不写状态。
+  // 校验先于任何写入: 拒绝 = 零 mutation + 结构化 reason (rc-9)。
+  // DiagnosticianStageKind 目标不在本函数的生产目标集合内; 防御性跳过
+  // (血缘门禁严格限于 PeerRunnerKind, §4.2 作用域隔离)。
+  let authoritativeCorrelationId: string | undefined;
+  if (isPeerRunnerKind(piTask.taskKind)) {
+    const lineage = await resolveAuthoritativeCorrelationId(rawTask, (id: string) => stateManager.getTask(id));
+    if (!lineage.ok) {
+      return { ok: false, reason: `lineage_refused:${lineage.reason}` };
+    }
+    // 可恢复历史任务: 校验通过后把根侧恢复的 id 安全补入本次 reopen 写
+    // (§5.3.7) — 走 mergePITaskMetadata 的既有 28 字段机制, 不新增真值源。
+    authoritativeCorrelationId
+      = lineage.correlationId !== (piTask.correlationId?.trim() ?? '') ? lineage.correlationId : undefined;
+  }
+
   const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
     runnerDecision: undefined, // 新一轮 verdict 未定,清空旧判定 (INV-02 单一决策依据)
     // P0 verdict drift: revision reopen = 新 execution epoch — 旧 completion
@@ -89,6 +113,7 @@ export async function reopenTaskForRevision(
     revisionCount: (piTask.revisionCount ?? 0) + 1,
     revisionFeedback: options?.revisionFeedback ?? piTask.revisionFeedback,
     revisionCauseId: options?.revisionCauseId,
+    ...(authoritativeCorrelationId !== undefined ? { correlationId: authoritativeCorrelationId } : {}),
   });
 
   if (options?.replaceArtificerDependencyWith) {

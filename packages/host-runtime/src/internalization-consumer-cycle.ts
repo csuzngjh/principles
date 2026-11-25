@@ -72,6 +72,23 @@ import {
   type BehaviorEvidencePort,
   type ArtificerEvidencePreflightVerdict,
   type ArtificerTrustedFactsPort,
+  type TelemetryEvent,
+  type PIArtifactStore,
+  type EffectivePdConfig,
+  type OutputLanguage,
+  type RefinerRuleHostGateDeps,
+  type RolloutAutoDispatchInput,
+  type RolloutAutoDispatchOutcome,
+  type RolloutRevisionRoutingInput,
+  type SeedArtificerRepairParams,
+  type BehaviorExamplePack,
+  type ArtificerHostSemanticContext,
+  type DreamerRunnerResult,
+  type PhilosopherRunnerResult,
+  type ScribeRunnerResult,
+  type ArtificerRunnerResult,
+  type EvaluatorRunnerResult,
+  type RolloutReviewerRunnerResult,
 } from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from './pd-config.js';
@@ -338,6 +355,232 @@ async function runReconciliationBudget(
     // reconciliation 失败不阻塞周期 (下轮再试);显式留痕 (rc-9)
     emitEvent('INTERNALIZATION_CONSUMER_RECONCILE_FAILED', String(reconErr));
     logger.warn(`[PD:${logLabel}] Succeeded-transition reconciliation failed: ${String(reconErr)}`);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PRI-1293 Phase 2B — 共享单步 Runner 执行器 (SPEC-PD-PIPELINE-SPINE-001 §3.5)
+//
+// `executeSelectedInternalizationTask` 是六种 Peer Runner 构造+执行的唯一权威
+// 实现。收编对象：本文件的 consumer cycle 分支 + pd-cli
+// `runtime-internalization-run-once` 的 6 分支手搓构造。`rulehost-pipeline-
+// runner` 是显式同步对抗算子 (非租约编排)，按 SPEC §3.5.2 白名单保留独立构造。
+//
+// 职责边界 (统一 Runner 执行，不统一所有宿主行为)：
+//   只负责 — kind→Runner 映射、按判别联合的类型化依赖装配、执行指定 taskId、
+//   返回原始执行结果。
+//   不进入 — 任务发现/选择/wake/lease (orchestrator)、Runtime Profile 解析、
+//   Adapter/L2 路由 (各入口自建 adapter 传入)、Owner Evidence Preflight
+//   (auto consumer)、repair 任务创建 (两个 governance deps 工厂)、后继提交、
+//   周期调度、Workspace Telemetry 归属 (eventEmitter 由入口选择)。
+//
+// Scribe/Artificer/Evaluator 的 ledgerIdentity 从 (workspaceDir, stateManager)
+// 以同一装配导出 — 此前 consumer 与 run-once 各自内联同一段闭包 (重复实现)。
+// 两个入口的有意差异 (§2.5) 由输入类型表达：artificer 的 evidence pack /
+// trustedFacts 仅由具备 preflight 能力的入口传入；evaluator 的 repair deps /
+// gateDeps / hostToolCatalog / hostSemanticContext 必需显式提供，不存在缺省
+// 掩盖 (类型层面不可缺失)。
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Runner 遥测窄端口 — 与 core `PeerRunnerTelemetryEmitter` 结构等价
+ * (该类型不在 core 冻结 barrel 上，此处按结构声明，零新增导出)。
+ * StoreEventEmitter 与 WorkspaceTelemetryEmitter 均满足。
+ */
+export interface SelectedTaskTelemetryEmitter {
+  readonly emitTelemetry: (event: TelemetryEvent) => unknown;
+}
+
+/** 全部 kind 共享的调用方依赖。 */
+export interface SelectedInternalizationTaskBaseDeps {
+  /** 要执行的已租约任务。 */
+  readonly taskId: string;
+  readonly stateManager: RuntimeStateManager;
+  /** 入口自建的 runtime adapter (含 L2 / test-double 路由决策)。 */
+  readonly runtimeAdapter: PDRuntimeAdapter;
+  /** 入口选择的遥测口 (consumer evaluator 用 workspace-scoped emitter)。 */
+  readonly eventEmitter: SelectedTaskTelemetryEmitter;
+  readonly artifactStore: PIArtifactStore;
+  /** Workspace 根 — ledgerIdentity 装配的唯一事实来源。 */
+  readonly workspaceDir: string;
+}
+
+/** Runner 构造/执行选项 — 原样转发 (各入口既有语义保持)。 */
+export interface SelectedInternalizationTaskRunnerOptions {
+  readonly owner: string;
+  readonly runtimeKind: string;
+  readonly timeoutMs: number;
+  readonly effectiveConfig?: EffectivePdConfig;
+  readonly outputLanguage?: OutputLanguage;
+  readonly pollIntervalMs?: number;
+}
+
+/** Evaluator repair 轮的宿主接线 (来自既有 governance deps 工厂，不造第三套)。 */
+export interface SelectedEvaluatorRepairDeps {
+  readonly isRepairLoopEnabled: () => boolean;
+  readonly seedArtificerRepairTask: (params: SeedArtificerRepairParams) => Promise<string>;
+}
+
+/** rollout 治理接线 (来自 createRolloutGovernanceDeps)。 */
+export interface SelectedRolloutGovernanceDeps {
+  readonly dispatchActivation: (input: RolloutAutoDispatchInput) => Promise<RolloutAutoDispatchOutcome>;
+  readonly reopenRevisionTarget: (input: RolloutRevisionRoutingInput) => Promise<{ ok: boolean; reason: string; reopenedTaskId?: string }>;
+}
+
+/**
+ * 按 taskKind 收窄的判别联合输入 — 必需依赖在类型层面不可缺失；
+ * optional 仅限两个入口现状真实可选的字段 (artificer 的 evidence pack /
+ * trustedFacts / hostSemanticContext、evaluator 的宿主目录与语义投影)。
+ */
+export type ExecuteSelectedInternalizationTaskInput =
+  | ({ readonly taskKind: 'dreamer' } & SelectedInternalizationTaskBaseDeps & { readonly runnerOptions: SelectedInternalizationTaskRunnerOptions })
+  | ({ readonly taskKind: 'philosopher' } & SelectedInternalizationTaskBaseDeps & { readonly runnerOptions: SelectedInternalizationTaskRunnerOptions })
+  | ({ readonly taskKind: 'scribe' } & SelectedInternalizationTaskBaseDeps & { readonly runnerOptions: SelectedInternalizationTaskRunnerOptions })
+  | ({
+      readonly taskKind: 'artificer';
+      /** 仅 preflight 通过的入口传入 (consumer evidence ready)；run-once 无此能力则缺省。 */
+      readonly behaviorExamplePack?: BehaviorExamplePack;
+      /** 仅 consumer 传入 — 与 intent preflight 同源的 trusted-facts 端口。 */
+      readonly trustedFacts?: ArtificerTrustedFactsPort;
+      readonly hostSemanticContext?: ArtificerHostSemanticContext;
+    } & SelectedInternalizationTaskBaseDeps & { readonly runnerOptions: SelectedInternalizationTaskRunnerOptions })
+  | ({
+      readonly taskKind: 'evaluator';
+      /** repair 轮宿主接线 — 缺失即是装配错误，不允许缺省掩盖。 */
+      readonly repairDeps: SelectedEvaluatorRepairDeps;
+      /** 对抗重放 gate — 两个入口都必须显式提供各自权威解析结果。 */
+      readonly gateDeps: RefinerRuleHostGateDeps;
+      readonly hostToolCatalog?: ConsumerHostToolCatalog;
+      readonly hostSemanticContext?: ArtificerHostSemanticContext;
+    } & SelectedInternalizationTaskBaseDeps & { readonly runnerOptions: SelectedInternalizationTaskRunnerOptions })
+  | ({
+      readonly taskKind: 'rollout_reviewer';
+      readonly governanceDeps: SelectedRolloutGovernanceDeps;
+    } & SelectedInternalizationTaskBaseDeps & { readonly runnerOptions: SelectedInternalizationTaskRunnerOptions });
+
+export type SelectedInternalizationTaskRunResult =
+  | DreamerRunnerResult
+  | PhilosopherRunnerResult
+  | ScribeRunnerResult
+  | ArtificerRunnerResult
+  | EvaluatorRunnerResult
+  | RolloutReviewerRunnerResult;
+
+/**
+ * Scribe/Artificer/Evaluator 共用的 ledger 身份装配 — 与两个入口此前内联的
+ * 闭包逐字等价 (每次调用新开 PrincipleTreeLedgerAdapter 读盘，无跨周期缓存)。
+ */
+function buildWorkspaceLedgerIdentity(
+  workspaceDir: string,
+  stateManager: RuntimeStateManager,
+): {
+  resolveForCandidate: (candidateId: string) => Promise<ReturnType<PrincipleTreeLedgerAdapter['resolveCandidatePrincipleIdentity']>>;
+  isAvailable: () => boolean;
+  listForCandidate: (candidateId: string) => ReturnType<PrincipleTreeLedgerAdapter['listForCandidate']>;
+  hasPrinciple: (principleId: string) => boolean;
+} {
+  const ledger = (): PrincipleTreeLedgerAdapter => new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` });
+  return {
+    resolveForCandidate: async (candidateId: string) => {
+      const candidate = await stateManager.getCandidate(candidateId);
+      return ledger().resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
+    },
+    // PRI-915: availability first — an unreadable ledger must not read as an
+    // unresolved chain.
+    isAvailable: (): boolean => ledger().isAvailable(),
+    listForCandidate: (candidateId: string) => ledger().listForCandidate(candidateId),
+    hasPrinciple: (principleId: string) => ledger().hasPrinciple(principleId),
+  };
+}
+
+/**
+ * Execute ONE leased internalization task with the kind-selected runner.
+ * Constructs the runner from the typed input and returns the raw run result.
+ * Runner crashes propagate to the caller (each entry keeps its own crash
+ * semantics: consumer rethrows without state writes; run-once logs + rethrows).
+ */
+export async function executeSelectedInternalizationTask(
+  input: ExecuteSelectedInternalizationTaskInput,
+): Promise<SelectedInternalizationTaskRunResult> {
+  const { taskId, stateManager, runtimeAdapter, eventEmitter, artifactStore, workspaceDir } = input;
+  const {runnerOptions} = input;
+  // Evaluator 的身份装配含 hasPrinciple (PRI-911A writer boundary)；
+  // Scribe 另需 listForCandidate (chain stamping)；Artificer 只读解析。
+  // 一次装配、按 kind 结构化满足各自 deps 形状。
+  const ledgerIdentity = buildWorkspaceLedgerIdentity(workspaceDir, stateManager);
+  switch (input.taskKind) {
+    case 'dreamer':
+      return new DreamerRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore, validator: new DefaultDreamerValidator() },
+        runnerOptions,
+      ).run(taskId);
+    case 'philosopher':
+      return new PhilosopherRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore, validator: new DefaultPhilosopherValidator() },
+        runnerOptions,
+      ).run(taskId);
+    case 'scribe':
+      return new ScribeRunner(
+        {
+          stateManager, runtimeAdapter, eventEmitter, artifactStore,
+          validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }),
+          // I2 — CHAIN STAMPING (Owner review of PR #1856, P1): 完整三元身份
+          // (resolveForCandidate / isAvailable / listForCandidate)。
+          ledgerIdentity,
+        },
+        runnerOptions,
+      ).run(taskId);
+    case 'artificer':
+      return new ArtificerRunner(
+        {
+          stateManager, runtimeAdapter, eventEmitter, artifactStore,
+          validator: new DefaultArtificerValidator(),
+          ledgerIdentity,
+          ...(input.behaviorExamplePack !== undefined ? { behaviorExamplePack: input.behaviorExamplePack } : {}),
+          ...(input.trustedFacts !== undefined ? { trustedFacts: input.trustedFacts } : {}),
+        },
+        {
+          ...runnerOptions,
+          ...(input.hostSemanticContext !== undefined ? { hostSemanticContext: input.hostSemanticContext } : {}),
+        },
+      ).run(taskId);
+    case 'evaluator': {
+      const evaluatorLedgerIdentity = {
+        resolveForCandidate: ledgerIdentity.resolveForCandidate,
+        isAvailable: ledgerIdentity.isAvailable,
+        hasPrinciple: ledgerIdentity.hasPrinciple,
+      };
+      return new EvaluatorRunner(
+        {
+          stateManager,
+          runtimeAdapter,
+          eventEmitter,
+          artifactStore,
+          validator: new DefaultEvaluatorValidator(),
+          ledgerIdentity: evaluatorLedgerIdentity,
+          isRepairLoopEnabled: input.repairDeps.isRepairLoopEnabled,
+          seedArtificerRepairTask: input.repairDeps.seedArtificerRepairTask,
+        },
+        {
+          ...runnerOptions,
+          gateDeps: input.gateDeps,
+          ...(input.hostToolCatalog !== undefined
+            ? { hostToolCatalog: { readOnlyTools: [...input.hostToolCatalog.readOnlyTools], writeTools: [...input.hostToolCatalog.writeTools] } }
+            : {}),
+          ...(input.hostSemanticContext !== undefined ? { hostSemanticContext: input.hostSemanticContext } : {}),
+        },
+      ).run(taskId);
+    }
+    case 'rollout_reviewer':
+      return new RolloutReviewerRunner(
+        {
+          stateManager, runtimeAdapter, eventEmitter, artifactStore,
+          validator: new DefaultRolloutReviewerValidator(),
+          dispatchActivation: input.governanceDeps.dispatchActivation,
+          reopenRevisionTarget: input.governanceDeps.reopenRevisionTarget,
+        },
+        runnerOptions,
+      ).run(taskId);
   }
 }
 
@@ -934,147 +1177,80 @@ async function executeConsumerCycle(
     // (PRI-795 review P1: the emitter itself is constructed above, before the
     // adapter dispatch, so the ArtificerL2 adapter can share it.)
 
+    // PRI-1293 Phase 2B: 构造执行器输入并交由唯一权威实现执行。逐 kind 的
+    // 差异只剩「哪些类型化依赖由本入口提供」(eventEmitter 选择、evidence
+    // pack、repair/governance 接线、宿主目录/语义投影) — Runner 构造本体
+    // 收编进 executeSelectedInternalizationTask。
     // Dispatch by leased task kind. Only kinds listed in
     // FULL_CHAIN_CONSUMER_RUNNER_KINDS can be leased here; anything else
     // (e.g. diagnostician) hits the default branch — fail loud if it does (EP-03).
-    let runner: DreamerRunner | PhilosopherRunner | ScribeRunner | ArtificerRunner | EvaluatorRunner | RolloutReviewerRunner;
+    let executionInput: ExecuteSelectedInternalizationTaskInput | null = null;
     switch (taskKind) {
       case 'dreamer':
-        runner = new DreamerRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDreamerValidator() },
-          runnerOptions,
-        );
+        executionInput = {
+          taskKind, taskId, workspaceDir, stateManager, runtimeAdapter: adapter,
+          eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, runnerOptions,
+        };
         break;
       case 'philosopher':
-        runner = new PhilosopherRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultPhilosopherValidator() },
-          runnerOptions,
-        );
+        executionInput = {
+          taskKind, taskId, workspaceDir, stateManager, runtimeAdapter: adapter,
+          eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, runnerOptions,
+        };
         break;
       case 'scribe':
-        runner = new ScribeRunner(
-          {
-            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }),
-            // I2 — CHAIN STAMPING (Owner review of PR #1856, P1): the scribe
-            // stamps the ledger principle UUID (minted at intake, keyed by the
-            // dreamer task seed's candidateId) onto the artifact it writes, so
-            // the dispatcher's ledger identity gate sees a resolvable
-            // identity on the live production chain. listForCandidate reads
-            // the ledger from disk per call — no cross-cycle staleness.
-            ledgerIdentity: {
-              resolveForCandidate: async (candidateId: string) => {
-                const candidate = await stateManager.getCandidate(candidateId);
-                return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
-              },
-              // PRI-915: availability first — an unreadable ledger must not
-              // read as an unresolved chain.
-              isAvailable: (): boolean =>
-                new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).isAvailable(),
-              listForCandidate: (candidateId: string) =>
-                new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).listForCandidate(candidateId),
-            },
-          },
-          runnerOptions,
-        );
+        executionInput = {
+          taskKind, taskId, workspaceDir, stateManager, runtimeAdapter: adapter,
+          eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, runnerOptions,
+        };
         break;
       case 'artificer':
-        runner = new ArtificerRunner(
-          {
-            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultArtificerValidator(),
-            ledgerIdentity: { resolveForCandidate: async (candidateId: string) => {
-              const candidate = await stateManager.getCandidate(candidateId);
-              return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
-            } },
-            // PRI-982 (SPEC-PD-IAER-001 FR-02): the preflight-assembled Owner
-            // evidence pack — present only when the authoritative channel is
-            // code_tool_hook AND the readiness gate returned ready (same
-            // ArtificerRunnerDeps shape as the run-rulehost CLI pipeline).
-            ...(artificerEvidence !== null && artificerEvidence.decision === 'ready'
-              ? { behaviorExamplePack: artificerEvidence.pack }
-              : {}),
-            // SPEC-RULECODE-QUALITY-001 A1 (Owner review P2): the SAME
-            // trusted-facts port the intent preflight used must ride into the
-            // runner so the defensive mirror sees the same fact resolutions —
-            // without this, a port-resolved task would pass the entry gate and
-            // then be refused by the runner's "provider absent" guard.
-            ...(ports.trustedFacts !== undefined ? { trustedFacts: ports.trustedFacts } : {}),
-          },
+        executionInput = {
+          taskKind, taskId, workspaceDir, stateManager, runtimeAdapter: adapter,
+          eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, runnerOptions,
+          // PRI-982 (SPEC-PD-IAER-001 FR-02): the preflight-assembled Owner
+          // evidence pack — present only when the authoritative channel is
+          // code_tool_hook AND the readiness gate returned ready.
+          ...(artificerEvidence !== null && artificerEvidence.decision === 'ready'
+            ? { behaviorExamplePack: artificerEvidence.pack }
+            : {}),
+          // SPEC-RULECODE-QUALITY-001 A1 (Owner review P2): the SAME
+          // trusted-facts port the intent preflight used must ride into the
+          // runner so the defensive mirror sees the same fact resolutions.
+          ...(ports.trustedFacts !== undefined ? { trustedFacts: ports.trustedFacts } : {}),
           // PRI-741: thread the host semantic projection into generation.
-          { ...runnerOptions, ...(artificerHostSemanticContext !== undefined ? { hostSemanticContext: artificerHostSemanticContext } : {}) },
-        );
+          ...(artificerHostSemanticContext !== undefined ? { hostSemanticContext: artificerHostSemanticContext } : {}),
+        };
         break;
       case 'evaluator':
-        // P0-D 生产接线: PRI-509 repair loop 正式进入 consumer (bounded,
-        // flag evaluator_artificer_repair_loop 保留运行时关闭能力)。needs_revision
-        // → seed artificer repair; commit 门控保证不再并行 seed rollout_reviewer。
-        // PRI-630: 注入宿主声明的 runtime-authoritative 工具目录 — 工具名合法
-        // 性以目录为准,禁止 LLM 凭记忆判 "非标准工具名" (链 48371236 根因②)。
-        // PRI-634 A1/A3: (a) 注入 canonical production gateDeps — 此前缺省导致
-        // adversarial replay 结构性不可达 (链 48371236 根因 A1); (b) evaluator
-        // 的事件改走 workspace-scoped emitter, 只把 4 类 critical events 落盘到
-        // <workspaceDir>/.pd/telemetry/critical-events.jsonl, 其余照旧转发全局
-        // storeEmitter (multi-workspace 隔离, 见 workspace-telemetry-emitter.ts)。
-        // gateDeps 属于 evaluator production semantics, 不是宿主可选能力 —
-        // 无论 OpenClaw 还是 Codex worker 执行, deterministic gate wiring
-        // 必须存在 (第二个 options 参数, 绝不放第一个 deps 参数)。
-        runner = new EvaluatorRunner(
-          {
-            stateManager, runtimeAdapter: adapter, eventEmitter: workspaceEmitter,
-            artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
-            // PRI-911A (I1 writer boundary): the rule artifact's identity is a
-            // ledger UUID or nothing. hasPrinciple turns "UUID-shaped" into
-            // "UUID the ledger actually mints", so a shaped-but-unknown id is
-            // refused as invalid_identity instead of being carried forward.
-            // Same per-call disk read as the scribe wiring above.
-            // PRI-915: availability first — an unreadable ledger must surface
-            // as identity_source_unavailable, not as invalid_identity drift.
-            ledgerIdentity: {
-              resolveForCandidate: async (candidateId: string) => {
-                const candidate = await stateManager.getCandidate(candidateId);
-                return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
-              },
-              isAvailable: (): boolean =>
-                new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).isAvailable(),
-              hasPrinciple: (principleId: string) =>
-                new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).hasPrinciple(principleId),
-            },
-            ...createEvaluatorRepairDeps(workspaceDir, stateManager, logger),
-          },
-          {
-            ...runnerOptions,
-            // PRI-634-F: host registry + workspace root (when declared) make
-            // the evaluator's adversarial replay resolve tool semantics and
-            // normalizedPath identically to the host production gate.
-            gateDeps: createProductionGateDeps({
-              ...(toolSemantics ? { toolSemantics } : {}),
-              projectDir: workspaceDir,
-            }),
-            ...(hostToolCatalog
-              ? { hostToolCatalog: { readOnlyTools: [...hostToolCatalog.readOnlyTools], writeTools: [...hostToolCatalog.writeTools] } }
-              : {}),
-            // PRI-741: host-name parity replay case from the SAME registry
-            // provenance as the gateDeps above.
-            ...(artificerHostSemanticContext !== undefined ? { hostSemanticContext: artificerHostSemanticContext } : {}),
-          },
-        );
+        // P0-D 生产接线 / PRI-630 / PRI-634 A1+A3 注释语义保持: repair deps
+        // 来自既有 governance 工厂; gateDeps 是 evaluator production
+        // semantics (options 第二参由执行器装配), 宿主目录/语义投影可选透传。
+        executionInput = {
+          taskKind, taskId, workspaceDir, stateManager, runtimeAdapter: adapter,
+          // PRI-634 A3: workspace-scoped telemetry — evaluator 事件归属本
+          // workspace (multi-workspace 隔离), 其余 kind 走全局 storeEmitter。
+          eventEmitter: workspaceEmitter,
+          artifactStore: stateManager.piArtifactStore,
+          runnerOptions,
+          repairDeps: createEvaluatorRepairDeps(workspaceDir, stateManager, logger),
+          gateDeps: createProductionGateDeps({
+            ...(toolSemantics ? { toolSemantics } : {}),
+            projectDir: workspaceDir,
+          }),
+          ...(hostToolCatalog ? { hostToolCatalog } : {}),
+          ...(artificerHostSemanticContext !== undefined ? { hostSemanticContext: artificerHostSemanticContext } : {}),
+        };
         break;
       case 'rollout_reviewer':
-        // Lineage echo reconciliation is built into the runner: LLM-truncated
-        // taskId / sourceEvaluatorArtifactId echoes are overwritten with the
-        // authoritative values before validation, so a bad echo no longer
-        // dead-ends the candidate before the approval queue.
-        //
-        // P0-E/F 治理接线: approve_rollout → 自动 ActivationDispatcher (PRI-811
-        // Phase B: 一律 approvals.pending, Owner 批准后才激活); needs_revision →
-        // reopen scribe/artificer 修订 (绝不进入 approval 队列, INV-04)。
-        runner = new RolloutReviewerRunner(
-          {
-            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
-            artifactStore: stateManager.piArtifactStore, validator: new DefaultRolloutReviewerValidator(),
-            ...createRolloutGovernanceDeps(workspaceDir, orchestrator, { logger, ...(toolSemantics ? { toolSemantics } : {}) }),
-          },
-          runnerOptions,
-        );
+        // Lineage echo reconciliation is built into the runner; P0-E/F 治理接线
+        // (approve_rollout → approvals.pending; needs_revision → reopen, INV-04)
+        // 来自既有 governance 工厂 — Owner 审批绝不被绕过。
+        executionInput = {
+          taskKind, taskId, workspaceDir, stateManager, runtimeAdapter: adapter,
+          eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, runnerOptions,
+          governanceDeps: createRolloutGovernanceDeps(workspaceDir, orchestrator, { logger, ...(toolSemantics ? { toolSemantics } : {}) }),
+        };
         break;
       default:
         emitEvent('INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({ decision: 'no_runner_for_kind', taskKind }));
@@ -1098,7 +1274,7 @@ async function executeConsumerCycle(
 
     let runResult;
     try {
-      runResult = await runner.run(taskId);
+      runResult = await executeSelectedInternalizationTask(executionInput);
     } catch (runErr) {
       logger.error(`[PD:${logLabel}] Runner crashed for task ${taskId}: ${String(runErr)}`);
       // SPEC §5.3 / task-book §1.1: this layer holds no execution identity

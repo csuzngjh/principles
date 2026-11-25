@@ -149,6 +149,16 @@ function mapCommitDecisionToAction(
         reason: `blocked_missing_verdict: ${commitResult.reason}; durable runnerDecision and legacy runs verdict both absent (fail-closed)`,
         nextAction: 'Re-run the stage runner (writes durable verdict) or reconcile via the pending-artifacts report',
       };
+    case 'lineage_refused':
+      // PRI-1293 Phase 3: 血缘校验拒绝 — 结构化 reason 透出, 零后继零写入;
+      // 不折叠成普通 no_successor (rc-9)。
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `lineage_refused: ${commitResult.reason} (${commitResult.detail}); correlationId lineage is not provable — no successor was created`,
+        nextAction: 'Inspect the task chain (parentTaskId links and root dreamer identity); repair the chain or re-run after lineage is provable',
+      };
     case 'source_correction_reopened':
       return {
         taskId: commitResult.sourceTaskId,

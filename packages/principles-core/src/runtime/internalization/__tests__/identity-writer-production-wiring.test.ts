@@ -116,8 +116,12 @@ describe('PRI-911A: identity writer production wiring guards', () => {
         }
       }
     }
-    // Non-vacuity: the three known production sites must still be found.
-    expect(sites.length).toBeGreaterThanOrEqual(3);
+    // Non-vacuity: the two known production sites must still be found.
+    // (PRI-1293 Phase 2B moved the run-once construction into the shared
+    // executor — the surviving sites are the executor in host-runtime's
+    // internalization-consumer-cycle.ts and the sanctioned CLI factory in
+    // rulehost-pipeline-runner.ts.)
+    expect(sites.length).toBeGreaterThanOrEqual(2);
   });
 
   it('identity telemetry events are emitted as prefix + registered suffix (G2)', () => {

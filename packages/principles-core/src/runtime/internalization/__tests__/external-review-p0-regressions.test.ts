@@ -74,8 +74,31 @@ function meta(o: Record<string, unknown> = {}): string {
 }
 
 async function mkTask(taskId: string, taskKind: string, diagnosticJson: string): Promise<void> {
+  // PRI-1293 Phase 3: 链挂 dreamer 根 — reopen 血缘门禁要求任务可回溯根
+  // dreamer。scribe 按其 correlationId 挂种子根, 其余任务挂首个依赖。
+  const pi = hydratePITaskRecord({ taskKind, diagnosticJson } as unknown as TaskRecord);
+  let parentTaskId: string | undefined;
+  if (taskKind === 'scribe' && pi?.correlationId) {
+    const dreamerId = `dreamer-${pi.correlationId}-src`;
+    const existing = await stateManager.getTask(dreamerId);
+    if (!existing) {
+      await stateManager.createTask({
+        taskId: dreamerId, taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({
+          pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+          candidateId: pi.correlationId,
+        }),
+      });
+    }
+    parentTaskId = dreamerId;
+  } else {
+    parentTaskId = pi?.dependencyTaskIds[0];
+  }
+  const finalJson = pi && parentTaskId !== undefined
+    ? createPITaskDiagnosticJson(mergePITaskMetadata(pi, { parentTaskId }))
+    : diagnosticJson;
   await stateManager.createTask({
-    taskId, taskKind, status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson,
+    taskId, taskKind, status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: finalJson,
   });
 }
 

@@ -93,6 +93,30 @@ function nhrContext(reasonCode: string = HUMAN_REVIEW_REASON.evaluatorRepairBudg
   };
 }
 
+// PRI-1293 Phase 3: 血缘可证明的 dreamer 根 — revise_once 的 reopen 目标
+// (repair artificer) 必须可回溯根 dreamer, 否则新的 reopen 血缘门禁按设计
+// 拒绝。本文件夹具链此前无 dreamer 根, 这里补一个共享根并挂链 (断言不变)。
+const OWNER_DECISION_DREAMER_ROOT = 'dreamer-owner-decision-root';
+
+function dreamerRootTask(): TaskRecord {
+  return {
+    taskId: OWNER_DECISION_DREAMER_ROOT,
+    taskKind: 'dreamer',
+    status: 'succeeded',
+    attemptCount: 1,
+    maxAttempts: 3,
+    createdAt: '2026-08-28T00:00:00.000Z',
+    updatedAt: '2026-08-28T00:00:00.000Z',
+    diagnosticJson: JSON.stringify({
+      pi_metadata: {
+        dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+      },
+      candidateId: 'cand-owner-decision-root',
+    }),
+  };
+}
+
 function evaluatorNhrTask(overrides: { meta?: Partial<PITaskMetadata>; status?: TaskRecord['status'] } = {}): TaskRecord {
   return {
     taskId: EVAL_ID,
@@ -106,6 +130,7 @@ function evaluatorNhrTask(overrides: { meta?: Partial<PITaskMetadata>; status?: 
       runnerDecision: 'needs_revision',
       completionIntent: { decision: 'needs_revision', sourceRunId: RUN_ID, revisionEpoch: 0, status: 'pending' },
       humanReviewContext: nhrContext(),
+      parentTaskId: OWNER_DECISION_DREAMER_ROOT,
       ...overrides.meta,
     })),
   };
@@ -122,6 +147,7 @@ function artificerTaskWithPayload(repairIteration: number): TaskRecord {
     updatedAt: '2026-08-29T00:00:00.000Z',
     diagnosticJson: createPITaskDiagnosticJson(baseMeta({
       dependencyTaskIds: [SCRIBE_ID],
+      parentTaskId: OWNER_DECISION_DREAMER_ROOT,
       repairPayload: {
         requiredChanges: ['fix timeout handling'],
         concerns: ['c1'],
@@ -212,7 +238,11 @@ function makeRolloutArtifactStore(): MemoryPIArtifactStore {
 /** in-memory stateManager 满足 owner-resolution-service / owner-retry 需要的面 */
 function makeInMemoryStateManager(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore) {
   const store = new MemoryTaskStore();
-  for (const t of tasks) void store.createTask({ ...t });
+  // PRI-1293 Phase 3: 共享 dreamer 根始终在库 — reopen 血缘门禁要求 reopen
+  // 目标可回溯根 dreamer (fixture 链挂见 dreamerRootTask/parentTaskId)。
+  for (const entry of [dreamerRootTask(), ...tasks.filter((item) => item.taskId !== OWNER_DECISION_DREAMER_ROOT)]) {
+    void store.createTask({ ...entry });
+  }
   const runs = new Map<string, { runId: string; taskId: string; outputPayload?: string }>([
     [RUN_ID, { runId: RUN_ID, taskId: EVAL_ID, outputPayload: JSON.stringify({
       taskId: EVAL_ID,
@@ -1134,6 +1164,8 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
   it('reopen is a SINGLE task-row mutation (status+attemptCount+metadata together)', async () => {
     const store = new MemoryTaskStore();
     void store.createTask({ ...artificerTaskWithPayload(2) });
+    // PRI-1293 Phase 3: reopen 目标可回溯根 dreamer (血缘门禁可证明)。
+    void store.createTask({ ...dreamerRootTask() });
     const writes: Record<string, unknown>[] = [];
     const sm = {
       async getTask(id: string) { return store.getTask(id); },

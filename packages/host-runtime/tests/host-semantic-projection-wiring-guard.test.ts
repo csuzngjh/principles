@@ -45,15 +45,20 @@ describe('PRI-741 host semantic projection wiring guard', () => {
   });
 
   it('Guard A2: shared cycle threads hostSemanticContext into the artificer prompt', () => {
+    // PRI-1293 Phase 2B: Runner 构造收编进文件内的共享执行器 (文件中第一个
+    // `case 'artificer':`) — 执行器把 input.hostSemanticContext 透传进
+    // ArtificerRunner options; cycle 的 dispatch 输入以同一个
+    // artificerHostSemanticContext 变量装配 (单一 provenance 不变)。
     const slice = caseSlice(readSrc(CYCLE_SRC), "case 'artificer':");
     expect(slice).toContain('new ArtificerRunner');
-    expect(slice).toContain('hostSemanticContext: artificerHostSemanticContext');
+    expect(slice).toContain('hostSemanticContext: input.hostSemanticContext');
+    expect(readSrc(CYCLE_SRC)).toContain('hostSemanticContext: artificerHostSemanticContext');
   });
 
   it('Guard A3: shared cycle threads hostSemanticContext into the evaluator replay', () => {
     const slice = caseSlice(readSrc(CYCLE_SRC), "case 'evaluator':");
     expect(slice).toContain('new EvaluatorRunner');
-    expect(slice).toContain('hostSemanticContext: artificerHostSemanticContext');
+    expect(slice).toContain('hostSemanticContext: input.hostSemanticContext');
   });
 
   it('Guard B: run-once artificer branch resolves the durable declaration and degrades observably', () => {

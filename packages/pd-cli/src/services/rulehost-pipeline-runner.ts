@@ -37,6 +37,7 @@ import {
   DefaultArtificerValidator,
   EvaluatorRunner,
   DefaultEvaluatorValidator,
+  InternalizationOrchestrator,
   createPITaskDiagnosticJson,
   parsePITaskMetadata,
   parseSeedSourcePainId,
@@ -856,6 +857,25 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
         }
         return repairTaskId;
       }
+      // PRI-1293 Phase 3 (§5.2): 与 host-runtime seeder 相同的权威血缘关口 —
+      // 唯一实现经 InternalizationOrchestrator.resolveAuthoritativeCorrelationId
+      // 静态只读包装访问, 绝不本地重写父链遍历。校验失败结构化抛出 (evaluator
+      // 侧 repair_task_seed_failed 路径), 成功则 repair 任务携带验证过的
+      // correlationId + parentTaskId=sourceEvaluatorTaskId, 下一轮 evaluator
+      // 经 metadata 继承同一 id。
+      const sourceEvaluatorTask = await stateManager.getTask(params.repairPayload.sourceEvaluatorTaskId);
+      if (!sourceEvaluatorTask) {
+        throw new Error(
+          `evaluator_repair_seed_lineage_refused: source evaluator task ${params.repairPayload.sourceEvaluatorTaskId} not found`,
+        );
+      }
+      const lineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
+        sourceEvaluatorTask,
+        (taskId: string) => stateManager.getTask(taskId),
+      );
+      if (!lineage.ok) {
+        throw new Error(`evaluator_repair_seed_lineage_refused:${lineage.reason}:${lineage.detail}`);
+      }
       await stateManager.createTask({
         taskId: repairTaskId,
         // D1 (PRI-509): task kind is 'artificer' — reuses the artificer
@@ -880,6 +900,8 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
           timeoutMs: params.inheritedTimeoutMs,
           inputArtifactRefs: [...params.inheritedInputArtifactRefs],
           outputArtifactRefs: [],
+          parentTaskId: params.repairPayload.sourceEvaluatorTaskId,
+          correlationId: lineage.correlationId,
           ...(params.ownerEvidenceSelection !== undefined
             ? { ownerEvidenceSelection: params.ownerEvidenceSelection }
             : {}),
