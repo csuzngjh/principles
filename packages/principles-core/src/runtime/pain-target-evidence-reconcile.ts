@@ -372,8 +372,9 @@ function buildBackfillPatch(input: {
     resolvedAt: nowIso,
   };
   const existingEvidence = Array.isArray(diagnostic.evidence) ? diagnostic.evidence : [];
+  const existingValidEvidence = validateTargetTurnEvidenceEntries(existingEvidence);
   const painIngress = isRecord(diagnostic.painIngress) ? diagnostic.painIngress : {};
-  if (existingEvidence.length === 0) {
+  if (existingValidEvidence === null || existingValidEvidence.length === 0) {
     return {
       newRecord: {
         ...diagnostic,
@@ -647,8 +648,7 @@ export async function reconcileWaitingTargetEvidenceTasks(
       // backfill real entries in the same CAS.
       let patch: { readonly newRecord: Record<string, unknown>; readonly backfilled: boolean };
       if (read.status === 'legacy_available') {
-        const existingEvidence = Array.isArray(parsedRecord.evidence) ? parsedRecord.evidence : [];
-        if (existingEvidence.length === 0) {
+        if (persistedValidEvidenceCount(parsedRecord) === 0) {
           await repairInvalidReady('target_turn_evidence_unproven');
           stillWaiting += 1;
           continue;
