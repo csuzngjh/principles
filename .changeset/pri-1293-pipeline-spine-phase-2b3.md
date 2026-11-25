@@ -3,6 +3,7 @@
 "@principles/host-runtime": patch
 "@principles/pd-cli": patch
 "principles-disciple": patch
+"create-principles-disciple": patch
 ---
 
 Pipeline Spine Phase 2B/3 (PRI-1293): ONE single-step runner executor and ONE authoritative PeerRunnerKind correlation lineage. `executeSelectedInternalizationTask` (@principles/host-runtime, SPEC-authorized new export, re-exported by the existing consumer-cycle barrel star) extracts in place the six Peer Runner constructions from the consumer cycle and collapses the six hand-rolled branches in `pd runtime internalization run-once`; hosts keep their own entry facts (adapter/L2 routing, Owner-evidence preflight, workspace-scoped evaluator telemetry, gateDeps provenance) as typed discriminated-union inputs, and the scribe/artificer/evaluator ledger identity wiring is assembled once from (workspaceDir, stateManager) instead of three inline copies per entry. `rulehost-pipeline-runner` stays an independent synchronous adversarial operator (whitelisted). Four construction-point whitelists (diagnostician runners, internalization peer runners, PainSignalBridge, PainToPrincipleService) land in architecture-regression with multiline-tolerant scans, positive non-vacuity pins and file:line violation messages.
