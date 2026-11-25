@@ -1016,6 +1016,32 @@ describe('PRI-1273 (A2) — the reconcile backfills the arrived evidence onto th
     expect((diagnostic.painIngress as Record<string, unknown>).evidenceClass).toEqual({ status: 'unavailable', reason: 'not_applicable_unbound' });
   });
 
+  it('PRI-1296 review: legacy boolean availability cannot promote malformed persisted evidence', async () => {
+    const painId = 'mcp_1700000001296_lg000302';
+    await submitTargetingTurn10(painId);
+    const taskId = createDiagnosticianTaskId(painId);
+    const before = await readDiagnostic(taskId);
+    const malformed = { ...before, evidence: [{ sourceRef: '', note: 'malformed legacy evidence' }] };
+    const seeded = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      JSON.stringify(before),
+      { diagnosticJson: JSON.stringify(malformed) },
+    );
+    expect(seeded).not.toBeNull();
+
+    const report = await reconcileWaitingTargetEvidenceTasks({
+      stateManager,
+      targetTurnTextAvailable: () => true,
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL_PORT,
+      nowIso: new Date().toISOString(),
+    });
+    expect(report).toMatchObject({ checked: 1, flipped: 0, backfilled: 0, blocked: 0, stillWaiting: 1 });
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.evidence).toEqual([{ sourceRef: '', note: 'malformed legacy evidence' }]);
+    expect(diagnostic.recovery).toMatchObject({ state: 'waiting_for_target_evidence' });
+    expect(await pickDiagnosticianCandidate(stateManager, 5, new Date().toISOString())).toBeNull();
+  });
+
   it('PRI-1296 review: a pre-upgrade boolean-flipped empty-evidence READY task is re-admitted and backfilled', async () => {
     const painId = 'mcp_1700000001296_lg000296';
     const taskId = createDiagnosticianTaskId(painId);
