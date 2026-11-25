@@ -1,5 +1,32 @@
 # principles-disciple
 
+## 4.3.1
+
+### Patch Changes
+
+- c7b2856: On Windows, an update no longer opens a trail of terminal windows. The update
+  runs in the bootstrap executor, which is started detached and therefore has no
+  console; every console program it started without `windowsHide: true` got a
+  new, visible terminal window. The installer now hides the console of every
+  child process it starts (tar, `cmd /c npm`, the `pd` verification probes, the
+  console probe, the environment probes), and `pd console open` hides the console
+  of the Console server and of the stale-console probes it runs — that server
+  window used to stay open until the server was killed. An interactive
+  `pd console open` in a terminal is unchanged: the server still shares that
+  terminal.
+  
+  The OpenClaw plugin's tool probes (`pd capabilities`: rg, sg, fd, qmd,
+  ast-grep, shellcheck) hide their console for the same reason — the host process
+  they run in has no console on Windows.
+  
+  A fail-closed source guard (`scripts/lib/child-process-window-scan.mjs`) now
+  runs in the test suites of the installer, the CLI, the plugin, the Console
+  server and the Companion: a child_process call that does not hide its console,
+  or that the scan cannot attribute, fails the suite.
+- b99dc3d: Pipeline Spine Phase 1 (PRI-1291): fix the three verified pipeline breaks. D1 — `PainToPrincipleServiceOptions` is now a discriminated union on `asyncMode` (sync mode requires `sourceMaterialAuthorization` + `trajectoryTurnReader`), the sync bridge call forwards the authorization, and the three sync entry points (pd pain record --wait, OpenClaw hook, OpenClaw /pd-pain command) wire the workspace consent-ledger authorization and trajectory reader. D2 — `deviationAnchorToPainAnchor` single-tracks the anchor: the ingress/bridge write side derives the canonical `anchor`, the assembler recovers historical `deviationAnchor` rows and surfaces malformed ones in ambiguityNotes. D4 — `pd candidate internalize` gains the authority gate (dedup-first ordering, raw-kind validation, admission-document fail-closed, seed suppression, rule seeding window preserved) and both automatic seed entries (`diagnose`, PainSignalBridge) refuse invalid RAW kinds with zero seeding; `validateRecommendationKind` is exported from the runtime barrel with admission records.
+  
+  Owner recovery and bridge lifecycle: preserve persisted Owner parks during failed automatic retries, and give each production bridge acquisition an explicit release scope. Workspace retirement drains active borrowers and pending constructors before closing SQLite resources.
+
 ## 4.3.0
 
 ### Minor Changes
