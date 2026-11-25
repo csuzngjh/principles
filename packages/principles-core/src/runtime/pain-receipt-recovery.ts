@@ -327,7 +327,8 @@ function parseDiagnosticJson(task: TaskRecord): ParsedDiagnosticJson | null {
 }
 
 function countEvidence(diagnostic: ParsedDiagnosticJson): number {
-  return Array.isArray(diagnostic.record.evidence) ? diagnostic.record.evidence.length : 0;
+  if (!Array.isArray(diagnostic.record.evidence)) return 0;
+  return validateTargetTurnEvidenceEntries(diagnostic.record.evidence)?.length ?? 0;
 }
 
 function buildReceiptRef(receipt: ValidatedPainSubmitReceipt, identity: ReceiptEventIdentity, nowIso: string): PainRecoveryReceiptRef {
