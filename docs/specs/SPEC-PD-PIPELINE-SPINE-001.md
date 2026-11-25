@@ -361,3 +361,12 @@ rg -c "^\s*id: '" packages/principles-core/src/runtime/feature-flags/feature-fla
 | 后台触发所有权与 OS Scheduler | `docs/specs/SPEC-PD-SERVICE-HOST-001.md` |
 | 提交身份预绑定、回执兜底与授权撤回清理 | `docs/specs/SPEC-PD-FEEDBACK-RESILIENCE-001.md` |
 | **协作者防漏装配、手搓入口收编、分层探针测试、D1/D2/D4 止血与内化父链血缘** | **本 SPEC（v0.9）** |
+
+## Round 3 implementation amendment — OpenClaw effective config compatibility (2026-11-25)
+
+This amendment records the narrow config-compatibility correction without reopening the approved Pipeline Spine architecture.
+
+- `@principles/install-layout` owns path resolution only. `resolveOpenClawConfigPath` mirrors OpenClaw 2026.11.5 precedence: `OPENCLAW_CONFIG_PATH` > `OPENCLAW_STATE_DIR` > validated `OPENCLAW_PROFILE` state dir > default state dir, with `OPENCLAW_HOME` acting as the host HOME substitute and host-style `~`/relative user-path resolution. It does not parse config content and does not change the legacy `resolvePdHome()` compatibility contract.
+- `@principles/openclaw-plugin` owns read-only effective-config interpretation. Because OpenClaw 2026.11.5 does not expose its `$include` resolver through the plugin SDK, the plugin carries a bounded compatibility reader for JSON5 and `$include`; it performs no writes and returns no partial config on failure.
+- Owner explicit `hooks.allowConversationAccess=false` remains authoritative across direct config, nested/single/multiple includes, and merge conflicts. Startup repair must not flatten include graphs or write a main-config override when the plugins ownership path is include-backed; ambiguity is fail-closed/no-write.
+- Round 3 adds no new cross-package public API. The pre-existing Round 2 `resolveOpenClawConfigPath` install-layout export remains the only config-path API used across packages. The original four `@principles/core/runtime` cross-package symbols and export gates are unchanged.

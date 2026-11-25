@@ -168,6 +168,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // tool calls (trajectory reads) to pick the turn that actually executed a
     // write, so this belongs to the plugin I/O boundary rather than core.
     'correction-anchor.ts',
+    // PRI-1292 round 3: host effective-config I/O boundary. Reads OpenClaw's
+    // JSON5/`$include` files read-only for the authorization gate; no domain
+    // mutation or business policy beyond fail-closed transport compatibility.
+    'openclaw-config-loader.ts',
   ] as const;
 
   // Category 6: Test files

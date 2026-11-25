@@ -500,3 +500,13 @@ export async function resolveAuthoritativeCorrelationId(
 | `PRI-1293` | 子工单 4 | Phase 2B + Phase 3 | `[Pipeline Spine][Phase 2B/3] 内化单步执行收编、构造点守卫与 PeerRunnerKind 父链血缘收紧` | PD 产品瘦身与架构收敛 | `Todo` | `blockedBy PRI-1292` |
 | `PRI-1294` | 远期工单 A | Phase 4 | `[Pipeline Spine][Phase 4] 已退役双轨开关死分支清理与阶段合并 PD-Lab 评估门` | PD 产品瘦身与架构收敛 | `Backlog` | `blockedBy PRI-1290, PRI-1289` |
 | `PRI-1295` | 远期工单 B | Phase 5 | `[Pipeline Spine][Phase 5] 原则有效性派生读模型（注入 / 遵循偏离证据 / 同锚点 Pain 复发）` | PD 数据管道演进与学习闭环 | `Backlog` | `blockedBy PRI-1290, PRI-1289` |
+
+## Round 3 implementation amendment — OpenClaw effective config compatibility (2026-11-25)
+
+Normative host compatibility details for the config remediation:
+
+1. OpenClaw 2026.11.5 resolves config path as `OPENCLAW_CONFIG_PATH` first, otherwise `openclaw.json` under the resolved state dir. `OPENCLAW_STATE_DIR` wins over profile/home derivation. A valid non-default `OPENCLAW_PROFILE` selects `<effective-home>/.openclaw-<profile>`; `default` and invalid profile names select `<effective-home>/.openclaw`. `OPENCLAW_HOME` is a HOME substitute, not the `.openclaw` directory itself. User paths support leading `~` and host cwd-relative resolution; missing home falls back to cwd in the host.
+2. OpenClaw parses config as JSON first with JSON5 fallback. `$include` accepts a string or string array at object nodes, resolves relative paths against the including file, supports nested includes to depth 10, rejects cycles/escapes/missing or malformed files, deep-merges objects, concatenates arrays, lets later include entries win scalar conflicts, and lets sibling keys override included content. Include files are confined to the config directory unless `OPENCLAW_INCLUDE_ROOTS` explicitly allows additional roots.
+3. PD uses the installed OpenClaw behavior as compatibility evidence but does not import private OpenClaw modules: the plugin SDK exposes no authoritative include resolver. The compatibility reader in `openclaw-plugin` is read-only and fail-closed. `install-layout` remains path-only and must not depend on plugin/business packages.
+4. Auto-repair may write only the historical absent-flag case in a directly owned main config. It must not write when the root or plugins ownership path crosses `$include`, when parsing/include resolution is incomplete, or when any effective explicit value already exists. This is a conservative no-write rule, not a second configuration management system.
+5. Public API accounting is unchanged for `@principles/core/runtime` (the four documented exports). Round 3 adds zero new cross-package public APIs; it uses the Round 2 `resolveOpenClawConfigPath` export already introduced for host path alignment.

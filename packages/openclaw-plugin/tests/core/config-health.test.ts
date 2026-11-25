@@ -9,6 +9,7 @@ import {
   isExplicitConversationAccessOptOut,
   shouldBlockOpenClawConversationReads,
 } from '../../src/core/config-health.js';
+import { readOpenClawEffectiveConfig } from '../../src/core/openclaw-config-loader.js';
 
 vi.mock('os', async () => {
   const actual = await vi.importActual<typeof import('os')>('os');
@@ -158,7 +159,7 @@ describe('shouldBlockOpenClawConversationReads', () => {
     expect(shouldBlockOpenClawConversationReads()).toBe(true);
   });
 
-  it('relative override paths fail closed instead of falling back to the default config', () => {
+  it('nonexistent relative override paths fail closed instead of falling back to the default config', () => {
     writeConfig(defaultPath, true);
     process.env.OPENCLAW_STATE_DIR = 'relative-state';
     expect(shouldBlockOpenClawConversationReads()).toBe(true);
@@ -340,5 +341,215 @@ describe('ensureConversationAccessInConfig', () => {
 
     const updated = JSON.parse(readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
     expect(updated.plugins.entries['principles-disciple'].hooks.allowConversationAccess).toBe(true);
+  });
+});
+
+describe('OpenClaw 2026.11.5 JSON5 and $include effective config compatibility', () => {
+  const root = join('/tmp', 'pd-test-openclaw-json5-include-' + Date.now());
+  const configPath = join(root, 'openclaw.json');
+  const envKeys = ['OPENCLAW_CONFIG_PATH', 'OPENCLAW_STATE_DIR', 'OPENCLAW_HOME', 'OPENCLAW_PROFILE', 'OPENCLAW_INCLUDE_ROOTS'] as const;
+  let savedEnv: Record<string, string | undefined> = {};
+
+  function resetFiles(): void {
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root, { recursive: true });
+  }
+  function write(name: string, text: string): void {
+    writeFileSync(join(root, name), text, 'utf8');
+  }
+  function main(text: string): void {
+    writeFileSync(configPath, text, 'utf8');
+  }
+  function pluginConfig(value: boolean | undefined): string {
+    const hook = value === undefined ? '{}' : `{ allowConversationAccess: ${value} }`;
+    return `{ entries: { 'principles-disciple': { hooks: ${hook} } } }`;
+  }
+  function sha(): string {
+    return readFileSync(configPath, 'utf8');
+  }
+
+  beforeEach(() => {
+    savedEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    for (const key of envKeys) delete process.env[key];
+    resetFiles();
+    process.env.OPENCLAW_CONFIG_PATH = configPath;
+  });
+
+  afterEach(() => {
+    for (const key of envKeys) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('parses JSON5 comments, unquoted keys and trailing commas', () => {
+    main(`{
+      // Owner-managed host config
+      plugins: {
+        entries: {
+          'principles-disciple': { hooks: { allowConversationAccess: true, }, },
+        },
+      },
+    }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('recognizes explicit false through a single include and never auto-repairs over it', () => {
+    write('plugins.json5', pluginConfig(false));
+    main(`{ plugins: { $include: './plugins.json5' } }`);
+    const before = sha();
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
+  });
+
+  it('recognizes explicit true through a single include without a redundant write', () => {
+    write('plugins.json5', pluginConfig(true));
+    main(`{ plugins: { $include: './plugins.json5' } }`);
+    const before = sha();
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
+  });
+
+  it('resolves nested includes relative to the including file', () => {
+    mkdirSync(join(root, 'nested'), { recursive: true });
+    write('nested/deep.json5', pluginConfig(false));
+    write('nested/mid.json5', `{ entries: { 'principles-disciple': { hooks: { $include: './deep.json5' } } } }`);
+    main(`{ plugins: { $include: './nested/mid.json5' } }`);
+    // The nested include shape above targets hooks as an object, so use the
+    // canonical nested object form for the effective boolean assertion.
+    write('nested/deep.json5', `{ allowConversationAccess: false }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+  });
+
+  it('merges multiple includes in order with later includes winning scalar conflicts', () => {
+    write('first.json5', pluginConfig(true));
+    write('second.json5', pluginConfig(false));
+    main(`{ plugins: { $include: ['./first.json5', './second.json5'] } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    main(`{ plugins: { $include: ['./second.json5', './first.json5'] } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('main-config sibling keys override included values according to OpenClaw merge order', () => {
+    write('plugins.json5', pluginConfig(false));
+    main(`{ plugins: {
+      $include: './plugins.json5',
+      entries: { 'principles-disciple': { hooks: { allowConversationAccess: true } } },
+    } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('main explicit false wins over included true and remains untouched', () => {
+    write('plugins.json5', pluginConfig(true));
+    main(`{ plugins: {
+      $include: './plugins.json5',
+      entries: { 'principles-disciple': { hooks: { allowConversationAccess: false } } },
+    } }`);
+    const before = sha();
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
+  });
+
+
+  it('concatenates arrays and deep-merges objects in the same order as OpenClaw includes', () => {
+    write('base.json5', `{ entries: { 'principles-disciple': { hooks: { allowConversationAccess: false } } }, list: ['base'], nested: { a: 1, shared: 'base' } }`);
+    write('override.json5', `{ entries: { 'principles-disciple': { hooks: { allowConversationAccess: true } } }, list: ['override'], nested: { b: 2, shared: 'override' } }`);
+    main(`{ plugins: { $include: ['./base.json5', './override.json5'] } }`);
+    const loaded = readOpenClawEffectiveConfig(configPath);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    const plugins = loaded.config.plugins as Record<string, unknown>;
+    expect(plugins.list).toEqual(['base', 'override']);
+    expect(plugins.nested).toEqual({ a: 1, b: 2, shared: 'override' });
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('missing include fails closed and blocks automatic repair', () => {
+    main(`{ plugins: { $include: './missing.json5' } }`);
+    const before = sha();
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
+  });
+
+  it('malformed include fails closed and blocks automatic repair', () => {
+    write('bad.json5', '{ entries: ');
+    main(`{ plugins: { $include: './bad.json5' } }`);
+    const before = sha();
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
+  });
+
+  it('circular includes fail closed and block automatic repair', () => {
+    write('a.json5', `{ $include: './b.json5' }`);
+    write('b.json5', `{ $include: './a.json5' }`);
+    main(`{ plugins: { $include: './a.json5' } }`);
+    const before = sha();
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
+  });
+
+  it('include escaping the config directory fails closed', () => {
+    mkdirSync(join(root, 'inside'), { recursive: true });
+    writeFileSync(join('/tmp', 'pd-outside-include.json5'), pluginConfig(true), 'utf8');
+    main(`{ plugins: { $include: '../pd-outside-include.json5' } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    rmSync(join('/tmp', 'pd-outside-include.json5'), { force: true });
+  });
+
+  it('invalid include values and excessive nesting fail closed', () => {
+    main(`{ plugins: { $include: 42 } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    // Build real files: chain0 includes chain1 ... chain11 includes chain0.
+    for (let i = 0; i < 12; i += 1) write(`chain${i}.json5`, `{ $include: './chain${(i + 1) % 12}.json5' }`);
+    main(`{ plugins: { $include: './chain0.json5' } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+  });
+
+
+  it('unreadable effective config fails closed and performs no write', () => {
+    if (process.platform === 'win32') return;
+    writeFileSync(configPath, `{ plugins: ${pluginConfig(true)} }`, 'utf8');
+    const before = sha();
+    const { chmodSync } = require('node:fs') as typeof import('node:fs');
+    chmodSync(configPath, 0o000);
+    try {
+      expect(shouldBlockOpenClawConversationReads()).toBe(true);
+      expect(ensureConversationAccessInConfig()).toBe(false);
+    } finally {
+      chmodSync(configPath, 0o600);
+    }
+    expect(sha()).toBe(before);
+  });
+
+  it('an unrelated include branch does not block the normal absent-flag repair', () => {
+    write('logging.json5', `{ level: 'debug' }`);
+    main(`{
+      logging: { $include: './logging.json5' },
+      plugins: { entries: { 'principles-disciple': { enabled: true } } },
+    }`);
+    expect(ensureConversationAccessInConfig()).toBe(true);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('missing flag without includes keeps the existing startup repair behavior', () => {
+    main(`{ plugins: { entries: { 'principles-disciple': { enabled: true } } } }`);
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    expect(ensureConversationAccessInConfig()).toBe(true);
+    expect(shouldBlockOpenClawConversationReads()).toBe(false);
+  });
+
+  it('malformed main JSON5 fails closed and performs no write', () => {
+    main('{ plugins: ');
+    const before = sha();
+    expect(shouldBlockOpenClawConversationReads()).toBe(true);
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(sha()).toBe(before);
   });
 });

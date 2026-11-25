@@ -9,10 +9,11 @@
  * Extracted from index.ts to avoid circular imports when trajectory-collector.ts
  * needs to check conversation access state (PRI-346).
  */
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { existsSync, writeFileSync, renameSync } from 'fs';
 import { homedir } from 'os';
 import { withLock } from '../utils/file-lock.js';
 import { resolveOpenClawConfigPath } from '@principles/install-layout';
+import { readOpenClawEffectiveConfig } from './openclaw-config-loader.js';
 
 /**
  * PRI-348: Extract the full plugin entry (including hooks) from the global OpenClaw config.
@@ -87,14 +88,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function readConfig(configPath: string): Record<string, unknown> | null {
-  if (!existsSync(configPath)) return null;
-  try {
-    const raw = readFileSync(configPath, 'utf8').replace(/^\uFEFF/, '');
-    const parsed = JSON.parse(raw);
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  const result = readOpenClawEffectiveConfig(configPath);
+  return result.ok ? result.config : null;
+}
+
+function readRawAndEffectiveConfig(configPath: string): { rawConfig: Record<string, unknown>; config: Record<string, unknown>; usesInclude: boolean } | null {
+  const result = readOpenClawEffectiveConfig(configPath);
+  return result.ok ? { rawConfig: result.rawConfig, config: result.config, usesInclude: result.usesInclude } : null;
+}
+
+function containsIncludeKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsIncludeKey);
+  if (!isRecord(value)) return false;
+  if (Object.hasOwn(value, '$include')) return true;
+  return Object.values(value).some(containsIncludeKey);
 }
 
 function writeConfigAtomic(configPath: string, cfg: Record<string, unknown>): void {
@@ -126,8 +133,15 @@ export function ensureConversationAccessInConfig(): boolean {
   if (configPath === null || !existsSync(configPath)) return false;
 
   return withLock(configPath, () => {
-    const cfg = readConfig(configPath);
-    if (!cfg) return false;
+    const loaded = readRawAndEffectiveConfig(configPath);
+    if (!loaded) return false;
+    // If the plugins ownership path (or the root object supplying it) crosses
+    // `$include`, the write target is ambiguous: adding a main-config sibling
+    // could override an Owner decision supplied by the include graph. Refuse
+    // auto-repair in that case; unrelated include branches do not block the
+    // historical absent-flag repair in the main config.
+    const cfg = loaded.rawConfig;
+    if (Object.hasOwn(cfg, '$include') || containsIncludeKey(cfg.plugins)) return false;
 
     if (!isRecord(cfg.plugins)) {
       cfg.plugins = {};

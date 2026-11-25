@@ -47,9 +47,66 @@ describe('resolveOpenClawConfigPath', () => {
     });
   });
 
-  it('relative overrides fail closed instead of silently using the default config', () => {
-    expect(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: 'relative-state' }, home)).toEqual({ ok: false, reason: 'openclaw_state_dir_not_absolute' });
-    expect(resolveOpenClawConfigPath({ OPENCLAW_CONFIG_PATH: 'relative.json' }, home)).toEqual({ ok: false, reason: 'openclaw_config_path_not_absolute' });
+  it('resolves relative user-supplied paths with OpenClaw host cwd semantics', () => {
+    const cwd = path.join(os.tmpdir(), 'oc-cwd');
+    expect(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: 'relative-state' }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(cwd, 'relative-state', 'openclaw.json'),
+      source: 'state_dir',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_CONFIG_PATH: 'relative.json' }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(cwd, 'relative.json'),
+      source: 'config_path',
+    });
+  });
+
+  it('matches OpenClaw 2026.11.5 HOME, profile, tilde and precedence rules', () => {
+    const cwd = path.join(os.tmpdir(), 'oc-cwd');
+    const ocHome = path.join(os.tmpdir(), 'oc-openclaw-home');
+    expect(resolveOpenClawConfigPath({ OPENCLAW_HOME: ocHome }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(ocHome, '.openclaw', 'openclaw.json'),
+      source: 'openclaw_home',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_HOME: ocHome, OPENCLAW_PROFILE: 'client-a' }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(ocHome, '.openclaw-client-a', 'openclaw.json'),
+      source: 'profile',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_PROFILE: 'default' }, home, cwd).path).toBe(path.join(home, '.openclaw', 'openclaw.json'));
+    expect(resolveOpenClawConfigPath({ OPENCLAW_PROFILE: 'not valid!' }, home, cwd).path).toBe(path.join(home, '.openclaw', 'openclaw.json'));
+    expect(resolveOpenClawConfigPath({ OPENCLAW_CONFIG_PATH: '~/isolated/openclaw.json' }, home, cwd)).toEqual({
+      ok: true,
+      path: path.join(home, 'isolated', 'openclaw.json'),
+      source: 'config_path',
+    });
+    expect(resolveOpenClawConfigPath({ OPENCLAW_STATE_DIR: '~/state' }, home, cwd).path).toBe(path.join(home, 'state', 'openclaw.json'));
+    expect(resolveOpenClawConfigPath({
+      OPENCLAW_CONFIG_PATH: '/explicit/openclaw.json',
+      OPENCLAW_STATE_DIR: '/state',
+      OPENCLAW_HOME: ocHome,
+      OPENCLAW_PROFILE: 'client-a',
+    }, home, cwd).path).toBe(path.resolve('/explicit/openclaw.json'));
+    expect(resolveOpenClawConfigPath({
+      OPENCLAW_STATE_DIR: '/state',
+      OPENCLAW_HOME: ocHome,
+      OPENCLAW_PROFILE: 'client-a',
+    }, home, cwd).path).toBe(path.join('/state', 'openclaw.json'));
+  });
+
+  it('falls back to cwd when no home is available, matching OpenClaw resolveRequiredHomeDir', () => {
+    const cwd = path.join(os.tmpdir(), 'oc-no-home-cwd');
+    expect(resolveOpenClawConfigPath({}, '', cwd)).toEqual({
+      ok: true,
+      path: path.join(cwd, '.openclaw', 'openclaw.json'),
+      source: 'default',
+    });
+  });
+
+  it('uses host-platform absolute path semantics for explicit paths', () => {
+    const explicit = process.platform === 'win32' ? 'C:\\openclaw\\openclaw.json' : '/explicit/openclaw.json';
+    expect(resolveOpenClawConfigPath({ OPENCLAW_CONFIG_PATH: explicit }, home).path).toBe(path.resolve(explicit));
   });
 });
 
