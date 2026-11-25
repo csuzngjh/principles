@@ -1,5 +1,60 @@
 # @principles/codex-adapter
 
+## 0.15.1
+
+### Patch Changes
+
+- b7134ff: The Intent chain can no longer degrade to `not_configured` without leaving a
+  reason. Stage A already emitted `intent_doc_template_only`, but the event rode
+  the process-wide `storeEmitter` (no production subscriber) and was absent from
+  the workspace critical-event allowlist, so an emitted degradation and a silent
+  one were indistinguishable afterwards — the shape that hid a whole broken chain
+  during the 2026-11-22 intent ON/OFF pilot.
+  
+  The degradation record now carries a structured reason and an actionable
+  nextAction: `no_parsed_section` (canonical headings were never recognised — the
+  PRI-1284 class, where the Owner did write content) versus `placeholder_only`
+  (sections parsed but still carry template/TODO text). Telling an Owner who
+  already wrote five sections to "fill in a section" is no longer the only
+  available message.
+  
+  The same event types are now allowlisted into
+  `<workspace>/.pd/telemetry/critical-events.jsonl`, and the L3 automatic
+  diagnosis path binds the workspace-scoped sink instead of the bare singleton, so
+  the record survives the process on the path automatic Pain actually takes.
+  Normal (authored) INTENT.md behaviour is unchanged and produces no record.
+  
+  
+  Review follow-ups in the same bounded contract: mixed localized/canonical
+  headings now tell the Owner that only recognised sections are template-only and
+  point them at the supported headings; a fresh-read truncation that hides an
+  authored answer behind earlier TODO material is reported as a truncation
+  recovery problem rather than as a document with no answer; missing-file recovery
+  guidance now includes the CLI's required `--confirm` write acknowledgement; and
+  the Codex/WorkBuddy worker Stage A entry points bind the same durable critical
+  telemetry sink as the L3 automatic path.
+  
+  The recovery text keeps the workspace path separate from the copyable POSIX
+  command instead of emitting a shell-quoted path that can be expanded
+  incorrectly, and truncation analysis remains internal: degradation telemetry
+  never carries the untruncated INTENT.md section bodies it inspects.
+- ce6049a: Pipeline Spine Phase 2A (PRI-1292): ONE assembly point for the workspace pipeline host collaborators and ONE cache-free diagnostician runner assembly. `resolveWorkspacePipelineHostDeps` (@principles/host-runtime, new export) returns the five required collaborators (intentDocReader / trajectoryTurnReader / sourceMaterialAuthorization / telemetrySink / isAutoPainSubmissionAuthorized) with the default trajectory reader bound to the SAME consent-ledger authorization instance the gate consumers receive — removing the double-authorization-instance defect where diagnostician-auto-run, both codex worker sites and the workbuddy worker built two independent consent ports per call. All eight production assembly points migrate: pd pain record, the OpenClaw hook and /pd pain command (via the new shared plugin factory `createPluginPainToPrincipleService`, which passes the Gateway's in-process trajectory as an authorization-wrapped reader override — explicit OpenClaw `allowConversationAccess=false` revokes even previously collected rows immediately — and the entry's effectiveConfig as the intent flag authority per SPEC §13.1), diagnostician-auto-run, both codex worker sites, the workbuddy worker, and `pd diagnose run` + `pd pain retry`. `createDiagnosticianRunnerBundle` (@principles/core/runtime, new export, admitted) extracts in place the Diag*Runner + SplitDiagnosticianRunner assembly from the cached-bridge factory so the factory, diagnose and pain-retry share one construction sequence; it never touches bridgeCache, derives the same timing contract both CLIs relied on (stage = input, parent = 3×, lease 120s / heartbeat 40s), and with an externally provided stateManager reuses its connection and never closes it — dispose() is idempotent and closes only a factory-created manager. The bundle also refuses a stateManager whose canonical workspace differs from the bundle workspace, preventing cross-workspace task/consent/Intent/telemetry mixing. CLI contracts unchanged: --no-intake, --runtime test-double, ERR-067 retry loop, dead-letter replay and task-rerun semantics, JSON output shapes and exit codes are pinned by the existing suites plus new ownership/isolation tests.
+  
+  Round-2 hardening: the OpenClaw read gate now resolves the host-effective config through the shared install-layout authority (`OPENCLAW_CONFIG_PATH` > `OPENCLAW_STATE_DIR` > default home) and fails closed when that config is missing, unreadable, malformed, or indeterminate. Normal executable runner construction now requires Intent, trajectory, and source-material authorization collaborators at the type level; constructBridge owns its StateManager until bridge construction succeeds and closes it exactly once on adapter/bundle/bridge construction failure. `pd diagnose run` uses the single host-deps telemetry sink rather than constructing a second workspace sink.
+  
+  
+  Round-3 hardening: OpenClaw effective-config compatibility now mirrors 2026.11.5 host behavior: JSON5 fallback parsing, bounded read-only `$include` resolution (nested/multiple includes, host merge order, cycle/escape/missing-file fail-closed), and complete path resolution for OPENCLAW_HOME, valid non-default OPENCLAW_PROFILE, OPENCLAW_CONFIG_PATH, OPENCLAW_STATE_DIR, `~` expansion and host relative-path semantics. Explicit Owner `allowConversationAccess=false` remains authoritative through includes; startup repair never flattens include-backed ownership or writes when the effective config is indeterminate. No new cross-package public API is added. Follow-up hardening preserves the original config file mode across atomic repair, mirrors OpenClaw’s independent lexical/real include-root checks for allowed cross-root symlinks, limits include-managed write refusal to the actual permission parent chain, and keeps json5 as a runtime dependency in the root lockfile, and refuses startup auto-repair through a symlinked main config rather than replacing the link with a detached copy. Include file reads now enforce resolved-path length, descriptor-based regular-file/no-hardlink/2MiB validation, open-time root revalidation, and bounded reads; JSON5-only main configs are not auto-rewritten because rewriting would discard Owner comments, while strict-JSON repair creates its temporary file with the original mode from the first open. Health guidance no longer suggests deleting an explicit deny as a universal recovery path and directs Owners to edit the original config file directly so JSON5 comments are preserved; the CLI rewrite path is explicitly described as comment-losing.
+- 528d7a5: PRI-1296 — target-turn evidence admission during receipt recovery
+  
+  Receipt recovery no longer treats a legacy boolean target-text probe or malformed persisted evidence as proof of evidence completeness. Core validates persisted entries and replaces invalid legacy evidence only from a validated exact-target read, rechecks source-material authorization immediately before the write, and persists identity, evidence, evidenceClass, and recovery disposition through the existing single CAS contract. OpenClaw receipt recovery joins before_prompt_build and after_tool_call only through the same host runId and the exact persisted user-turn identity; if that bounded correlation or original-message verification is unavailable, target-dependent tasks remain unbound in waiting_for_receipt rather than becoming session-only READY. The candidate picker and manual diagnosis entry point both block that state until a target-bearing retry recovers the original task. WorkBuddy and OpenClaw worker cycles reconcile waiting target-evidence tasks before diagnostician candidate selection/execution, using the same host readers and consent-ledger authorization ports as their receipt fallbacks.
+- Updated dependencies [e4f4337]
+- Updated dependencies [b7134ff]
+- Updated dependencies [ce6049a]
+- Updated dependencies [528d7a5]
+  - @principles/core@8.3.0
+  - @principles/host-runtime@4.7.1
+  - @principles/install-layout@0.11.1
+
 ## 0.15.0
 
 ### Minor Changes
