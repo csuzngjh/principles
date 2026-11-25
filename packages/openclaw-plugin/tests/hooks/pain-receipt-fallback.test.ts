@@ -380,7 +380,7 @@ describe('runAfterToolCallReceiptFallback — exact same-run target-turn associa
       sourceRef: `governance_observation:openclaw|${sessionId}|${targetTurnId}|user`,
       note: 'the exact embedded owner message',
     }]);
-    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'receipt_recovered' });
   });
 
   it('keeps a task unbound when the after_tool_call run has no same-run turn mapping', async () => {
