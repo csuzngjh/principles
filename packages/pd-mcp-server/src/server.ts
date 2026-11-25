@@ -34,7 +34,6 @@ import {
   recheckSubmittedTask,
   type PainSubmitReceipt,
   type SubmittedTaskRecheck,
-  type HostSessionAssociation,
 } from '@principles/core/runtime/pain-submit-capability';
 import { runWithDeadline, OrphanLimiter, AdmissionLimiter, DEFAULT_DEADLINE_MS } from './deadline.js';
 import {
@@ -205,6 +204,8 @@ export function createMcpPainId(nowMs: number = Date.now(), randomHex: () => str
 
 /** The submit capability entry — injectable for adapter-contract tests;
  * production always uses the real Core capability. */
+type SubmitReceiptSessionAssociation = NonNullable<PainSubmitReceipt['sessionAssociation']>;
+
 export type SubmitCapabilityCall = (input: {
   readonly workspaceDir: string;
   readonly painId: string;
@@ -215,7 +216,7 @@ export type SubmitCapabilityCall = (input: {
    * production assembly reports the exact association verdict it resolved
    * immediately before invoking the write. A timeout receipt can then retain
    * that verdict instead of inventing a second identity decision. */
-  readonly observeSessionAssociation?: (association: HostSessionAssociation) => void;
+  readonly observeSessionAssociation?: (association: SubmitReceiptSessionAssociation) => void;
 }) => Promise<PainSubmitReceipt>;
 
 /** Bounded read-back entry — injectable for timeout tests. */
@@ -579,7 +580,7 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
         // reconciled by id instead of guessing (§5.7).
         const painId = createMcpPainId();
         const taskId = deriveSubmitTaskId(painId);
-        let sessionAssociation: HostSessionAssociation | undefined;
+        let sessionAssociation: SubmitReceiptSessionAssociation | undefined;
 
         const outcome = await runWithDeadline(
           async () => {

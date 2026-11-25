@@ -93,6 +93,10 @@ export interface PainSubmitCapabilityOptions {
    * tests inject deterministic results. The capability itself stays I/O-free.
    */
   readonly verifyHostSession?: () => HostSessionVerification;
+  /** Per-call observation point for the exact receipt-facing association
+   * verdict resolved inside this capability. The MCP deadline wrapper uses
+   * it to retain the original request's verdict on timeout receipts. */
+  readonly observeSessionAssociation?: (association: HostSessionAssociation) => void;
   /** Workspace-effective config loaded at MCP startup (same authority the CLI
    * uses). Without it the async submission can only be created if the state
    * directory already carries a resolvable runtime config. */
@@ -127,7 +131,7 @@ export type HostSessionVerification =
   | { readonly status: 'unverified'; readonly detail: string };
 
 /** PRI-1260: the association outcome surfaced on every submit receipt (inlined into the receipt surface). */
-export type HostSessionAssociation =
+type HostSessionAssociation =
   | Omit<Extract<HostSessionVerification, { status: 'verified' }>, 'inputEvidence' | 'targetEvidenceBlockedReason'>
   | Extract<HostSessionVerification, { status: 'unverified' }>
   | { readonly status: 'absent' };
@@ -136,7 +140,7 @@ export type HostSessionAssociation =
  * ONE conversion shared by the normal receipt and the MCP timeout receipts:
  * enrichment-only verification fields (`inputEvidence`, consent detail for
  * target evidence) never enter the receipt's association surface. */
-export function hostSessionVerificationToAssociation(
+function hostSessionVerificationToAssociation(
   verification: HostSessionVerification | undefined,
 ): HostSessionAssociation {
   return verification?.status === 'verified'
@@ -522,6 +526,7 @@ export async function submitPainCapability(
   // receipt.
   const verification = options.verifyHostSession?.();
   const sessionAssociation = hostSessionVerificationToAssociation(verification);
+  options.observeSessionAssociation?.(sessionAssociation);
 
   // PRI-1274 / PRI-1283: one target-evidence rule shared with receipt
   // recovery. Missing-but-collectable text waits; consent-denied text becomes
