@@ -643,6 +643,33 @@ function evaluateRecoveryPass(input: {
   const hasOwnerStatement = isRecord(diagnostic.record.anchor) && diagnostic.record.anchor.type === 'owner_expectation';
 
   const existingRecovery = diagnostic.record.recovery;
+  const rejectUnboundTargetIdentityUnavailable = (): Evaluation => {
+    // Strict OpenClaw admission has no exact target join for THIS task. A
+    // report-only rejection would leave the pending row diagnosable on the
+    // next worker tick, so persist the recoverable gate in the same CAS lane:
+    // waiting_for_receipt means a later same-run/corrected receipt may still
+    // bind it, while the candidate picker keeps it out of diagnosis until then.
+    const disposition: PainRecoveryDisposition = {
+      schemaVersion: PAIN_RECOVERY_DISPOSITION_SCHEMA_VERSION,
+      state: 'waiting_for_receipt',
+      reasonCode: 'target_turn_identity_unavailable',
+      attemptCount: nextAttemptCount(existingRecovery),
+      lastCheckedAt: nowIso,
+    };
+    return {
+      action: 'cas_disposition_only',
+      expectedJson: diagnostic.text,
+      newJson: mergeDisposition(diagnostic, disposition),
+      preconditions,
+      outcome: {
+        status: 'rejected',
+        reasonCode: 'target_turn_identity_unavailable',
+        painId: receipt.painId,
+        taskId: receipt.taskId,
+        taskUnbound: true,
+      },
+    };
+  };
   const existingRef = isRecord(existingRecovery) && isRecord(existingRecovery.receiptRef)
     ? existingRecovery.receiptRef
     : null;
@@ -700,16 +727,7 @@ function evaluateRecoveryPass(input: {
     return { action: 'report', outcome: { status: 'rejected', reasonCode: 'diagnostic_payload_invalid:pain_ingress_missing', painId: receipt.painId, taskId: receipt.taskId, taskUnbound: true } };
   }
   if (requireTargetTurnIdentity && targetTurnId === undefined && evidenceCount === 0 && !hasOwnerStatement) {
-    return {
-      action: 'report',
-      outcome: {
-        status: 'rejected',
-        reasonCode: 'target_turn_identity_unavailable',
-        painId: receipt.painId,
-        taskId: receipt.taskId,
-        taskUnbound: true,
-      },
-    };
+    return rejectUnboundTargetIdentityUnavailable();
   }
   // P1-3 (r2b, devin finding 0001) + review round 2 (directive I3): the
   // target is the original submission's EXPLICIT request when it named one
@@ -817,7 +835,8 @@ export async function recoverTaskIdentityFromReceipt(
   // trusted `_meta` path applies — a sentinel or malformed id is a rejection,
   // never a bind.
   if (!isUsableHostId(options.identity.sessionId) || !isUsableHostId(options.identity.toolCallId)
-    || (options.identity.submissionTurnId !== undefined && !isUsableHostId(options.identity.submissionTurnId))) {
+    || (options.identity.submissionTurnId !== undefined && !isUsableHostId(options.identity.submissionTurnId))
+    || (options.identity.targetTurnId !== undefined && !isUsableHostId(options.identity.targetTurnId))) {
     return { status: 'rejected', reasonCode: 'event_identity_invalid', painId: options.receipt.painId, taskId: options.receipt.taskId };
   }
   let manager: RuntimeStateManager | undefined;

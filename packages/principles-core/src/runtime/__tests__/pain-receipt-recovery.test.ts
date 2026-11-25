@@ -56,7 +56,7 @@ function unboundMcpIngress(evidenceCount = 0): PainIngressV1Payload {
   };
 }
 
-async function persistUnboundPain(painId: string, evidence: { sourceRef: string; note: string }[] = []): Promise<string> {
+async function persistUnboundPain(painId: string, evidence: { sourceRef: string; note: string }[] = [], hostKind: 'codex' | 'openclaw' = 'codex'): Promise<string> {
   const bridge = makeBridge();
   const { taskId } = await bridge.submitPainSignal({
     painId,
@@ -64,7 +64,7 @@ async function persistUnboundPain(painId: string, evidence: { sourceRef: string;
     source: 'mcp_agent_assisted',
     reason: 'receipt fallback fixture',
     provenance: 'agent_reported_owner_approved',
-    hostKind: 'codex',
+    hostKind,
     evidence,
     painIngress: unboundMcpIngress(evidence.length),
   });
@@ -968,6 +968,66 @@ describe('recoverTaskIdentityFromReceipt — protected states (T3/T4/T8/T9 negat
     // identity binding is blocked, but the owner-manual report remains eligible.
     const candidate = await pickDiagnosticianCandidate(stateManager, 1, new Date().toISOString());
     expect(candidate?.taskId).toBe(taskId);
+  });
+
+  it('rejects a malformed adapter-resolved target identity before any bind', async () => {
+    const painId = 'mcp_1700000001298_cc001298';
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir, {
+      sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' },
+    }), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+
+    const outcome = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir,
+      hostKind: 'openclaw',
+      receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-strict', toolCallId: 'call-strict-invalid', targetTurnId: 'unknown' },
+      authorization: authorize(true),
+    });
+    expect(outcome).toMatchObject({ status: 'rejected', reasonCode: 'event_identity_invalid' });
+  });
+
+  it('strict OpenClaw target gate persists waiting_for_receipt, blocks diagnosis, and allows a corrected retry', async () => {
+    const painId = 'mcp_1700000001297_cc001297';
+    const taskId = await persistUnboundPain(painId, [], 'openclaw');
+    const validated = validatePainSubmitReceipt(receiptJson(painId, tmpDir, {
+      sessionAssociation: { status: 'unverified', detail: 'host_session_claim_empty' },
+    }), { workspaceDir: tmpDir });
+    if (!validated.ok) throw new Error('fixture receipt invalid');
+
+    const first = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir,
+      hostKind: 'openclaw',
+      receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-strict', toolCallId: 'call-strict-1' },
+      authorization: authorize(true),
+      requireTargetTurnIdentity: true,
+      readTargetTurnEvidence: availableTargetEntries(),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(first).toMatchObject({ status: 'rejected', reasonCode: 'target_turn_identity_unavailable', taskUnbound: true });
+    const blockedDiagnostic = await readDiagnostic(taskId);
+    expect(blockedDiagnostic.sessionIdHint).toBeNull();
+    expect(blockedDiagnostic.recovery).toMatchObject({
+      state: 'waiting_for_receipt',
+      reasonCode: 'target_turn_identity_unavailable',
+    });
+    expect(await pickDiagnosticianCandidate(stateManager, 5, new Date().toISOString())).toBeNull();
+
+    const retry = await recoverTaskIdentityFromReceipt({
+      workspaceDir: tmpDir,
+      hostKind: 'openclaw',
+      receipt: validated.receipt,
+      identity: { sessionId: 'oc-session-strict', toolCallId: 'call-strict-2', targetTurnId: 'user-turn-row:8' },
+      authorization: authorize(true),
+      requireTargetTurnIdentity: true,
+      readTargetTurnEvidence: availableTargetEntries(),
+      sourceMaterialAuthorization: AUTHORIZED_SOURCE_MATERIAL,
+    });
+    expect(retry.status).toBe('recovered');
+    const diagnostic = await readDiagnostic(taskId);
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis' });
+    expect(diagnostic.evidence).toEqual(TARGET_ENTRIES);
   });
 
   it('T9: with the authorization OFF, ZERO identity metadata is persisted — no receiptRef, no toolCallId anywhere', async () => {
