@@ -13,6 +13,7 @@
  * turn.
  */
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const MAX_ENTRIES = 512;
 const TTL_MS = 30 * 60 * 1000;
@@ -20,6 +21,7 @@ const TTL_MS = 30 * 60 * 1000;
 interface RunTurnEntry {
   /** undefined is an ambiguity tombstone: the host reused a run id for a different turn. */
   readonly targetTurnId: string | undefined;
+  readonly messageDigest: string | undefined;
   readonly expiresAt: number;
 }
 
@@ -43,9 +45,12 @@ export function rememberOpenclawRunTurnCorrelation(input: {
   readonly sessionId: string;
   readonly runId: string;
   readonly targetTurnId: string;
+  /** Exact message bytes that were cross-checked against the final host message. */
+  readonly message: string;
   readonly now?: number;
 }): boolean {
-  if (!usable(input.targetTurnId)) return false;
+  if (!usable(input.targetTurnId) || typeof input.message !== 'string' || input.message.length === 0) return false;
+  const messageDigest = createHash('sha256').update(input.message, 'utf8').digest('hex');
   const entryKey = key(input);
   if (entryKey === undefined) return false;
   const now = input.now ?? Date.now();
@@ -57,19 +62,45 @@ export function rememberOpenclawRunTurnCorrelation(input: {
     // OpenClaw run ids may be reused after a run ends. If the same tuple now
     // points at a different row, it is impossible to distinguish a late event
     // from the prior run; quarantine the key instead of silently retargeting it.
-    if (existing.targetTurnId !== input.targetTurnId) {
-      entries.set(entryKey, { targetTurnId: undefined, expiresAt: Math.max(existing.expiresAt, now + TTL_MS) });
+    if (existing.targetTurnId !== input.targetTurnId || existing.messageDigest !== messageDigest) {
+      entries.set(entryKey, { targetTurnId: undefined, messageDigest: undefined, expiresAt: Math.max(existing.expiresAt, now + TTL_MS) });
       return false;
     }
     entries.delete(entryKey);
     entries.set(entryKey, existing);
     return true;
   }
-  entries.set(entryKey, { targetTurnId: input.targetTurnId, expiresAt: now + TTL_MS });
+  entries.set(entryKey, { targetTurnId: input.targetTurnId, messageDigest, expiresAt: now + TTL_MS });
   while (entries.size > MAX_ENTRIES) {
     const oldest = entries.keys().next().value;
     if (typeof oldest !== 'string') break;
     entries.delete(oldest);
+  }
+  return true;
+}
+
+/** Confirm a repeated prompt callback is still the same admitted user message.
+ * A runId reused for different text is quarantined, never retargeted. */
+export function confirmOpenclawRunTurnMessage(input: {
+  readonly workspaceDir: string;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly message: string;
+  readonly now?: number;
+}): boolean {
+  const entryKey = key(input);
+  if (entryKey === undefined || typeof input.message !== 'string' || input.message.length === 0) return false;
+  const entry = entries.get(entryKey);
+  if (entry === undefined) return false;
+  const now = input.now ?? Date.now();
+  if (entry.expiresAt <= now) {
+    entries.delete(entryKey);
+    return false;
+  }
+  const messageDigest = createHash('sha256').update(input.message, 'utf8').digest('hex');
+  if (entry.targetTurnId === undefined || entry.messageDigest !== messageDigest) {
+    entries.set(entryKey, { targetTurnId: undefined, messageDigest: undefined, expiresAt: Math.max(entry.expiresAt, now + TTL_MS) });
+    return false;
   }
   return true;
 }
