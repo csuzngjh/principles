@@ -1,5 +1,83 @@
 # @principles/pd-cli
 
+## 2.12.0
+
+### Minor Changes
+
+- c895c64: Service Host Phase 5 — the PD-owned Service Host is the fresh-install default
+  background lifecycle owner.
+  
+  - install-layout: new `provision_fresh_install` ownership transition
+    (legacy_owned with NO record → service_host_owned in one CAS write,
+    generation 1). It refuses without `freshInstall=true` and refuses any
+    workspace that already carries an ownership record, so upgrades keep using
+    the quiescing `begin_handover` sequence. Service-Host-only manifests
+    (`hosts: []` + declared workspaces) are now valid; an empty manifest with
+    neither stays structural damage.
+  - create-principles-disciple: `--host` has no default (no silent OpenClaw);
+    `none` installs no host adapter. Fresh installs default to registering AND
+    enabling the user-level OS scheduler, then provision the ACTUAL bound host
+    workspaces into Service Host ownership (active-release no-consume readiness →
+    CAS → first real managed cycle → `<pdHome>/service/install-provisioning.json`
+    evidence). A failed/deferred attempt records a PER-WORKSPACE pending entry
+    (`<pdHome>/service/pending-provisioning.json`), so `--host all` keeps every
+    deferred workspace resumable; each entry persists the REAL resolved directory
+    (a re-pointed symlink cannot claim a new target later); a later explicit
+    `--enable-service-host` install verifies each workspace's CURRENT host
+    binding, probes that host, and refuses to flip while a legacy OpenClaw
+    Gateway may still consume it.
+    Historical installs never wrote a pending entry and are never resumed
+    implicitly. `--yes` accepts the recommended default, `--json`/
+    `--non-interactive` without consent reports `consent_required` instead of
+    creating a trigger, `--no-service-host` opts out, and upgrades keep
+    refresh-if-registered. Refreshing an installed host reads its real binding
+    (Codex plugin-data / payload copy) and reuses that workspace instead of this
+    run's target; the console update resolves a legal empty `hosts` record to
+    `none`; the interactive install mode is recommended from the FINAL workspace
+    directory, never from another default.
+  - pd-cli: `pd service run-once --trigger installer` records the fresh-install
+    first cycle; `pd service status` exposes `hostBindingState`
+    (`bound` / `waiting_for_host_binding`) so a Service-Host-only workspace is
+    truthful instead of implying a worker that does not exist.
+
+### Patch Changes
+
+- c7b2856: On Windows, an update no longer opens a trail of terminal windows. The update
+  runs in the bootstrap executor, which is started detached and therefore has no
+  console; every console program it started without `windowsHide: true` got a
+  new, visible terminal window. The installer now hides the console of every
+  child process it starts (tar, `cmd /c npm`, the `pd` verification probes, the
+  console probe, the environment probes), and `pd console open` hides the console
+  of the Console server and of the stale-console probes it runs — that server
+  window used to stay open until the server was killed. An interactive
+  `pd console open` in a terminal is unchanged: the server still shares that
+  terminal.
+  
+  The OpenClaw plugin's tool probes (`pd capabilities`: rg, sg, fd, qmd,
+  ast-grep, shellcheck) hide their console for the same reason — the host process
+  they run in has no console on Windows.
+  
+  A fail-closed source guard (`scripts/lib/child-process-window-scan.mjs`) now
+  runs in the test suites of the installer, the CLI, the plugin, the Console
+  server and the Companion: a child_process call that does not hide its console,
+  or that the scan cannot attribute, fails the suite.
+- b99dc3d: Pipeline Spine Phase 1 (PRI-1291): fix the three verified pipeline breaks. D1 — `PainToPrincipleServiceOptions` is now a discriminated union on `asyncMode` (sync mode requires `sourceMaterialAuthorization` + `trajectoryTurnReader`), the sync bridge call forwards the authorization, and the three sync entry points (pd pain record --wait, OpenClaw hook, OpenClaw /pd-pain command) wire the workspace consent-ledger authorization and trajectory reader. D2 — `deviationAnchorToPainAnchor` single-tracks the anchor: the ingress/bridge write side derives the canonical `anchor`, the assembler recovers historical `deviationAnchor` rows and surfaces malformed ones in ambiguityNotes. D4 — `pd candidate internalize` gains the authority gate (dedup-first ordering, raw-kind validation, admission-document fail-closed, seed suppression, rule seeding window preserved) and both automatic seed entries (`diagnose`, PainSignalBridge) refuse invalid RAW kinds with zero seeding; `validateRecommendationKind` is exported from the runtime barrel with admission records.
+  
+  Owner recovery and bridge lifecycle: preserve persisted Owner parks during failed automatic retries, and give each production bridge acquisition an explicit release scope. Workspace retirement drains active borrowers and pending constructors before closing SQLite resources.
+- Updated dependencies [c7b2856]
+- Updated dependencies [d738de4]
+- Updated dependencies [2b8ac42]
+- Updated dependencies [49a7713]
+- Updated dependencies [b99dc3d]
+- Updated dependencies [db6fb22]
+- Updated dependencies [c895c64]
+  - principles-disciple@4.3.1
+  - @principles/core@8.2.0
+  - @principles/host-runtime@4.7.0
+  - @principles/codex-adapter@0.15.0
+  - @principles/workbuddy-adapter@0.9.0
+  - @principles/install-layout@0.11.0
+
 ## 2.11.1
 
 ### Patch Changes
