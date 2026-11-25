@@ -11,7 +11,9 @@
  *   - the event `result` is the agent tool result
  *     `{content:[{type:'text',text:<JSON of legacy CallToolResult>}],
  *      details:{mcpServer,...}}` — the receipt is DOUBLE-ENCODED;
- *   - identity = context `sessionId` + event `toolCallId`, no submission turn;
+ *   - identity = context `sessionId` + event `toolCallId`; the event runId
+ *     joins only to the exact persisted user-turn identity captured by the
+ *     same prompt run (never using runId as a turn id);
  *   - hand-off into the Core CAS recovery carries hostKind 'openclaw'.
  *
  * The Core barrel is mocked as a spy-through (importOriginal + delegation):
