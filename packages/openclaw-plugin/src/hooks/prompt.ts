@@ -65,7 +65,7 @@ import {
 import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
 import { createLiveSignalKeywordStore } from '../core/signal-keyword-store.js';
 import { captureOpenclawUserTurnForTargetEvidence } from './openclaw-target-turn-capture.js';
-import { rememberOpenclawRunTurnCorrelation } from './openclaw-run-turn-correlation.js';
+import { confirmOpenclawRunTurnMessage, rememberOpenclawRunTurnCorrelation } from './openclaw-run-turn-correlation.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 
@@ -187,6 +187,7 @@ function captureOpenclawTargetTurnForRun(input: {
       sessionId: input.sessionId,
       runId: input.runId,
       targetTurnId,
+      message: input.resolvedMessage,
     });
   }
 }
@@ -525,6 +526,22 @@ export function prepareOpenClawPromptRound(
   // own write produced, not on a foreign one.
   const sessionIdentity = sessionKey ?? sessionId;
   if (runId !== undefined && sessionIdentity !== undefined && hasClaimedSignalRun(wctx.workspaceDir, sessionIdentity, runId)) {
+    // runId may be reused after a run ends. Confirm that the prompt still
+    // resolves to the exact persisted user-turn text before reusing its row id.
+    if (sessionId !== undefined) {
+      let replayMessage = '';
+      try {
+        replayMessage = resolveCurrentUserMessage(event, sessionId).message;
+      } catch {
+        // Empty text intentionally quarantines the mapping below.
+      }
+      confirmOpenclawRunTurnMessage({
+        workspaceDir: wctx.workspaceDir,
+        sessionId,
+        runId,
+        message: replayMessage,
+      });
+    }
     const replayed = claimedSignalRunOrdinal(wctx.workspaceDir, sessionIdentity, runId);
     if (typeof replayed === 'number' && Number.isInteger(replayed) && replayed >= 1) {
       logger?.info?.(`[PD:Prompt] round key replayed for claimed run: round=${replayed}, sessionId=${sessionId?.substring(0, 20)}`);
@@ -834,6 +851,12 @@ export async function handleBeforePromptBuild(
       _roundPreparedEvents.delete(event);
       logger?.info?.('[PD:Prompt] signal collection already performed by the pre-selection round phase');
     } else if (runId && hasClaimedSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
+      confirmOpenclawRunTurnMessage({
+        workspaceDir: wctx.workspaceDir,
+        sessionId,
+        runId,
+        message: currentUserMessage,
+      });
       logger?.info?.(`[PD:Prompt] duplicate signal run skipped: runId=${runId}, sessionId=${sessionId.substring(0, 20)}`);
     } else {
       if (!runId) {
