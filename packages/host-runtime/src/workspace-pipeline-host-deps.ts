@@ -73,6 +73,8 @@ export interface ResolveWorkspacePipelineHostDepsInput {
    * every read; omitting it uses the consent-ledger port for hostKind.
    */
   readonly trajectoryTurnReaderOverrideAuthorization?: () => boolean;
+  /** Optional host-specific observable channel for critical-event persistence failures. */
+  readonly telemetryPersistenceFailureHandler?: (detail: string) => void;
 }
 
 
@@ -140,9 +142,9 @@ export function resolveWorkspacePipelineHostDeps(
     // events persist to <workspace>/.pd/telemetry/critical-events.jsonl and
     // every event still forwards to the storeEmitter singleton. Persist
     // failures degrade to stderr — never break the caller (PRI-634 contract).
-    telemetrySink: new WorkspaceTelemetryEmitter(storeEmitter, input.workspaceDir, (detail) => {
+    telemetrySink: new WorkspaceTelemetryEmitter(storeEmitter, input.workspaceDir, input.telemetryPersistenceFailureHandler ?? ((detail) => {
       process.stderr.write(`[PD:telemetry] WARNING: critical event persistence failed: ${detail}\n`);
-    }),
+    })),
     isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(input.workspaceDir),
   };
 }

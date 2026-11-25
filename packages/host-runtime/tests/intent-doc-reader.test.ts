@@ -200,9 +200,11 @@ describe('createHostIntentDocReader', () => {
     expect(result.doc?.path.endsWith('INTENT.en.md')).toBe(true);
   });
 
-  it('missing file returns not_found', () => {
+  it('missing file returns not_found with shell-safe separated workspace guidance', () => {
+    const dollarWorkspace = path.join(workspaceDir, 'Client $100');
+    fs.mkdirSync(dollarWorkspace, { recursive: true });
     const reader = createHostIntentDocReader({
-      workspaceDir,
+      workspaceDir: dollarWorkspace,
       effectiveConfig: makeConfig(true),
       lang: 'zh-CN',
     });
@@ -210,7 +212,9 @@ describe('createHostIntentDocReader', () => {
     const result = reader.readIntentDoc();
 
     expect(result).toMatchObject({ ok: false, found: false, flagEnabled: true, reason: 'not_found' });
-    expect(result.nextAction).toBeDefined();
+    expect(result.nextAction).toContain('pd intent init --confirm --lang zh-CN --workspace .');
+    expect(result.nextAction).toContain(`workspace directory ${dollarWorkspace}`);
+    expect(result.nextAction).toContain('--workspace .');
   });
 
   it('file above 32KB returns oversized (both initial size and read-bytes guarded)', () => {

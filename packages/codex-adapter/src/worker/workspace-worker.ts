@@ -440,7 +440,17 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             // actually runs for governance-admitted Codex pains; PRI-1265: the
             // Stage A gets the bound session's ORIGINAL turns from the
             // workspace's consent-tiered governance store.
-            const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig: config.effective });
+            const hostDeps = resolveWorkspacePipelineHostDeps({
+              workspaceDir,
+              effectiveConfig: config.effective,
+              telemetryPersistenceFailureHandler: (detail) => {
+                try {
+                  emitEvent('CODEX_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
+                } catch {
+                  // Telemetry persistence warnings must never fail the worker cycle.
+                }
+              },
+            });
             const bridge = await createPainSignalBridge({
               workspaceDir,
               stateDir,
@@ -540,7 +550,17 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             // assembly point as the diagnosis site above — PRI-1265 authorized
             // trajectory context, PRI-1283 R2 latest-consent gate, and the
             // SAME consent-ledger authorization instance for both.
-            const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig: config.effective });
+            const hostDeps = resolveWorkspacePipelineHostDeps({
+              workspaceDir,
+              effectiveConfig: config.effective,
+              telemetryPersistenceFailureHandler: (detail) => {
+                try {
+                  emitEvent('CODEX_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
+                } catch {
+                  // Telemetry persistence warnings must never fail the worker cycle.
+                }
+              },
+            });
             const bridge = await createPainSignalBridge({
               workspaceDir,
               stateDir,

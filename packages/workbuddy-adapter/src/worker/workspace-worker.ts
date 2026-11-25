@@ -396,7 +396,17 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
             // call). PRI-1233 / SPEC §9.2: this worker is where Stage A
             // actually runs for governance-admitted WorkBuddy pains;
             // PRI-1265: the Stage A gets the bound session's ORIGINAL turns.
-            const hostDeps = resolveWorkspacePipelineHostDeps({ workspaceDir, effectiveConfig: config.effective });
+            const hostDeps = resolveWorkspacePipelineHostDeps({
+              workspaceDir,
+              effectiveConfig: config.effective,
+              telemetryPersistenceFailureHandler: (detail) => {
+                try {
+                  emitEvent('WORKBUDDY_WORKER_CRITICAL_TELEMETRY_PERSIST_FAILED', detail);
+                } catch {
+                  // Telemetry persistence warnings must never fail the worker cycle.
+                }
+              },
+            });
             const bridge = await createPainSignalBridge({
               workspaceDir,
               stateDir,
