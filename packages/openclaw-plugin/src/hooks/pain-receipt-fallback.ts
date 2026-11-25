@@ -218,7 +218,7 @@ export interface PainReceiptFallbackInput {
   readonly identity: {
     readonly sessionId: string | undefined;
     readonly toolCallId: string | undefined;
-    readonly submissionTurnId?: string;
+    readonly targetTurnId?: string;
   };
   /** OpenClaw's production after_tool_call path sets this to prevent a
    * session-only READY fallback when target evidence is required. */
@@ -254,8 +254,8 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
   // spelling in Core/SQLite.
   const sessionId = normalizeEventId(input.identity.sessionId, { allowEmpty: false });
   const toolCallId = normalizeEventId(input.identity.toolCallId, { allowEmpty: false });
-  const submissionTurnId = normalizeEventId(input.identity.submissionTurnId, { allowEmpty: false });
-  if (sessionId === null || toolCallId === null || submissionTurnId === null) {
+  const targetTurnId = normalizeEventId(input.identity.targetTurnId, { allowEmpty: false });
+  if (sessionId === null || toolCallId === null || targetTurnId === null) {
     return { status: 'attempted', outcome: { status: 'rejected', reasonCode: 'event_identity_invalid' } };
   }
   if (sessionId === undefined || toolCallId === undefined) {
@@ -299,7 +299,7 @@ export async function attemptPainReceiptFallback(input: PainReceiptFallbackInput
     identity: {
       sessionId,
       toolCallId,
-      ...(submissionTurnId !== undefined ? { submissionTurnId } : {}),
+      ...(targetTurnId !== undefined ? { targetTurnId } : {}),
     },
     authorization: { minimalMetadataGranted: input.minimalMetadataGranted },
     requireTargetTurnIdentity: input.requireTargetTurnIdentity === true,
@@ -371,7 +371,7 @@ export async function runAfterToolCallReceiptFallback(input: {
     : typeof ctxToolCallId === 'string' && ctxToolCallId.length > 0
       ? ctxToolCallId
       : undefined;
-  const submissionTurnId = resolveOpenclawRunTurnCorrelation({
+  const targetTurnId = resolveOpenclawRunTurnCorrelation({
     workspaceDir: input.workspaceDir,
     sessionId: input.ctx.sessionId,
     runId: input.event.runId,
@@ -383,7 +383,7 @@ export async function runAfterToolCallReceiptFallback(input: {
     identity: {
       sessionId: input.ctx.sessionId,
       toolCallId,
-      ...(submissionTurnId !== undefined ? { submissionTurnId } : {}),
+      ...(targetTurnId !== undefined ? { targetTurnId } : {}),
     },
     // Without the same-run turn join, a target-dependent OpenClaw task stays
     // unbound. Explicit requested targets, valid submitted evidence and
