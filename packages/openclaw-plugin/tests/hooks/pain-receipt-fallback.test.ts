@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { RuntimeStateManager, getDefaultPdConfig } from '@principles/core/runtime';
+import { recordConversationIngestionConsent } from '@principles/host-runtime';
 import {
   buildReconciledSubmitReceipt,
   buildUnconfirmedSubmitReceipt,
@@ -46,6 +47,8 @@ vi.mock('@principles/core/runtime', async (importOriginal) => {
   return { ...actual, recoverTaskIdentityFromReceipt: recoverSpy, validatePainSubmitReceipt: validateSpy };
 });
 
+import { captureOpenclawUserTurnForTargetEvidence } from '../../src/hooks/openclaw-target-turn-capture.js';
+import { clearOpenclawRunTurnCorrelationsForTest, rememberOpenclawRunTurnCorrelation } from '../../src/hooks/openclaw-run-turn-correlation.js';
 import {
   OPENCLAW_PAIN_SUBMIT_SERVER_ID,
   attemptPainReceiptFallback,
@@ -76,7 +79,10 @@ function workspace(config?: { minimalMetadata: boolean }): string {
   dirs.push(root);
   return root;
 }
-afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  clearOpenclawRunTurnCorrelationsForTest();
+  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 /** The original unbound task the REAL capability persists when the request
  * carried no trusted `_meta` and no claim (`host_session_claim_empty` — the
@@ -310,6 +316,86 @@ describe('attemptPainReceiptFallback — identity normalization and missing fiel
     if (result.outcome.status === 'rejected') {
       expect(result.outcome.reasonCode).toMatch(/^receipt_/);
     }
+  });
+});
+
+describe('runAfterToolCallReceiptFallback — exact same-run target-turn association', () => {
+  it('recovers the original task against the exact rowid captured by before_prompt_build', async () => {
+    const ws = workspace({ minimalMetadata: true });
+    const painId = 'mcp_1764000000030_cc000030';
+    const taskId = await persistUnboundPain(ws, painId);
+    const sessionId = EVENT_IDENTITY.sessionId;
+    const runId = 'openclaw-run-exact-target-30';
+    const targetTurnId = 'user-turn-row:77';
+    const consent = recordConversationIngestionConsent(ws, 'openclaw', {
+      decision: 'granted',
+      decidedVia: 'owner_directive',
+      disclosureVersion: 'test-v1',
+      evidenceRef: 'pri-1296-same-run-target',
+    });
+    expect(consent.ok).toBe(true);
+    captureOpenclawUserTurnForTargetEvidence({
+      workspaceDir: ws,
+      sessionId,
+      hostTurnId: undefined,
+      fallbackHostTurnId: targetTurnId,
+      text: 'the exact embedded owner message',
+    });
+    expect(rememberOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId,
+      runId,
+      targetTurnId,
+    })).toBe(true);
+
+    const result = await runAfterToolCallReceiptFallback({
+      workspaceDir: ws,
+      event: {
+        toolName: 'pd-recall__pd_submit_pain',
+        runId,
+        toolCallId: EVENT_IDENTITY.toolCallId,
+        result: envelopeForReceipt(painId, ws),
+      },
+      ctx: { sessionId },
+    });
+    expect(result.line).toBe(`pain_receipt_recovered:taskId=${taskId}:state=ready_for_diagnosis`);
+    expect(recoverSpy).toHaveBeenCalledWith(expect.objectContaining({
+      identity: {
+        sessionId,
+        toolCallId: EVENT_IDENTITY.toolCallId,
+        submissionTurnId: targetTurnId,
+      },
+      requireTargetTurnIdentity: true,
+    }));
+
+    const diagnostic = await readDiagnostic(ws, taskId);
+    const verified = ((diagnostic.painIngress as Record<string, unknown>).verifiedHostSession) as Record<string, unknown>;
+    expect(verified.targetTurnId).toBe(targetTurnId);
+    expect(diagnostic.evidence).toEqual([{
+      sourceRef: `governance_observation:openclaw|${sessionId}|${targetTurnId}|user`,
+      note: 'the exact embedded owner message',
+    }]);
+    expect(diagnostic.recovery).toMatchObject({ state: 'ready_for_diagnosis', reasonCode: 'target_evidence_arrived' });
+  });
+
+  it('keeps a task unbound when the after_tool_call run has no same-run turn mapping', async () => {
+    const ws = workspace({ minimalMetadata: true });
+    const painId = 'mcp_1764000000031_cc000031';
+    const taskId = await persistUnboundPain(ws, painId);
+    const result = await runAfterToolCallReceiptFallback({
+      workspaceDir: ws,
+      event: {
+        toolName: 'pd-recall__pd_submit_pain',
+        runId: 'openclaw-run-without-capture',
+        toolCallId: EVENT_IDENTITY.toolCallId,
+        result: envelopeForReceipt(painId, ws),
+      },
+      ctx: { sessionId: EVENT_IDENTITY.sessionId },
+    });
+    expect(result.line).toBe(`pain_receipt_rejected:target_turn_identity_unavailable:stage=after_tool_call:unbound=true:taskId=${taskId}`);
+    const diagnostic = await readDiagnostic(ws, taskId);
+    expect(diagnostic.sessionIdHint).toBeNull();
+    expect((diagnostic.recovery as Record<string, unknown> | undefined)?.state).not.toBe('ready_for_diagnosis');
   });
 });
 
