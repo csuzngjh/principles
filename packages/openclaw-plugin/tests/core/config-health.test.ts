@@ -581,6 +581,23 @@ describe('OpenClaw 2026.11.5 JSON5 and $include effective config compatibility',
     expect(shouldBlockOpenClawConversationReads()).toBe(false);
   });
 
+  it('refuses startup repair through a config symlink and preserves the link', () => {
+    if (process.platform === 'win32') return;
+    const { symlinkSync, lstatSync } = require('node:fs') as typeof import('node:fs');
+    write('allow.json5', `['other-plugin']`);
+    write('managed.json', `{
+      plugins: {
+        allow: { $include: './allow.json5' },
+        entries: { 'principles-disciple': { enabled: true, hooks: {} } },
+      },
+    }`);
+    symlinkSync(join(root, 'managed.json'), configPath);
+    const before = readFileSync(join(root, 'managed.json'), 'utf8');
+    expect(ensureConversationAccessInConfig()).toBe(false);
+    expect(lstatSync(configPath).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(root, 'managed.json'), 'utf8')).toBe(before);
+  });
+
   it('still refuses repair when the direct hooks parent is include-backed', () => {
     write('hooks.json5', `{ otherHook: true }`);
     main(`{

@@ -9,7 +9,7 @@
  * Extracted from index.ts to avoid circular imports when trajectory-collector.ts
  * needs to check conversation access state (PRI-346).
  */
-import { chmodSync, existsSync, renameSync, statSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, renameSync, statSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { withLock } from '../utils/file-lock.js';
 import { resolveOpenClawConfigPath } from '@principles/install-layout';
@@ -146,6 +146,11 @@ export function ensureConversationAccessInConfig(): boolean {
   if (configPath === null || !existsSync(configPath)) return false;
 
   return withLock(configPath, () => {
+    // Atomic replacement would replace the symlink directory entry rather
+    // than the linked host config, silently detaching future administrator
+    // edits to the real target. This ownership is ambiguous, so fail closed
+    // and leave manual repair to the Owner instead of following the link.
+    if (lstatSync(configPath).isSymbolicLink()) return false;
     const loaded = readRawAndEffectiveConfig(configPath);
     if (!loaded) return false;
     // If the plugins ownership path (or the root object supplying it) crosses

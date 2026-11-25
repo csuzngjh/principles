@@ -82,7 +82,7 @@ No `typed hook ... blocked because ... allowConversationAccess=true` line appear
 
 ## Follow-up review hardening
 
-Post-acceptance review additionally fixed and covered by unit regression: atomic repair preserves the original config mode (0600 stays 0600), include lexical roots and symlink real roots are checked independently exactly like the host, ordinary `..`-prefixed filenames inside a permitted root are not misclassified as traversal, and startup repair is blocked only when a permission-parent node (`root/plugins/entries/principles-disciple/hooks`) is itself include-managed.
+Post-acceptance review additionally fixed and covered by unit regression: atomic repair preserves the original config mode (0600 stays 0600), include lexical roots and symlink real roots are checked independently exactly like the host, ordinary `..`-prefixed filenames inside a permitted root are not misclassified as traversal, and startup repair is blocked only when a permission-parent node (`root/plugins/entries/principles-disciple/hooks`) is itself include-managed, and repair through a symlinked main config is refused so `rename` cannot detach the link from its managed target.
 
 ## Limitations honestly recorded
 
