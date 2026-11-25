@@ -352,9 +352,9 @@ function parseWaitingTaskFacts(task: TaskRecord): ParsedTargetEvidenceTask {
  * evidence has arrived. The disposition flip, the top-level `evidence`
  * array and `painIngress.evidenceClass` ride the SAME conditional UPDATE —
  * a concurrent writer cannot observe the flip without the evidence, or the
- * evidence without the count (SPEC TD §3 steps 6–7). An already non-empty
- * evidence array (not expected on a waiting task, but never assumed away)
- * is preserved untouched and only the disposition flips.
+ * evidence without the count (SPEC TD §3 steps 6–7). A valid non-empty
+ * evidence array is preserved; a malformed legacy array is not proof and is
+ * replaced only when the exact target reader supplies validated entries.
  */
 function buildBackfillPatch(input: {
   readonly diagnostic: Record<string, unknown>;
