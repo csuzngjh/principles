@@ -1,5 +1,17 @@
 # @principles/pd-cli
 
+## 2.12.2
+
+### Patch Changes
+
+- a0a390e: Pipeline Spine Phase 2B/3 (PRI-1293): ONE single-step runner executor and ONE authoritative PeerRunnerKind correlation lineage. `executeSelectedInternalizationTask` (@principles/host-runtime, SPEC-authorized new export, re-exported by the existing consumer-cycle barrel star) extracts in place the six Peer Runner constructions from the consumer cycle and collapses the six hand-rolled branches in `pd runtime internalization run-once`; hosts keep their own entry facts (adapter/L2 routing, Owner-evidence preflight, workspace-scoped evaluator telemetry, gateDeps provenance) as typed discriminated-union inputs, and the scribe/artificer/evaluator ledger identity wiring is assembled once from (workspaceDir, stateManager) instead of three inline copies per entry. `rulehost-pipeline-runner` stays an independent synchronous adversarial operator (whitelisted). Four construction-point whitelists (diagnostician runners, internalization peer runners, PainSignalBridge, PainToPrincipleService) land in architecture-regression with multiline-tolerant scans, positive non-vacuity pins and file:line violation messages.
+  
+  Phase 3 fail-closes PeerRunnerKind lineage: `resolveAuthoritativeCorrelationId` (core-internal `correlation-lineage.ts`, reached cross-package only through a read-only static on `InternalizationOrchestrator`) walks parentTaskId only (10-edge bound, visited-set cycle detection, dangling-parent refusal), requires chain-wide trimmed correlationId consistency, cross-checks the root dreamer's two independent persisted identities (taskId-derived vs seed candidateId — A/A passes, A/B refuses `conflicting_root_identity_sources`, single-side adopts, both-blind refuses), and never accepts a descendant claim without root-side corroboration. The gate is wired at the single write authorities: commitNextTaskProposal ADVANCE (new structured `lineage_refused` decision — zero successor creation), the reopen core shared by Owner revise_once / rollout needs_revision / repair-complete reopen / revision cascade (structured `lineage_refused:<reason>` refusal before any mutation, historical chains safely backfill the recovered id into the same atomic write), the source-correction CAS reopen, and both evaluator repair seeders (host-runtime governance + pd-cli rulehost), which now persist correlationId + parentTaskId=sourceEvaluatorTaskId on repair tasks so repair chains prove back to their root dreamer and the next evaluator inherits the same id through the existing metadata machinery. DiagnosticianStageKind subtasks keep their parentTaskId + dependencyTaskIds semantics — no correlationId gate. Diagnostician chain behaviors, MVP core-loop invariants, deterministic repair ids, causeId idempotency and lease/recovery mechanics are unchanged and pinned by the existing suites plus new unit/integration/parity tests (12 mandated lineage cases through real stores).
+- Updated dependencies [a0a390e]
+  - @principles/core@8.3.1
+  - @principles/host-runtime@4.7.2
+  - principles-disciple@4.4.1
+
 ## 2.12.1
 
 ### Patch Changes
