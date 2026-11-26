@@ -901,9 +901,61 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           // 不了 id 占用)。
           output.enqueueReason = `successor_id_conflict: ${commitResult.reason}${commitResult.detail !== undefined ? ` (${commitResult.detail})` : ''}; the derived successor id is occupied by a foreign chain — no successor was created`;
           output.nextAction = 'Inspect the occupant tasks with pd runtime internalization list --json; cross-chain id collision requires Owner/manual resolution.';
+        } else if (commitResult.decision === 'successor_integrity_conflict') {
+          // PRI-1293 R6: 多后继完整性冲突 — 全部冲突 id 透出, 零写入。
+          output.enqueueReason = `successor_integrity_conflict: ${commitResult.reason} (${commitResult.detail}); conflicting successors [${commitResult.conflictingSuccessorTaskIds.join(', ')}] — nothing was created or reopened`;
+          output.nextAction = 'Inspect the conflicting successor tasks with pd runtime internalization list --json; resolve the duplicate-chain integrity conflict manually, then re-run.';
+        } else if (commitResult.decision === 'revision_reopen_failed') {
+          // PRI-1293 R6: repair 后来源 Evaluator reopen 失败 — 保留真实类别。
+          output.enqueueReason = `revision_reopen_failed: ${commitResult.reason}${commitResult.detail !== undefined ? ` (${commitResult.detail})` : ''}; source evaluator ${commitResult.reopenedTaskId} could not be reopened — the revision wave did not propagate`;
+          output.nextAction = `Inspect the source evaluator ${commitResult.reopenedTaskId} (status, lease, diagnosticJson) with pd runtime internalization list --json; repair the blockage, then re-run — reopen is idempotent.`;
+        } else if (commitResult.decision === 'invalid_task_metadata') {
+          output.enqueueReason = `invalid_task_metadata: ${commitResult.reason}; task ${commitResult.taskId} metadata is unparseable — no successor was created`;
+          output.nextAction = `Inspect and repair task ${commitResult.taskId} diagnosticJson via integrity-repair, then re-run.`;
+        } else if (commitResult.decision === 'task_not_found') {
+          output.enqueueReason = `task_not_found: task ${commitResult.taskId} disappeared between scan and commit`;
+          output.nextAction = 'Re-scan or investigate concurrent deletion; re-run if the task still exists.';
+        } else if (commitResult.decision === 'source_not_succeeded') {
+          output.enqueueReason = `source_not_succeeded: task status is ${commitResult.status} at commit time`;
+          output.nextAction = 'Investigate why the status changed after scan; re-run if appropriate.';
+        } else if (commitResult.decision === 'blocked_by_revision') {
+          output.enqueueReason = `blocked_by_revision: ${commitResult.reason} (runnerDecision=${commitResult.runnerDecision}); the revision loop owns the out-edge`;
+          output.nextAction = 'Inspect the seeded repair/revision task with pd runtime internalization list --json — no manual successor needed.';
+        } else if (commitResult.decision === 'blocked_by_rejection') {
+          output.enqueueReason = `blocked_by_rejection: ${commitResult.reason} (runnerDecision=${commitResult.runnerDecision}); terminal reject — no successor, no approval`;
+          output.nextAction = 'Inspect the reviewer output or re-run the stage if the verdict was spurious.';
+        } else if (commitResult.decision === 'blocked_missing_verdict') {
+          output.enqueueReason = `blocked_missing_verdict: ${commitResult.reason}; durable runnerDecision absent (fail-closed)`;
+          output.nextAction = 'Re-run the stage runner (writes durable verdict) or reconcile via the pending-artifacts report.';
+        } else if (commitResult.decision === 'revision_reopened' || commitResult.decision === 'successor_reopened') {
+          // 级联/修订重开 = 真实写动作 — 计入后继物化, 透出 reopened id。
+          output.successorKind = commitResult.decision === 'successor_reopened' ? commitResult.successorKind : 'evaluator';
+          output.successorTaskIds.push(commitResult.reopenedTaskId);
+          output.successorTasksCreated = 1;
+          output.enqueueReason = `${commitResult.decision}: existing terminal successor ${commitResult.reopenedTaskId} reopened to consume revision (prior verdict cleared)`;
+        } else if (commitResult.decision === 'revision_reopen_noop') {
+          output.enqueueReason = `revision_reopen_noop: ${commitResult.reason}; transition already materialized (idempotent replay)`;
+          output.nextAction = 'No action — idempotent replay.';
+        } else if (commitResult.decision === 'source_correction_reopened') {
+          output.successorKind = 'artificer';
+          output.successorTaskIds.push(commitResult.reopenedTaskId);
+          output.successorTasksCreated = 1;
+          output.enqueueReason = `source_correction_reopened: ${commitResult.reason}`;
+        } else if (commitResult.decision === 'source_correction_reopen_noop') {
+          output.enqueueReason = `source_correction_reopen_noop: ${commitResult.reason}; the source-correction transition already materialized`;
+          output.nextAction = 'No action — idempotent replay.';
+        } else if (commitResult.decision === 'source_correction_reopen_conflict') {
+          output.enqueueReason = `source_correction_reopen_conflict: ${commitResult.reason}; recorded outcome is terminal — generic cascade stays suppressed`;
+          output.nextAction = 'Inspect the artificer stop point in Console; conflict outcomes resolve only by explicit Owner decision.';
+        } else if (commitResult.decision === 'source_correction_reopen_failed') {
+          output.enqueueReason = `source_correction_reopen_failed: ${commitResult.reason}; source task ${commitResult.reopenedTaskId} could not be reopened`;
+          output.nextAction = `Inspect source task ${commitResult.reopenedTaskId} status/lease/metadata; the scribe epoch stays consumable.`;
         } else {
-          output.enqueueReason = `Unexpected commitNextTaskProposal decision: ${commitResult.decision}`;
-          output.nextAction = 'Investigate orchestrator logic; re-run with --no-enqueue-next to skip auto-enqueue.';
+          // 穷尽防御: 联合类型新增 decision 时此处必须显式化 — 编译期
+          // never 检查在 mapCommitDecisionToAction 已覆盖 CLI 全量,
+          // 此分支仅作运行时异物兜底, 且如实透出原始 decision 名。
+          output.enqueueReason = `unhandled_commit_decision: ${String((commitResult as { decision?: unknown }).decision)} — no successor semantics applied`;
+          output.nextAction = 'Investigate orchestrator logic; the decision type is not yet mapped in run-once output.';
         }
       } catch (enqueueErr: unknown) {
         const enqueueMessage = enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);

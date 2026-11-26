@@ -335,7 +335,16 @@ async function runReconciliationBudget(
       }
 
       const errors = recon.outcomes.filter((o) => o.decision.startsWith('reconcile_error'));
-      if (recon.recovered > 0 || errors.length > 0) {
+      // PRI-1293 R6: fail-closed 错误类别 (血缘拒绝/并发冲突/完整性冲突/
+      // repair reopen 失败/元数据损坏) 的完整排障信息必须进遥测 — 不得
+      // 只留下 blocked 计数而静默丢弃拒绝原因。
+      const REFUSAL_DECISIONS = new Set([
+        'lineage_refused', 'concurrent_modification', 'successor_integrity_conflict',
+        'successor_id_conflict', 'revision_reopen_failed', 'invalid_task_metadata',
+        'source_correction_reopen_failed',
+      ]);
+      const refusals = recon.outcomes.filter((o) => REFUSAL_DECISIONS.has(o.decision));
+      if (recon.recovered > 0 || errors.length > 0 || refusals.length > 0) {
         emitEvent('INTERNALIZATION_CONSUMER_RECONCILED', JSON.stringify({
           scanned: recon.scanned,
           recovered: recon.recovered,
@@ -345,6 +354,7 @@ async function runReconciliationBudget(
           recoveries: recon.outcomes.filter((o) => o.decision === 'successor_created' || o.decision.includes('reopened')),
           // P1 (最终复核): per-task 错误显式可观测 — 即使 recovered=0
           errors,
+          refusals,
         }));
         logger.info(`[PD:${logLabel}] Reconciliation: recovered=${recon.recovered} errors=${errors.length} wrapped=${recon.wrappedAround}`);
       }
@@ -1303,10 +1313,32 @@ async function executeConsumerCycle(
         emitEvent('INTERNALIZATION_CONSUMER_COMMIT_FAILED', JSON.stringify({ taskId, error: String(commitErr).slice(0, 300) }));
         logger.warn(`[PD:${logLabel}] Task ${taskId} succeeded but successor proposal failed: ${String(commitErr).slice(0, 200)}`);
       }
+      // PRI-1293 R6: 结构化 successor 事件 — decision 之外的排障字段
+      // (reason/detail/冲突 id 集合/reopened 目标) 必须透出, repair reopen
+      // 失败不得只留下一个模糊 decision 名。
+      const successorTelemetry: Record<string, unknown> = {};
+      if (commitResult) {
+        successorTelemetry.successorDecision = commitResult.decision;
+        if ('reason' in commitResult && typeof commitResult.reason === 'string') {
+          successorTelemetry.successorReason = commitResult.reason;
+        }
+        if ('detail' in commitResult && typeof commitResult.detail === 'string') {
+          successorTelemetry.successorDetail = commitResult.detail;
+        }
+        if ('conflictingSuccessorTaskIds' in commitResult && Array.isArray(commitResult.conflictingSuccessorTaskIds)) {
+          successorTelemetry.successorConflictingTaskIds = [...commitResult.conflictingSuccessorTaskIds];
+        }
+        successorTelemetry.sourceTaskId = 'sourceTaskId' in commitResult ? commitResult.sourceTaskId : taskId;
+        if ('reopenedTaskId' in commitResult && typeof commitResult.reopenedTaskId === 'string') {
+          successorTelemetry.reopenedTaskId = commitResult.reopenedTaskId;
+        }
+      } else {
+        successorTelemetry.successorDecision = 'commit_failed';
+      }
       emitEvent('INTERNALIZATION_CONSUMER_SUCCESS', JSON.stringify({
         taskId,
         status: runResult.status,
-        ...(commitResult ? { successorDecision: commitResult.decision } : { successorDecision: 'commit_failed' }),
+        ...successorTelemetry,
       }));
       logger.info(
         `[PD:${logLabel}] Task ${taskId} succeeded. Successor: ${commitResult ? commitResult.decision : 'commit_failed'}`,

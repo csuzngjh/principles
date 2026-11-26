@@ -35,6 +35,7 @@ interface EnqueueAction {
   successorTaskId?: string;
   reason?: string;
   nextAction?: string;
+  conflictingSuccessorTaskIds?: readonly string[];
 }
 
 interface EnqueueSuccessorsOutput {
@@ -214,6 +215,35 @@ function mapCommitDecisionToAction(
         reason: `source_correction_reopen_failed: ${commitResult.reason}`,
         nextAction: 'Inspect the receipt artificerTaskId lineage; the scribe epoch stays consumable',
       };
+    case 'successor_integrity_conflict':
+      // PRI-1293 R6: 多个持久化后继声明同一 parent/kind/channel — fail-closed
+      // 数据完整性冲突, 绝不折叠为 successor_exists (那会掩盖冲突存在),
+      // 全部冲突 id 必须透出供人工排查。
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `successor_integrity_conflict: ${commitResult.reason} (${commitResult.detail}); multiple persisted successors declare the same parent/kind/channel — nothing was created or reopened`,
+        nextAction: `Inspect the conflicting successor tasks [${commitResult.conflictingSuccessorTaskIds.join(', ')}] (pd runtime internalization list --json); resolve the duplicate-chain integrity conflict manually before re-running`,
+        conflictingSuccessorTaskIds: [...commitResult.conflictingSuccessorTaskIds],
+      };
+    case 'revision_reopen_failed':
+      // PRI-1293 R6: repair 完成后来源 Evaluator reopen 失败 — 真实失败
+      // 类别必须保留, 绝不折叠为 no_successor (那会伪装成正常流程结束)。
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        successorTaskId: commitResult.reopenedTaskId,
+        reason: `revision_reopen_failed: ${commitResult.reason}${commitResult.detail !== undefined ? ` (${commitResult.detail})` : ''}; the source evaluator could not be reopened after repair — the revision wave did not propagate`,
+        nextAction: `Inspect the source evaluator ${commitResult.reopenedTaskId}: its status, lease state and diagnosticJson metadata (pd runtime internalization list --json); repair the blockage, then re-run — reopen is idempotent`,
+      };
+    default: {
+      // 穷尽检查: 新增 CommitNextTaskResult decision 时必须在此获得显式
+      // 映射 — 禁止宽泛 fallback 静默吞掉未处理的决策类型。
+      const exhaustive: never = commitResult;
+      throw new Error(`Unhandled commit decision: ${JSON.stringify(exhaustive)}`);
+    }
   }
 }
 
@@ -329,19 +359,22 @@ async function buildSuccessorIndex(
   return index;
 }
 
-function findSuccessorInIndex(
+function findSuccessorsInIndex(
   index: Map<string, SuccessorIndexEntry>,
   opts: { parentTaskId: string; successorKind: string; channel: string },
-): SuccessorIndexEntry | null {
+): SuccessorIndexEntry[] {
   // PRI-1293 R5: 直查快路径废除 — 确定性 id 命中不校验 parent/kind/channel
   // 时会把异链 occupant 误认作本父子后继 (与 orchestrator 跨链碰撞同源)。
   // 父子扫描是唯一权威, 与 commit 的 findSuccessorByParent 判定条件一致。
+  // PRI-1293 R6: 返回全部匹配 — 多个持久化后继声明同一 parent/kind/channel
+  // 是数据完整性冲突, 预览必须与 confirm 一样 fail-closed, 不得任选其一。
+  const matches: SuccessorIndexEntry[] = [];
   for (const entry of index.values()) {
     if (entry.taskKind === opts.successorKind && entry.parentTaskId === opts.parentTaskId && entry.channel === opts.channel) {
-      return entry;
+      matches.push(entry);
     }
   }
-  return null;
+  return matches;
 }
 
 export async function handleRuntimeInternalizationEnqueueSuccessors(opts: EnqueueSuccessorsOptions): Promise<void> {
@@ -532,7 +565,7 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             skippedCount++;
             continue;
           }
-          const existingSuccessor = findSuccessorInIndex(
+          const successorMatches = findSuccessorsInIndex(
             successorIndex,
             {
               parentTaskId: task.taskId,
@@ -540,6 +573,23 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
               channel: proposalResult.proposal.channel,
             },
           );
+          if (successorMatches.length > 1) {
+            // PRI-1293 R6: 多后继完整性冲突 — 预览与 confirm 同一 fail-closed
+            // 判定: 不报告 successor_exists/would_reopen, 不创建不重开,
+            // 全部冲突 id 透出供人工排查。
+            const conflictIds = successorMatches.map((m) => m.taskId).sort();
+            actions.push({
+              taskId: task.taskId,
+              taskKind: piTask.taskKind,
+              decision: 'skipped',
+              reason: `successor_integrity_conflict: multiple persisted successors declare the same parent/kind/channel (parentTaskId=${task.taskId};kind=${proposalResult.proposal.taskKind};channel=${proposalResult.proposal.channel}); taskIds=[${conflictIds.join(',')}] — nothing would be created or reopened`,
+              nextAction: `Inspect the conflicting successor tasks [${conflictIds.join(', ')}]; resolve the duplicate-chain integrity conflict manually before re-running`,
+              conflictingSuccessorTaskIds: conflictIds,
+            });
+            skippedCount++;
+            continue;
+          }
+          const existingSuccessor: SuccessorIndexEntry | null = successorMatches.length === 1 ? successorMatches[0] ?? null : null;
           if (existingSuccessor) {
             if (!existingSuccessor.hydrated) {
               actions.push({

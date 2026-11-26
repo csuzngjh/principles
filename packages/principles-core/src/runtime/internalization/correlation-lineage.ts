@@ -244,77 +244,6 @@ export async function resolveAuthoritativeCorrelationId(
  * 便捷构造: 以 RuntimeStateManager 为存储的 getTask 绑定。
  * (生产调用方也可直接传 `stateManager.getTask.bind(stateManager)`。)
  */
-/**
- * Upgrade only known historical producer shapes. This helper is intentionally
- * separate from the read-only resolver: each inferred edge is proven from a
- * producer-specific task-id shape plus a unique typed predecessor, then
- * persisted with the existing task-row CAS. There is no generic dependency
- * fallback. Old AdversarialLoop Artificer rounds >1 depend on Scribe for input,
- * but are causally parented by the immediately preceding needs_revision Evaluator.
- */
-export async function resolveAuthoritativeCorrelationIdWithLegacyBackfill(
-  leafTaskRecord: TaskRecord,
-  stateManager: RuntimeStateManager,
-): Promise<CorrelationLineageResolution> {
-  let current = leafTaskRecord;
-  const visited = new Set<string>();
-  for (let depth = 0; depth <= CORRELATION_LINEAGE_MAX_PARENT_EDGES; depth += 1) {
-    if (visited.has(current.taskId)) {
-      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_cycle_at:' + current.taskId };
-    }
-    visited.add(current.taskId);
-    const pi = hydratePITaskRecord(current);
-    if (!pi) return { ok: false, reason: 'missing_correlation_id_lineage', detail: 'invalid_legacy_backfill_metadata:' + current.taskId };
-    if (pi.taskKind === 'dreamer') break;
-
-    const existingParentId = pi.parentTaskId?.trim();
-    if (existingParentId) {
-      const parent = await stateManager.getTask(existingParentId);
-      if (!parent) break; // canonical resolver reports dangling_parent_reference
-      current = parent;
-      continue;
-    }
-    if (depth === CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
-      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_depth_exceeded:' + current.taskId };
-    }
-
-    const inferred = await inferLegacyParentTaskId(current, pi, stateManager);
-    if (!inferred.ok) {
-      return { ok: false, reason: 'legacy_parent_inference_refused', detail: 'task=' + current.taskId + ';taskKind=' + pi.taskKind + ';' + inferred.reason };
-    }
-    if (visited.has(inferred.parentTaskId)) {
-      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_inferred_cycle_at:' + inferred.parentTaskId };
-    }
-    const parent = await stateManager.getTask(inferred.parentTaskId);
-    if (!parent) return { ok: false, reason: 'dangling_parent_reference', detail: 'legacy_inferred_parent_not_found:' + inferred.parentTaskId };
-
-    const merged = mergePITaskMetadata(pi, { parentTaskId: inferred.parentTaskId });
-    const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
-      current.taskId,
-      current.diagnosticJson ?? null,
-      { diagnosticJson: createPITaskDiagnosticJson(merged) },
-      {
-        expectedStatus: current.status,
-        expectedAttemptCount: current.attemptCount,
-        expectedMaxAttempts: current.maxAttempts,
-        expectedLeaseOwner: current.leaseOwner ?? null,
-        expectedLeaseExpiresAt: current.leaseExpiresAt ?? null,
-        expectedLeaseGeneration: current.leaseGeneration ?? 0,
-      },
-    );
-    if (!updated) {
-      const reread = await stateManager.getTask(current.taskId);
-      const rereadPi = reread ? hydratePITaskRecord(reread) : null;
-      if (!reread || rereadPi?.parentTaskId !== inferred.parentTaskId) {
-        return { ok: false, reason: 'legacy_parent_backfill_conflict', detail: 'CAS lost for task=' + current.taskId + ';expectedParent=' + inferred.parentTaskId };
-      }
-    }
-    current = parent;
-  }
-  const refreshedLeaf = await stateManager.getTask(leafTaskRecord.taskId);
-  return resolveAuthoritativeCorrelationId(refreshedLeaf ?? leafTaskRecord, (id: string) => stateManager.getTask(id));
-}
-
 type LegacyParentInference = { ok: true; parentTaskId: string } | { ok: false; reason: string };
 
 function legacyCorrelationCompatible(child: PITaskRecord, parent: PITaskRecord): boolean {
@@ -343,7 +272,7 @@ async function inferLegacyParentTaskId(
 
   // Old repair seeder persisted an explicit sourceEvaluatorTaskId in repairPayload.
   if (pi.taskKind === 'artificer' && pi.repairPayload) {
-    const sourceEvaluatorTaskId = pi.repairPayload.sourceEvaluatorTaskId;
+    const {sourceEvaluatorTaskId} = pi.repairPayload;
     const expectedId = 'artificer-repair-' + sourceEvaluatorTaskId + '-r' + pi.repairPayload.repairIteration;
     if (raw.taskId !== expectedId) return { ok: false, reason: 'repair_task_id_does_not_match_repair_payload' };
     return loadTypedParent(sourceEvaluatorTaskId, 'evaluator');
@@ -380,10 +309,11 @@ async function inferLegacyParentTaskId(
         || priorArtificerPi.channel !== pi.channel || !legacyCorrelationCompatible(candidatePi, priorArtificerPi)) continue;
       candidates.push(candidate);
     }
-    if (candidates.length !== 1) {
+    const chosen = candidates.at(0);
+    if (candidates.length !== 1 || chosen === undefined) {
       return { ok: false, reason: 'previous_round_evaluator_not_unique_or_not_needs_revision:round=' + String(round - 1) + ':matches=' + String(candidates.length) };
     }
-    return { ok: true, parentTaskId: candidates[0]!.taskId };
+    return { ok: true, parentTaskId: chosen.taskId };
   }
 
   // Old AdversarialLoop Evaluator IDs encode the exact Artificer round.
@@ -405,9 +335,13 @@ async function inferLegacyParentTaskId(
 
   // Old RuleHost philosopher/scribe IDs are timestamp-suffixed; the producer
   // passed exactly the causal predecessor as the sole dependency.
+  // 形状一旦匹配, 后续所有证明失败都必须返回具体拒绝原因 — 不得落回
+  // shape-not-recognized (否则已知生产者结构的多依赖任务会被错分为
+  // missing_correlation_id_lineage, 与错误分类契约相悖)。
   const ruleHostStage = /^(.+)-(philosopher|scribe)-([a-z0-9]+)$/.exec(raw.taskId);
   if (ruleHostStage && (pi.taskKind === 'philosopher' || pi.taskKind === 'scribe')
-    && ruleHostStage[2] === pi.taskKind && deps.length === 1) {
+    && ruleHostStage[2] === pi.taskKind) {
+    if (deps.length !== 1) return { ok: false, reason: 'legacy_rulehost_requires_exactly_one_dependency:deps=' + String(deps.length) };
     const parentRaw = await stateManager.getTask(deps[0] ?? '');
     const parentPi = parentRaw ? hydratePITaskRecord(parentRaw) : null;
     if (!parentRaw || !parentPi) return { ok: false, reason: 'legacy_rulehost_parent_missing_or_invalid' };
@@ -420,6 +354,86 @@ async function inferLegacyParentTaskId(
   }
 
   return { ok: false, reason: 'task_id_shape_not_from_a_supported_legacy_producer' };
+}
+
+
+/**
+ * Upgrade only known historical producer shapes. This helper is intentionally
+ * separate from the read-only resolver: each inferred edge is proven from a
+ * producer-specific task-id shape plus a unique typed predecessor, then
+ * persisted with the existing task-row CAS. There is no generic dependency
+ * fallback. Old AdversarialLoop Artificer rounds >1 depend on Scribe for input,
+ * but are causally parented by the immediately preceding needs_revision Evaluator.
+ */
+export async function resolveAuthoritativeCorrelationIdWithLegacyBackfill(
+  leafTaskRecord: TaskRecord,
+  stateManager: RuntimeStateManager,
+): Promise<CorrelationLineageResolution> {
+  let current = leafTaskRecord;
+  const visited = new Set<string>();
+  for (let depth = 0; depth <= CORRELATION_LINEAGE_MAX_PARENT_EDGES; depth += 1) {
+    if (visited.has(current.taskId)) {
+      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_cycle_at:' + current.taskId };
+    }
+    visited.add(current.taskId);
+    const pi = hydratePITaskRecord(current);
+    if (!pi) return { ok: false, reason: 'missing_correlation_id_lineage', detail: 'invalid_legacy_backfill_metadata:' + current.taskId };
+    if (pi.taskKind === 'dreamer') break;
+
+    const existingParentId = pi.parentTaskId?.trim();
+    if (existingParentId) {
+      const parent = await stateManager.getTask(existingParentId);
+      if (!parent) break; // canonical resolver reports dangling_parent_reference
+      current = parent;
+      continue;
+    }
+    if (depth === CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
+      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_depth_exceeded:' + current.taskId };
+    }
+
+    const inferred = await inferLegacyParentTaskId(current, pi, stateManager);
+    if (!inferred.ok) {
+      if (inferred.reason === 'task_id_shape_not_from_a_supported_legacy_producer') {
+        // 不匹配任何已知历史生产者结构 = 该节点根本不是历史生产者任务,
+        // 血缘链到此为止。分类权交还 canonical resolver — 无身份来源的孤儿
+        // 必须保持 missing_correlation_id_lineage (root_not_dreamer /
+        // unrecoverable root), 不得被粗暴归类为 legacy_parent_inference_refused
+        // (该分类专为"已知生产者结构但候选父节点无法证明"保留)。
+        break;
+      }
+      return { ok: false, reason: 'legacy_parent_inference_refused', detail: 'task=' + current.taskId + ';taskKind=' + pi.taskKind + ';' + inferred.reason };
+    }
+    if (visited.has(inferred.parentTaskId)) {
+      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_inferred_cycle_at:' + inferred.parentTaskId };
+    }
+    const parent = await stateManager.getTask(inferred.parentTaskId);
+    if (!parent) return { ok: false, reason: 'dangling_parent_reference', detail: 'legacy_inferred_parent_not_found:' + inferred.parentTaskId };
+
+    const merged = mergePITaskMetadata(pi, { parentTaskId: inferred.parentTaskId });
+    const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      current.taskId,
+      current.diagnosticJson ?? null,
+      { diagnosticJson: createPITaskDiagnosticJson(merged) },
+      {
+        expectedStatus: current.status,
+        expectedAttemptCount: current.attemptCount,
+        expectedMaxAttempts: current.maxAttempts,
+        expectedLeaseOwner: current.leaseOwner ?? null,
+        expectedLeaseExpiresAt: current.leaseExpiresAt ?? null,
+        expectedLeaseGeneration: current.leaseGeneration ?? 0,
+      },
+    );
+    if (!updated) {
+      const reread = await stateManager.getTask(current.taskId);
+      const rereadPi = reread ? hydratePITaskRecord(reread) : null;
+      if (!reread || rereadPi?.parentTaskId !== inferred.parentTaskId) {
+        return { ok: false, reason: 'legacy_parent_backfill_conflict', detail: 'CAS lost for task=' + current.taskId + ';expectedParent=' + inferred.parentTaskId };
+      }
+    }
+    current = parent;
+  }
+  const refreshedLeaf = await stateManager.getTask(leafTaskRecord.taskId);
+  return resolveAuthoritativeCorrelationId(refreshedLeaf ?? leafTaskRecord, (id: string) => stateManager.getTask(id));
 }
 
 export function correlationLineageGetTask(stateManager: RuntimeStateManager): CorrelationLineageGetTask {
