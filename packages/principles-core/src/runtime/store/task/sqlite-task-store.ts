@@ -4,6 +4,7 @@
  * Uses better-sqlite3 transactions for atomic read-check-write operations.
  * Validates every row read with TypeBox Value.Check().
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Value } from '@sinclair/typebox/value';
 import { TaskRecordSchema, type TaskRecord, type PDTaskStatus } from '../../task-status.js';
 import { PDRuntimeError } from '../../error-categories.js';
@@ -66,26 +67,35 @@ function readNullableStringField(
 // across processes.
 const SQLITE_WRITE_TRANSACTION_QUEUE: { current: Promise<void> } = { current: Promise.resolve() };
 
+interface SqliteWriteTransactionContext {
+  active: boolean;
+}
+
 export class SqliteTaskStore implements TaskStore {
-  private transactionDepth = 0;
+  private readonly transactionContext = new AsyncLocalStorage<SqliteWriteTransactionContext>();
 
   constructor(private readonly connection: SqliteConnection) {}
 
   async withWriteTransaction<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.transactionDepth > 0) return fn();
+    const inherited = this.transactionContext.getStore();
+    if (inherited?.active) return fn();
     const run = SQLITE_WRITE_TRANSACTION_QUEUE.current.then(async () => {
       const db = this.connection.getDb();
-      this.transactionDepth += 1;
-      db.prepare('BEGIN IMMEDIATE').run();
+      const context: SqliteWriteTransactionContext = { active: true };
+      let began = false;
       try {
-        const result = await fn();
+        db.prepare('BEGIN IMMEDIATE').run();
+        began = true;
+        const result = await this.transactionContext.run(context, fn);
         db.prepare('COMMIT').run();
         return result;
       } catch (error) {
-        try { db.prepare('ROLLBACK').run(); } catch { /* rollback best effort */ }
+        if (began) {
+          try { db.prepare('ROLLBACK').run(); } catch { /* rollback best effort */ }
+        }
         throw error;
       } finally {
-        this.transactionDepth -= 1;
+        context.active = false;
       }
     });
     SQLITE_WRITE_TRANSACTION_QUEUE.current = run.then(() => undefined, () => undefined);

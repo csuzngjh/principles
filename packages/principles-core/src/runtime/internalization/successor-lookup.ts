@@ -178,40 +178,47 @@ export async function lookupSuccessorByParent(
     if (classification === 'malformed') malformedCandidates.push(task);
   }
 
-  if (matches.length === 0 && malformedCandidates.length === 0) {
-    // The broad second read intentionally does not push down piChannel: rows
-    // whose channel key is missing/corrupt would otherwise be invisible before
-    // the malformed-metadata fail-closed judgment can run.
-    const legacyCandidates = await stateManager.listTasks({
-      statuses: [...PD_TASK_STATUSES],
-      taskKind: query.successorKind,
-    });
+  // The broad second read intentionally does not push down piChannel: rows
+  // whose channel key is missing/corrupt would otherwise be invisible before
+  // the malformed-metadata fail-closed judgment can run. It must run even
+  // when the exact read already found a valid successor: a same-parent row
+  // with a missing channel (or same-channel row with a missing parent edge)
+  // is still evidence of a potentially duplicated logical successor and must
+  // not be hidden merely because one well-formed row exists.
+  const legacyCandidates = await stateManager.listTasks({
+    statuses: [...PD_TASK_STATUSES],
+    taskKind: query.successorKind,
+  });
 
-    // A reconciliation/backfill writer can persist a missing parent edge
-    // between the exact first read and this broader second read. Re-judge
-    // exact identity on this second snapshot first; otherwise that row would
-    // be skipped as "already parented" and neither exact nor inferred.
-    for (const task of legacyCandidates) {
-      const classification = exactClassification(task, query);
-      if (classification === 'valid') matches.push(task);
-      if (classification === 'malformed') malformedCandidates.push(task);
+  // A reconciliation/backfill writer can persist a missing parent edge
+  // between the exact first read and this broader second read. Re-judge
+  // exact identity on this second snapshot first; otherwise that row would
+  // be skipped as "already parented" and neither exact nor inferred.
+  const seenExact = new Set(matches.concat(malformedCandidates).map((task) => task.taskId));
+  for (const task of legacyCandidates) {
+    if (seenExact.has(task.taskId)) continue;
+    const classification = exactClassification(task, query);
+    if (classification === 'valid') matches.push(task);
+    if (classification === 'malformed') malformedCandidates.push(task);
+  }
+
+  const dedupMalformed = new Set(malformedCandidates.map((task) => task.taskId));
+  for (const task of legacyCandidates) {
+    if (task.taskKind !== query.successorKind) continue;
+    if (malformedCandidateIsRelevant(task, query) && !dedupMalformed.has(task.taskId)) {
+      malformedCandidates.push(task);
+      dedupMalformed.add(task.taskId);
     }
+  }
 
-    if (matches.length === 0 && malformedCandidates.length === 0) {
-      const dedupMalformed = new Set<string>();
-      for (const task of legacyCandidates) {
-        if (task.taskKind !== query.successorKind) continue;
-        if (malformedCandidateIsRelevant(task, query) && !dedupMalformed.has(task.taskId)) {
-          malformedCandidates.push(task);
-          dedupMalformed.add(task.taskId);
-          continue;
-        }
-        const piTask = hydratePITaskRecord(task);
-        if (!piTask || piTask.parentTaskId || piTask.channel !== query.channel) continue;
-        const inferred = await inferLegacyParentTaskId(task, piTask, stateManager);
-        if (inferred.ok && inferred.parentTaskId === query.parentTaskId) {
-          matches.push(task);
-        }
+  if (matches.length === 0 && malformedCandidates.length === 0) {
+    for (const task of legacyCandidates) {
+      if (task.taskKind !== query.successorKind) continue;
+      const piTask = hydratePITaskRecord(task);
+      if (!piTask || piTask.parentTaskId || piTask.channel !== query.channel) continue;
+      const inferred = await inferLegacyParentTaskId(task, piTask, stateManager);
+      if (inferred.ok && inferred.parentTaskId === query.parentTaskId) {
+        matches.push(task);
       }
     }
   }

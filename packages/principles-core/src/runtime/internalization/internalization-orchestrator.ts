@@ -650,7 +650,199 @@ export class InternalizationOrchestrator {
     if (transition.kind === 'TERMINAL_REJECT') {
       return { decision: 'blocked_by_rejection', sourceTaskId: taskId, reason: transition.reason, runnerDecision: piTask.runnerDecision ?? 'unknown' };
     }
+    if (transition.kind === 'REOPEN_SOURCE_EVALUATOR' && piTask.repairPayload) {
+      return this.previewRepairReopenTransition(rawTask, piTask, transition.reason);
+    }
+    if (piTask.status !== 'succeeded') {
+      return { decision: 'source_not_succeeded', taskId, status: piTask.status };
+    }
+    if (rawTask.taskKind === 'scribe' && piTask.sourceCorrectionReceipt !== undefined
+      && piTask.sourceCorrectionCauseId !== undefined
+      && piTask.revisionCauseId === piTask.sourceCorrectionCauseId) {
+      if (piTask.sourceCorrectionReceipt.reopenOutcome !== undefined) {
+        return {
+          decision: 'source_correction_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: piTask.sourceCorrectionReceipt.artificerTaskId,
+          reason: `source_correction_outcome_recorded:${piTask.sourceCorrectionReceipt.reopenOutcome.kind}`,
+        };
+      }
+      return this.previewSourceCorrectionReopen(taskId, piTask);
+    }
     return null;
+  }
+
+  /**
+   * Read-only projection of the repair-completion branch. It performs the
+   * same identity, causal-idempotency, superseded-repair, target-state and
+   * lineage judgments as commit, but never backfills lineage metadata and
+   * never reopens the source evaluator.
+   */
+  private async previewRepairReopenTransition(
+    rawTask: TaskRecord,
+    piTask: PITaskRecord,
+    transitionReason: string,
+  ): Promise<CommitNextTaskResult> {
+    const { taskId } = rawTask;
+    const payload = piTask.repairPayload;
+    if (!payload) return { decision: 'invalid_task_metadata', taskId, reason: 'repair_payload_missing_for_reopen_transition' };
+    const repairIdentity = await verifyRepairTaskIdentity(
+      rawTask,
+      payload.sourceEvaluatorTaskId,
+      payload.repairIteration,
+      this.stateManager,
+    );
+    if (!repairIdentity.ok) {
+      return {
+        decision: 'lineage_refused',
+        sourceTaskId: taskId,
+        reason: repairIdentity.reason,
+        detail: `repair_identity_verification_failed:${repairIdentity.detail} — source evaluator NOT reopened, zero writes`,
+      };
+    }
+
+    const causeId = buildRepairRevisionCauseId(piTask);
+    const srcRaw = await this.stateManager.getTask(payload.sourceEvaluatorTaskId);
+    const srcPi = srcRaw ? hydratePITaskRecord(srcRaw) : null;
+    if (srcPi && hasConsumedRevisionCause(srcPi, causeId)) {
+      return {
+        decision: 'revision_reopen_noop',
+        sourceTaskId: taskId,
+        reopenedTaskId: payload.sourceEvaluatorTaskId,
+        reason: 'revision_cause_already_materialized',
+      };
+    }
+    if (srcPi && srcRaw) {
+      for (const depId of srcPi.dependencyTaskIds) {
+        if (depId === taskId) continue;
+        const dep = await this.stateManager.getTask(depId);
+        if (!dep || dep.taskKind !== 'artificer') continue;
+        const depPi = hydratePITaskRecord(dep);
+        if (
+          depPi?.repairPayload
+          && depPi.repairPayload.sourceEvaluatorTaskId === payload.sourceEvaluatorTaskId
+          && typeof depPi.repairPayload.repairIteration === 'number'
+          && depPi.repairPayload.repairIteration >= payload.repairIteration
+        ) {
+          return {
+            decision: 'revision_reopen_noop',
+            sourceTaskId: taskId,
+            reopenedTaskId: payload.sourceEvaluatorTaskId,
+            reason: 'stale_repair_transition_superseded',
+          };
+        }
+        break;
+      }
+    }
+
+    if (!srcRaw) {
+      return {
+        decision: 'revision_reopen_failed',
+        sourceTaskId: taskId,
+        reopenedTaskId: payload.sourceEvaluatorTaskId,
+        reason: 'task_not_found',
+      };
+    }
+    if (!srcPi) {
+      return {
+        decision: 'invalid_task_metadata',
+        taskId: payload.sourceEvaluatorTaskId,
+        reason: 'repair_evaluator_reopen_invalid_task_metadata',
+      };
+    }
+    if (srcRaw.status === 'leased') {
+      return {
+        decision: 'concurrent_modification',
+        sourceTaskId: taskId,
+        reopenedTaskId: payload.sourceEvaluatorTaskId,
+        detail: `task_leased_during_lineage_validation:${payload.sourceEvaluatorTaskId}:owner=${srcRaw.leaseOwner ?? 'unknown'} — reopen NOT applied, concurrent lease untouched`,
+      };
+    }
+    if (srcRaw.status !== 'pending' && srcRaw.status !== 'retry_wait'
+      && srcRaw.status !== 'succeeded' && srcRaw.status !== 'needs_human_review') {
+      return {
+        decision: 'revision_reopen_failed',
+        sourceTaskId: taskId,
+        reopenedTaskId: payload.sourceEvaluatorTaskId,
+        reason: `task_in_flight_${srcRaw.status}`,
+      };
+    }
+    if (isPeerRunnerKind(srcRaw.taskKind)) {
+      const lineage = await planLegacyLineageResolution(srcRaw, this.stateManager);
+      if (!lineage.ok) {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: lineage.reason,
+          detail: lineage.detail,
+        };
+      }
+    }
+    return {
+      decision: 'revision_reopened',
+      sourceTaskId: taskId,
+      reopenedTaskId: payload.sourceEvaluatorTaskId,
+      reason: transitionReason,
+    };
+  }
+
+  /**
+   * Read-only projection of source-correction targeted reopen. The confirm
+   * path additionally records receipt.reopenOutcome and performs the CAS;
+   * every business guard classification is mirrored here without either write.
+   */
+  private async previewSourceCorrectionReopen(
+    scribeTaskId: string,
+    scribePi: PITaskRecord,
+  ): Promise<CommitNextTaskResult> {
+    const receipt: SourceCorrectionReceiptV1 | undefined = scribePi.sourceCorrectionReceipt;
+    if (receipt === undefined) {
+      return { decision: 'invalid_task_metadata', taskId: scribeTaskId, reason: 'source_correction_receipt_missing' };
+    }
+    const causeId = scribePi.sourceCorrectionCauseId
+      ?? `rule-source-correction:${receipt.candidateId}:${receipt.bindingRevision}`;
+    const { artificerTaskId } = receipt;
+    const artificerTask = await this.stateManager.getTask(artificerTaskId);
+    if (!artificerTask) {
+      return { decision: 'source_correction_reopen_failed', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_task_missing' };
+    }
+    const artificerPi = hydratePITaskRecord(artificerTask);
+    if (!artificerPi) {
+      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_metadata_invalid' };
+    }
+    if (hasConsumedRevisionCause(artificerPi, causeId)) {
+      return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'source_correction_cause_already_materialized' };
+    }
+    if (artificerTask.status === 'pending' || artificerTask.status === 'retry_wait') {
+      return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: `artificer_in_flight_${artificerTask.status}` };
+    }
+    if (artificerTask.status !== 'needs_human_review') {
+      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: `artificer_status_${artificerTask.status}` };
+    }
+    const stopReasonCode = artificerPi.humanReviewContext?.reasonCode ?? '';
+    if (stopReasonCode !== receipt.expectedStopReasonCode) {
+      return {
+        decision: 'source_correction_reopen_conflict',
+        sourceTaskId: scribeTaskId,
+        reopenedTaskId: artificerTaskId,
+        reason: `stop_reason_drifted:${stopReasonCode || 'none'}!=${receipt.expectedStopReasonCode}`,
+      };
+    }
+    const lineage = await planLegacyLineageResolution(artificerTask, this.stateManager);
+    if (!lineage.ok) {
+      return {
+        decision: 'source_correction_reopen_conflict',
+        sourceTaskId: scribeTaskId,
+        reopenedTaskId: artificerTaskId,
+        reason: `lineage_refused:${lineage.reason}`,
+      };
+    }
+    return {
+      decision: 'source_correction_reopened',
+      sourceTaskId: scribeTaskId,
+      reopenedTaskId: artificerTaskId,
+      reason: 'original_artificer_reopened_on_new_scribe_epoch',
+    };
   }
 
   // ── commitNextTaskProposal ──────────────────────────────────────────────

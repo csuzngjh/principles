@@ -28,19 +28,28 @@ function piMetadata(meta: {
   dependencyTaskIds?: string[];
   runnerDecision?: string;
   revisionCount?: number;
-}): string {
+} & Record<string, unknown>): string {
+  const {
+    parentTaskId,
+    correlationId,
+    dependencyTaskIds,
+    runnerDecision,
+    revisionCount,
+    ...extra
+  } = meta;
   return JSON.stringify({
     [PI_METADATA_KEY]: {
-      dependencyTaskIds: meta.dependencyTaskIds ?? [],
+      dependencyTaskIds: dependencyTaskIds ?? [],
       channel: 'prompt',
       pipelineMode: 'full_chain',
       timeoutMs: 300000,
       inputArtifactRefs: [],
       outputArtifactRefs: [],
-      ...(meta.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
-      ...(meta.correlationId !== undefined ? { correlationId: meta.correlationId } : {}),
-      ...(meta.runnerDecision !== undefined ? { runnerDecision: meta.runnerDecision } : {}),
-      ...(meta.revisionCount !== undefined ? { revisionCount: meta.revisionCount } : {}),
+      ...(parentTaskId !== undefined ? { parentTaskId } : {}),
+      ...(correlationId !== undefined ? { correlationId } : {}),
+      ...(runnerDecision !== undefined ? { runnerDecision } : {}),
+      ...(revisionCount !== undefined ? { revisionCount } : {}),
+      ...extra,
     },
   });
 }
@@ -262,4 +271,216 @@ describe('enqueue-successors real sqlite successor integrity integration', () =>
     expect(after.count).toBe(before.count);
     expect(after.rows).toEqual(before.rows);
   });
+
+  it('needs_revision evaluator blocks before lineage in both dry-run and confirm', async () => {
+    const writer = new RuntimeStateManager({ workspaceDir });
+    await writer.initialize();
+    try {
+      await createTask(writer, 'evaluator-unprovable-needs-revision', 'evaluator', 'succeeded', {
+        runnerDecision: 'needs_revision',
+      });
+    } finally {
+      await writer.close();
+    }
+    const before = await snapshotTasks();
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, dryRun: true, json: true });
+    const dryAction = actionFor(readOutput(0), 'evaluator-unprovable-needs-revision');
+    expect(dryAction.decision).toBe('skipped');
+    expect(String(dryAction.reason)).toContain('blocked_by_revision');
+    expect(String(dryAction.reason)).not.toContain('lineage_refused');
+    expect(await snapshotTasks()).toEqual(before);
+
+    consoleLogSpy.mockClear();
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, confirm: true, json: true });
+    const confirmAction = actionFor(readOutput(0), 'evaluator-unprovable-needs-revision');
+    expect(confirmAction.decision).toBe(dryAction.decision);
+    expect(confirmAction.reason).toBe(dryAction.reason);
+    expect(await snapshotTasks()).toEqual(before);
+  });
+
+  it('completed repair artificer previews and performs the same source evaluator reopen', async () => {
+    const writer = new RuntimeStateManager({ workspaceDir });
+    await writer.initialize();
+    let evaluatorId = '';
+    let repairId = '';
+    try {
+      const chain = await seedFullChain(writer);
+      evaluatorId = 'evaluator-repair-source';
+      repairId = 'artificer-repair-' + evaluatorId + '-r1';
+      await createTask(writer, evaluatorId, 'evaluator', 'succeeded', {
+        parentTaskId: chain.artificer,
+        correlationId: CANDIDATE_ID,
+        dependencyTaskIds: [chain.artificer],
+        runnerDecision: 'needs_revision',
+      });
+      await createTask(writer, repairId, 'artificer', 'succeeded', {
+        parentTaskId: evaluatorId,
+        correlationId: CANDIDATE_ID,
+        dependencyTaskIds: [chain.scribe],
+        repairPayload: {
+          requiredChanges: ['fix matcher'],
+          concerns: ['adversarial case failed'],
+          previousScore: 0.4,
+          repairIteration: 1,
+          sourceArtificerArtifactId: 'pi-art-source-artificer',
+          sourceEvaluatorTaskId: evaluatorId,
+          sourceEvaluatorRunId: 'run-' + evaluatorId,
+        },
+      });
+    } finally {
+      await writer.close();
+    }
+    const before = await snapshotTasks();
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, dryRun: true, json: true });
+    const dryAction = actionFor(readOutput(0), repairId);
+    expect(dryAction.decision).toBe('would_reopen_successor');
+    expect(dryAction.successorTaskId).toBe(evaluatorId);
+    expect(String(dryAction.reason)).toContain('revision_reopened');
+    expect(await snapshotTasks()).toEqual(before);
+
+    consoleLogSpy.mockClear();
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, confirm: true, json: true });
+    const confirmAction = actionFor(readOutput(0), repairId);
+    expect(confirmAction.decision).toBe('successor_created');
+    expect(confirmAction.successorTaskId).toBe(evaluatorId);
+
+    const reader = new RuntimeStateManager({ workspaceDir, readonly: true });
+    await reader.initialize();
+    try {
+      const reopened = await reader.getTask(evaluatorId);
+      expect(reopened?.status).toBe('pending');
+      expect(reopened?.attemptCount).toBe(0);
+    } finally {
+      await reader.close();
+    }
+  });
+
+  async function seedSourceCorrectionChain(options: { outcomeRecorded: boolean }): Promise<{ scribe: string; artificer: string; causeId: string }> {
+    const writer = new RuntimeStateManager({ workspaceDir });
+    await writer.initialize();
+    try {
+      const dreamer = 'sc-dreamer';
+      const philosopher = 'sc-philosopher';
+      const scribe = 'sc-scribe';
+      const artificer = 'sc-artificer';
+      const causeId = 'rule-source-correction:' + CANDIDATE_ID + ':1';
+      await createTask(writer, dreamer, 'dreamer', 'succeeded', { correlationId: CANDIDATE_ID }, CANDIDATE_ID);
+      await createTask(writer, philosopher, 'philosopher', 'succeeded', { parentTaskId: dreamer, correlationId: CANDIDATE_ID });
+      await createTask(writer, scribe, 'scribe', 'succeeded', {
+        parentTaskId: philosopher,
+        correlationId: CANDIDATE_ID,
+        revisionCount: 1,
+        revisionCauseId: causeId,
+        sourceCorrectionCauseId: causeId,
+        sourceCorrectionReceipt: {
+          version: 1,
+          candidateId: CANDIDATE_ID,
+          scribeTaskId: scribe,
+          artificerTaskId: artificer,
+          sourceArtifactId: 'pi-art-scribe-source',
+          sourceArtifactDigest: 'sha256:' + 'a'.repeat(64),
+          bindingRevision: 1,
+          decisionId: 'decision-1',
+          expectedStopReasonCode: 'source_material_authorization_denied',
+          reason: 'owner corrected source material',
+          actor: 'owner',
+          requestId: 'request-1',
+          consumedAt: '2026-01-01T00:00:00.000Z',
+          status: 'consumed',
+          ...(options.outcomeRecorded ? { reopenOutcome: { kind: 'reopened', recordedAt: '2026-01-01T00:00:01.000Z' } } : {}),
+        },
+      });
+      await createTask(writer, artificer, 'artificer', 'needs_human_review', {
+        parentTaskId: scribe,
+        correlationId: CANDIDATE_ID,
+        dependencyTaskIds: [scribe],
+        humanReviewContext: {
+          reasonCode: 'source_material_authorization_denied',
+          sourceRunId: 'run-sc-artificer',
+          revisionEpoch: 0,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      });
+      return { scribe, artificer, causeId };
+    } finally {
+      await writer.close();
+    }
+  }
+
+  it('source-correction scribe previews and performs the same targeted artificer reopen', async () => {
+    const seeded = await seedSourceCorrectionChain({ outcomeRecorded: false });
+    const before = await snapshotTasks();
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, dryRun: true, json: true });
+    const dryAction = actionFor(readOutput(0), seeded.scribe);
+    expect(dryAction.decision).toBe('would_reopen_successor');
+    expect(dryAction.successorTaskId).toBe(seeded.artificer);
+    expect(String(dryAction.reason)).toContain('source_correction_reopened');
+    expect(await snapshotTasks()).toEqual(before);
+
+    consoleLogSpy.mockClear();
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, confirm: true, json: true });
+    const confirmAction = actionFor(readOutput(0), seeded.scribe);
+    expect(confirmAction.decision).toBe('successor_created');
+    expect(confirmAction.successorTaskId).toBe(seeded.artificer);
+
+    const reader = new RuntimeStateManager({ workspaceDir, readonly: true });
+    await reader.initialize();
+    try {
+      const reopened = await reader.getTask(seeded.artificer);
+      expect(reopened?.status).toBe('pending');
+      const scribe = await reader.getTask(seeded.scribe);
+      expect(String(scribe?.diagnosticJson)).toContain('reopened');
+    } finally {
+      await reader.close();
+    }
+  });
+
+  it('source-correction idempotent replay is the same no-op in dry-run and confirm with zero writes', async () => {
+    const seeded = await seedSourceCorrectionChain({ outcomeRecorded: true });
+    const before = await snapshotTasks();
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, dryRun: true, json: true });
+    const dryAction = actionFor(readOutput(0), seeded.scribe);
+    expect(dryAction.decision).toBe('skipped');
+    expect(String(dryAction.reason)).toContain('source_correction_reopen_noop');
+    expect(await snapshotTasks()).toEqual(before);
+
+    consoleLogSpy.mockClear();
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, confirm: true, json: true });
+    const confirmAction = actionFor(readOutput(0), seeded.scribe);
+    expect(confirmAction.decision).toBe(dryAction.decision);
+    expect(confirmAction.reason).toBe(dryAction.reason);
+    expect(await snapshotTasks()).toEqual(before);
+  });
+
+  it('normal artificer to evaluator creation keeps the same positive business decision in dry-run and confirm', async () => {
+    const writer = new RuntimeStateManager({ workspaceDir });
+    await writer.initialize();
+    let artificer = '';
+    try {
+      artificer = (await seedFullChain(writer)).artificer;
+    } finally {
+      await writer.close();
+    }
+    const before = await snapshotTasks();
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, dryRun: true, json: true });
+    const dryAction = actionFor(readOutput(0), artificer);
+    expect(dryAction.decision).toBe('would_create_successor');
+    expect(dryAction.successorKind).toBe('evaluator');
+    expect(await snapshotTasks()).toEqual(before);
+
+    consoleLogSpy.mockClear();
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: workspaceDir, confirm: true, json: true });
+    const confirmAction = actionFor(readOutput(0), artificer);
+    expect(confirmAction.decision).toBe('successor_created');
+    expect(confirmAction.successorKind).toBe('evaluator');
+
+    const after = await snapshotTasks();
+    expect(after.count).toBe(before.count + 1);
+  });
+
 });

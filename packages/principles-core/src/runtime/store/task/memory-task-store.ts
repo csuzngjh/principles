@@ -1,6 +1,7 @@
 /**
  * TaskStore — in-memory test double using a Map.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { TaskRecord } from '../../task-status.js';
 import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-store.js';
 
@@ -54,19 +55,24 @@ function readPIMetadataValue(diagnosticJson: string | null | undefined, field: '
   }
 }
 
+interface MemoryWriteTransactionContext {
+  active: boolean;
+}
+
 export class MemoryTaskStore implements TaskStore {
   private readonly tasks = new Map<string, TaskRecord>();
   private transactionQueue: Promise<void> = Promise.resolve();
-  private transactionDepth = 0;
+  private readonly transactionContext = new AsyncLocalStorage<MemoryWriteTransactionContext>();
 
   async withWriteTransaction<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.transactionDepth > 0) return fn();
+    const inherited = this.transactionContext.getStore();
+    if (inherited?.active) return fn();
     const run = this.transactionQueue.then(async () => {
-      this.transactionDepth += 1;
+      const context: MemoryWriteTransactionContext = { active: true };
       try {
-        return await fn();
+        return await this.transactionContext.run(context, fn);
       } finally {
-        this.transactionDepth -= 1;
+        context.active = false;
       }
     });
     this.transactionQueue = run.then(() => undefined, () => undefined);

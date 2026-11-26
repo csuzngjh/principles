@@ -447,6 +447,26 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
         // 走同一推理路径 (同一 inferLegacyParentTaskId + canonical overlay
         // 终验), 消除"dry-run 拒绝而 confirm 成功"的分叉; planner 不写库,
         // dry-run 零写入不变量保持。
+        const transitionGate = await orchestrator.previewNextTaskTransitionGate(task.taskId);
+        if (transitionGate !== null) {
+          if (transitionGate.decision === 'revision_reopened' || transitionGate.decision === 'source_correction_reopened') {
+            actions.push({
+              taskId: task.taskId,
+              taskKind: piTask.taskKind,
+              decision: 'would_reopen_successor',
+              successorKind: transitionGate.decision === 'revision_reopened' ? 'evaluator' : 'artificer',
+              successorTaskId: transitionGate.reopenedTaskId,
+              reason: `${transitionGate.decision}: ${transitionGate.reason}; confirm would reopen this task — dry-run wrote nothing`,
+            });
+            createdCount++;
+          } else {
+            const gateAction = mapCommitDecisionToAction(transitionGate);
+            gateAction.taskKind = piTask.taskKind;
+            actions.push(gateAction);
+            skippedCount++;
+          }
+          continue;
+        }
         let peerLineageParentEdgeCount: number | null = null;
         if (isPeerRunnerKind(piTask.taskKind)) {
           const lineage: LegacyLineagePlan = await planLegacyLineageResolution(task, stateManager);
@@ -463,14 +483,6 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             continue;
           }
           peerLineageParentEdgeCount = lineage.parentEdgeCount;
-        }
-        const transitionGate = await orchestrator.previewNextTaskTransitionGate(task.taskId);
-        if (transitionGate !== null) {
-          const gateAction = mapCommitDecisionToAction(transitionGate);
-          gateAction.taskKind = piTask.taskKind;
-          actions.push(gateAction);
-          skippedCount++;
-          continue;
         }
         const proposalResult = await orchestrator.proposeNextTask(task.taskId).catch((proposeErr: unknown) => {
           const proposeMessage = proposeErr instanceof Error ? proposeErr.message : String(proposeErr);
