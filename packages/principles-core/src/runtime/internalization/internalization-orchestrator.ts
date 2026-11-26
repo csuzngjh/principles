@@ -26,7 +26,6 @@ import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccesso
 import {
   resolveAuthoritativeCorrelationId,
   resolveAuthoritativeCorrelationIdWithLegacyBackfill,
-  correlationLineageGetTask,
   CORRELATION_LINEAGE_MAX_PARENT_EDGES,
   type CorrelationLineageGetTask,
   type CorrelationLineageResolution,
@@ -1100,7 +1099,7 @@ export class InternalizationOrchestrator {
         }
         if (rescanned.length === 1) {
           return { decision: 'successor_exists', sourceTaskId: taskId,
-            successorTaskId: rescanned[0]!.taskId, successorKind: proposal.taskKind };
+            successorTaskId: rescanned.at(0)?.taskId ?? "", successorKind: proposal.taskKind };
         }
         // occupant 不可解析 = 损坏行 — 它可能是本链被腐蚀的后继也可能是异链
         // 残骸, 无法证明任一归属。fallback 创建会复制一条逻辑后继而腐蚀行
