@@ -25,6 +25,7 @@ import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccesso
 // 不入 barrel — 跨包消费方经 InternalizationOrchestrator 静态只读包装访问)。
 import {
   resolveAuthoritativeCorrelationId,
+  resolveAuthoritativeCorrelationIdWithLegacyBackfill,
   correlationLineageGetTask,
   CORRELATION_LINEAGE_MAX_PARENT_EDGES,
   type CorrelationLineageGetTask,
@@ -179,7 +180,9 @@ export type CommitNextTaskResult =
   /** PRI-1293 R3: 级联 reopen CAS 并发落败 — 修订波未传播, 可重试, 绝不伪装成幂等态 */
   | { decision: 'concurrent_modification'; sourceTaskId: string; reopenedTaskId: string; detail: string }
   /** PRI-1293 R5: 派生 id 与父派生 fallback id 均被异链占用 — fail-closed, 绝不伪装幂等 */
-  | { decision: 'successor_id_conflict'; sourceTaskId: string; reason: string; detail?: string };
+  | { decision: 'successor_id_conflict'; sourceTaskId: string; reason: string; detail?: string }
+  | { decision: 'successor_integrity_conflict'; sourceTaskId: string; reason: string; detail: string; conflictingSuccessorTaskIds: string[] }
+  | { decision: 'revision_reopen_failed'; sourceTaskId: string; reopenedTaskId: string; reason: string; detail?: string };
 
 // ── Constructor Options ───────────────────────────────────────────────────────
 
@@ -240,6 +243,14 @@ export class InternalizationOrchestrator {
     getTask: CorrelationLineageGetTask,
   ): Promise<CorrelationLineageResolution> {
     return resolveAuthoritativeCorrelationId(leafTaskRecord, getTask);
+  }
+
+  /** One-time CAS backfill for exact legacy producer shapes, then the same lineage authority. */
+  static resolveAuthoritativeCorrelationIdWithLegacyBackfill(
+    leafTaskRecord: Parameters<typeof resolveAuthoritativeCorrelationId>[0],
+    stateManager: RuntimeStateManager,
+  ): Promise<CorrelationLineageResolution> {
+    return resolveAuthoritativeCorrelationIdWithLegacyBackfill(leafTaskRecord, stateManager);
   }
 
   // ── wakeOnce ──────────────────────────────────────────────────────────────
@@ -738,9 +749,23 @@ export class InternalizationOrchestrator {
         revisionCauseId: causeId,
       });
       if (!reopened.ok) {
-        // reopen 失败 (evaluator 缺失/状态不可 reopen) — 不 seed 正常后继,
-        // 结构化返回让 host 层观测 (rc-9)。
-        return { decision: 'no_successor', sourceTaskId: taskId, reason: `evaluator_reopen_failed:${reopened.reason}` };
+        // Repair 已成功但来源 Evaluator reopen 失败不是正常终点；保留真实拒绝类别。
+        if (reopened.reason.startsWith('lineage_refused:')) {
+          return { decision: 'lineage_refused', sourceTaskId: taskId,
+            reason: reopened.reason.slice('lineage_refused:'.length), detail: reopened.detail ?? reopened.reason };
+        }
+        if (reopened.reason === 'concurrent_modification') {
+          return { decision: 'concurrent_modification', sourceTaskId: taskId,
+            reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+            detail: reopened.detail ?? 'repair_evaluator_reopen_cas_conflict:' + piTask.repairPayload.sourceEvaluatorTaskId };
+        }
+        if (reopened.reason === 'invalid_task_metadata') {
+          return { decision: 'invalid_task_metadata', taskId: piTask.repairPayload.sourceEvaluatorTaskId,
+            reason: 'repair_evaluator_reopen_invalid_task_metadata' };
+        }
+        return { decision: 'revision_reopen_failed', sourceTaskId: taskId,
+          reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId, reason: reopened.reason,
+          ...(reopened.detail !== undefined ? { detail: reopened.detail } : {}) };
       }
       // A (crash window): 同 causeId 重放 = 真 no-op — 单独 decision 使
       // reconciliation 不把它计为"恢复" (already materialized)。
@@ -808,7 +833,7 @@ export class InternalizationOrchestrator {
     // correlationId ?? stripTrailingChannel), 不漂移在途历史链的确定性去重。
     let authoritativeCorrelation: Extract<CorrelationLineageResolution, { ok: true }> | null = null;
     if (isPeerRunnerKind(piTask.taskKind)) {
-      const lineage = await resolveAuthoritativeCorrelationId(rawTask, correlationLineageGetTask(this.stateManager));
+      const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, this.stateManager);
       if (!lineage.ok) {
         return {
           decision: 'lineage_refused',
@@ -868,8 +893,15 @@ export class InternalizationOrchestrator {
     // 与本队列链相同, 直查命中异链任务, 级联重开错链的后继并替换其依赖。
     // 扫描按 (parentTaskId, kind, channel) 匹配, 异链 occupant 自然不命中;
     // id 占用冲突在创建路径处理 (fallback 父派生 id + UNIQUE 竞态重扫)。
-    const scannedSuccessor = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
-    const existingSuccessorCandidate = scannedSuccessor;
+    const scannedSuccessors = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
+    if (scannedSuccessors.length > 1) {
+      const conflictingSuccessorTaskIds = scannedSuccessors.map((candidate) => candidate.taskId);
+      return { decision: 'successor_integrity_conflict', sourceTaskId: taskId,
+        reason: 'multiple_successors_for_parent',
+        detail: 'parentTaskId=' + taskId + ';successorKind=' + proposal.taskKind + ';channel=' + proposal.channel + ';taskIds=[' + conflictingSuccessorTaskIds.join(',') + ']',
+        conflictingSuccessorTaskIds };
+    }
+    const existingSuccessorCandidate = scannedSuccessors[0] ?? null;
     // PRI-1293 R5: 级联判定经共享只读 planner (revision-reopen.ts) — commit
     // 与 dry-run 预览消费同一判定, 预览不再把"将重开"误报为 successor_exists。
     const scannedSuccPi = existingSuccessorCandidate !== null ? hydratePITaskRecord(existingSuccessorCandidate) : null;
@@ -1059,13 +1091,16 @@ export class InternalizationOrchestrator {
         // successor_exists 收敛语义正确; 既有终态后继早在首个扫描即命中,
         // 不会到达此处。
         const rescanned = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
-        if (rescanned) {
-          return {
-            decision: 'successor_exists',
-            sourceTaskId: taskId,
-            successorTaskId: rescanned.taskId,
-            successorKind: proposal.taskKind,
-          };
+        if (rescanned.length > 1) {
+          const conflictingSuccessorTaskIds = rescanned.map((candidate) => candidate.taskId);
+          return { decision: 'successor_integrity_conflict', sourceTaskId: taskId,
+            reason: 'multiple_successors_for_parent_after_unique_conflict',
+            detail: 'parentTaskId=' + taskId + ';successorKind=' + proposal.taskKind + ';channel=' + proposal.channel + ';taskIds=[' + conflictingSuccessorTaskIds.join(',') + ']',
+            conflictingSuccessorTaskIds };
+        }
+        if (rescanned.length === 1) {
+          return { decision: 'successor_exists', sourceTaskId: taskId,
+            successorTaskId: rescanned[0]!.taskId, successorKind: proposal.taskKind };
         }
         // occupant 不可解析 = 损坏行 — 它可能是本链被腐蚀的后继也可能是异链
         // 残骸, 无法证明任一归属。fallback 创建会复制一条逻辑后继而腐蚀行
@@ -1218,7 +1253,7 @@ export class InternalizationOrchestrator {
     recovered: number;
     alreadyMaterialized: number;
     blocked: number;
-    outcomes: { taskId: string; decision: string }[];
+    outcomes: { taskId: string; decision: string; reason?: string; detail?: string; conflictingSuccessorTaskIds?: string[] }[];
     /** 本周期后的游标 — caller 必须持久化 (A3 restart 语义) */
     nextCursor: { lastUpdatedAt: string; lastTaskId: string };
     /** true = 已扫到尾部,caller 应将游标重置回开头 (wrap-around) */
@@ -1243,7 +1278,7 @@ export class InternalizationOrchestrator {
       limit: fetchLimit,
     });
 
-    const outcomes: { taskId: string; decision: string }[] = [];
+    const outcomes: { taskId: string; decision: string; reason?: string; detail?: string; conflictingSuccessorTaskIds?: string[] }[] = [];
     let recovered = 0;
     let alreadyMaterialized = 0;
     let blocked = 0;
@@ -1253,7 +1288,13 @@ export class InternalizationOrchestrator {
       if (!isPeerRunnerKind(task.taskKind)) continue;
       try {
         const result = await this.commitNextTaskProposal(task.taskId);
-        outcomes.push({ taskId: task.taskId, decision: result.decision });
+        const outcome: { taskId: string; decision: string; reason?: string; detail?: string; conflictingSuccessorTaskIds?: string[] } = {
+          taskId: task.taskId, decision: result.decision,
+        };
+        if ('reason' in result) outcome.reason = result.reason;
+        if ('detail' in result && result.detail !== undefined) outcome.detail = result.detail;
+        if ('conflictingSuccessorTaskIds' in result) outcome.conflictingSuccessorTaskIds = [...result.conflictingSuccessorTaskIds];
+        outcomes.push(outcome);
         if (result.decision === 'successor_created' || result.decision === 'revision_reopened' || result.decision === 'successor_reopened'
           || result.decision === 'source_correction_reopened') {
           recovered += 1;
@@ -1396,9 +1437,9 @@ export class InternalizationOrchestrator {
       // PRI-1293 Phase 3: 定点续接是生产 reopen 路径 — 与 commit/reopen 核心
       // 共享同一血缘权威。守卫通过后、CAS 写之前校验; 拒绝 = conflict 终态
       // 可观测 (receipt outcome 落库), 零写入。
-      const artificerLineage = await resolveAuthoritativeCorrelationId(
+      const artificerLineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(
         artificerTask,
-        correlationLineageGetTask(this.stateManager),
+        this.stateManager,
       );
       if (!artificerLineage.ok) {
         await this.recordSourceCorrectionOutcome(scribeTaskId, {
@@ -1510,7 +1551,7 @@ export class InternalizationOrchestrator {
     parentTaskId: string,
     successorKind: RunnerKind,
     channel: string,
-  ): Promise<TaskRecord | null> {
+  ): Promise<TaskRecord[]> {
     // PRI-1293 R5 (F4 部分缓解): taskKind 过滤下推至 SQL WHERE task_kind = ?
     // (sqlite-task-store 既有能力), 扫描行数从全表收敛到单一 kind。
     // parentTaskId 的 json_extract 下推与批量复合索引属 PRI-1299 范围
@@ -1526,7 +1567,7 @@ export class InternalizationOrchestrator {
       }
     }
     matches.sort((a, b) => (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0));
-    return matches[0] ?? null;
+    return matches;
   }
 
   /**

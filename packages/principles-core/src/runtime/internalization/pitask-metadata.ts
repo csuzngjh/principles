@@ -43,16 +43,9 @@ import { isValidIntentSnapshot } from '../intent/intent-snapshot.js';
 export const PI_METADATA_KEY = 'pi_metadata' as const;
 
 /**
- * PRI-1293 R5: consumedRevisionCauseIds 的有界上限 (FIFO 逐出)。
- * 32 个独立 revision cause 已远超任何 revision budget 现实
- * (每个 cause = 一轮完整修订周期); 逐出仅在该量级之外发生。
- */
-export const CONSUMED_REVISION_CAUSE_IDS_CAP = 32 as const;
-
-/**
  * PRI-1293 R5: 幂等判定的唯一入口——cause 是否已被该任务消费。
  * 检查当前槽 (revisionCauseId, 兼容历史无 history 字段的旧行) 与
- * 有界消费历史 (consumedRevisionCauseIds)。任何 cause 幂等判定不得
+ * 持久消费历史 (consumedRevisionCauseIds)。任何 cause 幂等判定不得
  * 绕过本 helper 直读单槽——单槽会被独立因果流 (cascade/repair/owner)
  * 覆盖, 覆盖后旧 cause 的保护失效 (修复完成后旧级联重新传播,
  * 回滚修复成果)。
@@ -67,7 +60,7 @@ export function hasConsumedRevisionCause(
 
 /**
  * PRI-1293 R5: reopen 写入时的历史折入——旧槽值 (代表已消费的 cause)
- * 与新 cause 一并并入, 去重保序 (最新在尾), 超上限 FIFO 逐出。
+ * 与新 cause 一并并入, 去重保序 (最新在尾), 任务生命周期内不逐出。
  */
 export function appendConsumedRevisionCause(
   piTask: { readonly revisionCauseId?: string | undefined; readonly consumedRevisionCauseIds?: readonly string[] | undefined },
@@ -83,7 +76,7 @@ export function appendConsumedRevisionCause(
     ordered.push(piTask.revisionCauseId);
   }
   if (newCauseId !== undefined && newCauseId !== '' && !seen.has(newCauseId)) ordered.push(newCauseId);
-  return ordered.slice(-CONSUMED_REVISION_CAUSE_IDS_CAP);
+  return ordered;
 }
 
 /**
@@ -440,7 +433,7 @@ export interface PITaskMetadata {
   revisionCauseId?: string;
   /**
    * PRI-1293 R5 (旧修订覆盖修复): 已消费 revision cause 的有界追加历史
-   * (最新在尾, 上限 CONSUMED_REVISION_CAUSE_IDS_CAP, FIFO 逐出)。
+   * (最新在尾, 任务生命周期内保留, 不做 FIFO 逐出)。
    * revisionCauseId 单槽会被**独立因果流**覆盖 (级联 wave 与 repair 轮
    * 写同一字段), 覆盖后旧 cause 的幂等重放保护失效——已传播的级联在
    * 修复完成后重扫时再次 reopen 目标, 把依赖与结论回滚到修复前。
@@ -914,7 +907,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
   // PRI-1293 R5 write invariant (单一重建点执行): 任何写路径一旦 (重)写
   // revisionCauseId 槽——reopenTaskForRevision、source-correction 续接、
   // rule-binding、approved-rule-revision 等全部经本函数——旧槽值与新值
-  // 必须折入有界消费历史,否则覆盖后旧 cause 的幂等重放保护失效
+  // 必须折入持久消费历史,否则覆盖后旧 cause 的幂等重放保护失效
   // (已传播的级联在修复完成后重扫时再次 reopen,回滚修复成果)。
   // 调用方显式给 consumedRevisionCauseIds 时以调用方为准 (测试/迁移逃生门)。
   if (Object.hasOwn(overrides, 'revisionCauseId') && !Object.hasOwn(overrides, 'consumedRevisionCauseIds')) {
@@ -1248,7 +1241,6 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
   }
   if (Object.hasOwn(m, 'consumedRevisionCauseIds') && m.consumedRevisionCauseIds !== undefined) {
     if (!Array.isArray(m.consumedRevisionCauseIds)
-      || m.consumedRevisionCauseIds.length > CONSUMED_REVISION_CAUSE_IDS_CAP
       || !m.consumedRevisionCauseIds.every((c) => typeof c === 'string' && c.trim() !== '' && c.length <= 512)) return null;
   }
   if (Object.hasOwn(m, 'ruleBindingRevisionCauseId') && m.ruleBindingRevisionCauseId !== undefined) {

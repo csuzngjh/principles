@@ -13,7 +13,7 @@ import type { PITaskRecord } from './peer-runner-contracts.js';
 import { isPeerRunnerKind } from './peer-runner-contracts.js';
 // PRI-1293 Phase 3: reopen 与 commit 共享同一唯一血缘权威 (§5.3 — 只包
 // orchestrator wrapper 不合格; 此处是四条生产 reopen 路径的共同核心)。
-import { resolveAuthoritativeCorrelationId } from './correlation-lineage.js';
+import { resolveAuthoritativeCorrelationIdWithLegacyBackfill } from './correlation-lineage.js';
 import {
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
@@ -146,7 +146,7 @@ export async function reopenTaskForRevision(
   // (血缘门禁严格限于 PeerRunnerKind, §4.2 作用域隔离)。
   let authoritativeCorrelationId: string | undefined;
   if (isPeerRunnerKind(piTask.taskKind)) {
-    const lineage = await resolveAuthoritativeCorrelationId(rawTask, (id: string) => stateManager.getTask(id));
+    const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, stateManager);
     if (!lineage.ok) {
       return { ok: false, reason: `lineage_refused:${lineage.reason}`, detail: lineage.detail };
     }
