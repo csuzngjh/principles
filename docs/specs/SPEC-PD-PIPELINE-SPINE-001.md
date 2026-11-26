@@ -1,9 +1,13 @@
 # SPEC-PD-PIPELINE-SPINE-001 — PD 核心管道主干收敛规范
 
-- **版本**：v0.9
-- **日期**：2026-11-23
-- **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
+- **版本**：v0.10
+- **日期**：2026-11-28
+- **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，仍待 Owner 决策与批准）
 - **修订记录**：
+  - **v0.10（PR #2803 实施期评审回填修订）**：
+    1. **Phase 2B/3 运行时规则回填**：实施与多轮评审确认 v0.9 未规定的 10 项内化链运行时规则（root correlationId 权威身份、parentTaskId 血缘完整性、最大父链深度 10 与**创建前**新增边检查、reopen 全快照 CAS 七项前提与并发失败语义、revisionCauseId 幂等、历史终态后继按 `(parentTaskId, kind, channel)` 复用、RuleHost 时间戳 id 链与 enqueue-successors 的统一幂等、dry-run/confirm 判定逐点一致、`concurrent_modification` 独立结构化透出且不计入 already-materialized、host-runtime barrel 显式导出白名单）。规范性条文见 TECH 文档「Round 4 implementation amendment」（R4-1 至 R4-10），代码已落地并经真实持久化生产路径回归验证。
+    2. **D1/D3/D4/D5/D6 逐项核对**：全部已实施且无偏差；D6 涉及的 `executeSelectedInternalizationTask` 导出边界本轮收紧为白名单制（详见 TECH 文档核对表）。
+    3. **待 Owner 决策**：(a) RuleHost 时间戳任务 id 是否远期收敛为确定性 id（当前工程结论：无必要）；(b) 本修正案整体批准。未经 Owner 批准，Draft 状态不变。
   - **v0.9（PR #2763 第七轮独立复核修订）**：
     1. **修正 §2.3 消费者描述**：v0.8 已将桶消费者收紧为仅 `pd-cli`，§2.3 残留 "pd-cli/host-runtime" 旧表述，统一为 `pd-cli`（`diagnose.ts`/`candidate.ts`）。
     2. **闭环 `diagnose` 拒绝结果终端可观察性**：核实 `diagnose.ts` TTY 输出循环（`:1049-1079`）无 `status:'refused'` 分支，且全候选被拒时 `internalizeNextAction` 落到 `'No candidates were generated from this diagnosis.'` 误报——要求 TTY 输出 `DREAMER SEED REFUSED` + 结构化 `reason`，全部被拒时 `nextAction` 明确报告拒绝原因（不误报"未生成候选"），补 TTY 回归测试。

@@ -889,6 +889,12 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           // (那只会让链静默搁浅; 问题在于父链/根身份不可证明)。
           output.enqueueReason = `lineage_refused: ${commitResult.reason} (${commitResult.detail}); correlationId lineage is not provable — no successor was created`;
           output.nextAction = 'Inspect the task chain with `pd runtime internalization list --json`: check parentTaskId links and the root dreamer identity (taskId/seed candidateId consistency), repair the chain, then re-run.';
+        } else if (commitResult.decision === 'concurrent_modification') {
+          // PRI-1293 R3: 级联 reopen 的 CAS 并发落败 — 修订波未传播, 但任务
+          // 本身已成功; 这是可重试的暂时态, 绝不呈现为幂等完成, 也不建议
+          // --no-enqueue-next (跳过排队解决不了并发冲突)。
+          output.enqueueReason = `concurrent_modification: cascade reopen of ${commitResult.reopenedTaskId} lost the CAS race (${commitResult.detail}); the revision wave has not propagated yet — retry is safe`;
+          output.nextAction = `Re-run the successor sweep shortly: pd runtime internalization enqueue-successors --workspace ${workspaceDir} --confirm — reopen is idempotent, the next wave retries honestly.`;
         } else {
           output.enqueueReason = `Unexpected commitNextTaskProposal decision: ${commitResult.decision}`;
           output.nextAction = 'Investigate orchestrator logic; re-run with --no-enqueue-next to skip auto-enqueue.';

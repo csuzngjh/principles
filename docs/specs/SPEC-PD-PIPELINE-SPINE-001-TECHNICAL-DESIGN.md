@@ -1,12 +1,13 @@
 # SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案
 
-- **版本**：v0.9
-- **日期**：2026-11-23
-- **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
-- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.9）](./SPEC-PD-PIPELINE-SPINE-001.md)
+- **版本**：v0.10
+- **日期**：2026-11-28
+- **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，仍待 Owner 决策与批准）
+- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.10）](./SPEC-PD-PIPELINE-SPINE-001.md)
 - **源码事实基线**：`origin/main@679dcc93f`
 - **规范性数据契约**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)、[MVP Core Loop Contract](../architecture/MVP_CORE_LOOP_CONTRACT.md)
 - **标注约定**：文中标注 `〔现有能力〕` 的符号已在当前源码中存在；标注 `〔新增能力〕` 的符号当前不存在，实施前不得以现有能力名义引用；标注 `〔收编删除〕` 的代码块为重复组装，迁移后删除。
+- **v0.10 关键技术修订摘要（PR #2803 实施期评审回填，未批准）**：Phase 2B/3 实施与多轮评审暴露出 v0.9 未规定的 10 项运行时规则，已在代码中落地并经生产路径回归验证；本版将其回填为规范条文（见文末「Round 4 implementation amendment」），覆盖：root correlationId 权威身份、parentTaskId 血缘完整性、最大父链深度与新增边检查、reopen 全快照 CAS、revisionCauseId 幂等、历史终态后继复用、RuleHost/enqueue-successors 统一幂等、dry-run/confirm 行为一致、并发冲突结构化透出与重试、host-runtime 公开 API 边界。**本文档仍为 Draft for Owner Review；其中标注〔待 Owner 决策〕的条目未经 Owner 批准不得视为定案。**
 - **v0.9 关键技术修订摘要**：
   1. §3.4.2/§3.7 闭环 `diagnose` 拒绝结果**终端可观察性**：核实 `diagnose.ts:1049-1079` TTY 输出循环无 `status:'refused'` 分支，`:987` 尾部分支使全候选被拒时误报 `'No candidates were generated from this diagnosis.'`——要求 TTY 新增 `DREAMER SEED REFUSED` + 结构化 `reason` 分支、全拒时 `nextAction` 明确报告拒绝原因、补 TTY 回归测试。
   2. 跨文档一致性：主 SPEC §2.3 残留 "pd-cli/host-runtime" 消费者描述统一为 `pd-cli`；Complexity Delta 3→4 同步至 Linear `PRI-1289` 与 PR 描述 §5；修正 PR Review Convergence 第五轮版本归属（v0.7 非 v0.8）。
@@ -510,3 +511,104 @@ Normative host compatibility details for the config remediation:
 3. PD uses the installed OpenClaw behavior as compatibility evidence but does not import private OpenClaw modules: the plugin SDK exposes no authoritative include resolver. The compatibility reader in `openclaw-plugin` is read-only and fail-closed. `install-layout` remains path-only and must not depend on plugin/business packages.
 4. Auto-repair may write only the historical absent-flag case in a directly owned main config. It must not write when the root or plugins ownership path crosses `$include`, when parsing/include resolution is incomplete, or when any effective explicit value already exists. This is a conservative no-write rule, not a second configuration management system.
 5. Public API accounting is unchanged for `@principles/core/runtime` (the four documented exports). Round 3 adds zero new cross-package public APIs; it uses the Round 2 `resolveOpenClawConfigPath` export already introduced for host path alignment.
+
+---
+
+## Round 4 implementation amendment — Phase 2B/3 运行时规则回填（2026-11-28，Draft for Owner Review）
+
+Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以下运行时规则。代码已落地并经真实持久化生产路径回归验证（验证证据见 PR #2803 §14 及后续轮次报告）；本节将其回填为规范条文。标注〔待 Owner 决策〕的条目为实施期工程判断，需 Owner 批准后方能定案。
+
+### R4-1. Root correlationId 的权威身份规则
+
+根 `dreamer` 任务的 correlation 身份有两个独立持久化来源：`candidateIdFromDreamerSeed(diagnosticJson)` 与 `candidateIdFromDreamerTaskId(taskId)`。规则（v0.4 已部分规定，此处为实施定稿）：
+
+- 双源一致（`A+A`）→ 采纳为权威 root correlationId；
+- 双源冲突（`A+B`）→ **fail-closed 拒绝**（`conflicting_root_identity`），不得用 `??` 链偏向任一来源——自我佐证的冲突根不得传播到后代链；
+- 单边存在 → 采纳单边；双缺失 → 拒绝；
+- 后代的链声明 `correlationId` 与根权威身份冲突时拒绝（`conflicting_parent_correlation_id`）；后代缺失 `correlationId` 时以根权威身份**安全补入**（历史链恢复语义），补入本身也走 CAS。
+
+### R4-2. parentTaskId 血缘完整性规则
+
+- 所有后继创建路径（orchestrator commit、RuleHost 同步链、对抗反馈环、repair seeding）必须写入真实 `parentTaskId`；命名前缀/ candidateId 推导不得作为父链身份来源。
+- `resolveAuthoritativeCorrelationId` 对 `PeerRunnerKind` 执行有界父链回溯（上限 `CORRELATION_LINEAGE_MAX_PARENT_EDGES`）；悬空父引用（`getTask` 返回 `null`）fail-closed；父链自环以 `parent_chain_cycle_or_depth_exceeded` 拒绝。
+- `DiagnosticianStageKind` 不受此门禁约束（诊断子任务无 `candidateId`）。
+
+### R4-3. 最大父链深度与新增边检查
+
+- `CORRELATION_LINEAGE_MAX_PARENT_EDGES = 10`（经 `@principles/core/runtime` 桶导出）。
+- 读取侧：父链边数 > 10 的源任务本身以 `parent_chain_cycle_or_depth_exceeded` 拒绝。
+- **写入侧（创建前检查）**：仅当确实需要**创建新后继**时，校验 `parentEdgeCount + 1 <= 10`；超限在 `createTask` **之前**以结构化 `lineage_refused`（detail 含 `successor_would_exceed_depth_limit:11_edges_max_10`）拒绝，零写入。
+- **豁免**：命中已存在后继（任何状态）时不适用新增边检查——已存在边不增加深度。
+- 语义边界：9 边源创建 10 边后继**放行**；10 边源创建 11 边后继**拒绝**。
+
+### R4-4. Reopen 全快照 CAS 的字段与并发失败语义
+
+`reopenTaskForRevision` 的写入必须使用 `updateTaskIfDiagnosticJsonUnchanged` 全快照 CAS，前提集合七项：`taskId` + `diagnosticJson` 逐字节 + `status` + `attemptCount` + `leaseOwner`（null）+ `leaseExpiresAt`（null）+ `revisionCount`（派生快照内）。任一前提失配：
+
+- 返回 `{ ok: false, reason: 'concurrent_modification' }`，**零写入**——不得覆盖并发 lease、并发 metadata 写入或并发完成；
+- 落败后必须重新读取目标任务：若其 `revisionCauseId` 已等于本次 causeId（另一执行者完成了同一 revision），返回 `{ ok: true, outcome: 'already_applied' }` 幂等重放，不视为并发冲突；
+- 否则保持 `concurrent_modification` 结构化冲突，保留可重试语义（reopen 幂等，下一波重试安全）。
+
+注：终态（succeeded/needs_human_review）任务无法被 lease（lease 状态机仅接受 pending/retry_wait）；级联目标的并发形态是**另一笔写入**（完成回写/另一波 reopen/元数据订正）；pending/retry_wait 目标的并发形态才可能为 lease 竞争。两类均以同一 CAS 前提集捕捉。
+
+### R4-5. revisionCauseId 幂等规则
+
+- cascade reopen 的 causeId 派生自 `(sourceTaskId, sourceRevisionCount, targetTaskId)`：`` cascade-<source>-rc<N>-<target> ``；owner 直接修订的 causeId 由调用方给定。
+- 目标已携带同一 `revisionCauseId` → `revision_reopen_noop`，**不得双重递增** `revisionCount`（防双重应用保护独立于并发时序，先决于 CAS）。
+- 源自身 reopen 的 causeId 幂等同样适用于 revision-refresh 路径。
+
+### R4-6. 历史终态后继复用规则
+
+- `commitNextTaskProposal` 的后继识别顺序：
+  1. 确定性派生 id 直查（命中任何状态 → 按该状态的既有语义处理）；
+  2. 直查未命中时，按 `(parentTaskId, successorKind, channel)` 扫描全状态空间：
+     - 命中 `pending/retry_wait/leased/running` 在途后继 → `successor_exists`（保留原任务 id，不重建）；
+     - 命中 `succeeded/needs_human_review` 终态后继：
+       - `revisionCount = 0` → `successor_exists`（终态即完结，不重开）；
+       - `revisionCount > 0` → 级联 reopen（R4-5 幂等 + R4-4 CAS + R4-1 血缘校验），原任务 id 与既有历史全部保留；
+     - 未命中任何后继 → 进入新创建分支（R4-3 新增边检查适用）。
+- 扫描复用与 dry-run 同一套查询能力，**禁止**两条路径各自实现不同的查找逻辑。
+- 不得因任务 id 形态不同（确定性 id vs RuleHost 时间戳 id）创建第二条逻辑相同的任务链。
+
+### R4-7. RuleHost 与 enqueue-successors 统一幂等规则〔待 Owner 决策：时间戳 id 是否收敛为确定性 id 的远期方向〕
+
+- RuleHost 同步链使用 `<correlation>-<stage>-<timestamp36>` 时间戳任务 id，orchestrator 派生的确定性 id 永远不会命中它们——因此 R4-6 的 parentage 扫描是唯一正确的统一识别机制，而非兼容补丁。
+- `revisionCount = 0` 的完整链上重复执行 `enqueue-successors --confirm`：幂等、零新行、原 id 保留，dry-run 与 confirm 报告同一 `successorTaskId`。
+- `pending/retry_wait/leased` 等在途状态的后继语义与既有任务状态机一致（在途即存在，不重建、不抢占）。
+
+### R4-8. dry-run 与 confirm 行为一致性
+
+- dry-run 必须复用与 commit 完全相同的判定输入：同一 `resolveAuthoritativeCorrelationId` 血缘裁决、同一 R4-6 后继识别、同一 R4-3 新增边深度检查。
+- 深度裁决按源任务的只读血缘结果预先计算，**仅在预览将要创建新后继时**应用（与 commit 的触发点逐点对应）；命中既有后继的预览不检查新增边。
+- 一致性矩阵（均有生产路径回归）：9→10 两侧放行 / 10→11 两侧拒绝且 reason 逐字节一致 / 10 边已有后继两侧 `successor_exists` / 血缘无效两侧拒绝。
+- dry-run 保持零写入（`cli-4`）；拒绝不增加 `createdCount`。
+
+### R4-9. 并发冲突的结构化错误与重试语义
+
+- `concurrent_modification` 是 `commitNextTaskProposal` 的**独立结构化 decision**，不得折叠进 `successor_exists`（后者语义为"后继已正确就位"，会把未完成的级联伪装成幂等完成）。
+- 所有消费方必须显式处理：
+  - `host-runtime` consumer cycle：`concurrent_modification` 计入 `skipped`（**不得**计入 `alreadyMaterialized`），保留下一波重试机会；
+  - `pd-cli run-once` / `enqueue-successors`：映射为带重试指引的 `nextAction`（不暗示 `--no-enqueue-next` 等会丢失修订波的操作）；
+  - reconciliation：只统计 `successor_exists`/`revision_reopen_noop`/`source_correction_reopen_noop` 为 already-materialized。
+- 重试语义：reopen 幂等，冲突解除后的下一波 commit 正常落地（回归：并发写入存活、attemptCount 不被错误重置、重试后 `successor_reopened`）。
+
+### R4-10. host-runtime 公开 API 边界
+
+- `@principles/host-runtime` barrel 对 `internalization-consumer-cycle` 采用**显式导出白名单**（禁止 `export *`）：仅导出 `runInternalizationConsumerCycle` + 循环 outcome/input 类型 + `executeSelectedInternalizationTask`（`ExecuteSelectedInternalizationTaskInput`/`ExecuteSelectedInternalizationTaskOutcome`/`SelectedInternalizationTaskRunnerOptions`）+ `ConsumerCycleLogger` 等有真实跨包消费者的符号。
+- 内部装配辅助类型（`SelectedTaskTelemetryEmitter`、`SelectedInternalizationTaskBaseDeps`、`SelectedEvaluatorRepairDeps`、`SelectedRolloutGovernanceDeps` 等）**不得**经 barrel 进入公开 API；类型仍以结构化方式出现在导出函数的签名中（TypeScript 结构化类型），但不具名导出。
+- Export Surface Gate（`export-surface-baseline.json` / `export-admissions.json` 与 `.d.ts` 生成物核对）为合并门禁；pd-cli/codex-adapter 消费点回归为必过项。
+
+### D1/D3/D4/D5/D6 决策核对状态
+
+| 决策 | 实施核对结果 | 状态 |
+|---|---|---|
+| D1（宿主协作者同步类型门） | `PainToPrincipleServiceOptions` 可辨识联合 + 5 处构造点守卫已落地，与本 PR 血缘变更无交互 | 已实施，无偏差 |
+| D3（租约心跳） | v0.3 已撤销误诊；本轮 reopen CAS 前提含 `leaseOwner/leaseExpiresAt`，与既有心跳语义一致——lease 不会被 reopen 覆盖，心跳持有者的租约安全 | 已实施，无偏差 |
+| D4（候选准入权威门禁） | seed 闸严格拒绝 + `rawRecommendationKind` 数据源已落地；与本 PR 无交互 | 已实施，无偏差 |
+| D5（deviationAnchor/anchor 双轨） | 读侧回退解析已落地；与本 PR 无交互 | 已实施，无偏差 |
+| D6（内化单步执行收编） | `executeSelectedInternalizationTask` 已收编 run-once 6 分支 switch；本轮将其导出收紧至白名单（R4-10），跨包消费者（pd-cli run-once、codex-adapter worker）回归通过 | 已实施，导出边界本轮收紧 |
+
+### 仍需 Owner 决策的事项
+
+1. R4-7：RuleHost 时间戳任务 id 是否应在远期收敛为 orchestrator 确定性 id（当前结论：无必要——parentage 扫描已是权威识别机制，收敛仅存审美价值且需迁移历史行）。
+2. 本修正案整体：v0.10 全部回填条文需 Owner 批准后方能从 Draft 转为 Approved；批准前代码侧已落地的行为视为"实施期工程定稿、待规范追认"。

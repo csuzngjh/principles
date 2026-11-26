@@ -14,7 +14,7 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
-import type { TaskRecord, PDTaskStatus } from '../task-status.js';
+import { PD_TASK_STATUSES, type TaskRecord, type PDTaskStatus } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
@@ -193,7 +193,9 @@ export type CommitNextTaskResult =
   /** P0-3: 决策型任务缺少 durable + legacy verdict — fail-closed, 不 seed 任何后继 */
   | { decision: 'blocked_missing_verdict'; taskId: string; reason: string }
   /** PRI-1293 Phase 3: PeerRunnerKind 血缘校验拒绝 — 结构化 reason, 零后继零写入 */
-  | { decision: 'lineage_refused'; sourceTaskId: string; reason: string; detail: string };
+  | { decision: 'lineage_refused'; sourceTaskId: string; reason: string; detail: string }
+  /** PRI-1293 R3: 级联 reopen CAS 并发落败 — 修订波未传播, 可重试, 绝不伪装成幂等态 */
+  | { decision: 'concurrent_modification'; sourceTaskId: string; reopenedTaskId: string; detail: string };
 
 // ── Constructor Options ───────────────────────────────────────────────────────
 
@@ -841,16 +843,6 @@ export class InternalizationOrchestrator {
 
     const {proposal} = proposalResult;
 
-    const existingSuccessor = await this.findExistingSuccessor(taskId, proposal.taskKind, proposal.channel);
-    if (existingSuccessor) {
-      return {
-        decision: 'successor_exists',
-        sourceTaskId: taskId,
-        successorTaskId: existingSuccessor.taskId,
-        successorKind: proposal.taskKind,
-      };
-    }
-
     // Successor taskId must be STABLE across the whole peer-runner chain so that
     // every layer (dreamer/philosopher/scribe/artificer/evaluator) derives its id
     // from the SAME root, not from the predecessor's full id (which already
@@ -884,20 +876,26 @@ export class InternalizationOrchestrator {
     // (而非 successor_exists 停摆)。普通幂等重扫 (revisionCount=0) 不级联,
     // 保持既有 successor_exists 语义。pending/retry_wait 的存在后继仍走
     // findExistingSuccessor 的 successor_exists 分支。
-    const directIdHit = (piTask.revisionCount ?? 0) > 0
-      ? await this.stateManager.getTask(successorTaskId)
+    // ── 统一后继识别 (PRI-1293 review round 3) ──
+    // 后继身份是 (parentTaskId, successorKind, channel) 父子关系, 不是派生 id:
+    //   - 修订重开把恢复的 correlationId 回填进源任务, 派生根漂移 (R2);
+    //   - RuleHost 同步链持久化时间戳 id, 确定性派生永不复现 (R3)。
+    // 因此直查与父子扫描都不再受 revisionCount 门限制 — 此前 rc=0 仅靠
+    // createTask 的 UNIQUE 撞约束兜底, 对时间戳链等于毫无保护: dry-run
+    // (全状态索引) 能看到的终态后继, confirm 却再创建一条逻辑相同的链。
+    // 现在任何状态的已存在后继 (在途/终态/failed) 都先命中 successor_exists;
+    // 仅当命中可重开终态且源经历过 revision (rc>0) 时才进入级联重开。
+    // 直查命中必须以 taskId 自证身份: 损坏/不一致的 store 若返回 id 不匹配
+    // 的行, 按未命中 fail-closed 处理 (该行绝无可能是此派生 id 的后继)。
+    const directIdHitRaw = await this.stateManager.getTask(successorTaskId);
+    const directIdHit = directIdHitRaw !== null && directIdHitRaw.taskId === successorTaskId ? directIdHitRaw : null;
+    const scannedSuccessor = directIdHit === null
+      ? await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel)
       : null;
-    // PRI-1293 review fix: 后继身份是父子关系而非派生 id。修订重开会把恢复
-    // 的 correlationId 回填进源任务, 使本轮派生根从历史 stripTrailingChannel
-    // 形式漂移到 correlationId 形式 — 直查新 id 必未命中, 若就此创建则原
-    // 后继滞留 succeeded、新后继重复生成 (修订波永不波及同一逻辑后继)。
-    // 因此直查落空时先按 (parentTaskId, successorKind, channel) 扫描可重开
-    // 终态后继, 命中则复用其真实 id 进入级联, 只有扫描也落空才派生新 id。
-    const scannedTerminalSuccessor = directIdHit === null && (piTask.revisionCount ?? 0) > 0
-      ? await this.findTerminalSuccessorByParent(taskId, proposal.taskKind, proposal.channel)
-      : null;
-    const existingSuccessorCandidate = directIdHit ?? scannedTerminalSuccessor;
-    if (existingSuccessorCandidate && (existingSuccessorCandidate.status === 'succeeded' || existingSuccessorCandidate.status === 'needs_human_review')) {
+    const existingSuccessorCandidate = directIdHit ?? scannedSuccessor;
+    if (existingSuccessorCandidate
+      && (existingSuccessorCandidate.status === 'succeeded' || existingSuccessorCandidate.status === 'needs_human_review')
+      && (piTask.revisionCount ?? 0) > 0) {
       const cascadeTargetTaskId = existingSuccessorCandidate.taskId;
       const cascadeCauseId = `cascade-${taskId}-rc${piTask.revisionCount ?? 0}-${cascadeTargetTaskId}`;
       // B: 对称的 cause 前置 — 该 wave 的 cascade reopen 已 materialize
@@ -973,6 +971,19 @@ export class InternalizationOrchestrator {
           reason: `cascade_reopen_invalid_task_metadata: successor of ${taskId}`,
         };
       }
+      // PRI-1293 review round 3: CAS 并发落败是独立的结构化结果 — 级联未能
+      // 传播修订波, 链停在旧 epoch, 绝不折叠为 successor_exists (那会把未
+      // 完成的级联伪装成正常幂等态)。reopen 内部已在 CAS 落败后重读: 同一
+      // revisionCauseId 已 materialize 的重放在上面按 idempotent no-op 返回,
+      // 到达这里 = 真实的并发冲突, 可安全重试 (reopen 幂等)。
+      if (reopened.reason === 'concurrent_modification') {
+        return {
+          decision: 'concurrent_modification',
+          sourceTaskId: taskId,
+          reopenedTaskId: cascadeTargetTaskId,
+          detail: reopened.detail ?? `cascade_cas_conflict:${cascadeTargetTaskId}`,
+        };
+      }
       return {
         decision: 'successor_exists',
         sourceTaskId: taskId,
@@ -981,7 +992,9 @@ export class InternalizationOrchestrator {
       };
     }
     if (existingSuccessorCandidate) {
-      // leased / retry_wait / pending(经直查而非 findExistingSuccessor 命中) — 在途,不重复处理
+      // 统一识别的剩余命中: rc=0 的终态后继 (幂等重扫不级联 — 保留原任务
+      // id, 零创建零重复执行), 以及 leased/retry_wait/pending/failed 在途
+      // 或待重试后继 — 与任务状态机语义一致, 不重复处理。
       return {
         decision: 'successor_exists',
         sourceTaskId: taskId,
@@ -1444,50 +1457,28 @@ export class InternalizationOrchestrator {
   }
 
   /**
-   * Find an existing successor task matching parentTaskId + successorKind + channel.
-   * Scans pending tasks and hydrates to check PI metadata.
-   * Returns the matching TaskRecord or null.
-   */
-  private async findExistingSuccessor(
-    parentTaskId: string,
-    successorKind: RunnerKind,
-    channel: string,
-  ): Promise<TaskRecord | null> {
-    const pendingTasks = await this.stateManager.listTasks({ status: 'pending' });
-    const retryWaitTasks = await this.stateManager.listTasks({ status: 'retry_wait' });
-    const candidates = [...pendingTasks, ...retryWaitTasks];
-    for (const task of candidates) {
-      if (task.taskKind !== successorKind) continue;
-      const piTask = hydratePITaskRecord(task);
-      if (!piTask) continue;
-      if (piTask.parentTaskId === parentTaskId && piTask.channel === channel) {
-        return task;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Find a REOPENABLE terminal (succeeded / needs_human_review) successor by
-   * (parentTaskId, successorKind, channel) — the lineage-truth counterpart of
-   * the derived-id lookup. A successor whose persisted id drifted from the
-   * current derivation (revision reopen backfills the recovered correlationId
-   * into the source, shifting the derivation root) is still the same logical
-   * successor and must be reused/reopened, never duplicated (PRI-1293 review).
+   * Find the logical successor by (parentTaskId, successorKind, channel) across
+   * ALL task statuses — the lineage-truth counterpart of the derived-id lookup.
    *
-   * Invoked only on the revision-cascade path (revisionCount > 0, direct id
-   * miss), so the terminal-scan cost never lands on the common fresh-commit
-   * path. Deterministic: ties break by taskId.
+   * Successor identity is the parentage relation, not the derived id:
+   *   - revision reopen backfills the recovered correlationId into the source,
+   *     shifting the derivation root away from the persisted id (PRI-1293 R2);
+   *   - the RuleHost synchronous chain persists timestamp-suffixed ids that the
+   *     deterministic derivation never reproduces (PRI-1293 R3).
+   * ANY persisted row — in-flight (pending/leased/retry_wait), terminal
+   * (succeeded/needs_human_review) or failed — proves the logical successor
+   * already exists. This mirrors the semantics the deterministic-id UNIQUE
+   * constraint catch used to provide as a last resort, extended to chains
+   * whose ids are not derivable. Deterministic: ties break by taskId.
    */
-  private async findTerminalSuccessorByParent(
+  private async findSuccessorByParent(
     parentTaskId: string,
     successorKind: RunnerKind,
     channel: string,
   ): Promise<TaskRecord | null> {
-    const succeededTasks = await this.stateManager.listTasks({ status: 'succeeded' });
-    const reviewTasks = await this.stateManager.listTasks({ status: 'needs_human_review' });
+    const allTasks = await this.stateManager.listTasks({ statuses: [...PD_TASK_STATUSES] });
     const matches: TaskRecord[] = [];
-    for (const task of [...succeededTasks, ...reviewTasks]) {
+    for (const task of allTasks) {
       if (task.taskKind !== successorKind) continue;
       const piTask = hydratePITaskRecord(task);
       if (!piTask) continue;

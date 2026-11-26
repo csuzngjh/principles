@@ -158,6 +158,16 @@ export async function reopenTaskForRevision(
     },
   );
   if (casResult === null) {
+    // PRI-1293 review round 3: CAS 落败后重读 — 若并发执行者完成的正是**同一
+    // revisionCauseId** 的 reopen, 本轮修订已 materialize, 按幂等重放处理
+    // (诚实事实, 非伪装); 否则返回明确的并发冲突, 由下一轮重试。
+    if (options?.revisionCauseId !== undefined) {
+      const reread = await stateManager.getTask(taskId);
+      const rereadPi = reread ? hydratePITaskRecord(reread) : null;
+      if (rereadPi && rereadPi.revisionCauseId === options.revisionCauseId) {
+        return { ok: true, reason: 'idempotent_replay_same_revision' };
+      }
+    }
     return {
       ok: false,
       reason: 'concurrent_modification',

@@ -431,7 +431,7 @@
     {
       "entry": "./runtime",
       "source": "src/runtime/index.ts",
-      "count": 2068,
+      "count": 2069,
       "symbols": [
         "ADAPTIVE_DELIVERY_RECORD_ENUMS",
         "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -592,6 +592,7 @@
         "CORE_PRINCIPLES",
         "CORE_PRINCIPLE_IDS",
         "CORRECTION_SEED_KEYWORDS",
+        "CORRELATION_LINEAGE_MAX_PARENT_EDGES",
         "CanActivateResult",
         "CanaryStatus",
         "CandidateAdmissionDocument",

@@ -5,6 +5,7 @@ import {
   isPeerRunnerKind,
   hydratePITaskRecord,
   PD_TASK_STATUSES,
+  CORRELATION_LINEAGE_MAX_PARENT_EDGES,
 } from '@principles/core/runtime';
 import type { CommitNextTaskResult, PDTaskStatus } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -158,6 +159,16 @@ function mapCommitDecisionToAction(
         decision: 'skipped',
         reason: `lineage_refused: ${commitResult.reason} (${commitResult.detail}); correlationId lineage is not provable — no successor was created`,
         nextAction: 'Inspect the task chain (parentTaskId links and root dreamer identity); repair the chain or re-run after lineage is provable',
+      };
+    case 'concurrent_modification':
+      // PRI-1293 R3: 级联 reopen 的 CAS 并发落败 — 独立的可重试结果, 不得
+      // 计入 alreadyMaterialized/existing, 也不伪装成 successor_exists。
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `concurrent_modification: cascade reopen of ${commitResult.reopenedTaskId} lost the CAS race (${commitResult.detail}); revision wave not propagated — nothing was written`,
+        nextAction: 'Re-run enqueue-successors --confirm shortly; reopen is idempotent and the next wave retries honestly',
       };
     case 'source_correction_reopened':
       return {
@@ -445,6 +456,7 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
         // 预览若跳过该判定会把同一任务误报为 would_create_successor。此处只读
         // (resolveAuthoritativeCorrelationId 不写任何状态), 且拒绝映射经
         // mapCommitDecisionToAction 与确认路径逐字一致。
+        let peerLineageParentEdgeCount: number | null = null;
         if (isPeerRunnerKind(piTask.taskKind)) {
           const lineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
             task,
@@ -462,6 +474,7 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             skippedCount++;
             continue;
           }
+          peerLineageParentEdgeCount = lineage.parentEdgeCount;
         }
         const proposalResult = await orchestrator.proposeNextTask(task.taskId).catch((proposeErr: unknown) => {
           const proposeMessage = proposeErr instanceof Error ? proposeErr.message : String(proposeErr);
@@ -531,6 +544,22 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
               });
               existingCount++;
             }
+          } else if (peerLineageParentEdgeCount !== null
+            && peerLineageParentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
+            // PRI-1293 R3: dry-run 与 confirm 共用同一新增边深度判定 — commit
+            // (orchestrator) 只在确实要创建新后继时校验再加一条边是否越限,
+            // 预览必须在同一分支点应用同一规则, 否则 10 边任务预览
+            // would_create 而 confirm lineage_refused。已存在后继走上面的
+            // successor_exists 分支, 不受新增边限制影响 (与 commit 同序)。
+            const depthAction = mapCommitDecisionToAction({
+              decision: 'lineage_refused',
+              sourceTaskId: task.taskId,
+              reason: 'parent_chain_cycle_or_depth_exceeded',
+              detail: `successor_would_exceed_depth_limit:${peerLineageParentEdgeCount + 1}_edges_max_${CORRELATION_LINEAGE_MAX_PARENT_EDGES}`,
+            });
+            depthAction.taskKind = piTask.taskKind;
+            actions.push(depthAction);
+            skippedCount++;
           } else {
             actions.push({
               taskId: task.taskId,

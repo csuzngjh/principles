@@ -1171,6 +1171,10 @@ export type {
 
 export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalization/internalization-orchestrator.js';
 
+// PRI-1293 R3: dry-run/confirm 共享同一新增边深度上限 — pd-cli 预览路径
+// 必须引用同一常量而非复刻字面值 (P4 单一真值源)。
+export { CORRELATION_LINEAGE_MAX_PARENT_EDGES } from './internalization/correlation-lineage.js';
+
 // Golden fixtures (PRI-385)
 export type { FixtureDataSet } from './internalization/golden-dogfood-fixtures.js';
 export { GOLDEN_FIXTURES } from './internalization/golden-dogfood-fixtures.js';

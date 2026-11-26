@@ -249,7 +249,7 @@ describe('§3.6.3 (5) — DiagnosticianStageKind 作用域隔离', () => {
     if (result.decision !== 'successor_created') return;
     const successor = await stateManager.getTask(result.successorTaskId);
     expect(successor?.taskKind).toBe('diag_distiller');
-    const pi = hydratePITaskRecord(successor!);
+    const pi = hydratePITaskRecord(need(successor, 'diag distiller successor'));
     expect(pi?.parentTaskId).toBe('diag_rootcause-1');
     expect(pi?.correlationId).toBeUndefined();
     expect(pi?.dependencyTaskIds).toContain('diag_rootcause-1');
@@ -528,5 +528,117 @@ describe('PRI-1293 review fix — revision reopen CAS 并发安全 (finding: lea
     expect(after?.status).toBe('pending');
     expect(after?.revisionCount).toBe(1);
     expect(after?.correlationId).toBe(CAND_A);
+  });
+});
+
+describe('PRI-1293 R3 — cascade reopen CAS 并发冲突的结构化透出 (review: successor_exists 折叠)', () => {
+  /**
+   * 共享夹具: dreamer→philosopher→scribe→artificer→evaluator 全 succeeded,
+   * artificer 已经历一轮修订 (rc=1) 并重新完成 — commit 走级联路径,
+   * 目标是终态 evaluator。
+   */
+  async function seedCascadeChain(): Promise<{ artificer: string; evaluator: string }> {
+    const dreamer = await mkTask('dreamer-cc-prompt', 'dreamer', 'succeeded', { correlationId: CAND_A, topCandidateId: CAND_A });
+    const philosopher = await mkTask('philosopher-cc', 'philosopher', 'succeeded', { parentTaskId: dreamer, correlationId: CAND_A });
+    const scribe = await mkTask('scribe-cc', 'scribe', 'succeeded', { parentTaskId: philosopher, correlationId: CAND_A });
+    const artificer = await mkTask('artificer-cc', 'artificer', 'succeeded', { parentTaskId: scribe, correlationId: CAND_A, dependencyTaskIds: [scribe] });
+    const evaluator = await mkTask('evaluator-cc', 'evaluator', 'succeeded', { parentTaskId: artificer, correlationId: CAND_A, dependencyTaskIds: [artificer], runnerDecision: 'approved' });
+    const reopened = await reopenTaskForRevision(stateManager, artificer, {
+      revisionCauseId: 'owner-revise-cc',
+      reason: 'owner_revise_once',
+    });
+    expect(reopened.ok).toBe(true);
+    await stateManager.updateTask(artificer, { status: 'succeeded', attemptCount: 1 });
+    return { artificer, evaluator };
+  }
+
+  it('级联 CAS 窗口注入并发 metadata 写入 → concurrent_modification 而非 successor_exists, 并发写入不被覆盖, 重试成功', async () => {
+    const { artificer, evaluator } = await seedCascadeChain();
+    // 注: 终态 (succeeded) 任务无法被 lease (lease 状态机只接受 pending/
+    // retry_wait) — 级联目标的真实并发形态是**另一笔写入** (评审: "并发
+    // lease 或 metadata 更新"): 完成回写/另一波修订/元数据订正。此处注入
+    // 一笔真实 metadata 更新, 它必须不被本层级联覆盖。
+    const beforeAttempt = (await stateManager.getTask(evaluator))?.attemptCount;
+
+    const originalGetTask = stateManager.getTask.bind(stateManager);
+    let writeInjected = false;
+    stateManager.getTask = async (id: string) => {
+      const task = await originalGetTask(id);
+      if (!writeInjected && id === evaluator) {
+        writeInjected = true;
+        // 先放行本次读取 (reopen 的原始读取), 并发写在返回后落——交错进 CAS 窗口。
+        const current = need(await originalGetTask(evaluator), 'evaluator for concurrent write');
+        const parsed = JSON.parse(current.diagnosticJson ?? '{}') as Record<string, unknown>;
+        const piMeta = (parsed[PI_METADATA_KEY] ?? {}) as Record<string, unknown>;
+        piMeta.revisionFeedback = 'concurrent-writer-feedback';
+        parsed[PI_METADATA_KEY] = piMeta;
+        await stateManager.updateTask(evaluator, { diagnosticJson: JSON.stringify(parsed) });
+      }
+      return task;
+    };
+    let result;
+    try {
+      result = await orchestrator.commitNextTaskProposal(artificer);
+    } finally {
+      stateManager.getTask = originalGetTask;
+    }
+
+    expect(writeInjected).toBe(true);
+    // 核心断言: 绝不折叠为 successor_exists (伪装幂等), 而是结构化并发冲突。
+    expect(result.decision, JSON.stringify(result)).toBe('concurrent_modification');
+    expect(result.decision).not.toBe('successor_exists');
+    // 并发写入不被覆盖: revisionFeedback 留存, status/attemptCount 未被本层改写。
+    const after = need(await stateManager.getTask(evaluator), 'evaluator after conflict');
+    expect(after.status).toBe('succeeded');
+    expect(after.attemptCount).toBe(beforeAttempt);
+    const afterParsed = JSON.parse(after.diagnosticJson ?? '{}') as Record<string, unknown>;
+    expect((afterParsed[PI_METADATA_KEY] as Record<string, unknown>).revisionFeedback).toBe('concurrent-writer-feedback');
+    const afterPi = hydratePITaskRecord(after);
+    expect(afterPi?.revisionCount ?? 0).toBe(0);
+    // 零新任务 — 没有创建任何后继。
+    const allIds = (await stateManager.listTasks()).map((t) => t.taskId);
+    expect(allIds.filter((id) => id.startsWith('evaluator-') && id !== evaluator)).toHaveLength(0);
+
+    // 重试语义: 无并发干扰后下一波 commit 级联 reopen 正常落地 — 修订波
+    // 并未丢失, 只是延迟 (reopen 幂等, 重试安全)。
+    const retry = await orchestrator.commitNextTaskProposal(artificer);
+    expect(retry.decision, JSON.stringify(retry)).toBe('successor_reopened');
+    const reopenedEval = hydratePITaskRecord(need(await stateManager.getTask(evaluator), 'evaluator after retry'));
+    expect(reopenedEval?.status).toBe('pending');
+  });
+
+  it('级联 CAS 落败后重读发现同一 revisionCauseId 已 materialize → 幂等 no-op 而非并发冲突', async () => {
+    const { artificer, evaluator } = await seedCascadeChain();
+    const expectedCauseId = `cascade-${artificer}-rc1-${evaluator}`;
+
+    // 交错形态: 外层级联血缘读取期间, 另一执行者以**同一 causeId** 完成 reopen。
+    const originalGetTask = stateManager.getTask.bind(stateManager);
+    let innerReopenDone = false;
+    stateManager.getTask = async (id: string) => {
+      const task = await originalGetTask(id);
+      if (!innerReopenDone && id === evaluator) {
+        innerReopenDone = true;
+        const inner = await reopenTaskForRevision(stateManager, evaluator, {
+          reason: 'upstream_revision_cascade',
+          revisionCauseId: expectedCauseId,
+        });
+        expect(inner.ok).toBe(true);
+      }
+      return task;
+    };
+    let result;
+    try {
+      result = await orchestrator.commitNextTaskProposal(artificer);
+    } finally {
+      stateManager.getTask = originalGetTask;
+    }
+
+    expect(innerReopenDone).toBe(true);
+    // 同一 revision 已 materialize → 诚实的幂等重放, 不是并发冲突, 也不是伪装 exists。
+    expect(result.decision, JSON.stringify(result)).toBe('revision_reopen_noop');
+    // 只 reopen 一次: revisionCount 不被双重递增。
+    const after = hydratePITaskRecord(need(await stateManager.getTask(evaluator), 'evaluator after materialized replay'));
+    expect(after?.revisionCount).toBe(1);
+    expect(after?.revisionCauseId).toBe(expectedCauseId);
   });
 });
