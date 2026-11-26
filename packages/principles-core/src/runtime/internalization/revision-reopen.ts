@@ -144,26 +144,64 @@ export async function reopenTaskForRevision(
   // 校验先于任何写入: 拒绝 = 零 mutation + 结构化 reason (rc-9)。
   // DiagnosticianStageKind 目标不在本函数的生产目标集合内; 防御性跳过
   // (血缘门禁严格限于 PeerRunnerKind, §4.2 作用域隔离)。
-  let authoritativeCorrelationId: string | undefined;
+  let resolvedLineageCorrelationId: string | undefined;
   if (isPeerRunnerKind(piTask.taskKind)) {
     const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, stateManager);
     if (!lineage.ok) {
       return { ok: false, reason: `lineage_refused:${lineage.reason}`, detail: lineage.detail };
     }
-    // 可恢复历史任务: 校验通过后把根侧恢复的 id 安全补入本次 reopen 写
-    // (§5.3.7) — 走 mergePITaskMetadata 的既有 28 字段机制, 不新增真值源。
-    authoritativeCorrelationId
-      = lineage.correlationId !== (piTask.correlationId?.trim() ?? '') ? lineage.correlationId : undefined;
+    resolvedLineageCorrelationId = lineage.correlationId;
   }
 
-  const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
+  // ── PRI-1293 R7 (P1-2): 快照生命周期修复 — 血缘解析可能刚对本任务执行了
+  // 历史回填 CAS (补齐 parentTaskId/correlationId), 第一次读取的 rawTask/
+  // piTask 已失效: 继续用旧快照既是 CAS 前提必然落败 (自身回填即并发),
+  // 又会让 merge 丢失刚回填的 parentTaskId (双重腐蚀)。因此血缘门禁后必须
+  // 重新读取, 一切以第二次快照为准。 ──
+  const rawTask2 = await stateManager.getTask(taskId);
+  if (!rawTask2) {
+    return { ok: false, reason: 'task_not_found', detail: 'disappeared_after_lineage_validation' };
+  }
+  const piTask2 = hydratePITaskRecord(rawTask2);
+  if (!piTask2) {
+    return { ok: false, reason: 'invalid_task_metadata', detail: 'metadata_became_unparseable_after_lineage_validation' };
+  }
+  // 并发消费检查: 血缘解析期间他者可能已完成同一 cause 的 reopen — 幂等 no-op
+  // (诚实事实); 不同 cause 的并发修改由下方 CAS 裁决。
+  if (options?.revisionCauseId && hasConsumedRevisionCause(piTask2, options.revisionCauseId)) {
+    return { ok: true, reason: 'idempotent_replay_same_revision' };
+  }
+  // 状态再校验: 血缘解析期间状态可能翻转 — leased 表示他者正在执行,
+  // 不得覆盖; failed 等非可 reopen 状态同样拒绝。pending/retry_wait 为
+  // 可继续状态 (同一任务在修订输入上更新后继续)。
+  if (rawTask2.status === 'leased') {
+    return {
+      ok: false,
+      reason: 'concurrent_modification',
+      detail: `task_leased_during_lineage_validation:${taskId}:owner=${rawTask2.leaseOwner ?? 'unknown'} — reopen NOT applied, concurrent lease untouched`,
+    };
+  }
+  if (rawTask2.status !== 'pending' && rawTask2.status !== 'retry_wait'
+    && rawTask2.status !== 'succeeded' && rawTask2.status !== 'needs_human_review') {
+    return { ok: false, reason: `task_in_flight_${rawTask2.status}` };
+  }
+
+  // 可恢复历史任务: 校验通过后把根侧恢复的 id 安全补入本次 reopen 写
+  // (§5.3.7) — 与第二次快照比较, 只有差异才需要补入 (回填只写 parentTaskId,
+  // 链上 id 一致性在血缘门禁内已验证, 权威值在两次读取间稳定)。
+  const authoritativeCorrelationId = resolvedLineageCorrelationId !== undefined
+    && resolvedLineageCorrelationId !== (piTask2.correlationId?.trim() ?? '')
+    ? resolvedLineageCorrelationId
+    : undefined;
+
+  const merged: PITaskMetadata = mergePITaskMetadata(piTask2, {
     runnerDecision: undefined, // 新一轮 verdict 未定,清空旧判定 (INV-02 单一决策依据)
     // P0 verdict drift: revision reopen = 新 execution epoch — 旧 completion
     // intent 失去 authority,必须随旧 verdict 一并清空;否则重跑时入口门
     // 会 resume 旧 intent,新 epoch 的重新评估被永远跳过。
     completionIntent: undefined,
-    revisionCount: (piTask.revisionCount ?? 0) + 1,
-    revisionFeedback: options?.revisionFeedback ?? piTask.revisionFeedback,
+    revisionCount: (piTask2.revisionCount ?? 0) + 1,
+    revisionFeedback: options?.revisionFeedback ?? piTask2.revisionFeedback,
     revisionCauseId: options?.revisionCauseId,
     // PRI-1293 R5: 消费历史折入由 mergePITaskMetadata 的写不变量自动执行
     // (覆盖 revisionCauseId 槽时旧槽值+新值一并并入, 全写路径统一)。
@@ -174,7 +212,7 @@ export async function reopenTaskForRevision(
     // 替换 artificer 依赖为指定任务(修订轮读取其 repairPayload/artifacts)。
     // 链是线性的: evaluator 的 artificer dep 只有一个。
     const nonArtificerDeps: string[] = [];
-    for (const depId of piTask.dependencyTaskIds) {
+    for (const depId of piTask2.dependencyTaskIds) {
       if (depId === options.replaceArtificerDependencyWith) continue;
       const dep = await stateManager.getTask(depId);
       if (dep && dep.taskKind === 'artificer') continue;
@@ -196,19 +234,19 @@ export async function reopenTaskForRevision(
   // 由下一轮 reconciliation/调用方重试 (reopen 本身幂等, 重试安全)。
   const casResult = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
     taskId,
-    rawTask.diagnosticJson ?? null,
+    rawTask2.diagnosticJson ?? null,
     {
       diagnosticJson: createPITaskDiagnosticJson(merged),
       status: 'pending',
       attemptCount: 0,
     },
     {
-      expectedStatus: rawTask.status,
-      expectedAttemptCount: rawTask.attemptCount,
-      expectedMaxAttempts: rawTask.maxAttempts,
-      expectedLeaseOwner: rawTask.leaseOwner ?? null,
-      expectedLeaseExpiresAt: rawTask.leaseExpiresAt ?? null,
-      expectedLeaseGeneration: rawTask.leaseGeneration ?? 0,
+      expectedStatus: rawTask2.status,
+      expectedAttemptCount: rawTask2.attemptCount,
+      expectedMaxAttempts: rawTask2.maxAttempts,
+      expectedLeaseOwner: rawTask2.leaseOwner ?? null,
+      expectedLeaseExpiresAt: rawTask2.leaseExpiresAt ?? null,
+      expectedLeaseGeneration: rawTask2.leaseGeneration ?? 0,
     },
   );
   if (casResult === null) {

@@ -29,6 +29,8 @@ import {
   mergePITaskMetadata,
   hydratePITaskRecord,
   artificerRepairTaskId,
+  verifyRepairTaskIdentity,
+  type RepairIdentityVerification,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
   type PIArtifactSnapshot,
@@ -214,48 +216,31 @@ export function createEvaluatorRepairDeps(
             `repair task ${repairTaskId} already reached terminal status ${existing.status}; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)`,
           );
         }
-        // PRI-1293 review fix: 复用路径不得绕过血缘门禁。升级前创建的旧
-        // repair task 可能缺 parentTaskId/correlationId — 若直接复用, 等于
-        // 让无血缘证明的 corrective work 继续流转。复用前必须: (1) 来源
-        // evaluator 链可证明 (与新建同一权威校验); (2) 既有任务的亲缘字段
-        // 与权威来源一致 — 缺失则经 CAS 安全补齐 (不覆盖并发 lease), 冲突
-        // 则结构化拒绝而非静默采信。
-        const reuseSourceEvaluator = await stateManager.getTask(params.repairPayload.sourceEvaluatorTaskId);
-        if (!reuseSourceEvaluator) {
-          throw new Error(
-            `evaluator_repair_seed_lineage_refused: source evaluator task ${params.repairPayload.sourceEvaluatorTaskId} not found`,
-          );
-        }
-        const reuseLineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
-          reuseSourceEvaluator,
-          (taskId: string) => stateManager.getTask(taskId),
+        // PRI-1293 R7 (P1-1): 复用前完整身份验证 — 共享 core 唯一实现
+        // (verifyRepairTaskIdentity), 与 pd-cli seeder / orchestrator 完成
+        // 路径同一规则: payload 存在+来源/iteration 一致+taskId 互证+来源
+        // evaluator 真实+parent/correlation 一致+channel 一致。缺失亲缘字段
+        // 可 CAS 回填, payload 身份不符一律 fail-closed。
+        const identity: RepairIdentityVerification = await verifyRepairTaskIdentity(
+          existing,
+          params.repairPayload.sourceEvaluatorTaskId,
+          params.repairPayload.repairIteration,
+          stateManager,
         );
-        if (!reuseLineage.ok) {
-          throw new Error(`evaluator_repair_seed_lineage_refused:${reuseLineage.reason}:${reuseLineage.detail}`);
+        if (!identity.ok) {
+          throw new Error(`evaluator_repair_seed_lineage_refused:${identity.reason}:${identity.detail}`);
         }
         const existingPi = hydratePITaskRecord(existing);
         if (!existingPi) {
           throw new Error(`evaluator_repair_seed_lineage_refused:invalid_task_metadata:repair task ${repairTaskId} diagnosticJson unreadable`);
         }
-        const existingParent = typeof existingPi.parentTaskId === 'string' && existingPi.parentTaskId.trim() !== '' ? existingPi.parentTaskId.trim() : null;
-        const existingCorrelation = typeof existingPi.correlationId === 'string' && existingPi.correlationId.trim() !== '' ? existingPi.correlationId.trim() : null;
-        if (existingParent !== null && existingParent !== params.repairPayload.sourceEvaluatorTaskId) {
-          throw new Error(
-            `evaluator_repair_seed_lineage_refused:conflicting_parent_task_id:repair task ${repairTaskId} parent=${existingParent} != source evaluator ${params.repairPayload.sourceEvaluatorTaskId}`,
-          );
-        }
-        if (existingCorrelation !== null && existingCorrelation !== reuseLineage.correlationId) {
-          throw new Error(
-            `evaluator_repair_seed_lineage_refused:conflicting_parent_correlation_id:repair task ${repairTaskId} correlationId=${existingCorrelation} != authoritative ${reuseLineage.correlationId}`,
-          );
-        }
-        if (existingParent === null || existingCorrelation === null) {
+        if (identity.needsLineageBackfill) {
           // 旧任务缺亲缘字段 — 按权威来源补齐 ( merge 保持其余 28 字段 ),
           // CAS 断言读取时的完整状态; 并发被触碰则放弃并结构化抛出, 下一轮
           // seed 重试 (播种幂等, 重试安全)。
           const merged = mergePITaskMetadata(existingPi, {
             parentTaskId: params.repairPayload.sourceEvaluatorTaskId,
-            correlationId: reuseLineage.correlationId,
+            correlationId: identity.authoritativeCorrelationId,
           });
           const casResult = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
             repairTaskId,
@@ -275,7 +260,7 @@ export function createEvaluatorRepairDeps(
               `evaluator_repair_seed_concurrent_modification: repair task ${repairTaskId} changed during lineage backfill — seed NOT applied, safe to retry`,
             );
           }
-          logger?.info?.(`[PD:Consumer] repair task ${repairTaskId} lineage backfilled (parentTaskId + correlationId ${reuseLineage.correlationId}) before reuse`);
+          logger?.info?.(`[PD:Consumer] repair task ${repairTaskId} lineage backfilled (parentTaskId + correlationId ${identity.authoritativeCorrelationId}) before reuse`);
         }
         logger?.info?.(`[PD:Consumer] repair task ${repairTaskId} already exists (in-flight ${existing.status}); reusing (idempotent seed)`);
         return repairTaskId;

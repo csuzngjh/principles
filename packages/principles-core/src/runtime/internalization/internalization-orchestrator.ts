@@ -21,6 +21,7 @@ import type { DependencyGateResult, NextTaskProposal } from './internalization-s
 import { deriveSuccessorTaskId } from './internalization-state-machine.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, hasConsumedRevisionCause } from './pitask-metadata.js';
 import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition } from './revision-reopen.js';
+import { verifyRepairTaskIdentity } from './repair-task-identity.js';
 // PRI-1293 Phase 3: 唯一 PeerRunnerKind 血缘权威解析器 (core 内部模块,
 // 不入 barrel — 跨包消费方经 InternalizationOrchestrator 静态只读包装访问)。
 import {
@@ -694,6 +695,54 @@ export class InternalizationOrchestrator {
       };
     }
     if (transition.kind === 'REOPEN_SOURCE_EVALUATOR' && piTask.repairPayload) {
+      // PRI-1293 R7 (P1-1): Repair 完成路径的身份前置验证 — 本分支早于通用
+      // PeerRunner 血缘门禁, 不能依赖后续检查兜底。修改来源 Evaluator 之前
+      // 必须证明 Repair 自身: payload 身份与 taskId 互证、来源 Evaluator 真实、
+      // parent/correlation/channel 一致。验证失败 = 零写入 + 结构化拒绝
+      // (不得修改 dependencyTaskIds/清空 inputArtifactRefs/递增 revisionCount)。
+      const repairIdentity = await verifyRepairTaskIdentity(
+        rawTask,
+        piTask.repairPayload.sourceEvaluatorTaskId,
+        piTask.repairPayload.repairIteration,
+        this.stateManager,
+      );
+      if (!repairIdentity.ok) {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: repairIdentity.reason,
+          detail: `repair_identity_verification_failed:${repairIdentity.detail} — source evaluator NOT reopened, zero writes`,
+        };
+      }
+      if (repairIdentity.needsLineageBackfill) {
+        // 历史缺失 parent/correlation — 来源已证明, 经全快照 CAS 安全补齐
+        // (不覆盖并发 lease); CAS 落败 = 并发冲突, 本轮不写 evaluator。
+        const backfillMerged = mergePITaskMetadata(piTask, {
+          parentTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+          correlationId: repairIdentity.authoritativeCorrelationId,
+        });
+        const backfillCas = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+          taskId,
+          rawTask.diagnosticJson ?? null,
+          { diagnosticJson: createPITaskDiagnosticJson(backfillMerged) },
+          {
+            expectedStatus: rawTask.status,
+            expectedAttemptCount: rawTask.attemptCount,
+            expectedMaxAttempts: rawTask.maxAttempts,
+            expectedLeaseOwner: rawTask.leaseOwner ?? null,
+            expectedLeaseExpiresAt: rawTask.leaseExpiresAt ?? null,
+            expectedLeaseGeneration: rawTask.leaseGeneration ?? 0,
+          },
+        );
+        if (backfillCas === null) {
+          return {
+            decision: 'concurrent_modification',
+            sourceTaskId: taskId,
+            reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+            detail: `repair_identity_backfill_cas_conflict:${taskId} — evaluator NOT reopened, safe to retry`,
+          };
+        }
+      }
       // PRI-629 P0 (SPEC §12): epoch-aware causal identity — Owner 额外修订轮
       // (revise_once reopen 该 artificer,其 revisionCount+1) 再次完成时,
       // 重开来源 evaluator 必须使用新 causeId 才是真 reopen;同 epoch 重放
@@ -1252,7 +1301,7 @@ export class InternalizationOrchestrator {
     recovered: number;
     alreadyMaterialized: number;
     blocked: number;
-    outcomes: { taskId: string; decision: string; reason?: string; detail?: string; conflictingSuccessorTaskIds?: string[] }[];
+    outcomes: { taskId: string; decision: string; reason?: string; detail?: string; reopenedTaskId?: string; successorTaskId?: string; successorKind?: string; conflictingSuccessorTaskIds?: string[] }[];
     /** 本周期后的游标 — caller 必须持久化 (A3 restart 语义) */
     nextCursor: { lastUpdatedAt: string; lastTaskId: string };
     /** true = 已扫到尾部,caller 应将游标重置回开头 (wrap-around) */
@@ -1287,11 +1336,21 @@ export class InternalizationOrchestrator {
       if (!isPeerRunnerKind(task.taskKind)) continue;
       try {
         const result = await this.commitNextTaskProposal(task.taskId);
-        const outcome: { taskId: string; decision: string; reason?: string; detail?: string; conflictingSuccessorTaskIds?: string[] } = {
+        // PRI-1293 R7 (P2-2): 完整结构化投影 — repair reopen 失败后 Owner 必须
+        // 能直接从 reconciliation 结果定位原本要重开的 Evaluator (reopenedTaskId),
+        // 不得在中间层丢失证据字段。
+        const outcome: {
+          taskId: string; decision: string; reason?: string; detail?: string;
+          reopenedTaskId?: string; successorTaskId?: string; successorKind?: string;
+          conflictingSuccessorTaskIds?: string[];
+        } = {
           taskId: task.taskId, decision: result.decision,
         };
         if ('reason' in result) outcome.reason = result.reason;
         if ('detail' in result && result.detail !== undefined) outcome.detail = result.detail;
+        if ('reopenedTaskId' in result && typeof result.reopenedTaskId === 'string') outcome.reopenedTaskId = result.reopenedTaskId;
+        if ('successorTaskId' in result && typeof result.successorTaskId === 'string') outcome.successorTaskId = result.successorTaskId;
+        if ('successorKind' in result && typeof result.successorKind === 'string') outcome.successorKind = result.successorKind;
         if ('conflictingSuccessorTaskIds' in result) outcome.conflictingSuccessorTaskIds = [...result.conflictingSuccessorTaskIds];
         outcomes.push(outcome);
         if (result.decision === 'successor_created' || result.decision === 'revision_reopened' || result.decision === 'successor_reopened'
@@ -1478,6 +1537,9 @@ export class InternalizationOrchestrator {
           expectedMaxAttempts: artificerTask.maxAttempts,
           expectedLeaseOwner: artificerTask.leaseOwner ?? null,
           expectedLeaseExpiresAt: artificerTask.leaseExpiresAt ?? null,
+          // PRI-1293 R7 (P2-3): leaseOwner/leaseExpiresAt 相同的重租场景只有
+          // leaseGeneration 单调递增可区分 — 缺失此前提则旧 CAS 会覆盖新租约。
+          expectedLeaseGeneration: artificerTask.leaseGeneration ?? 0,
         },
       );
       if (updated) {

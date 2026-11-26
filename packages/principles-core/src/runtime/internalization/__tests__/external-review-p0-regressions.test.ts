@@ -92,7 +92,8 @@ async function mkTask(taskId: string, taskKind: string, diagnosticJson: string):
     }
     parentTaskId = dreamerId;
   } else {
-    parentTaskId = pi?.dependencyTaskIds[0];
+    // PRI-1293 R7: 显式 parentTaskId 优先 (repair 的 causal parent 是来源 evaluator)。
+    parentTaskId = pi?.parentTaskId ?? pi?.dependencyTaskIds[0];
   }
   const finalJson = pi && parentTaskId !== undefined
     ? createPITaskDiagnosticJson(mergePITaskMetadata(pi, { parentTaskId }))
@@ -135,6 +136,7 @@ describe('P0-4 — repair/reopen 真幂等 (fault injection)', () => {
     await mkTask(REPAIR_ID, 'artificer', meta({
       dependencyTaskIds: [SCRIBE_ID], correlationId: 'p04',
       repairPayload: { requiredChanges: ['x'], concerns: [], previousScore: 0.4, repairIteration: 1, sourceArtificerArtifactId: 'pi-art-a', sourceEvaluatorTaskId: EVAL_ID },
+      parentTaskId: EVAL_ID,
     }));
 
     // repair 完成 → commit → evaluator reopen (第一次)

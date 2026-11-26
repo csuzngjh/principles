@@ -1602,6 +1602,10 @@ export type {
   OwnerIdentityContext,
 } from './internalization/owner-resolution-service.js';
 export { deriveSuccessorTaskId } from './internalization/internalization-state-machine.js';
+export { verifyRepairTaskIdentity } from './internalization/repair-task-identity.js';
+export { planLegacyLineageResolution } from './internalization/correlation-lineage.js';
+export type { LegacyLineagePlan } from './internalization/correlation-lineage.js';
+export type { RepairIdentityVerification } from './internalization/repair-task-identity.js';
 // PRI-1293 R5: 共享只读级联判定 — commit 与 dry-run 预览消费同一计划入口。
 export { reopenTaskForRevision, resolveRolloutRevisionTarget, buildRepairRevisionCauseId, planExistingSuccessorTransition } from './internalization/revision-reopen.js';
 export type { ReopenRevisionOptions, RolloutRevisionTarget } from './internalization/revision-reopen.js';

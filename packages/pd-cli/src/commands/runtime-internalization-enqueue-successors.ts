@@ -8,7 +8,7 @@ import {
   CORRELATION_LINEAGE_MAX_PARENT_EDGES,
 } from '@principles/core/runtime';
 import type { CommitNextTaskResult, PDTaskStatus } from '@principles/core/runtime';
-import { planExistingSuccessorTransition, deriveSuccessorTaskId } from '@principles/core/runtime';
+import { planExistingSuccessorTransition, deriveSuccessorTaskId, planLegacyLineageResolution, type LegacyLineagePlan } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createConsentLedgerSourceMaterialAuthorization } from '@principles/host-runtime/source-material-authorization';
 
@@ -507,12 +507,13 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
         // 预览若跳过该判定会把同一任务误报为 would_create_successor。此处只读
         // (resolveAuthoritativeCorrelationId 不写任何状态), 且拒绝映射经
         // mapCommitDecisionToAction 与确认路径逐字一致。
+        // PRI-1293 R7 (P2-1): dry-run 改用只读 planner — 与 confirm 的回填版
+        // 走同一推理路径 (同一 inferLegacyParentTaskId + canonical overlay
+        // 终验), 消除"dry-run 拒绝而 confirm 成功"的分叉; planner 不写库,
+        // dry-run 零写入不变量保持。
         let peerLineageParentEdgeCount: number | null = null;
         if (isPeerRunnerKind(piTask.taskKind)) {
-          const lineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
-            task,
-            (taskId: string) => stateManager.getTask(taskId),
-          );
+          const lineage: LegacyLineagePlan = await planLegacyLineageResolution(task, stateManager);
           if (!lineage.ok) {
             const lineageAction = mapCommitDecisionToAction({
               decision: 'lineage_refused',

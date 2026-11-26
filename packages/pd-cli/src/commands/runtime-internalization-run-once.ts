@@ -951,11 +951,11 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           output.enqueueReason = `source_correction_reopen_failed: ${commitResult.reason}; source task ${commitResult.reopenedTaskId} could not be reopened`;
           output.nextAction = `Inspect source task ${commitResult.reopenedTaskId} status/lease/metadata; the scribe epoch stays consumable.`;
         } else {
-          // 穷尽防御: 联合类型新增 decision 时此处必须显式化 — 编译期
-          // never 检查在 mapCommitDecisionToAction 已覆盖 CLI 全量,
-          // 此分支仅作运行时异物兜底, 且如实透出原始 decision 名。
-          output.enqueueReason = `unhandled_commit_decision: ${String((commitResult as { decision?: unknown }).decision)} — no successor semantics applied`;
-          output.nextAction = 'Investigate orchestrator logic; the decision type is not yet mapped in run-once output.';
+          // PRI-1293 R7 (P2-4): 编译期穷尽 — if/else 链对 CommitNextTaskResult
+          // 全联合类型逐一 narrowing 后, 此分支的类型必须为 never。新增
+          // decision 未显式映射时此处产生编译错误, 禁止运行时兜底吞没。
+          const exhaustiveCheck: never = commitResult;
+          throw new Error(`unhandled_commit_decision_compile_guard: ${JSON.stringify(exhaustiveCheck)}`);
         }
       } catch (enqueueErr: unknown) {
         const enqueueMessage = enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);

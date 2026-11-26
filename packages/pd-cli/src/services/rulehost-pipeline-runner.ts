@@ -44,6 +44,8 @@ import {
   parsePITaskMetadata,
   parseSeedSourcePainId,
   artificerRepairTaskId,
+  verifyRepairTaskIdentity,
+  type RepairIdentityVerification,
   runAdversarialLoop,
   evaluateInRefinerSandbox,
   DEFAULT_MAX_ROUNDS,
@@ -863,43 +865,26 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
             `repair task ${repairTaskId} already reached terminal status ${existing.status}; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)`,
           );
         }
-        // PRI-1293 review fix: 复用路径不得绕过血缘门禁 — 与 host-runtime
-        // seeder 同一规则。升级前创建的旧 repair task 可能缺 parentTaskId/
-        // correlationId; 复用前必须证明来源 evaluator 链, 缺失字段经 CAS
-        // 安全补齐, 冲突字段结构化拒绝。
-        const reuseSourceEvaluator = await stateManager.getTask(params.repairPayload.sourceEvaluatorTaskId);
-        if (!reuseSourceEvaluator) {
-          throw new Error(
-            `evaluator_repair_seed_lineage_refused: source evaluator task ${params.repairPayload.sourceEvaluatorTaskId} not found`,
-          );
-        }
-        const reuseLineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
-          reuseSourceEvaluator,
-          (taskId: string) => stateManager.getTask(taskId),
+        // PRI-1293 R7 (P1-1): 复用前完整身份验证 — 共享 core 唯一实现
+        // (verifyRepairTaskIdentity), 与 host-runtime seeder / orchestrator
+        // 完成路径同一规则, 禁止两份实现各自演化。
+        const identity: RepairIdentityVerification = await verifyRepairTaskIdentity(
+          existing,
+          params.repairPayload.sourceEvaluatorTaskId,
+          params.repairPayload.repairIteration,
+          stateManager,
         );
-        if (!reuseLineage.ok) {
-          throw new Error(`evaluator_repair_seed_lineage_refused:${reuseLineage.reason}:${reuseLineage.detail}`);
+        if (!identity.ok) {
+          throw new Error(`evaluator_repair_seed_lineage_refused:${identity.reason}:${identity.detail}`);
         }
         const existingPi = hydratePITaskRecord(existing);
         if (!existingPi) {
           throw new Error(`evaluator_repair_seed_lineage_refused:invalid_task_metadata:repair task ${repairTaskId} diagnosticJson unreadable`);
         }
-        const existingParent = typeof existingPi.parentTaskId === 'string' && existingPi.parentTaskId.trim() !== '' ? existingPi.parentTaskId.trim() : null;
-        const existingCorrelation = typeof existingPi.correlationId === 'string' && existingPi.correlationId.trim() !== '' ? existingPi.correlationId.trim() : null;
-        if (existingParent !== null && existingParent !== params.repairPayload.sourceEvaluatorTaskId) {
-          throw new Error(
-            `evaluator_repair_seed_lineage_refused:conflicting_parent_task_id:repair task ${repairTaskId} parent=${existingParent} != source evaluator ${params.repairPayload.sourceEvaluatorTaskId}`,
-          );
-        }
-        if (existingCorrelation !== null && existingCorrelation !== reuseLineage.correlationId) {
-          throw new Error(
-            `evaluator_repair_seed_lineage_refused:conflicting_parent_correlation_id:repair task ${repairTaskId} correlationId=${existingCorrelation} != authoritative ${reuseLineage.correlationId}`,
-          );
-        }
-        if (existingParent === null || existingCorrelation === null) {
+        if (identity.needsLineageBackfill) {
           const merged = mergePITaskMetadata(existingPi, {
             parentTaskId: params.repairPayload.sourceEvaluatorTaskId,
-            correlationId: reuseLineage.correlationId,
+            correlationId: identity.authoritativeCorrelationId,
           });
           const casResult = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
             repairTaskId,

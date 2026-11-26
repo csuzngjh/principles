@@ -358,6 +358,91 @@ async function inferLegacyParentTaskId(
 
 
 /**
+ * PRI-1293 R7 (P2-1): 只读历史血缘规划 — dry-run / confirm / seeder 的统一
+ * 判定入口。与回填版走完全相同的推理路径 (同一 inferLegacyParentTaskId,
+ * 同一深度/环/孤儿分类规则), 但**不写任何状态**: 推断出的边收集为
+ * backfillEdges, 然后用 overlay getTask (把计划边虚拟补入 parentTaskId)
+ * 跑 canonical resolver 终验 — 保证规划判定与"回填后 canonical 判定"
+ * 严格一致, 消除 dry-run 拒绝而 confirm 成功的分叉。
+ */
+export type LegacyLineagePlan =
+  | {
+    readonly ok: true;
+    readonly correlationId: string;
+    readonly recoveredFromLegacyRoot: boolean;
+    readonly parentEdgeCount: number;
+    /** 需要 CAS 补齐的父子边 (缺失但已证明); 空数组 = 无需回填。 */
+    readonly backfillEdges: readonly { readonly taskId: string; readonly parentTaskId: string }[];
+  }
+  | { readonly ok: false; readonly reason: CorrelationLineageFailureReason; readonly detail: string };
+
+export async function planLegacyLineageResolution(
+  leafTaskRecord: TaskRecord,
+  stateManager: RuntimeStateManager,
+): Promise<LegacyLineagePlan> {
+  const edges: { taskId: string; parentTaskId: string }[] = [];
+  let current = leafTaskRecord;
+  const visited = new Set<string>();
+  for (let depth = 0; depth <= CORRELATION_LINEAGE_MAX_PARENT_EDGES; depth += 1) {
+    if (visited.has(current.taskId)) {
+      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_cycle_at:' + current.taskId };
+    }
+    visited.add(current.taskId);
+    const pi = hydratePITaskRecord(current);
+    if (!pi) return { ok: false, reason: 'missing_correlation_id_lineage', detail: 'invalid_legacy_backfill_metadata:' + current.taskId };
+    if (pi.taskKind === 'dreamer') break;
+
+    const existingParentId = pi.parentTaskId?.trim();
+    if (existingParentId) {
+      const parent = await stateManager.getTask(existingParentId);
+      if (!parent) break; // canonical overlay 同样报 dangling_parent_reference
+      current = parent;
+      continue;
+    }
+    if (depth === CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
+      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_depth_exceeded:' + current.taskId };
+    }
+
+    const inferred = await inferLegacyParentTaskId(current, pi, stateManager);
+    if (!inferred.ok) {
+      if (inferred.reason === 'task_id_shape_not_from_a_supported_legacy_producer') {
+        break; // 非生产者节点: 链止于此, 分类权交 canonical overlay
+      }
+      return { ok: false, reason: 'legacy_parent_inference_refused', detail: 'task=' + current.taskId + ';taskKind=' + pi.taskKind + ';' + inferred.reason };
+    }
+    if (visited.has(inferred.parentTaskId)) {
+      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_inferred_cycle_at:' + inferred.parentTaskId };
+    }
+    const parent = await stateManager.getTask(inferred.parentTaskId);
+    if (!parent) return { ok: false, reason: 'dangling_parent_reference', detail: 'legacy_inferred_parent_not_found:' + inferred.parentTaskId };
+    edges.push({ taskId: current.taskId, parentTaskId: inferred.parentTaskId });
+    current = parent;
+  }
+
+  // overlay: 把计划边虚拟补入, canonical resolver 终验 — 不写库。
+  const edgeMap = new Map(edges.map((e) => [e.taskId, e.parentTaskId]));
+  const overlayGetTask = async (taskId: string): Promise<TaskRecord | null> => {
+    const row = await stateManager.getTask(taskId);
+    const planned = edgeMap.get(taskId);
+    if (!row || planned === undefined) return row;
+    const pi = hydratePITaskRecord(row);
+    if (!pi) return row;
+    const merged = mergePITaskMetadata(pi, { parentTaskId: planned });
+    return { ...row, diagnosticJson: createPITaskDiagnosticJson(merged) };
+  };
+  const overlayLeaf = await overlayGetTask(leafTaskRecord.taskId) ?? leafTaskRecord;
+  const canonical = await resolveAuthoritativeCorrelationId(overlayLeaf, overlayGetTask);
+  if (!canonical.ok) return canonical;
+  return {
+    ok: true,
+    correlationId: canonical.correlationId,
+    recoveredFromLegacyRoot: canonical.recoveredFromLegacyRoot,
+    parentEdgeCount: canonical.parentEdgeCount,
+    backfillEdges: edges,
+  };
+}
+
+/**
  * Upgrade only known historical producer shapes. This helper is intentionally
  * separate from the read-only resolver: each inferred edge is proven from a
  * producer-specific task-id shape plus a unique typed predecessor, then

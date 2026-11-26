@@ -64,7 +64,7 @@ const j11LedgerIdentity = {
 };
 
 const EVAL_ID = 'evaluator-j11-prompt';
-const REPAIR_ID = 'artificer-repair-j11-1';
+const REPAIR_ID = 'artificer-repair-evaluator-j11-prompt-r1';
 const ROLLOUT_ID = 'rollout_reviewer-j11-prompt';
 const SCRIBE_ID = 'scribe-j11-prompt';
 const ORIGINAL_ARTIFICER_ID = 'artificer-j11-prompt';
@@ -137,7 +137,9 @@ async function main() {
     await stateManager.createTask({
       taskId: REPAIR_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: meta({
-        dependencyTaskIds: [SCRIBE_ID], correlationId: 'j11', parentTaskId: SCRIBE_ID,
+        // PRI-1293 R7: repair 的 causal parent 是来源 evaluator (生产语义),
+        // 依赖输入仍是 scribe — 二者不可混同。
+        dependencyTaskIds: [SCRIBE_ID], correlationId: 'j11', parentTaskId: EVAL_ID,
         repairPayload: { requiredChanges: ['fix guard'], concerns: [], previousScore: 0.4, repairIteration: 1, sourceArtificerArtifactId: 'pi-art-a-j11', sourceEvaluatorTaskId: EVAL_ID },
       }),
     });

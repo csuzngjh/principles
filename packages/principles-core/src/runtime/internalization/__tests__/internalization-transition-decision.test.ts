@@ -253,18 +253,18 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
       meta: makeMeta({ dependencyTaskIds: ['scribe-cand-4-prompt'], parentTaskId: 'dreamer-cand-4-prompt' }),
     });
     const repairTask = makeTask({
-      taskId: 'artificer-repair-xyz', taskKind: 'artificer', status: 'succeeded',
+      taskId: 'artificer-repair-evaluator-cand-4-prompt-r1', taskKind: 'artificer', status: 'succeeded',
       meta: makeMeta({ repairPayload: makeRepairPayload(1, 'evaluator-cand-4-prompt') }),
     });
     mockStateManager.getTask.mockImplementation(async (id: string) => {
-      if (id === 'artificer-repair-xyz') return repairTask;
+      if (id === 'artificer-repair-evaluator-cand-4-prompt-r1') return repairTask;
       if (id === 'evaluator-cand-4-prompt') return evaluatorTask;
       if (id === 'artificer-cand-4-prompt') return originalArtificer;
       if (id === 'dreamer-cand-4-prompt') return makeDreamerTask('dreamer-cand-4-prompt', 'cand-4');
       return null;
     });
 
-    const result = await makeOrchestrator().commitNextTaskProposal('artificer-repair-xyz');
+    const result = await makeOrchestrator().commitNextTaskProposal('artificer-repair-evaluator-cand-4-prompt-r1');
 
     expect(result.decision).toBe('revision_reopened');
     expect(result.reopenedTaskId).toBe('evaluator-cand-4-prompt');
@@ -278,7 +278,7 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
     // dep 替换: 原 artificer dep 移除, repair 任务成为唯一 artificer dep
     const writtenJson = reopenCall1?.diagnosticJson as string;
     const parsed = JSON.parse(writtenJson) as { pi_metadata: { dependencyTaskIds: string[]; revisionCount?: number } };
-    expect(parsed.pi_metadata.dependencyTaskIds).toContain('artificer-repair-xyz');
+    expect(parsed.pi_metadata.dependencyTaskIds).toContain('artificer-repair-evaluator-cand-4-prompt-r1');
     expect(parsed.pi_metadata.dependencyTaskIds).not.toContain('artificer-cand-4-prompt');
     expect(parsed.pi_metadata.dependencyTaskIds).toContain('scribe-cand-4-prompt'); // scribe 依赖保留
     expect(parsed.pi_metadata.revisionCount).toBe(1);

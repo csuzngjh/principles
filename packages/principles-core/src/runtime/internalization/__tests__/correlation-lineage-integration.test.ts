@@ -325,15 +325,15 @@ describe('§3.6.3 (6) — repair → 来源 evaluator reopen 继承同一 correl
     // repairPayload.sourceEvaluatorTaskId 指回 evaluator。
     const dreamer = await mkTask('dreamer-repair-prompt', 'dreamer', 'succeeded', { correlationId: CAND_A, topCandidateId: CAND_A });
     const scribe = await mkTask('scribe-repair', 'scribe', 'succeeded', { parentTaskId: dreamer, correlationId: CAND_A });
-    await mkTask('artificer-repair-1', 'artificer', 'succeeded', {
+    await mkTask('artificer-repair-evaluator-repair-src-r1', 'artificer', 'succeeded', {
       parentTaskId: scribe,
       correlationId: CAND_A,
       runnerDecision: 'approved',
     });
     // 手工补 repairPayload (含 sourceEvaluatorTaskId + iteration)。
-    const artificerRaw = await stateManager.getTask('artificer-repair-1');
+    const artificerRaw = await stateManager.getTask('artificer-repair-evaluator-repair-src-r1');
     const artificerPi = hydratePITaskRecord(need(artificerRaw, 'repair artificer task'));
-    await stateManager.updateTask('artificer-repair-1', {
+    await stateManager.updateTask('artificer-repair-evaluator-repair-src-r1', {
       diagnosticJson: createPITaskDiagnosticJson({
         ...need(artificerPi, 'repair artificer metadata'),
         repairPayload: {
@@ -363,16 +363,16 @@ describe('§3.6.3 (6) — repair → 来源 evaluator reopen 继承同一 correl
       dependencyTaskIds: [originalArtificer],
     });
     // repair artificer 的父链按生产方向指向来源 evaluator。
-    const repairRaw = await stateManager.getTask('artificer-repair-1');
+    const repairRaw = await stateManager.getTask('artificer-repair-evaluator-repair-src-r1');
     const repairPi = hydratePITaskRecord(need(repairRaw, 'repair artificer'));
-    await stateManager.updateTask('artificer-repair-1', {
+    await stateManager.updateTask('artificer-repair-evaluator-repair-src-r1', {
       diagnosticJson: createPITaskDiagnosticJson({
         ...need(repairPi, 'repair artificer metadata'),
         parentTaskId: evaluator,
       }),
     });
 
-    const result = await orchestrator.commitNextTaskProposal('artificer-repair-1');
+    const result = await orchestrator.commitNextTaskProposal('artificer-repair-evaluator-repair-src-r1');
     expect(result.decision).toBe('revision_reopened');
     if (result.decision !== 'revision_reopened') return;
     expect(result.reopenedTaskId).toBe(evaluator);
@@ -382,7 +382,7 @@ describe('§3.6.3 (6) — repair → 来源 evaluator reopen 继承同一 correl
     expect(reopened?.status).toBe('pending');
     // 依赖替换的真实证明: 原 artificer 依赖被换出, repair artificer 换入
     // (PRI-668 / P0-D 语义保持) — 两个方向都必须断言。
-    expect(reopened?.dependencyTaskIds).toContain('artificer-repair-1');
+    expect(reopened?.dependencyTaskIds).toContain('artificer-repair-evaluator-repair-src-r1');
     expect(reopened?.dependencyTaskIds).not.toContain('artificer-original');
   });
 });
@@ -560,28 +560,34 @@ describe('PRI-1293 R3 — cascade reopen CAS 并发冲突的结构化透出 (rev
     // 一笔真实 metadata 更新, 它必须不被本层级联覆盖。
     const beforeAttempt = (await stateManager.getTask(evaluator))?.attemptCount;
 
-    const originalGetTask = stateManager.getTask.bind(stateManager);
+    // PRI-1293 R7 (P1-2) 适配: reopen 现为双读生命周期 (血缘门禁后重读权威
+    // 快照)。并发写若在第一读注入, 第二读会观测并合法合并 (不再是竞态) —
+    // 真实 CAS 窗口是最终写入前。改注入到目标 CAS 执行前一刻: patch 含
+    // status 的写即 reopen 终写 (血缘回填仅写 metadata)。
+    const originalCas = stateManager.updateTaskIfDiagnosticJsonUnchanged.bind(stateManager);
     let writeInjected = false;
-    stateManager.getTask = async (id: string) => {
-      const task = await originalGetTask(id);
-      if (!writeInjected && id === evaluator) {
+    /* eslint-disable @typescript-eslint/max-params -- 镜像生产 CAS 签名以注入并发写 (参数列跨行, 行级 directive 覆盖不到 arrow 报告点)。 */
+    stateManager.updateTaskIfDiagnosticJsonUnchanged = async (
+      taskId: string, expected: string | null, patch: Record<string, unknown>, preconditions?: Record<string, unknown>,
+    ) => {
+      if (!writeInjected && taskId === evaluator && patch.status !== undefined) {
         writeInjected = true;
-        // 先放行本次读取 (reopen 的原始读取), 并发写在返回后落——交错进 CAS 窗口。
-        const current = need(await originalGetTask(evaluator), 'evaluator for concurrent write');
+        const current = need(await stateManager.getTask(evaluator), 'evaluator for concurrent write');
         const parsed = JSON.parse(current.diagnosticJson ?? '{}') as Record<string, unknown>;
         const piMeta = (parsed[PI_METADATA_KEY] ?? {}) as Record<string, unknown>;
         piMeta.revisionFeedback = 'concurrent-writer-feedback';
         parsed[PI_METADATA_KEY] = piMeta;
         await stateManager.updateTask(evaluator, { diagnosticJson: JSON.stringify(parsed) });
       }
-      return task;
+      return originalCas(taskId, expected, patch, preconditions);
     };
     let result;
     try {
       result = await orchestrator.commitNextTaskProposal(artificer);
     } finally {
-      stateManager.getTask = originalGetTask;
+      stateManager.updateTaskIfDiagnosticJsonUnchanged = originalCas;
     }
+    /* eslint-enable @typescript-eslint/max-params */
 
     expect(writeInjected).toBe(true);
     // 核心断言: 绝不折叠为 successor_exists (伪装幂等), 而是结构化并发冲突。
