@@ -324,11 +324,12 @@ describe('validateAndBackfillRepairLineage — CAS 六项快照前提', () => {
     expect(existing.leaseOwner).toBe('worker-1');
     expect(existing.leaseGeneration).toBe(2);
 
-    let captured: {
+    type CapturedCasCall = {
       taskId: string;
       expectedDiagnosticJson: string | null;
       options?: Record<string, unknown>;
-    } | null = null;
+    };
+    let captured: CapturedCasCall | null = null;
     const capturingStore: RepairLineageBackfillStore = {
       getTask: (taskId: string) => sm.getTask(taskId),
       listTasks: (filter?: Parameters<RuntimeStateManager['listTasks']>[0]) => sm.listTasks(filter),
@@ -343,7 +344,7 @@ describe('validateAndBackfillRepairLineage — CAS 六项快照前提', () => {
       capturingStore,
     );
     expect(r.ok).toBe(true);
-    const got = need(captured, 'captured CAS call');
+    const got = need<CapturedCasCall>(captured, 'captured CAS call');
     expect(got.taskId).toBe(rep);
     // diagnosticJson 逐字节前提。
     expect(got.expectedDiagnosticJson).toBe(existing.diagnosticJson ?? null);
