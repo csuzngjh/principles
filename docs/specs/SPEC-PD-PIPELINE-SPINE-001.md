@@ -1,11 +1,12 @@
 # SPEC-PD-PIPELINE-SPINE-001 — PD 核心管道主干收敛规范
 
-- **版本**：v0.10
+- **版本**：v0.11
 - **日期**：2026-11-28
-- **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，仍待 Owner 决策与批准）
+- **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，v0.11 为其事实勘误，仍待 Owner 决策与批准）
 - **修订记录**：
+  - **v0.11（v0.10 事实勘误，无规范行为变更）**：评审指出 v0.10 回填条文与代码存在字段/类型名不一致，逐项核实后于 TECH 文档勘误：① R4-1 拒绝 reason 实为 `conflicting_root_identity_sources`；② R4-4 CAS 前提集修正为 `taskId` + `diagnosticJson` 逐字节 + 六项显式快照前提（含 `maxAttempts`/`leaseGeneration`，v0.10 漏列且误标 lease 字段为恒 null），`revisionCount`/`revisionCauseId` 由 `diagnosticJson` 字节相等覆盖而非独立前提；③ R4-4 幂等重放返回实为 `{ ok: true, reason: 'idempotent_replay_same_revision' }`（无 `outcome` 字段）；④ R4-6 状态枚举修正（`running` 非 `PDTaskStatus`，非终态命中含 `failed`）；⑤ R4-9 consumer cycle 机制修正（即时路径 `successorDecision` 遥测透出 + reconciliation 计 `blocked`，不存在"计入 `skipped`"的机制）；⑥ R4-10 类型名修正（实为 `SelectedInternalizationTaskRunResult`）并补全白名单精确枚举。规范意图与代码行为均未变，仅事实描述与实施对齐。
   - **v0.10（PR #2803 实施期评审回填修订）**：
-    1. **Phase 2B/3 运行时规则回填**：实施与多轮评审确认 v0.9 未规定的 10 项内化链运行时规则（root correlationId 权威身份、parentTaskId 血缘完整性、最大父链深度 10 与**创建前**新增边检查、reopen 全快照 CAS 七项前提与并发失败语义、revisionCauseId 幂等、历史终态后继按 `(parentTaskId, kind, channel)` 复用、RuleHost 时间戳 id 链与 enqueue-successors 的统一幂等、dry-run/confirm 判定逐点一致、`concurrent_modification` 独立结构化透出且不计入 already-materialized、host-runtime barrel 显式导出白名单）。规范性条文见 TECH 文档「Round 4 implementation amendment」（R4-1 至 R4-10），代码已落地并经真实持久化生产路径回归验证。
+    1. **Phase 2B/3 运行时规则回填**：实施与多轮评审确认 v0.9 未规定的 10 项内化链运行时规则（root correlationId 权威身份、parentTaskId 血缘完整性、最大父链深度 10 与**创建前**新增边检查、reopen 全快照 CAS 前提集与并发失败语义、revisionCauseId 幂等、历史终态后继按 `(parentTaskId, kind, channel)` 复用、RuleHost 时间戳 id 链与 enqueue-successors 的统一幂等、dry-run/confirm 判定逐点一致、`concurrent_modification` 独立结构化透出且不计入 already-materialized、host-runtime barrel 显式导出白名单）。规范性条文见 TECH 文档「Round 4 implementation amendment」（R4-1 至 R4-10），代码已落地并经真实持久化生产路径回归验证。
     2. **D1/D3/D4/D5/D6 逐项核对**：全部已实施且无偏差；D6 涉及的 `executeSelectedInternalizationTask` 导出边界本轮收紧为白名单制（详见 TECH 文档核对表）。
     3. **待 Owner 决策**：(a) RuleHost 时间戳任务 id 是否远期收敛为确定性 id（当前工程结论：无必要）；(b) 本修正案整体批准。未经 Owner 批准，Draft 状态不变。
   - **v0.9（PR #2763 第七轮独立复核修订）**：
@@ -43,7 +44,7 @@
   - **v0.2（对抗式自审修订）**：修正 `runtimeKind` / `hostKind` 混淆；按 P2.1 删除 `createPipelineRuntime` 大门面；用探针值端到端测试替代静态字段清单；删除 `PITaskMetadata` 三分组重排。
 - **范围**：Pain → 诊断 → 候选准入与账本入库 → 内化 → 激活 → 注入/拦截 → 行为证据 这条核心链路的协作者装配、跨跳数据连通性与有效性闭环
 - **事实基线**：`origin/main@679dcc93f`。§3 的全部数字与代码锚点均在该基线上实测，复跑命令见附录 A。
-- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.9）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
+- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.11）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
 - **不改变**：Pain 语义、诊断/内化业务规则、Owner 审批权、任务状态机（`MVP_CORE_LOOP_CONTRACT` INV-01..08）、物理数据库布局、Workspace 数据归属
 - **关联**：
   - `docs/architecture/MVP_CORE_LOOP_CONTRACT.md`（语义基线，本 SPEC 不修改）

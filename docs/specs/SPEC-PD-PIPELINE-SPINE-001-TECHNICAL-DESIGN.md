@@ -1,12 +1,13 @@
 # SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案
 
-- **版本**：v0.10
+- **版本**：v0.11
 - **日期**：2026-11-28
-- **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，仍待 Owner 决策与批准）
-- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.10）](./SPEC-PD-PIPELINE-SPINE-001.md)
+- **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，v0.11 为其事实勘误，仍待 Owner 决策与批准）
+- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.11）](./SPEC-PD-PIPELINE-SPINE-001.md)
 - **源码事实基线**：`origin/main@679dcc93f`
 - **规范性数据契约**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)、[MVP Core Loop Contract](../architecture/MVP_CORE_LOOP_CONTRACT.md)
 - **标注约定**：文中标注 `〔现有能力〕` 的符号已在当前源码中存在；标注 `〔新增能力〕` 的符号当前不存在，实施前不得以现有能力名义引用；标注 `〔收编删除〕` 的代码块为重复组装，迁移后删除。
+- **v0.11 关键技术修订摘要（v0.10 事实勘误，无规范行为变更）**：评审指出 v0.10 回填条文存在若干与代码不一致的字段/类型名，逐项核实后勘误（规范意图不变，仅使事实描述与实施一致）：① R4-1 拒绝 reason 实为 `conflicting_root_identity_sources`（非 `conflicting_root_identity`）；② R4-4 CAS 前提集修正为实际实现——`taskId` 定位 + `diagnosticJson` 逐字节相等 + 六项显式快照前提（`status`/`attemptCount`/`maxAttempts`/`leaseOwner`/`leaseExpiresAt`/`leaseGeneration`，均为快照值而非恒 null），`revisionCount`/`revisionCauseId` 位于 `diagnosticJson` PI 信封内由字节相等覆盖而非独立前提；③ R4-4 幂等重放返回形状实为 `{ ok: true, reason: 'idempotent_replay_same_revision' }`（无 `outcome` 字段）；④ R4-6 状态枚举修正——`running` 不是 `PDTaskStatus`（实际六态：`pending`/`leased`/`succeeded`/`retry_wait`/`failed`/`needs_human_review`），非终态命中含 `failed`；⑤ R4-9 consumer cycle 机制修正——即时路径以 `successorDecision` 遥测透出，reconciliation 计入 `blocked`（不存在"计入 `skipped`"的机制），核心不变量（不计入 already-materialized、保留重试）不变；⑥ R4-10 类型名修正——实际导出为 `SelectedInternalizationTaskRunResult`（不存在 `ExecuteSelectedInternalizationTaskOutcome`），并补全白名单精确枚举。
 - **v0.10 关键技术修订摘要（PR #2803 实施期评审回填，未批准）**：Phase 2B/3 实施与多轮评审暴露出 v0.9 未规定的 10 项运行时规则，已在代码中落地并经生产路径回归验证；本版将其回填为规范条文（见文末「Round 4 implementation amendment」），覆盖：root correlationId 权威身份、parentTaskId 血缘完整性、最大父链深度与新增边检查、reopen 全快照 CAS、revisionCauseId 幂等、历史终态后继复用、RuleHost/enqueue-successors 统一幂等、dry-run/confirm 行为一致、并发冲突结构化透出与重试、host-runtime 公开 API 边界。**本文档仍为 Draft for Owner Review；其中标注〔待 Owner 决策〕的条目未经 Owner 批准不得视为定案。**
 - **v0.9 关键技术修订摘要**：
   1. §3.4.2/§3.7 闭环 `diagnose` 拒绝结果**终端可观察性**：核实 `diagnose.ts:1049-1079` TTY 输出循环无 `status:'refused'` 分支，`:987` 尾部分支使全候选被拒时误报 `'No candidates were generated from this diagnosis.'`——要求 TTY 新增 `DREAMER SEED REFUSED` + 结构化 `reason` 分支、全拒时 `nextAction` 明确报告拒绝原因、补 TTY 回归测试。
@@ -523,7 +524,7 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 根 `dreamer` 任务的 correlation 身份有两个独立持久化来源：`candidateIdFromDreamerSeed(diagnosticJson)` 与 `candidateIdFromDreamerTaskId(taskId)`。规则（v0.4 已部分规定，此处为实施定稿）：
 
 - 双源一致（`A+A`）→ 采纳为权威 root correlationId；
-- 双源冲突（`A+B`）→ **fail-closed 拒绝**（`conflicting_root_identity`），不得用 `??` 链偏向任一来源——自我佐证的冲突根不得传播到后代链；
+- 双源冲突（`A+B`）→ **fail-closed 拒绝**（`conflicting_root_identity_sources`），不得用 `??` 链偏向任一来源——自我佐证的冲突根不得传播到后代链；
 - 单边存在 → 采纳单边；双缺失 → 拒绝；
 - 后代的链声明 `correlationId` 与根权威身份冲突时拒绝（`conflicting_parent_correlation_id`）；后代缺失 `correlationId` 时以根权威身份**安全补入**（历史链恢复语义），补入本身也走 CAS。
 
@@ -543,10 +544,10 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 
 ### R4-4. Reopen 全快照 CAS 的字段与并发失败语义
 
-`reopenTaskForRevision` 的写入必须使用 `updateTaskIfDiagnosticJsonUnchanged` 全快照 CAS，前提集合七项：`taskId` + `diagnosticJson` 逐字节 + `status` + `attemptCount` + `leaseOwner`（null）+ `leaseExpiresAt`（null）+ `revisionCount`（派生快照内）。任一前提失配：
+`reopenTaskForRevision` 的写入必须使用 `updateTaskIfDiagnosticJsonUnchanged` 全快照 CAS。前提集合（v0.11 勘误后与实际实现一致）：`taskId` 定位 + `diagnosticJson` 逐字节相等 + 六项显式快照前提——`expectedStatus`、`expectedAttemptCount`、`expectedMaxAttempts`、`expectedLeaseOwner`、`expectedLeaseExpiresAt`、`expectedLeaseGeneration`，均匹配**读取时的快照值**（终态任务的 `leaseOwner`/`leaseExpiresAt` 通常为 null，但前提匹配的是快照而非恒 null 字面量）。`revisionCount`/`revisionCauseId` **不是**独立 CAS 前提——它们位于 `diagnosticJson` 的 PI 元数据信封内（`pitask-metadata.ts`：PI 元数据无第二存储，必须随 `diagnosticJson` 旅行），由逐字节相等前提覆盖。任一前提失配：
 
 - 返回 `{ ok: false, reason: 'concurrent_modification' }`，**零写入**——不得覆盖并发 lease、并发 metadata 写入或并发完成；
-- 落败后必须重新读取目标任务：若其 `revisionCauseId` 已等于本次 causeId（另一执行者完成了同一 revision），返回 `{ ok: true, outcome: 'already_applied' }` 幂等重放，不视为并发冲突；
+- 落败后必须重新读取目标任务：若其 `revisionCauseId` 已等于本次 causeId（另一执行者完成了同一 revision），返回 `{ ok: true, reason: 'idempotent_replay_same_revision' }` 幂等重放（返回形状无 `outcome` 字段，幂等重放以 `reason` 表达），不视为并发冲突；
 - 否则保持 `concurrent_modification` 结构化冲突，保留可重试语义（reopen 幂等，下一波重试安全）。
 
 注：终态（succeeded/needs_human_review）任务无法被 lease（lease 状态机仅接受 pending/retry_wait）；级联目标的并发形态是**另一笔写入**（完成回写/另一波 reopen/元数据订正）；pending/retry_wait 目标的并发形态才可能为 lease 竞争。两类均以同一 CAS 前提集捕捉。
@@ -562,7 +563,7 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 - `commitNextTaskProposal` 的后继识别顺序：
   1. 确定性派生 id 直查（命中任何状态 → 按该状态的既有语义处理）；
   2. 直查未命中时，按 `(parentTaskId, successorKind, channel)` 扫描全状态空间：
-     - 命中 `pending/retry_wait/leased/running` 在途后继 → `successor_exists`（保留原任务 id，不重建）；
+     - 命中非终态后继（`pending`/`leased`/`retry_wait`/`failed`——`PDTaskStatus` 共六态，无 `running` 状态）→ `successor_exists`（保留原任务 id，不重建、不抢占）；
      - 命中 `succeeded/needs_human_review` 终态后继：
        - `revisionCount = 0` → `successor_exists`（终态即完结，不重开）；
        - `revisionCount > 0` → 级联 reopen（R4-5 幂等 + R4-4 CAS + R4-1 血缘校验），原任务 id 与既有历史全部保留；
@@ -587,14 +588,14 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 
 - `concurrent_modification` 是 `commitNextTaskProposal` 的**独立结构化 decision**，不得折叠进 `successor_exists`（后者语义为"后继已正确就位"，会把未完成的级联伪装成幂等完成）。
 - 所有消费方必须显式处理：
-  - `host-runtime` consumer cycle：`concurrent_modification` 计入 `skipped`（**不得**计入 `alreadyMaterialized`），保留下一波重试机会；
+  - `host-runtime` consumer cycle：即时路径在 `INTERNALIZATION_CONSUMER_SUCCESS` 遥测中以 `successorDecision` 原样透出（不静默吞掉）；周期末 reconciliation 将其计入 `blocked` 而非 already-materialized（**不存在**"计入 `skipped`"的机制——v0.11 勘误），任务保持原状态，下一波重试机会保留；
   - `pd-cli run-once` / `enqueue-successors`：映射为带重试指引的 `nextAction`（不暗示 `--no-enqueue-next` 等会丢失修订波的操作）；
   - reconciliation：只统计 `successor_exists`/`revision_reopen_noop`/`source_correction_reopen_noop` 为 already-materialized。
 - 重试语义：reopen 幂等，冲突解除后的下一波 commit 正常落地（回归：并发写入存活、attemptCount 不被错误重置、重试后 `successor_reopened`）。
 
 ### R4-10. host-runtime 公开 API 边界
 
-- `@principles/host-runtime` barrel 对 `internalization-consumer-cycle` 采用**显式导出白名单**（禁止 `export *`）：仅导出 `runInternalizationConsumerCycle` + 循环 outcome/input 类型 + `executeSelectedInternalizationTask`（`ExecuteSelectedInternalizationTaskInput`/`ExecuteSelectedInternalizationTaskOutcome`/`SelectedInternalizationTaskRunnerOptions`）+ `ConsumerCycleLogger` 等有真实跨包消费者的符号。
+- `@principles/host-runtime` barrel 对 `internalization-consumer-cycle` 采用**显式导出白名单**（禁止 `export *`）。精确枚举（v0.11 勘误后与 `packages/host-runtime/src/index.ts` 一致）——值导出：`INTERNALIZATION_AUTO_CONSUMER_FLAG_ID`、`orderKindsByOldestReadyStage`、`oldestReadyAgeMs`、`executeSelectedInternalizationTask`、`runInternalizationConsumerCycle`；类型导出：`ConsumerCycleLogger`、`ConsumerHostToolCatalog`、`InternalizationConsumerCyclePorts`、`InternalizationConsumerCycleOutcome`、`InternalizationConsumerCycleSignals`、`ExecuteSelectedInternalizationTaskInput`、`SelectedInternalizationTaskRunResult`（执行结果类型——**不存在** `ExecuteSelectedInternalizationTaskOutcome` 这一类型名）、`SelectedInternalizationTaskRunnerOptions`。
 - 内部装配辅助类型（`SelectedTaskTelemetryEmitter`、`SelectedInternalizationTaskBaseDeps`、`SelectedEvaluatorRepairDeps`、`SelectedRolloutGovernanceDeps` 等）**不得**经 barrel 进入公开 API；类型仍以结构化方式出现在导出函数的签名中（TypeScript 结构化类型），但不具名导出。
 - Export Surface Gate（`export-surface-baseline.json` / `export-admissions.json` 与 `.d.ts` 生成物核对）为合并门禁；pd-cli/codex-adapter 消费点回归为必过项。
 
@@ -603,7 +604,7 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 | 决策 | 实施核对结果 | 状态 |
 |---|---|---|
 | D1（宿主协作者同步类型门） | `PainToPrincipleServiceOptions` 可辨识联合 + 5 处构造点守卫已落地，与本 PR 血缘变更无交互 | 已实施，无偏差 |
-| D3（租约心跳） | v0.3 已撤销误诊；本轮 reopen CAS 前提含 `leaseOwner/leaseExpiresAt`，与既有心跳语义一致——lease 不会被 reopen 覆盖，心跳持有者的租约安全 | 已实施，无偏差 |
+| D3（租约心跳） | v0.3 已撤销误诊；本轮 reopen CAS 前提含 `leaseOwner`/`leaseExpiresAt`/`leaseGeneration` 快照，与既有心跳语义一致——lease 不会被 reopen 覆盖，心跳持有者的租约安全 | 已实施，无偏差 |
 | D4（候选准入权威门禁） | seed 闸严格拒绝 + `rawRecommendationKind` 数据源已落地；与本 PR 无交互 | 已实施，无偏差 |
 | D5（deviationAnchor/anchor 双轨） | 读侧回退解析已落地；与本 PR 无交互 | 已实施，无偏差 |
 | D6（内化单步执行收编） | `executeSelectedInternalizationTask` 已收编 run-once 6 分支 switch；本轮将其导出收紧至白名单（R4-10），跨包消费者（pd-cli run-once、codex-adapter worker）回归通过 | 已实施，导出边界本轮收紧 |
@@ -611,4 +612,4 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 ### 仍需 Owner 决策的事项
 
 1. R4-7：RuleHost 时间戳任务 id 是否应在远期收敛为 orchestrator 确定性 id（当前结论：无必要——parentage 扫描已是权威识别机制，收敛仅存审美价值且需迁移历史行）。
-2. 本修正案整体：v0.10 全部回填条文需 Owner 批准后方能从 Draft 转为 Approved；批准前代码侧已落地的行为视为"实施期工程定稿、待规范追认"。
+2. 本修正案整体：全部回填条文（v0.10 回填 + v0.11 事实勘误）需 Owner 批准后方能从 Draft 转为 Approved；批准前代码侧已落地的行为视为"实施期工程定稿、待规范追认"。
