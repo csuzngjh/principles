@@ -711,6 +711,18 @@
       ],
       "whyNotInternal": "The plan shape crosses the package boundary with planLegacyLineageResolution; consumers branch on backfillEdges/parentEdgeCount without re-declaring the union.",
       "alternativeConsidered": "Structural copies in pd-cli would drift when the plan gains fields."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "planSuccessorIdAllocation",
+      "kind": "value",
+      "addedIn": "PRI-1299",
+      "expiresAt": "2027-11-26",
+      "consumers": [
+        "packages/pd-cli/src/commands/runtime-internalization-enqueue-successors.ts"
+      ],
+      "whyNotInternal": "The enqueue-successors dry-run preview must classify preferred/fallback successor id occupancy with exactly the same fail-closed rules as atomic confirm creation. Keeping this classifier core-internal would force pd-cli to duplicate identity-occupancy adjudication and recreate the dry-run/confirm drift this PR eliminates.",
+      "alternativeConsidered": "Leaving the classifier unexported and duplicating occupant inspection in pd-cli was rejected; exporting the whole creation authority was narrowed to this read-only planning seam."
     }
   ],
   "removals": [

@@ -134,6 +134,7 @@ interface MockStateManager {
   getTask: ReturnType<typeof vi.fn>;
   acquireLease: ReturnType<typeof vi.fn>;
   createTask: ReturnType<typeof vi.fn>;
+  withWriteTransaction: ReturnType<typeof vi.fn>;
 }
 
 function createMockStateManager(): MockStateManager {
@@ -142,6 +143,7 @@ function createMockStateManager(): MockStateManager {
     getTask: vi.fn(),
     acquireLease: vi.fn(),
     createTask: vi.fn(),
+    withWriteTransaction: vi.fn().mockImplementation(async (fn: () => Promise<unknown>) => fn()),
   };
 }
 
@@ -244,7 +246,7 @@ describe('philosopher toggle — orchestration is toggle-blind (characterization
       outputArtifactRefs: [{ artifactType: 'principle', ref: 'pi-art-dreamer-1' }],
       topCandidateId: 'cand-dreamer-task-1',
     });
-    stateManager.getTask.mockResolvedValue(dreamerTask);
+    stateManager.getTask.mockImplementation(async (taskId: string) => taskId === dreamerTask.taskId ? dreamerTask : null);
     // findExistingSuccessor scans pending then retry_wait.
     stateManager.listTasks.mockResolvedValue([]);
     stateManager.createTask.mockImplementation((input: TaskRecord) => Promise.resolve(input));

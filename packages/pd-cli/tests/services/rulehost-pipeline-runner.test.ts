@@ -397,7 +397,16 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
         if (artificerCallCount === 1) {
           return evaluatorNeedsRevision(taskId, artificerArtifactId);
         }
-        return evaluatorApproved(taskId, artificerArtifactId);
+        const approved = evaluatorApproved(taskId, artificerArtifactId) as {
+          evaluation: Record<string, unknown>;
+        };
+        // Unified successor arbitration reuses the evaluator-seeded repair
+        // artificer as the round-2 artificer. That makes this a PRI-630 repair
+        // evaluation round, so the scripted evaluator must satisfy the same
+        // convergence contract a real repair-round evaluator sees in its prompt.
+        approved.evaluation.priorRequirementStatuses = [{ id: 'req-1', status: 'resolved' }];
+        approved.evaluation.requirementLedger = [{ id: 'req-1', statement: 'fix matcher', status: 'resolved' }];
+        return approved;
       },
     });
 
@@ -415,7 +424,13 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
 
     expect(artificerCallCount).toBe(2);
     expect(artificerPrompts).toHaveLength(2);
-    expect(artificerPrompts[1]).toContain('Prior adversarial replay failures');
+    // PRI-1299 unified successor arbitration: the evaluator-seeded repair
+    // artificer and the synchronous round-2 artificer are the same logical
+    // successor (parent/kind/channel), so RuleHost reuses the repair task
+    // rather than duplicating it. The second prompt must still carry the
+    // deterministic replay failure evidence, now through repairFeedback.
+    expect(artificerPrompts[1]).toContain('repairFeedback');
+    expect(artificerPrompts[1]).toContain('Deterministic Replay Evidence');
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
     expect(result.approvalId).not.toBeNull();
@@ -433,7 +448,10 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       const evalR1 = tasks.find((t) => t.taskId.includes('-evaluator-r1-'));
       const evalR2 = tasks.find((t) => t.taskId.includes('-evaluator-r2-'));
       const artR1 = tasks.find((t) => t.taskId.includes('-artificer-r1-'));
-      const artR2 = tasks.find((t) => t.taskId.includes('-artificer-r2-'));
+      const artR2 = tasks.find((t) => {
+        if (t.taskKind !== 'artificer') return false;
+        return hydratePITaskRecord(t)?.repairPayload?.sourceEvaluatorTaskId === evalR1?.taskId;
+      });
       const philosopher = tasks.find((t) => t.taskKind === 'philosopher');
       const scribe = tasks.find((t) => t.taskKind === 'scribe' && t.taskId.includes('-scribe-'));
       if (!evalR1 || !evalR2 || !artR1 || !artR2 || !philosopher || !scribe) {
@@ -443,18 +461,16 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       expect(evalR1.status, 'round-1 evaluator must not be stranded in needs_human_review').toBe('succeeded');
       // 2. The persisted repair task exists, parented on the round-1 evaluator,
       //    carrying the candidate identity recovered from the dreamer seed root.
-      const repairTask = tasks.find((t) => {
-        if (t.taskKind !== 'artificer') return false;
-        const pi = hydratePITaskRecord(t);
-        return pi?.repairPayload?.sourceEvaluatorTaskId === evalR1.taskId;
-      });
-      if (!repairTask) throw new Error('expected a persisted artificer repair task for the round-1 evaluator');
+      //    Under PRI-1299 unified successor arbitration it is also the round-2
+      //    artificer: RuleHost must execute that one logical successor rather
+      //    than creating a duplicate timestamped round-2 task.
+      const repairTask = artR2;
       const repairPi = hydratePITaskRecord(repairTask);
       expect(repairPi?.parentTaskId).toBe(evalR1.taskId);
       expect(repairPi?.correlationId).toBe('candidate-dreamer-feedback-001');
-      expect(repairTask.status === 'pending' || repairTask.status === 'retry_wait').toBe(true);
+      expect(repairTask.status).toBe('succeeded');
       // 3. End-to-end parent chain: dreamer seed → philosopher → scribe →
-      //    artificer-r1 → evaluator-r1 → artificer-r2 → evaluator-r2.
+      //    artificer-r1 → evaluator-r1 → repair/round-2 artificer → evaluator-r2.
       const parentOf = (t: typeof tasks[number]) => hydratePITaskRecord(t)?.parentTaskId;
       expect(parentOf(philosopher)).toBe('dreamer-feedback-001');
       expect(parentOf(scribe)).toBe(philosopher.taskId);

@@ -431,7 +431,7 @@
     {
       "entry": "./runtime",
       "source": "src/runtime/index.ts",
-      "count": 2076,
+      "count": 2077,
       "symbols": [
         "ADAPTIVE_DELIVERY_RECORD_ENUMS",
         "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -2369,6 +2369,7 @@
         "planExistingSuccessorTransition",
         "planLegacyLineageResolution",
         "planOwnerVerdictOverrideResume",
+        "planSuccessorIdAllocation",
         "preflightArtificerIntentBasis",
         "preflightArtificerOwnerEvidence",
         "prepareAdaptiveIntervention",

@@ -96,6 +96,7 @@ interface MockStateManager {
   listTasks: ReturnType<typeof vi.fn>;
   getTask: ReturnType<typeof vi.fn>;
   acquireLease: ReturnType<typeof vi.fn>;
+  withWriteTransaction: ReturnType<typeof vi.fn>;
 }
 
 /**
@@ -106,6 +107,7 @@ function createMockStateManager(): MockStateManager {
     listTasks: vi.fn(),
     getTask: vi.fn(),
     acquireLease: vi.fn(),
+    withWriteTransaction: vi.fn().mockImplementation(async (fn: () => Promise<unknown>) => fn()),
   };
 }
 
@@ -782,7 +784,7 @@ describe('InternalizationOrchestrator', () => {
         outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-dreamer-1' }],
         topCandidateId: 'cand-dreamer-1',
       });
-      mockStateManager.getTask.mockResolvedValue(succeededDreamer);
+      mockStateManager.getTask.mockImplementation(async (taskId: string) => taskId === 'dreamer-1' ? succeededDreamer : null);
       mockStateManager.listTasks.mockResolvedValue([]);
       createTaskFn.mockResolvedValue({
         taskId: 'philosopher-dreamer-1-prompt',
@@ -935,7 +937,7 @@ describe('InternalizationOrchestrator', () => {
         outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-dreamer-1' }],
         topCandidateId: 'cand-dreamer-1',
       });
-      mockStateManager.getTask.mockResolvedValue(succeededDreamer);
+      mockStateManager.getTask.mockImplementation(async (taskId: string) => taskId === 'dreamer-1' ? succeededDreamer : null);
       mockStateManager.listTasks.mockResolvedValue([]);
       createTaskFn.mockImplementation((record: Record<string, unknown>) => Promise.resolve({
         ...record,

@@ -1173,7 +1173,7 @@ export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalizat
 // PRI-1299: single successor-identification/integrity-adjudication seam shared
 // by orchestrator commit and pd-cli dry-run preview.
 export { lookupSuccessorByParent } from './internalization/successor-lookup.js';
-export { createLogicalSuccessorTask, planSuccessorIdAllocation } from './internalization/successor-create.js';
+export { planSuccessorIdAllocation } from './internalization/successor-create.js';
 
 // PRI-1293 R3: dry-run/confirm 共享同一新增边深度上限 — pd-cli 预览路径
 // 必须引用同一常量而非复刻字面值 (P4 单一真值源)。
