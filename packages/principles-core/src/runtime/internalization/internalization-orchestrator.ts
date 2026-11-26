@@ -883,19 +883,30 @@ export class InternalizationOrchestrator {
     // (而非 successor_exists 停摆)。普通幂等重扫 (revisionCount=0) 不级联,
     // 保持既有 successor_exists 语义。pending/retry_wait 的存在后继仍走
     // findExistingSuccessor 的 successor_exists 分支。
-    const existingById = (piTask.revisionCount ?? 0) > 0
+    const directIdHit = (piTask.revisionCount ?? 0) > 0
       ? await this.stateManager.getTask(successorTaskId)
       : null;
-    if (existingById && (existingById.status === 'succeeded' || existingById.status === 'needs_human_review')) {
-      const cascadeCauseId = `cascade-${taskId}-rc${piTask.revisionCount ?? 0}-${successorTaskId}`;
+    // PRI-1293 review fix: 后继身份是父子关系而非派生 id。修订重开会把恢复
+    // 的 correlationId 回填进源任务, 使本轮派生根从历史 stripTrailingChannel
+    // 形式漂移到 correlationId 形式 — 直查新 id 必未命中, 若就此创建则原
+    // 后继滞留 succeeded、新后继重复生成 (修订波永不波及同一逻辑后继)。
+    // 因此直查落空时先按 (parentTaskId, successorKind, channel) 扫描可重开
+    // 终态后继, 命中则复用其真实 id 进入级联, 只有扫描也落空才派生新 id。
+    const scannedTerminalSuccessor = directIdHit === null && (piTask.revisionCount ?? 0) > 0
+      ? await this.findTerminalSuccessorByParent(taskId, proposal.taskKind, proposal.channel)
+      : null;
+    const existingSuccessorCandidate = directIdHit ?? scannedTerminalSuccessor;
+    if (existingSuccessorCandidate && (existingSuccessorCandidate.status === 'succeeded' || existingSuccessorCandidate.status === 'needs_human_review')) {
+      const cascadeTargetTaskId = existingSuccessorCandidate.taskId;
+      const cascadeCauseId = `cascade-${taskId}-rc${piTask.revisionCount ?? 0}-${cascadeTargetTaskId}`;
       // B: 对称的 cause 前置 — 该 wave 的 cascade reopen 已 materialize
       // (successor 可能 pending 或已重跑完成),重放不得再 reopen。
-      const succPi = hydratePITaskRecord(existingById);
+      const succPi = hydratePITaskRecord(existingSuccessorCandidate);
       if (succPi && succPi.revisionCauseId === cascadeCauseId) {
         return {
           decision: 'revision_reopen_noop',
           sourceTaskId: taskId,
-          reopenedTaskId: successorTaskId,
+          reopenedTaskId: cascadeTargetTaskId,
           reason: 'revision_cause_already_materialized',
         };
       }
@@ -918,7 +929,7 @@ export class InternalizationOrchestrator {
           }
         }
       }
-      const reopened = await this.reopenTaskForRevision(successorTaskId, {
+      const reopened = await this.reopenTaskForRevision(cascadeTargetTaskId, {
         reason: 'upstream_revision_cascade',
         // B (外部复核): causal idempotency — 同一 upstream revision wave 的
         // reconciliation/commit 重放不得再次 reopen 或递增 revisionCount。
@@ -932,30 +943,48 @@ export class InternalizationOrchestrator {
           return {
             decision: 'revision_reopen_noop',
             sourceTaskId: taskId,
-            reopenedTaskId: successorTaskId,
+            reopenedTaskId: cascadeTargetTaskId,
             reason: reopened.reason,
           };
         }
         return {
           decision: 'successor_reopened',
           sourceTaskId: taskId,
-          reopenedTaskId: successorTaskId,
+          reopenedTaskId: cascadeTargetTaskId,
           successorKind: proposal.taskKind,
+        };
+      }
+      // 级联重开被拒绝不折叠为 successor_exists — 修订波未能向下游传播,
+      // 链停在旧 epoch; 结构化透出真实拒绝原因 (rc-9), 让 consumer cycle /
+      // run-once / enqueue-successors 可观测, 而非呈现为正常幂等态。
+      if (reopened.reason.startsWith('lineage_refused:')) {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: reopened.reason.slice('lineage_refused:'.length),
+          detail: `cascade_reopen_refused:${cascadeTargetTaskId}${reopened.detail !== undefined ? `:${reopened.detail}` : ''}`,
+        };
+      }
+      if (reopened.reason === 'invalid_task_metadata') {
+        return {
+          decision: 'invalid_task_metadata',
+          taskId: cascadeTargetTaskId,
+          reason: `cascade_reopen_invalid_task_metadata: successor of ${taskId}`,
         };
       }
       return {
         decision: 'successor_exists',
         sourceTaskId: taskId,
-        successorTaskId,
+        successorTaskId: cascadeTargetTaskId,
         successorKind: proposal.taskKind,
       };
     }
-    if (existingById) {
+    if (existingSuccessorCandidate) {
       // leased / retry_wait / pending(经直查而非 findExistingSuccessor 命中) — 在途,不重复处理
       return {
         decision: 'successor_exists',
         sourceTaskId: taskId,
-        successorTaskId,
+        successorTaskId: existingSuccessorCandidate.taskId,
         successorKind: proposal.taskKind,
       };
     }
@@ -1224,7 +1253,7 @@ export class InternalizationOrchestrator {
        */
       revisionCauseId?: string;
     },
-  ): Promise<{ ok: boolean; reason: string }> {
+  ): Promise<{ ok: boolean; reason: string; detail?: string }> {
     // PRI-629: 提取至 revision-reopen.ts 的单一核心实现 (Console/CLI 复用),
     // orchestrator 方法保留为兼容委托。
     return reopenTaskForRevision(this.stateManager, taskId, options);
@@ -1418,6 +1447,38 @@ export class InternalizationOrchestrator {
       }
     }
     return null;
+  }
+
+  /**
+   * Find a REOPENABLE terminal (succeeded / needs_human_review) successor by
+   * (parentTaskId, successorKind, channel) — the lineage-truth counterpart of
+   * the derived-id lookup. A successor whose persisted id drifted from the
+   * current derivation (revision reopen backfills the recovered correlationId
+   * into the source, shifting the derivation root) is still the same logical
+   * successor and must be reused/reopened, never duplicated (PRI-1293 review).
+   *
+   * Invoked only on the revision-cascade path (revisionCount > 0, direct id
+   * miss), so the terminal-scan cost never lands on the common fresh-commit
+   * path. Deterministic: ties break by taskId.
+   */
+  private async findTerminalSuccessorByParent(
+    parentTaskId: string,
+    successorKind: RunnerKind,
+    channel: string,
+  ): Promise<TaskRecord | null> {
+    const succeededTasks = await this.stateManager.listTasks({ status: 'succeeded' });
+    const reviewTasks = await this.stateManager.listTasks({ status: 'needs_human_review' });
+    const matches: TaskRecord[] = [];
+    for (const task of [...succeededTasks, ...reviewTasks]) {
+      if (task.taskKind !== successorKind) continue;
+      const piTask = hydratePITaskRecord(task);
+      if (!piTask) continue;
+      if (piTask.parentTaskId === parentTaskId && piTask.channel === channel) {
+        matches.push(task);
+      }
+    }
+    matches.sort((a, b) => (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0));
+    return matches[0] ?? null;
   }
 
   /**

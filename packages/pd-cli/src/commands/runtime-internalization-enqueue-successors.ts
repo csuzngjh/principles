@@ -439,6 +439,30 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
       }
 
       if (isDryRun) {
+        // PRI-1293 review fix: 预览与确认共用同一个只读血缘判定 — commit 门
+        // (internalization-orchestrator commitNextTaskProposal) 在任何后继
+        // 创建/查找之前 fail-closed 拒绝不可证明血缘的 PeerRunnerKind 任务;
+        // 预览若跳过该判定会把同一任务误报为 would_create_successor。此处只读
+        // (resolveAuthoritativeCorrelationId 不写任何状态), 且拒绝映射经
+        // mapCommitDecisionToAction 与确认路径逐字一致。
+        if (isPeerRunnerKind(piTask.taskKind)) {
+          const lineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
+            task,
+            (taskId: string) => stateManager.getTask(taskId),
+          );
+          if (!lineage.ok) {
+            const lineageAction = mapCommitDecisionToAction({
+              decision: 'lineage_refused',
+              sourceTaskId: task.taskId,
+              reason: lineage.reason,
+              detail: lineage.detail,
+            });
+            lineageAction.taskKind = piTask.taskKind;
+            actions.push(lineageAction);
+            skippedCount++;
+            continue;
+          }
+        }
         const proposalResult = await orchestrator.proposeNextTask(task.taskId).catch((proposeErr: unknown) => {
           const proposeMessage = proposeErr instanceof Error ? proposeErr.message : String(proposeErr);
           return {

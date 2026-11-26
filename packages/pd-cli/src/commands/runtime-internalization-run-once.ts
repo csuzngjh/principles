@@ -883,6 +883,12 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         } else if (commitResult.decision === 'no_successor') {
           output.enqueueReason = commitResult.reason;
           output.nextAction = 'No successor in job graph for this task kind and channel. This is expected for terminal runners.';
+        } else if (commitResult.decision === 'lineage_refused') {
+          // PRI-1293 review fix: 血缘拒绝是真实的 fail-closed 结果 — 不得折叠
+          // 进 "Unexpected decision", 更不得建议 --no-enqueue-next 跳过排队
+          // (那只会让链静默搁浅; 问题在于父链/根身份不可证明)。
+          output.enqueueReason = `lineage_refused: ${commitResult.reason} (${commitResult.detail}); correlationId lineage is not provable — no successor was created`;
+          output.nextAction = 'Inspect the task chain with `pd runtime internalization list --json`: check parentTaskId links and the root dreamer identity (taskId/seed candidateId consistency), repair the chain, then re-run.';
         } else {
           output.enqueueReason = `Unexpected commitNextTaskProposal decision: ${commitResult.decision}`;
           output.nextAction = 'Investigate orchestrator logic; re-run with --no-enqueue-next to skip auto-enqueue.';

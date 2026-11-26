@@ -20,7 +20,7 @@ import * as fs from 'node:fs';
 import { runRuleHostPipeline, backfillScribeIdentity, readScribeOwnerRequirementGaps } from '../../src/services/rulehost-pipeline-runner.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime';
-import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId } from '@principles/core/runtime';
+import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId, hydratePITaskRecord } from '@principles/core/runtime';
 import { addPrincipleToLedger, updatePrinciple, appendReuseEvidence } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
@@ -418,6 +418,55 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
     expect(result.approvalId).not.toBeNull();
+
+    // PRI-1293 review fix regression: the final approval is NOT sufficient
+    // evidence. Round 1 ended needs_revision with the repair loop defaulting
+    // ON — the round-1 evaluator must be durably succeeded (never stranded in
+    // needs_human_review), its repair task must actually exist, and the whole
+    // synchronous chain must carry a provable parentTaskId lineage back to the
+    // selected dreamer seed.
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const tasks = await verify.listTasks();
+      const evalR1 = tasks.find((t) => t.taskId.includes('-evaluator-r1-'));
+      const evalR2 = tasks.find((t) => t.taskId.includes('-evaluator-r2-'));
+      const artR1 = tasks.find((t) => t.taskId.includes('-artificer-r1-'));
+      const artR2 = tasks.find((t) => t.taskId.includes('-artificer-r2-'));
+      const philosopher = tasks.find((t) => t.taskKind === 'philosopher');
+      const scribe = tasks.find((t) => t.taskKind === 'scribe' && t.taskId.includes('-scribe-'));
+      if (!evalR1 || !evalR2 || !artR1 || !artR2 || !philosopher || !scribe) {
+        throw new Error(`expected full round-1/round-2 chain in persisted tasks, got: ${tasks.map((t) => `${t.taskKind}:${t.taskId}`).join(',')}`);
+      }
+      // 1. Round-1 evaluator completed normally — repair seeding was NOT refused.
+      expect(evalR1.status, 'round-1 evaluator must not be stranded in needs_human_review').toBe('succeeded');
+      // 2. The persisted repair task exists, parented on the round-1 evaluator,
+      //    carrying the candidate identity recovered from the dreamer seed root.
+      const repairTask = tasks.find((t) => {
+        if (t.taskKind !== 'artificer') return false;
+        const pi = hydratePITaskRecord(t);
+        return pi?.repairPayload?.sourceEvaluatorTaskId === evalR1.taskId;
+      });
+      if (!repairTask) throw new Error('expected a persisted artificer repair task for the round-1 evaluator');
+      const repairPi = hydratePITaskRecord(repairTask);
+      expect(repairPi?.parentTaskId).toBe(evalR1.taskId);
+      expect(repairPi?.correlationId).toBe('candidate-dreamer-feedback-001');
+      expect(repairTask.status === 'pending' || repairTask.status === 'retry_wait').toBe(true);
+      // 3. End-to-end parent chain: dreamer seed → philosopher → scribe →
+      //    artificer-r1 → evaluator-r1 → artificer-r2 → evaluator-r2.
+      const parentOf = (t: typeof tasks[number]) => hydratePITaskRecord(t)?.parentTaskId;
+      expect(parentOf(philosopher)).toBe('dreamer-feedback-001');
+      expect(parentOf(scribe)).toBe(philosopher.taskId);
+      expect(parentOf(artR1)).toBe(scribe.taskId);
+      expect(parentOf(evalR1)).toBe(artR1.taskId);
+      expect(parentOf(artR2)).toBe(evalR1.taskId);
+      expect(parentOf(evalR2)).toBe(artR2.taskId);
+      // 4. The loop's naming correlation must NOT be mistaken for a candidate
+      //    id — sync tasks carry no correlationId of their own.
+      expect(hydratePITaskRecord(evalR1)?.correlationId).toBeUndefined();
+    } finally {
+      await verify.close();
+    }
   }, 60_000);
 
   // ── Test 2: Capability OFF (explicitly disabled) → text_principle_only ──

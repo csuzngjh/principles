@@ -241,6 +241,38 @@ describe('resolveAuthoritativeCorrelationId — 拒绝路径 (fail-closed)', () 
     });
   });
 
+  it('根锚点核对: 根 taskId/seed 双源均为 A, 链上 (含根自身) 全写 B → conflicting_parent_correlation_id (SPEC §3.6.2)', async () => {
+    // 根自身 correlationId 是链上声明的一部分, 不得充当独立于 rootSeedId 的
+    // 佐证 — 否则根双源事实 (A) 会被链上自证 (B) 循环推翻。
+    const dreamer = mkTask(`dreamer-${UUID_A}-prompt`, 'dreamer', { correlationId: UUID_B, topCandidateId: UUID_A });
+    const philosopher = mkTask('philosopher-anchor-b', 'philosopher', { parentTaskId: dreamer.taskId, correlationId: UUID_B });
+    const result = await resolveAuthoritativeCorrelationId(philosopher, makeStore([dreamer, philosopher]));
+    expect(result).toEqual({
+      ok: false,
+      reason: 'conflicting_parent_correlation_id',
+      detail: expect.stringContaining(UUID_A),
+    });
+    if (!result.ok) expect(result.detail).toContain(UUID_B);
+  });
+
+  it('根锚点核对: 根双源为 A、根自身不携带 id、仅后代写 B → 同样 conflicting_parent_correlation_id', async () => {
+    const dreamer = mkTask(`dreamer-${UUID_A}-prompt`, 'dreamer', { topCandidateId: UUID_A });
+    const scribe = mkTask('scribe-anchor-b', 'scribe', { parentTaskId: dreamer.taskId, correlationId: UUID_B });
+    const result = await resolveAuthoritativeCorrelationId(scribe, makeStore([dreamer, scribe]));
+    expect(result).toEqual({
+      ok: false,
+      reason: 'conflicting_parent_correlation_id',
+      detail: expect.stringContaining(UUID_B),
+    });
+  });
+
+  it('根锚点核对不误伤: 根双源为 A 且链上全写 A → 通过', async () => {
+    const dreamer = mkTask(`dreamer-${UUID_A}-prompt`, 'dreamer', { correlationId: UUID_A, topCandidateId: UUID_A });
+    const scribe = mkTask('scribe-anchor-a', 'scribe', { parentTaskId: dreamer.taskId, correlationId: UUID_A });
+    const result = await resolveAuthoritativeCorrelationId(scribe, makeStore([dreamer, scribe]));
+    expect(result).toEqual({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: false });
+  });
+
   it('根全盲 (A=null, B=null, 根自身无 id) 而仅后代声明 correlationId → 拒绝 (test 12)', async () => {
     const dreamer = mkTask('dreamer-blind-prompt', 'dreamer'); // 非 UUID taskId, 无 seed candidateId, 无自身 id
     const philosopher = mkTask('philosopher-claim', 'philosopher', { parentTaskId: dreamer.taskId, correlationId: UUID_C });

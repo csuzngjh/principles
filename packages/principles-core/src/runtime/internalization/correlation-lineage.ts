@@ -17,10 +17,12 @@
  *      `candidateIdFromDreamerSeed(diagnosticJson)` 是两个独立持久化事实 —
  *      A+A 通过、A+B 冲突拒绝、单边缺失采纳单边、双缺失不可恢复; 禁止
  *      `??` 链静默偏向 (wakeOnce admission 的既有回退不复制到此);
- *   6. 根侧佐证 (v0.5): 链上唯一非空 correlationId 必须被根侧佐证 (根
- *      taskId/seed 解析出同一 candidateId，或根自身携带同一 id); 根三个身份
- *      来源全部缺失时仅后代声明不得采纳; 根不是 dreamer 时无佐证来源，一律
- *      拒绝;
+ *   6. 根锚点核对 + 根侧佐证 (v0.5): 链上唯一非空 correlationId 与非空
+ *      rootSeedId 不一致时按 conflicting_parent_correlation_id 拒绝 (根自身
+ *      携带的 correlationId 是链上声明的一部分, 不得循环自证); 一致或
+ *      rootSeedId 缺失时, 链上声明必须被根侧佐证 (根 taskId/seed 解析出同一
+ *      candidateId，或根自身携带同一 id); 根三个身份来源全部缺失时仅后代
+ *      声明不得采纳; 根不是 dreamer 时无佐证来源，一律拒绝;
  *   7. 历史无 id 在途链可从根 dreamer 双源恢复，但不回填任何持久化真值 —
  *      恢复结果只写入新后继 / reopen 目标的 metadata (调用方职责)。
  *
@@ -169,6 +171,9 @@ export async function resolveAuthoritativeCorrelationId(
       detail: `root_task_id_vs_seed:[${boundDetail([fromTaskId, fromSeed])}]`,
     };
   }
+  // 双源交叉校验通过后的唯一 rootSeedId (§3.6.2 裁决表): 双非空必相等,
+  // 单边缺失采纳单边, 双缺失为 null。
+  const rootSeedId = fromTaskId ?? fromSeed;
 
   if (chainId !== null) {
     // ── 4. 根侧佐证 (v0.5): 后代声明必须被根佐证，绝不孤立采信 ──
@@ -177,6 +182,16 @@ export async function resolveAuthoritativeCorrelationId(
         ok: false,
         reason: 'missing_correlation_id_lineage',
         detail: `root_not_dreamer:${root.pi.taskKind}:${root.raw.taskId}`,
+      };
+    }
+    // ── 4a. 根锚点核对 (§3.6.2): 链上声明与非空 rootSeedId 不一致 = 冲突,
+    // 一律拒绝 — 根自身 correlationId 是链上声明的一部分, 不得循环自证;
+    // 该检查必须先于下方的第三佐证来源。
+    if (rootSeedId !== null && chainId !== rootSeedId) {
+      return {
+        ok: false,
+        reason: 'conflicting_parent_correlation_id',
+        detail: `root_anchor_mismatch:chain=${chainId},root_seed=${rootSeedId}`,
       };
     }
     const corroborated = chainId === fromTaskId

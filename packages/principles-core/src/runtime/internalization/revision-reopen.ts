@@ -61,7 +61,7 @@ export async function reopenTaskForRevision(
   stateManager: RuntimeStateManager,
   taskId: string,
   options?: ReopenRevisionOptions,
-): Promise<{ ok: boolean; reason: string }> {
+): Promise<{ ok: boolean; reason: string; detail?: string }> {
   const rawTask = await stateManager.getTask(taskId);
   if (!rawTask) {
     return { ok: false, reason: 'task_not_found' };
@@ -96,7 +96,7 @@ export async function reopenTaskForRevision(
   if (isPeerRunnerKind(piTask.taskKind)) {
     const lineage = await resolveAuthoritativeCorrelationId(rawTask, (id: string) => stateManager.getTask(id));
     if (!lineage.ok) {
-      return { ok: false, reason: `lineage_refused:${lineage.reason}` };
+      return { ok: false, reason: `lineage_refused:${lineage.reason}`, detail: lineage.detail };
     }
     // 可恢复历史任务: 校验通过后把根侧恢复的 id 安全补入本次 reopen 写
     // (§5.3.7) — 走 mergePITaskMetadata 的既有 28 字段机制, 不新增真值源。

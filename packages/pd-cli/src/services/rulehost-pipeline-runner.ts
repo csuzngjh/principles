@@ -352,7 +352,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // ── Stage: philosopher ──
     onProgress('philosopher', 'start');
     const philosopherTaskId = `${correlation}-philosopher-${Date.now().toString(36)}`;
-    await createInternalizationTask(stateManager, philosopherTaskId, 'philosopher', [dreamerSeedTaskId], channel, timeoutMs);
+    await createInternalizationTask(stateManager, philosopherTaskId, 'philosopher', [dreamerSeedTaskId], channel, timeoutMs, dreamerSeedTaskId);
     const philosopherRunner = new PhilosopherRunner(
       { stateManager, runtimeAdapter: agentAdapters.philosopher, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore },
       runnerOptsFor(agentAdapters.philosopher),
@@ -368,7 +368,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // ── Stage: scribe ──
     onProgress('scribe', 'start');
     const scribeTaskId = `${correlation}-scribe-${Date.now().toString(36)}`;
-    await createInternalizationTask(stateManager, scribeTaskId, 'scribe', [philosopherTaskId], channel, timeoutMs);
+    await createInternalizationTask(stateManager, scribeTaskId, 'scribe', [philosopherTaskId], channel, timeoutMs, philosopherTaskId);
     const scribeRunner = new ScribeRunner(
       {
         stateManager, runtimeAdapter: agentAdapters.scribe, eventEmitter, validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }), artifactStore,
@@ -739,6 +739,7 @@ async function createInternalizationTask(
   dependencyTaskIds: string[],
   channel: 'prompt' | 'code_tool_hook' | 'defer_archive',
   timeoutMs: number,
+  parentTaskId?: string,
 ): Promise<void> {
   await stateManager.createTask({
     taskId,
@@ -752,6 +753,11 @@ async function createInternalizationTask(
       timeoutMs,
       inputArtifactRefs: [],
       outputArtifactRefs: [],
+      // PRI-1293 review fix: the synchronous path must persist the REAL
+      // producing parent chain — the lineage gate (correlation-lineage.ts)
+      // walks parentTaskId only, so a dependency-only chain is unprovable and
+      // the evaluator repair seeder fails closed on legitimate tasks.
+      ...(parentTaskId !== undefined ? { parentTaskId } : {}),
     }),
   });
 }

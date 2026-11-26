@@ -274,7 +274,11 @@ describe('§3.6.3 (7) — reopenTaskForRevision 血缘保持 / 篡改拒绝 (Own
       revisionCauseId: 'owner-res-tamper',
       reason: 'owner_revise_once',
     });
-    expect(result).toEqual({ ok: false, reason: 'lineage_refused:conflicting_parent_correlation_id' });
+    expect(result).toEqual({
+      ok: false,
+      reason: 'lineage_refused:conflicting_parent_correlation_id',
+      detail: `chain_values:[${CAND_B},${CAND_A}]`,
+    });
     const after = await stateManager.getTask(scribe);
     expect(after?.diagnosticJson).toBe(beforeJson);
     expect(after?.status).toBe('needs_human_review');
@@ -335,5 +339,90 @@ describe('§3.6.3 (6) — repair → 来源 evaluator reopen 继承同一 correl
     expect(reopened?.status).toBe('pending');
     // 依赖换到 repair artificer (PRI-668 / P0-D 语义保持)。
     expect(reopened?.dependencyTaskIds).toContain('artificer-repair-1');
+  });
+});
+
+describe('PRI-1293 review fix — 修订重开复用历史终态后继, 不派生重复后继 (finding 2)', () => {
+  it('历史链 artificer 修订波: 级联按 (parent,kind,channel) 扫描命中原终态 evaluator 并重开它, 重放零新增任务', async () => {
+    // 场景出自复核例: 历史代码规则链全程无 correlationId, 后继 id 由
+    // stripTrailingChannel 派生 (evaluator-artificer-legacy-prompt)。
+    const dreamer = await mkTask('dreamer-legacy-prompt', 'dreamer', 'succeeded', { topCandidateId: CAND_A });
+    const philosopher = await mkTask('philosopher-legacy-prompt', 'philosopher', 'succeeded', { parentTaskId: dreamer });
+    const scribe = await mkTask('scribe-legacy-prompt', 'scribe', 'succeeded', { parentTaskId: philosopher });
+    const artificer = await mkTask('artificer-legacy-prompt', 'artificer', 'succeeded', { parentTaskId: scribe });
+    const evaluator = await mkTask('evaluator-artificer-legacy-prompt', 'evaluator', 'succeeded', {
+      parentTaskId: artificer,
+      dependencyTaskIds: [artificer],
+      runnerDecision: 'approved',
+    });
+    const taskCountBefore = (await successorIds()).length;
+
+    // 1) Owner 修订 artificer — reopen 补入恢复的 correlationId (cand-aaaa),
+    //    revisionCount=1。此后派生根从 artificer-legacy 漂移到 cand-aaaa,
+    //    直查 evaluator-cand-aaaa-prompt 必未命中 — 修复前在此制造重复后继。
+    const reopenedSource = await reopenTaskForRevision(stateManager, artificer, {
+      revisionCauseId: 'owner-revise-art',
+      reason: 'owner_revise_once',
+    });
+    expect(reopenedSource.ok).toBe(true);
+    const sourcePi = hydratePITaskRecord(need(await stateManager.getTask(artificer), 'reopened artificer'));
+    expect(sourcePi?.correlationId).toBe(CAND_A);
+    expect(sourcePi?.revisionCount).toBe(1);
+
+    // 2) 模拟 artificer 重跑完成 (修订波上游重新 succeeded)。
+    await stateManager.updateTask(artificer, { status: 'succeeded', attemptCount: 1 });
+
+    // 3) commit: 级联必须复用原 evaluator (真实 id), 而不是创建
+    //    evaluator-cand-aaaa-prompt。
+    const first = await orchestrator.commitNextTaskProposal(artificer);
+    expect(first.decision, JSON.stringify(first)).toBe('successor_reopened');
+    if (first.decision !== 'successor_reopened') return;
+    expect(first.reopenedTaskId).toBe(evaluator);
+    // 原 evaluator 回到 pending 等待重跑; 没有任何新任务被创建。
+    const reopenedEvaluator = hydratePITaskRecord(need(await stateManager.getTask(evaluator), 'cascade-reopened evaluator'));
+    expect(reopenedEvaluator?.status).toBe('pending');
+    expect(reopenedEvaluator?.revisionCauseId).toBe(`cascade-${artificer}-rc1-${evaluator}`);
+    expect((await successorIds()).length).toBe(taskCountBefore);
+    expect((await successorIds()).some((id) => id.includes(CAND_A))).toBe(false);
+
+    // 4) 重放 commit: evaluator 已在途 (pending) → successor_exists, 仍零新增。
+    const replay = await orchestrator.commitNextTaskProposal(artificer);
+    expect(replay.decision).toBe('successor_exists');
+    if (replay.decision === 'successor_exists') {
+      expect(replay.successorTaskId).toBe(evaluator);
+    }
+    expect((await successorIds()).length).toBe(taskCountBefore);
+  });
+});
+
+describe('PRI-1293 review fix — 级联重开拒绝透出真实血缘原因 (finding 4 后半)', () => {
+  it('终态后继自身链冲突时, 级联拒绝映射为 lineage_refused 而非 successor_exists', async () => {
+    // 源链一致 (cand-aaaa), 但终态 evaluator 自带冲突标识 cand-bbbb:
+    // reopen 校验其链时 claimed = {cand-bbbb, cand-aaaa} → 拒绝。
+    const dreamer = await mkTask('dreamer-cascade-prompt', 'dreamer', 'succeeded', { correlationId: CAND_A, topCandidateId: CAND_A });
+    const artificer = await mkTask('artificer-cascade', 'artificer', 'succeeded', {
+      parentTaskId: dreamer,
+      correlationId: CAND_A,
+    });
+    await mkTask('evaluator-cascade-conflict', 'evaluator', 'succeeded', {
+      parentTaskId: artificer,
+      correlationId: CAND_B,
+      dependencyTaskIds: [artificer],
+    });
+    // 源已经历修订 (revisionCount=1) — 直接 reopen + 重新完成构造。
+    const reopenedSource = await reopenTaskForRevision(stateManager, artificer, {
+      revisionCauseId: 'owner-revise-cascade',
+      reason: 'owner_revise_once',
+    });
+    expect(reopenedSource.ok).toBe(true);
+    await stateManager.updateTask(artificer, { status: 'succeeded', attemptCount: 1 });
+
+    const result = await orchestrator.commitNextTaskProposal(artificer);
+    expect(result.decision, JSON.stringify(result)).toBe('lineage_refused');
+    if (result.decision !== 'lineage_refused') return;
+    expect(result.reason).toBe('conflicting_parent_correlation_id');
+    expect(result.detail ?? '').toContain('cascade_reopen_refused:evaluator-cascade-conflict');
+    // 拒绝不折叠、不创建任何任务。
+    expect((await successorIds()).some((id) => id.startsWith('evaluator-cand'))).toBe(false);
   });
 });

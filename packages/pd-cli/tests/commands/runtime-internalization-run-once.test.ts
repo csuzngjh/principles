@@ -745,6 +745,44 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.successorTaskIds).toEqual([]);
   });
 
+  it('auto-enqueue: lineage_refused surfaces the structured refusal — never folded into Unexpected decision, never advised to skip enqueue', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-enq-lineage',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-enq-lineage',
+      runId: 'run-enq-lineage',
+      artifactId: 'pi-art-enq-lineage',
+      resultRef: 'dreamer://run-enq-lineage',
+      contextHash: 'ctx-enq-lineage',
+      output: { valid: true, taskId: 'task-dreamer-enq-lineage', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'lineage_refused',
+      sourceTaskId: 'task-dreamer-enq-lineage',
+      reason: 'conflicting_parent_correlation_id',
+      detail: 'chain_values:[cand-a,cand-b]',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.enqueueDecision).toBe('lineage_refused');
+    expect(output.enqueueReason).toContain('lineage_refused: conflicting_parent_correlation_id');
+    expect(output.enqueueReason).toContain('chain_values:[cand-a,cand-b]');
+    expect(output.enqueueReason).not.toContain('Unexpected commitNextTaskProposal decision');
+    expect(output.nextAction).toContain('parentTaskId');
+    expect(output.nextAction).not.toContain('--no-enqueue-next');
+    expect(output.successorTasksCreated).toBe(0);
+    expect(output.successorTaskIds).toEqual([]);
+  });
+
   it('auto-enqueue: failed run does not call commitNextTaskProposal', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',

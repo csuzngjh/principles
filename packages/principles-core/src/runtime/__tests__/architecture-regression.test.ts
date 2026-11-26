@@ -4603,6 +4603,18 @@ describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2B: production construction-point whi
     // (§2.6: never merged into runInternalizationConsumerCycle).
     'packages/pd-cli/src/services/rulehost-pipeline-runner.ts',
   ];
+  // File-level whitelisting alone cannot stop a second construction site from
+  // being added INSIDE a whitelisted file (bypassing the shared executor while
+  // the guard stays green). Pin the exact construction count per whitelisted
+  // file: any additional `new <Peer>Runner(` — even in these files — breaks
+  // this test and forces an explicit, review-visible update of the pin.
+  const PEER_RUNNER_CONSTRUCTION_COUNT_BY_FILE: Readonly<Record<string, number>> = {
+    // Six factory branches — exactly one construction per peer runner kind.
+    'packages/host-runtime/src/internalization-consumer-cycle.ts': 6,
+    // Synchronous pipeline stages: dreamer/philosopher/scribe/artificer/evaluator
+    // (no RolloutReviewer — the operator terminates at the adversarial loop).
+    'packages/pd-cli/src/services/rulehost-pipeline-runner.ts': 5,
+  };
 
   it('Phase 2B B: Internalization peer Runner constructions stay inside the §3.5.2 whitelist', () => {
     const hits = scanConstructions(ALL_PRODUCTION_FILES, PEER_RUNNER_CONSTRUCTION);
@@ -4623,6 +4635,19 @@ describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2B: production construction-point whi
     expect(
       unauthorizedConstructions(hits, PEER_RUNNER_WHITELIST, 'PeerRunner (Dreamer/Philosopher/Scribe/Artificer/Evaluator/RolloutReviewer)'),
     ).toEqual([]);
+    // Sole-constructor pin: the count inside each whitelisted file is exact.
+    // A new construction site within the file is a whitelist-evading change
+    // and must never land silently (update requires editing this pin, which
+    // CODEOWNERS/review surfaces as an architecture decision).
+    for (const [file, expectedCount] of Object.entries(PEER_RUNNER_CONSTRUCTION_COUNT_BY_FILE)) {
+      const actualCount = hits.filter((hit) => hit.file === file).length;
+      expect(
+        actualCount,
+        `${file} must keep exactly ${expectedCount} peer Runner construction(s) — found ${actualCount}. `
+        + 'A new construction inside a whitelisted file bypasses the §3.5.2 sole-executor contract; '
+        + 'remove it or justify the new site in the whitelist comment AND update this pin in the same PR.',
+      ).toBe(expectedCount);
+    }
   });
 
   // ── C. PainSignalBridge ─────────────────────────────────────────────────
