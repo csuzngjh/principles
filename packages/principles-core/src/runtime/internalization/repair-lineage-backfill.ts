@@ -30,7 +30,7 @@ import type { TaskRecord } from '../task-status.js';
 import type { TaskStoreUpdatePatch } from '../store/task/task-store.js';
 import type { CorrelationLineageTaskStore } from './correlation-lineage.js';
 import { verifyRepairTaskIdentity } from './repair-task-identity.js';
-import { hydratePITaskRecord, mergePITaskMetadata, createPITaskDiagnosticJson } from './pitask-metadata.js';
+import { hydratePITaskRecord, mergePITaskMetadata, createPITaskDiagnosticJson, PI_METADATA_KEY } from './pitask-metadata.js';
 
 /**
  * 血缘回填对任务存储的最窄需求 — 不得传入整个宿主对象:
@@ -78,8 +78,10 @@ export interface ValidateAndBackfillRepairLineageParams {
  *      repair_parent_conflicts_payload_source / repair_source_lineage_unprovable /
  *      repair_correlation_conflicts_authoritative / repair_channel_mismatch /
  *      repair_identity_unreadable_metadata);
- *   - 'invalid_task_metadata': 验证通过后 merge 前提 hydrate 失败
- *     (防御性分支 — hydrate 是纯函数, 正常不可达);
+ *   - 'repair_task_id_mismatch': params.repairTaskId 与 existing.taskId
+ *     不一致 — 验证行与写目标不是同一行, fail fast 零写入;
+ *   - 'invalid_task_metadata': 验证通过后 diagnosticJson 根文档不可解析
+ *     或 merge 前提 hydrate 失败 (防御性分支);
  *   - 'concurrent_modification': 回填 CAS 落败 — 任务在读取后被并发触碰,
  *     零写入, 调用方安全重试。
  */
@@ -97,6 +99,30 @@ function fail(reason: string, detail: string): RepairLineageBackfillResult {
   return { ok: false, reason, detail };
 }
 
+function parseDiagnosticRoot(diagnosticJson: string | null): Record<string, unknown> | null {
+  if (diagnosticJson === null || diagnosticJson.trim() === '') return {};
+  try {
+    const parsed: unknown = JSON.parse(diagnosticJson);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 只替换 namespaced pi_metadata 信封, 保留 diagnosticJson 根上的宿主/Runner
+ * 诊断键 (lastValidatorErrors / output_failure_details / validator_error_history
+ * 等)。backfill 的授权范围是亲缘字段, 不得借整文档重建丢弃无关重试证据。
+ */
+function replacePIMetadataEnvelope(existingDiagnosticJson: string | null, metadata: Parameters<typeof createPITaskDiagnosticJson>[0]): string | null {
+  const root = parseDiagnosticRoot(existingDiagnosticJson);
+  const envelopeRoot = parseDiagnosticRoot(createPITaskDiagnosticJson(metadata));
+  const piMetadata = envelopeRoot?.[PI_METADATA_KEY];
+  if (root === null || piMetadata === undefined) return null;
+  return JSON.stringify({ ...root, [PI_METADATA_KEY]: piMetadata });
+}
+
 /**
  * 校验 repair 任务完整身份; 仅在亲缘字段缺失且来源已证明时经六项快照前提
  * CAS 补齐。除该单条条件 UPDATE 外不写任何状态; 任何验证失败或 CAS 落败
@@ -106,6 +132,14 @@ export async function validateAndBackfillRepairLineage(
   params: ValidateAndBackfillRepairLineageParams,
   store: RepairLineageBackfillStore,
 ): Promise<RepairLineageBackfillResult> {
+  // 0. 验证快照与 CAS 目标必须是同一行 — 两个标识分别由调用方传入时
+  //    不得静默把 A 行的验证结论写到 B 行。
+  if (params.repairTaskId !== params.existing.taskId) {
+    return fail(
+      'repair_task_id_mismatch',
+      `param=${params.repairTaskId};snapshot=${params.existing.taskId}`,
+    );
+  }
   // 1. 只读完整身份验证 (与三消费方同一规则 — 单一实现, 不复制)。
   const identity = await verifyRepairTaskIdentity(
     params.existing,
@@ -138,10 +172,14 @@ export async function validateAndBackfillRepairLineage(
     parentTaskId: params.sourceEvaluatorTaskId,
     correlationId: identity.authoritativeCorrelationId,
   });
+  const nextDiagnosticJson = replacePIMetadataEnvelope(params.existing.diagnosticJson ?? null, merged);
+  if (nextDiagnosticJson === null) {
+    return fail('invalid_task_metadata', `repair task ${params.repairTaskId} diagnosticJson root unreadable`);
+  }
   const casResult = await store.updateTaskIfDiagnosticJsonUnchanged(
     params.repairTaskId,
     params.existing.diagnosticJson ?? null,
-    { diagnosticJson: createPITaskDiagnosticJson(merged) },
+    { diagnosticJson: nextDiagnosticJson },
     {
       expectedStatus: params.existing.status,
       expectedAttemptCount: params.existing.attemptCount,

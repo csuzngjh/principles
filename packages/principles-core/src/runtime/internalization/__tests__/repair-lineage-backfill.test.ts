@@ -125,7 +125,7 @@ async function seedModernChainToEvaluator(prefix: string) {
 
 async function seedRepairTask(ev: string, iteration: number, opts?: {
   omitLineage?: boolean; parentOverride?: string; correlationOverride?: string;
-  omitPayload?: boolean; lease?: boolean;
+  omitPayload?: boolean; lease?: boolean; extraDiagnosticFields?: Record<string, unknown>;
 }): Promise<string> {
   const taskId = artificerRepairTaskId(ev, iteration);
   const meta: SeedMeta = {
@@ -155,6 +155,7 @@ async function seedRepairTask(ev: string, iteration: number, opts?: {
         ...(meta.correlationId !== undefined ? { correlationId: meta.correlationId } : {}),
         ...(meta.repairPayload !== undefined ? { repairPayload: meta.repairPayload } : {}),
       },
+      ...(opts?.extraDiagnosticFields ?? {}),
     }),
   });
   return taskId;
@@ -205,6 +206,30 @@ describe('validateAndBackfillRepairLineage — 合法路径', () => {
     expect(need(await sm.getTask(rep), 'rep after row').status).toBe('pending');
   });
 
+  it('CAS 回填只替换 pi_metadata 信封 → diagnosticJson 根上的 Runner 诊断证据不丢失', async () => {
+    const { ev } = await seedModernChainToEvaluator('siblings');
+    const rep = await seedRepairTask(ev, 1, {
+      omitLineage: true,
+      extraDiagnosticFields: {
+        lastValidatorErrors: ['validator evidence'],
+        output_failure_details: { kind: 'validator_failed' },
+        validator_error_history: [{ round: 1, message: 'keep-me' }],
+      },
+    });
+    const r = await runBackfill(rep, ev, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.backfilled).toBe(true);
+    const raw = need(await sm.getTask(rep), 'rep after').diagnosticJson;
+    const parsed: unknown = JSON.parse(raw ?? '{}');
+    const root = parsed as Record<string, unknown>;
+    expect(root.lastValidatorErrors).toEqual(['validator evidence']);
+    expect(root.output_failure_details).toEqual({ kind: 'validator_failed' });
+    expect(root.validator_error_history).toEqual([{ round: 1, message: 'keep-me' }]);
+    const pi = hydratePITaskRecord(need(await sm.getTask(rep), 'rep after hydrate'));
+    expect(pi?.parentTaskId).toBe(ev);
+    expect(pi?.correlationId).toBe(CAND);
+  });
+
   it('仅缺 correlation (parent 已在且一致) → 仍 backfilled=true 且 parent 不被改写', async () => {
     const { ev } = await seedModernChainToEvaluator('pc-only');
     const taskId = artificerRepairTaskId(ev, 1);
@@ -236,6 +261,23 @@ describe('validateAndBackfillRepairLineage — 合法路径', () => {
 });
 
 describe('validateAndBackfillRepairLineage — 拒绝矩阵 (零写入)', () => {
+  it('repairTaskId 与 existing.taskId 不一致 → repair_task_id_mismatch, fail fast 零写入', async () => {
+    const { ev } = await seedModernChainToEvaluator('idmm');
+    const rep = await seedRepairTask(ev, 1, { omitLineage: true });
+    const existing = need(await sm.getTask(rep), 'rep');
+    const before = existing.diagnosticJson;
+    const r = await validateAndBackfillRepairLineage(
+      { repairTaskId: rep + '-wrong-target', existing, sourceEvaluatorTaskId: ev, repairIteration: 1 },
+      narrowStore(),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe('repair_task_id_mismatch');
+      expect(r.detail).toContain('wrong-target');
+    }
+    expect(need(await sm.getTask(rep), 'rep after').diagnosticJson).toBe(before);
+  });
+
   it('来源 evaluator 缺失 → repair_source_evaluator_missing, 零写入', async () => {
     // payload 与确定性 taskId 互证一致, 但 payload 指向的来源从未存在。
     const ghost = 'evaluator-never-existed';
