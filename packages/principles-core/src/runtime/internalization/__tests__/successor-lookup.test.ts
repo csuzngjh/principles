@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import { lookupSuccessorByParent } from '../successor-lookup.js';
+import { createLogicalSuccessorTask } from '../successor-create.js';
 import { PI_METADATA_KEY } from '../pitask-metadata.js';
 import { PD_TASK_STATUSES } from '../../task-status.js';
 
@@ -121,5 +122,94 @@ describe('lookupSuccessorByParent', () => {
     const result = await lookup();
     expect(result.outcome).toBe('unique');
     if (result.outcome === 'unique') expect(result.successor.taskId).toBe('same-triple');
+  });
+});
+
+
+describe('malformed successor metadata fail-closed behavior', () => {
+  it('identity-valid but non-identity-corrupt metadata is malformed, never none', async () => {
+    await stateManager.createTask({
+      taskId: 'eval-corrupt-nonidentity', taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        [PI_METADATA_KEY]: {
+          dependencyTaskIds: 'not-an-array', channel: 'prompt', timeoutMs: 300000,
+          inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: 'parent-a',
+        },
+      }),
+    });
+    const result = await lookup();
+    expect(result.outcome).toBe('malformed');
+    if (result.outcome === 'malformed') {
+      expect(result.malformedCandidateTaskIds).toEqual(['eval-corrupt-nonidentity']);
+      expect(result.nextAction).toBe('repair_malformed_successor_metadata_before_retry');
+    }
+  });
+
+  it('pi_metadata with parent but missing channel is fail-closed malformed', async () => {
+    await stateManager.createTask({
+      taskId: 'eval-missing-channel', taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        [PI_METADATA_KEY]: {
+          dependencyTaskIds: ['parent-a'], timeoutMs: 300000,
+          inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: 'parent-a',
+        },
+      }),
+    });
+    const result = await lookup();
+    expect(result.outcome).toBe('malformed');
+    if (result.outcome === 'malformed') expect(result.malformedCandidateTaskIds).toEqual(['eval-missing-channel']);
+  });
+});
+
+describe('createLogicalSuccessorTask atomic arbitration', () => {
+  it('two independent SQLite connections cannot create duplicate logical successors', async () => {
+    const second = new RuntimeStateManager({ workspaceDir });
+    await second.initialize();
+    try {
+      await mkTask('parent-atomic', 'artificer');
+      const metadata = {
+        dependencyTaskIds: ['parent-atomic'], channel: 'prompt' as const, timeoutMs: 300000,
+        inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: 'parent-atomic',
+      };
+      const [a, b] = await Promise.all([
+        createLogicalSuccessorTask({
+          stateManager, parentTaskId: 'parent-atomic', successorKind: 'evaluator', channel: 'prompt',
+          preferredTaskId: 'evaluator-deterministic', metadata,
+        }),
+        createLogicalSuccessorTask({
+          stateManager: second, parentTaskId: 'parent-atomic', successorKind: 'evaluator', channel: 'prompt',
+          preferredTaskId: 'evaluator-timestamp-abc', metadata,
+        }),
+      ]);
+      expect([a.outcome, b.outcome].sort()).toEqual(['created', 'existing']);
+      const created = a.outcome === 'created' ? a.task : b.outcome === 'created' ? b.task : null;
+      const existing = a.outcome === 'existing' ? a.task : b.outcome === 'existing' ? b.task : null;
+      expect(created?.taskId).toBe(existing?.taskId);
+      const rows = await stateManager.listTasks({ taskKind: 'evaluator', piParentTaskId: 'parent-atomic', piChannel: 'prompt' });
+      expect(rows).toHaveLength(1);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('malformed relevant candidate blocks creation without adding a row', async () => {
+    await stateManager.createTask({
+      taskId: 'eval-corrupt-atomic', taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        [PI_METADATA_KEY]: {
+          dependencyTaskIds: 'broken', channel: 'prompt', timeoutMs: 300000,
+          inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: 'parent-atomic-malformed',
+        },
+      }),
+    });
+    const before = await stateManager.listTasks({});
+    const result = await createLogicalSuccessorTask({
+      stateManager, parentTaskId: 'parent-atomic-malformed', successorKind: 'evaluator', channel: 'prompt',
+      preferredTaskId: 'evaluator-new-atomic',
+      metadata: { dependencyTaskIds: ['parent-atomic-malformed'], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: 'parent-atomic-malformed' },
+    });
+    expect(result.outcome).toBe('lookup');
+    if (result.outcome === 'lookup') expect(result.lookup.outcome).toBe('malformed');
+    expect((await stateManager.listTasks({})).map((t) => t.taskId)).toEqual(before.map((t) => t.taskId));
   });
 });

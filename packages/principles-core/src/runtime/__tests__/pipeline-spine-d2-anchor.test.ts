@@ -104,7 +104,8 @@ function createReadFixture(task: TaskRecord): ReadFixture {
     getTask: vi.fn(async (taskId: string) => (taskId === task.taskId ? task : null)),
     updateTask: vi.fn(),
     updateTaskIfDiagnosticJsonUnchanged: vi.fn(async () => null),
-    listTasks: vi.fn(async () => []),
+    withWriteTransaction: async <T>(fn: () => Promise<T>): Promise<T> => fn(),
+  listTasks: vi.fn(async () => []),
     deleteTask: vi.fn(async () => true),
   };
   const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {

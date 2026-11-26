@@ -6,6 +6,7 @@ import {
   hydratePITaskRecord,
   CORRELATION_LINEAGE_MAX_PARENT_EDGES,
   lookupSuccessorByParent,
+  planSuccessorIdAllocation,
 } from '@principles/core/runtime';
 import type { CommitNextTaskResult } from '@principles/core/runtime';
 import { planExistingSuccessorTransition, deriveSuccessorTaskId, planLegacyLineageResolution, type LegacyLineagePlan } from '@principles/core/runtime';
@@ -226,6 +227,15 @@ function mapCommitDecisionToAction(
         reason: `successor_integrity_conflict: ${commitResult.reason} (${commitResult.detail}); multiple persisted successors declare the same parent/kind/channel — nothing was created or reopened`,
         nextAction: `Inspect the conflicting successor tasks [${commitResult.conflictingSuccessorTaskIds.join(', ')}] (pd runtime internalization list --json); resolve the duplicate-chain integrity conflict manually before re-running`,
         conflictingSuccessorTaskIds: [...commitResult.conflictingSuccessorTaskIds],
+      };
+    case 'successor_metadata_malformed':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: 'successor_metadata_malformed: ' + commitResult.reason + ' (' + commitResult.detail + '); a relevant successor candidate cannot be safely interpreted — nothing was created or reopened',
+        nextAction: commitResult.nextAction,
+        conflictingSuccessorTaskIds: commitResult.malformedCandidateTaskIds,
       };
     case 'revision_reopen_failed':
       // PRI-1293 R6: repair 完成后来源 Evaluator reopen 失败 — 真实失败
@@ -454,6 +464,14 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
           }
           peerLineageParentEdgeCount = lineage.parentEdgeCount;
         }
+        const transitionGate = await orchestrator.previewNextTaskTransitionGate(task.taskId);
+        if (transitionGate !== null) {
+          const gateAction = mapCommitDecisionToAction(transitionGate);
+          gateAction.taskKind = piTask.taskKind;
+          actions.push(gateAction);
+          skippedCount++;
+          continue;
+        }
         const proposalResult = await orchestrator.proposeNextTask(task.taskId).catch((proposeErr: unknown) => {
           const proposeMessage = proposeErr instanceof Error ? proposeErr.message : String(proposeErr);
           return {
@@ -522,6 +540,20 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             skippedCount++;
             continue;
           }
+          if (lookup.outcome === 'malformed') {
+            const malformedAction = mapCommitDecisionToAction({
+              decision: lookup.decision,
+              sourceTaskId: task.taskId,
+              reason: lookup.reason,
+              detail: lookup.detail,
+              malformedCandidateTaskIds: [...lookup.malformedCandidateTaskIds],
+              nextAction: lookup.nextAction,
+            });
+            malformedAction.taskKind = piTask.taskKind;
+            actions.push(malformedAction);
+            skippedCount++;
+            continue;
+          }
           if (lookup.outcome === 'unique') {
             const existingSuccessor = lookup.successor;
             const existingSuccessorPi = hydratePITaskRecord(existingSuccessor);
@@ -574,13 +606,20 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             }
           } else {
             const derivedSuccessorTaskId = deriveSuccessorTaskId(proposalResult.proposal, task.taskId);
-            let deterministicOccupant: Awaited<ReturnType<typeof stateManager.getTask>> = null;
+            const fallbackSuccessorTaskId = derivedSuccessorTaskId + '-p-' + task.taskId;
+            let allocation;
             try {
-              deterministicOccupant = await stateManager.getTask(derivedSuccessorTaskId);
+              allocation = await planSuccessorIdAllocation(stateManager, {
+                preferredTaskId: derivedSuccessorTaskId,
+                fallbackTaskId: fallbackSuccessorTaskId,
+                parentTaskId: task.taskId,
+                successorKind: proposalResult.proposal.taskKind,
+                channel: proposalResult.proposal.channel,
+              });
             } catch (occupantErr: unknown) {
               const message = occupantErr instanceof Error ? occupantErr.message : String(occupantErr);
               emitFailure({
-                error: 'Failed to inspect derived successor id occupant: ' + message,
+                error: 'Failed to inspect successor id occupant: ' + message,
                 isDryRun,
                 json: !!opts.json,
                 reason: 'successor_id_preflight_failed: ' + message,
@@ -588,39 +627,18 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
               });
               return;
             }
-            const fallbackSuccessorTaskId = derivedSuccessorTaskId + '-p-' + task.taskId;
-            let fallbackOccupant: Awaited<ReturnType<typeof stateManager.getTask>> = null;
-            if (deterministicOccupant !== null) {
-              try {
-                fallbackOccupant = await stateManager.getTask(fallbackSuccessorTaskId);
-              } catch (occupantErr: unknown) {
-                const message = occupantErr instanceof Error ? occupantErr.message : String(occupantErr);
-                emitFailure({
-                  error: 'Failed to inspect fallback successor id occupant: ' + message,
-                  isDryRun,
-                  json: !!opts.json,
-                  reason: 'successor_id_preflight_failed: ' + message,
-                  nextAction: 'Check database availability and re-run; no successor was created or reopened in dry-run',
-                });
-                return;
-              }
-            }
-            if (deterministicOccupant !== null && hydratePITaskRecord(deterministicOccupant) === null) {
-              // Not successor identity recognition: this is the same creation-id
-              // corruption preflight commit performs before attempting a write.
-              actions.push({
-                taskId: task.taskId,
-                taskKind: piTask.taskKind,
-                decision: 'skipped',
-                reason: 'successor_exists_with_malformed_metadata: taskId=' + derivedSuccessorTaskId + ' has unparseable diagnosticJson',
-                nextAction: 'Run integrity-repair on the successor task, then re-run enqueue-successors',
+            if (allocation.outcome === 'id_conflict') {
+              const conflictAction = mapCommitDecisionToAction({
+                decision: 'successor_id_conflict',
+                sourceTaskId: task.taskId,
+                reason: allocation.reason,
+                detail: allocation.detail,
               });
+              conflictAction.taskKind = piTask.taskKind;
+              actions.push(conflictAction);
               skippedCount++;
             } else if (peerLineageParentEdgeCount !== null
               && peerLineageParentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
-              // PRI-1293 R3: apply the same new-edge depth check at the same
-              // branch point as commit — only when a new successor would be
-              // created, never for an existing successor edge.
               const depthAction = mapCommitDecisionToAction({
                 decision: 'lineage_refused',
                 sourceTaskId: task.taskId,
@@ -629,16 +647,6 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
               });
               depthAction.taskKind = piTask.taskKind;
               actions.push(depthAction);
-              skippedCount++;
-            } else if (deterministicOccupant !== null && fallbackOccupant !== null) {
-              const conflictAction = mapCommitDecisionToAction({
-                decision: 'successor_id_conflict',
-                sourceTaskId: task.taskId,
-                reason: 'derived_and_fallback_ids_occupied_by_foreign_chain',
-                detail: 'primary=' + derivedSuccessorTaskId + ' fallback=' + fallbackSuccessorTaskId + ' both occupied; scan found no successor for parent ' + task.taskId,
-              });
-              conflictAction.taskKind = piTask.taskKind;
-              actions.push(conflictAction);
               skippedCount++;
             } else {
               actions.push({

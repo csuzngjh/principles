@@ -59,8 +59,38 @@ function readNullableStringField(
   return value;
 }
 
+// Shared across every SqliteTaskStore instance in this process. Cross-connection
+// callers must never enter BEGIN IMMEDIATE while another instance is inside an
+// async transaction callback; doing so can block this single event loop before
+// the first transaction can finish. The DB write lock still serializes writers
+// across processes.
+const SQLITE_WRITE_TRANSACTION_QUEUE: { current: Promise<void> } = { current: Promise.resolve() };
+
 export class SqliteTaskStore implements TaskStore {
+  private transactionDepth = 0;
+
   constructor(private readonly connection: SqliteConnection) {}
+
+  async withWriteTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.transactionDepth > 0) return fn();
+    const run = SQLITE_WRITE_TRANSACTION_QUEUE.current.then(async () => {
+      const db = this.connection.getDb();
+      this.transactionDepth += 1;
+      db.prepare('BEGIN IMMEDIATE').run();
+      try {
+        const result = await fn();
+        db.prepare('COMMIT').run();
+        return result;
+      } catch (error) {
+        try { db.prepare('ROLLBACK').run(); } catch { /* rollback best effort */ }
+        throw error;
+      } finally {
+        this.transactionDepth -= 1;
+      }
+    });
+    SQLITE_WRITE_TRANSACTION_QUEUE.current = run.then(() => undefined, () => undefined);
+    return run;
+  }
 
   async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
     const db = this.connection.getDb();

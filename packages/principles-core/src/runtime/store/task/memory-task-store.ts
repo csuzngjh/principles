@@ -56,6 +56,22 @@ function readPIMetadataValue(diagnosticJson: string | null | undefined, field: '
 
 export class MemoryTaskStore implements TaskStore {
   private readonly tasks = new Map<string, TaskRecord>();
+  private transactionQueue: Promise<void> = Promise.resolve();
+  private transactionDepth = 0;
+
+  async withWriteTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.transactionDepth > 0) return fn();
+    const run = this.transactionQueue.then(async () => {
+      this.transactionDepth += 1;
+      try {
+        return await fn();
+      } finally {
+        this.transactionDepth -= 1;
+      }
+    });
+    this.transactionQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
 
   async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
     const now = new Date().toISOString();

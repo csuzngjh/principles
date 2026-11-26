@@ -23,6 +23,7 @@ import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, h
 import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition } from './revision-reopen.js';
 import { verifyRepairTaskIdentity } from './repair-task-identity.js';
 import { lookupSuccessorByParent, type SuccessorLookupResult } from './successor-lookup.js';
+import { createLogicalSuccessorTask } from './successor-create.js';
 // PRI-1293 Phase 3: 唯一 PeerRunnerKind 血缘权威解析器 (core 内部模块,
 // 不入 barrel — 跨包消费方经 InternalizationOrchestrator 静态只读包装访问)。
 import {
@@ -184,6 +185,8 @@ export type CommitNextTaskResult =
   /** PRI-1293 R5: 派生 id 与父派生 fallback id 均被异链占用 — fail-closed, 绝不伪装幂等 */
   | { decision: 'successor_id_conflict'; sourceTaskId: string; reason: string; detail?: string }
   | { decision: 'successor_integrity_conflict'; sourceTaskId: string; reason: string; detail: string; conflictingSuccessorTaskIds: string[] }
+  /** PRI-1299 round 2: a relevant successor candidate is provably present but malformed — fail closed, zero writes. */
+  | { decision: 'successor_metadata_malformed'; sourceTaskId: string; reason: string; detail: string; malformedCandidateTaskIds: string[]; nextAction: string }
   | { decision: 'revision_reopen_failed'; sourceTaskId: string; reopenedTaskId: string; reason: string; detail?: string };
 
 // ── Constructor Options ───────────────────────────────────────────────────────
@@ -620,6 +623,36 @@ export class InternalizationOrchestrator {
     };
   }
 
+  /**
+   * Read-only preview of the same state-machine gate used by commit. It never
+   * writes lineage, tasks, cascade state, or metadata. null means the source is
+   * eligible to continue to proposal/successor arbitration.
+   */
+  async previewNextTaskTransitionGate(taskId: string): Promise<CommitNextTaskResult | null> {
+    const rawTask = await this.stateManager.getTask(taskId);
+    if (!rawTask) return { decision: 'task_not_found', taskId };
+    const piTask = hydratePITaskRecord(rawTask);
+    if (!piTask) return { decision: 'invalid_task_metadata', taskId, reason: 'Failed to hydrate PITaskRecord from diagnosticJson' };
+    const legacyVerdict = await this.resolveLegacyRunnerVerdict(taskId, rawTask.taskKind);
+    const adversarialReplayFailed = rawTask.taskKind === 'evaluator'
+      ? await this.resolveAdversarialReplayFailed(taskId)
+      : false;
+    const transition = decideInternalizationTransition(transitionInputFromTask(piTask, legacyVerdict, { adversarialReplayFailed }));
+    if (transition.kind === 'HUMAN_REVIEW_REQUIRED' || transition.kind === 'NOT_ADVANCEABLE') {
+      return { decision: 'source_not_succeeded', taskId, status: piTask.status };
+    }
+    if (transition.kind === 'BLOCKED_MISSING_VERDICT') {
+      return { decision: 'blocked_missing_verdict', taskId, reason: transition.reason };
+    }
+    if (transition.kind === 'REVISION_REQUIRED') {
+      return { decision: 'blocked_by_revision', sourceTaskId: taskId, reason: transition.reason, runnerDecision: piTask.runnerDecision ?? 'unknown' };
+    }
+    if (transition.kind === 'TERMINAL_REJECT') {
+      return { decision: 'blocked_by_rejection', sourceTaskId: taskId, reason: transition.reason, runnerDecision: piTask.runnerDecision ?? 'unknown' };
+    }
+    return null;
+  }
+
   // ── commitNextTaskProposal ──────────────────────────────────────────────
 
   /**
@@ -945,6 +978,16 @@ export class InternalizationOrchestrator {
         detail: successorLookup.detail,
         conflictingSuccessorTaskIds: [...successorLookup.conflictingSuccessorTaskIds] };
     }
+    if (successorLookup.outcome === 'malformed') {
+      return {
+        decision: successorLookup.decision,
+        sourceTaskId: taskId,
+        reason: successorLookup.reason,
+        detail: successorLookup.detail,
+        malformedCandidateTaskIds: [...successorLookup.malformedCandidateTaskIds],
+        nextAction: successorLookup.nextAction,
+      };
+    }
     // The conflict gate above is now the first write-sensitive decision. Only
     // after it passes may the legacy lineage resolver persist proven parent edges.
     // This keeps successor_integrity_conflict truly zero-write while preserving
@@ -1125,74 +1168,51 @@ export class InternalizationOrchestrator {
     //   UNIQUE 裁决, 败者重扫收敛——不会双链并行。fallback 仍 UNIQUE 落败
     //   且重扫为空 = 持续占用冲突, fail-closed 结构化 successor_id_conflict
     //   (绝不折叠为 successor_exists 伪装幂等)。
-    let successorRecord: TaskRecord | null = null;
-    for (let createAttempt = 0; createAttempt < 2 && successorRecord === null; createAttempt++) {
-      const idForCreate = createAttempt === 0
-        ? successorTaskId
-        : successorTaskId + '-p-' + taskId;
-      try {
-        successorRecord = await this.stateManager.createTask({
-          taskId: idForCreate,
-          taskKind: proposal.taskKind,
-          status: 'pending',
-          attemptCount: 0,
-          maxAttempts: 3,
-          inputRef: undefined,
-          resultRef: undefined,
-          lastError: undefined,
-          leaseOwner: undefined,
-          leaseExpiresAt: undefined,
-          diagnosticJson: createPITaskDiagnosticJson(successorMetadata),
-        });
-      } catch (createErr) {
-        const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
-        if (!(errMsg.includes('UNIQUE constraint') || errMsg.includes('PRIMARY KEY') || errMsg.includes('already exists'))) {
-          throw createErr;
-        }
-        // UNIQUE 落败: 重扫真实后继。并发创建者物化的新行一律 pending,
-        // successor_exists 收敛语义正确; 既有终态后继早在首个扫描即命中,
-        // 不会到达此处。
-        const rescanned = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
-        if (rescanned.outcome === 'conflict') {
-          return { decision: rescanned.decision, sourceTaskId: taskId,
-            reason: rescanned.reason + '_after_unique_conflict',
-            detail: rescanned.detail,
-            conflictingSuccessorTaskIds: [...rescanned.conflictingSuccessorTaskIds] };
-        }
-        if (rescanned.outcome === 'unique') {
-          return { decision: 'successor_exists', sourceTaskId: taskId,
-            successorTaskId: rescanned.successor.taskId, successorKind: proposal.taskKind };
-        }
-        // occupant 不可解析 = 损坏行 — 它可能是本链被腐蚀的后继也可能是异链
-        // 残骸, 无法证明任一归属。fallback 创建会复制一条逻辑后继而腐蚀行
-        // 原地留存 (完整性恶化), fail-closed 要求先修复腐蚀 (rc-9 诚实)。
-        const occupantRaw = await this.stateManager.getTask(idForCreate);
-        if (occupantRaw !== null && hydratePITaskRecord(occupantRaw) === null) {
-          return {
-            decision: 'successor_id_conflict',
-            sourceTaskId: taskId,
-            reason: 'occupant_metadata_unparseable',
-            detail: 'task ' + idForCreate + ' occupies the derived id with unparseable diagnosticJson — repair corruption before creating (no fallback duplication of a corrupt row)',
-          };
-        }
-        if (createAttempt === 1) {
-          return {
-            decision: 'successor_id_conflict',
-            sourceTaskId: taskId,
-            reason: 'derived_and_fallback_ids_occupied_by_foreign_chain',
-            detail: 'primary=' + successorTaskId + ' fallback=' + successorTaskId + '-p-' + taskId + ' both occupied; scan found no successor for parent ' + taskId,
-          };
-        }
+    const creation = await createLogicalSuccessorTask({
+      stateManager: this.stateManager,
+      parentTaskId: taskId,
+      successorKind: proposal.taskKind,
+      channel: proposal.channel,
+      preferredTaskId: successorTaskId,
+      fallbackTaskId: successorTaskId + '-p-' + taskId,
+      metadata: successorMetadata,
+    });
+    if (creation.outcome === 'lookup') {
+      if (creation.lookup.outcome === 'malformed') {
+        return {
+          decision: creation.lookup.decision,
+          sourceTaskId: taskId,
+          reason: creation.lookup.reason,
+          detail: creation.lookup.detail,
+          malformedCandidateTaskIds: [...creation.lookup.malformedCandidateTaskIds],
+          nextAction: creation.lookup.nextAction,
+        };
       }
+      return {
+        decision: creation.lookup.decision,
+        sourceTaskId: taskId,
+        reason: creation.lookup.reason,
+        detail: creation.lookup.detail,
+        conflictingSuccessorTaskIds: [...creation.lookup.conflictingSuccessorTaskIds],
+      };
     }
-    if (successorRecord === null) {
-      // 循环不变式保证不可达 (attempt 1 落败已返回), 防御性 fail-closed。
+    if (creation.outcome === 'id_conflict') {
       return {
         decision: 'successor_id_conflict',
         sourceTaskId: taskId,
-        reason: 'create_loop_exhausted_without_row',
+        reason: creation.allocation.reason,
+        detail: creation.allocation.detail,
       };
     }
+    if (creation.outcome === 'existing') {
+      return {
+        decision: 'successor_exists',
+        sourceTaskId: taskId,
+        successorTaskId: creation.task.taskId,
+        successorKind: proposal.taskKind,
+      };
+    }
+    const successorRecord: TaskRecord = creation.task;
 
     return {
       decision: 'successor_created',

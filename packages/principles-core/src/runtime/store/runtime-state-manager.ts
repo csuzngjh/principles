@@ -229,6 +229,11 @@ export class RuntimeStateManager {
     return this._taskStore.listTasks(filter);
   }
 
+  async withWriteTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    this.assertInitialized();
+    return this._taskStore.withWriteTransaction(fn);
+  }
+
   async updateTask(taskId: string, patch: TaskStoreUpdatePatch): Promise<TaskRecord> {
     this.assertInitialized();
     return this._taskStore.updateTask(taskId, patch);

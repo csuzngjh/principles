@@ -302,7 +302,7 @@ describe('PRI-1299 creation-id conflict regressions', () => {
     expect((await stateManager.listTasks({})).length).toBe(beforeCount);
   });
 
-  it('two concurrent creators both scan first, then converge through UNIQUE rescan to exactly one logical successor', async () => {
+  it('two concurrent creators serialize through the atomic successor transaction and converge to exactly one logical successor', async () => {
     const chain = await seedFullChain('concurrent-create', { timestamped: false });
     const beforeCount = (await stateManager.listTasks({})).length;
     const originalListTasks = stateManager.listTasks.bind(stateManager);
@@ -348,11 +348,10 @@ describe('PRI-1299 creation-id conflict regressions', () => {
     });
     expect(logicalSuccessors.map((task) => task.taskId)).toHaveLength(1);
     expect((await stateManager.listTasks({})).length).toBe(beforeCount + 1);
-    // Two initial scans are forced empty by the barrier. Because both creators
-    // then race the same deterministic insert, the UNIQUE loser must perform a
-    // third exact scan and observe the winner. Accepting merely >=2 would not
-    // prove that post-conflict rescan happened at all.
-    expect(exactScanCount).toBe(3);
+    // The two preflight scans are followed by the atomic creation authority's
+    // in-transaction arbitration scans. With BEGIN IMMEDIATE serialization the
+    // loser observes the winner before insert, so no duplicate row is created.
+    expect(exactScanCount).toBe(4);
   });
 
   it('unparseable occupant of the derived id remains successor_id_conflict and blocks fallback duplication', async () => {

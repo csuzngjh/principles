@@ -7,6 +7,7 @@ const mockCommitNextTaskProposal = vi.hoisted(() => vi.fn());
 const mockProposeNextTask = vi.hoisted(() => vi.fn());
 const mockResolveLineage = vi.hoisted(() => vi.fn());
 const mockLookupSuccessorByParent = vi.hoisted(() => vi.fn());
+const mockPlanSuccessorIdAllocation = vi.hoisted(() => vi.fn());
 const mockClose = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockInitialize = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockRuntimeStateManagerOpts = vi.hoisted(() => vi.fn());
@@ -35,6 +36,7 @@ vi.mock('@principles/core/runtime', async (importOriginal) => ({
       return {
         commitNextTaskProposal: mockCommitNextTaskProposal,
         proposeNextTask: mockProposeNextTask,
+        previewNextTaskTransitionGate: vi.fn().mockResolvedValue(null),
       };
     }),
     // PRI-1293 review fix: the dry-run preview shares the commit gate's
@@ -47,6 +49,7 @@ vi.mock('@principles/core/runtime', async (importOriginal) => ({
   // ok/correlationId/parentEdgeCount/reason/detail)。
   planLegacyLineageResolution: mockResolveLineage,
   lookupSuccessorByParent: mockLookupSuccessorByParent,
+  planSuccessorIdAllocation: mockPlanSuccessorIdAllocation,
   isPeerRunnerKind: vi.fn().mockImplementation((k: string) =>
     ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'].includes(k),
   ),
@@ -199,6 +202,22 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     mockClose.mockResolvedValue(undefined);
     // Default: lineage provable — existing tests exercise the post-gate paths.
     mockResolveLineage.mockResolvedValue({ ok: true, correlationId: 'corr-default' });
+    mockPlanSuccessorIdAllocation.mockReset();
+    mockPlanSuccessorIdAllocation.mockImplementation(async (_sm: unknown, input: { preferredTaskId: string; fallbackTaskId?: string }) => {
+      const classify = async (id: string) => {
+        const row = await mockGetTask(id);
+        if (row === null || row === undefined) return 'free';
+        try { JSON.parse(row.diagnosticJson); return 'foreign'; } catch { return 'malformed'; }
+      };
+      const primary = await classify(input.preferredTaskId);
+      if (primary === 'free') return { outcome: 'use_id', taskId: input.preferredTaskId, usedFallback: false };
+      if (primary === 'malformed') return { outcome: 'id_conflict', reason: 'occupant_metadata_unparseable', detail: 'task ' + input.preferredTaskId + ' occupies the successor id with unparseable diagnosticJson', conflictingTaskIds: [input.preferredTaskId] };
+      if (input.fallbackTaskId === undefined) return { outcome: 'id_conflict', reason: 'derived_and_fallback_ids_occupied_by_foreign_chain', detail: 'primary occupied', conflictingTaskIds: [input.preferredTaskId] };
+      const fallback = await classify(input.fallbackTaskId);
+      if (fallback === 'free') return { outcome: 'use_id', taskId: input.fallbackTaskId, usedFallback: true };
+      if (fallback === 'malformed') return { outcome: 'id_conflict', reason: 'occupant_metadata_unparseable', detail: 'task ' + input.fallbackTaskId + ' occupies the fallback successor id with unparseable diagnosticJson', conflictingTaskIds: [input.fallbackTaskId] };
+      return { outcome: 'id_conflict', reason: 'derived_and_fallback_ids_occupied_by_foreign_chain', detail: 'primary and fallback occupied', conflictingTaskIds: [input.preferredTaskId, input.fallbackTaskId] };
+    });
     mockLookupSuccessorByParent.mockResolvedValue({ outcome: 'none' });
     mockGetTask.mockResolvedValue(null);
   });
@@ -784,8 +803,8 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.actions[0].decision).toBe('skipped');
-    expect(output.actions[0].reason).toContain('successor_exists_with_malformed_metadata');
-    expect(output.actions[0].nextAction).toContain('integrity-repair');
+    expect(output.actions[0].reason).toContain('occupant_metadata_unparseable');
+    expect(output.actions[0].nextAction).toContain('Inspect the occupant tasks');
     expect(output.skippedCount).toBe(1);
     expect(output.createdCount).toBe(0);
   });

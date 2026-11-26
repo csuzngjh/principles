@@ -133,6 +133,14 @@ export interface TaskStore {
   /** List tasks with optional filter. */
   listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]>;
 
+  /**
+   * Run a logical read-check-write unit inside the store's write-serializing
+   * transaction boundary. SQLite implementations use BEGIN IMMEDIATE so
+   * independent connections cannot interleave lookup and insert. Nested calls
+   * join the already-active unit; implementations serialize top-level units.
+   */
+  withWriteTransaction<T>(fn: () => Promise<T>): Promise<T>;
+
   /** Delete a task by ID. Returns true if a row was deleted. */
   deleteTask(taskId: string): Promise<boolean>;
 }

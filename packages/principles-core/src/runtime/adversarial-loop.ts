@@ -27,7 +27,8 @@ import { isEvaluatorOutputV2 } from './internalization/evaluator-output.js';
 import type { EvaluatorAdversarialResult } from './internalization/evaluator-output.js';
 import { formatAdversarialFeedback } from './internalization/adversarial-feedback.js';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helper functions declared after main, matching codebase convention */
-import { createPITaskDiagnosticJson } from './internalization/pitask-metadata.js';
+import type { createPITaskDiagnosticJson } from './internalization/pitask-metadata.js';
+import { createLogicalSuccessorTask } from './internalization/successor-create.js';
 
 /** PRD hard cap on adversarial rounds. */
 export const DEFAULT_MAX_ROUNDS = 2;
@@ -92,14 +93,14 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
     // revision — mirroring the lease-based repair flow whose repair artificer
     // is parented on the source evaluator.
     const artificerParentTaskId = round === 1 ? input.scribeTaskId : lastEvaluatorTaskId;
+    let resolvedArtificerTaskId: string;
     try {
-      await input.stateManager.createTask({
-        taskId: artificerTaskId,
+      resolvedArtificerTaskId = await createLoopSuccessorTask(input.stateManager, {
+        preferredTaskId: artificerTaskId,
         taskKind: 'artificer',
-        status: 'pending',
-        attemptCount: 0,
-        maxAttempts: 3,
-        diagnosticJson: createPITaskDiagnosticJson({
+        parentTaskId: artificerParentTaskId,
+        channel,
+        metadata: {
           dependencyTaskIds: [input.scribeTaskId],
           channel,
           timeoutMs: 300_000,
@@ -107,7 +108,7 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
           outputArtifactRefs: [],
           adversarialFeedback,
           parentTaskId: artificerParentTaskId,
-        }),
+        },
       });
     } catch (createErr) {
       return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
@@ -116,7 +117,7 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
 
     let artificerResult;
     try {
-      artificerResult = await input.artificerRunner.run(artificerTaskId);
+      artificerResult = await input.artificerRunner.run(resolvedArtificerTaskId);
     } catch (runErr) {
       return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
         `artificer_run_threw: ${runErr instanceof Error ? runErr.message : String(runErr)}`);
@@ -135,9 +136,10 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
     // PDRuntimeError and artificerResult.status !== 'succeeded' is caught above.
     // There is no V1 plan-only degradation path.
     const evaluatorTaskId = `${correlation}-evaluator-r${round}-${Date.now().toString(36)}`;
-    lastEvaluatorTaskId = evaluatorTaskId;
+    let resolvedEvaluatorTaskId: string;
     try {
-      await createEvaluatorTask(input.stateManager, evaluatorTaskId, artificerTaskId, channel);
+      resolvedEvaluatorTaskId = await createEvaluatorTask(input.stateManager, evaluatorTaskId, resolvedArtificerTaskId, channel);
+      lastEvaluatorTaskId = resolvedEvaluatorTaskId;
     } catch (createErr) {
       return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
         `evaluator_task_create_failed: ${createErr instanceof Error ? createErr.message : String(createErr)}`);
@@ -145,20 +147,20 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
 
     let evaluatorResult;
     try {
-      evaluatorResult = await input.evaluatorRunner.run(evaluatorTaskId);
+      evaluatorResult = await input.evaluatorRunner.run(resolvedEvaluatorTaskId);
     } catch (runErr) {
-      return rejected(round, evaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+      return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
         `evaluator_run_threw: ${runErr instanceof Error ? runErr.message : String(runErr)}`);
     }
 
     if (evaluatorResult.status !== 'succeeded' || !evaluatorResult.output) {
-      return rejected(round, evaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+      return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
         `evaluator_run_status_${evaluatorResult.status ?? 'unknown'}`);
     }
 
     const evaluatorOutput = evaluatorResult.output;
     const reviewDecision = evaluatorOutput.evaluation.decision;
-    lastPrincipleArtifactId = evaluatorResult.artifactId ?? await resolvePrincipleArtifactId(input, evaluatorTaskId);
+    lastPrincipleArtifactId = evaluatorResult.artifactId ?? await resolvePrincipleArtifactId(input, resolvedEvaluatorTaskId);
     if (isEvaluatorOutputV2(evaluatorOutput) && evaluatorOutput.adversarialResult) {
       lastAdversarialResult = evaluatorOutput.adversarialResult;
     }
@@ -180,15 +182,15 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
     if (decision === 'approved') {
       // Rule artifact written by EvaluatorRunner.succeedTask (PRI-427) when
       // adversarialResult.passed === true. Resolve it from the store.
-      const ruleArtifactId = await resolveRuleArtifactId(input, evaluatorTaskId);
+      const ruleArtifactId = await resolveRuleArtifactId(input, resolvedEvaluatorTaskId);
       if (!ruleArtifactId) {
-        return rejected(round, evaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+        return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
           'evaluator_approved_without_rule_artifact');
       }
       return {
         decision: 'approved',
         rounds: round,
-        finalEvaluatorTaskId: evaluatorTaskId,
+        finalEvaluatorTaskId: resolvedEvaluatorTaskId,
         ruleArtifactId,
         principleArtifactId: lastPrincipleArtifactId,
         adversarialResult: lastAdversarialResult,
@@ -199,7 +201,7 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
       return {
         decision: 'rejected',
         rounds: round,
-        finalEvaluatorTaskId: evaluatorTaskId,
+        finalEvaluatorTaskId: resolvedEvaluatorTaskId,
         ruleArtifactId: null,
         principleArtifactId: lastPrincipleArtifactId,
         adversarialResult: lastAdversarialResult,
@@ -230,20 +232,42 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+async function createLoopSuccessorTask(
+  stateManager: RuntimeStateManager,
+  input: {
+    readonly preferredTaskId: string;
+    readonly taskKind: 'artificer' | 'evaluator';
+    readonly parentTaskId: string;
+    readonly channel: 'prompt' | 'code_tool_hook' | 'defer_archive';
+    readonly metadata: Parameters<typeof createPITaskDiagnosticJson>[0];
+  },
+): Promise<string> {
+  const creation = await createLogicalSuccessorTask({
+    stateManager,
+    parentTaskId: input.parentTaskId,
+    successorKind: input.taskKind,
+    channel: input.channel,
+    preferredTaskId: input.preferredTaskId,
+    metadata: input.metadata,
+  });
+  if (creation.outcome === 'created' || creation.outcome === 'existing') return creation.task.taskId;
+  if (creation.outcome === 'lookup') throw new Error(creation.lookup.decision + ':' + creation.lookup.detail);
+  throw new Error('successor_id_conflict:' + creation.allocation.detail);
+}
+
 // eslint-disable-next-line @typescript-eslint/max-params
 async function createEvaluatorTask(
   stateManager: RuntimeStateManager,
   evaluatorTaskId: string,
   artificerTaskId: string,
   channel: 'prompt' | 'code_tool_hook' | 'defer_archive',
-): Promise<void> {
-  await stateManager.createTask({
-    taskId: evaluatorTaskId,
+): Promise<string> {
+  return createLoopSuccessorTask(stateManager, {
+    preferredTaskId: evaluatorTaskId,
     taskKind: 'evaluator',
-    status: 'pending',
-    attemptCount: 0,
-    maxAttempts: 3,
-    diagnosticJson: createPITaskDiagnosticJson({
+    parentTaskId: artificerTaskId,
+    channel,
+    metadata: {
       dependencyTaskIds: [artificerTaskId],
       channel,
       timeoutMs: 300_000,
@@ -253,7 +277,7 @@ async function createEvaluatorTask(
       // artificer — without it the parentTaskId chain breaks here and repair
       // seeding is refused for legitimate synchronous evaluations.
       parentTaskId: artificerTaskId,
-    }),
+    },
   });
 }
 
