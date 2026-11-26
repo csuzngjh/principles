@@ -1,6 +1,6 @@
 # SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案
 
-- **版本**：v0.13
+- **版本**：v0.14
 - **日期**：2026-11-28
 - **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，v0.11/v0.12/v0.13 为事实勘误与新一轮评审增补，仍待 Owner 决策与批准）
 - **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.13）](./SPEC-PD-PIPELINE-SPINE-001.md)
@@ -635,6 +635,30 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 | D4（候选准入权威门禁） | seed 闸严格拒绝 + `rawRecommendationKind` 数据源已落地；与本 PR 无交互 | 已实施，无偏差 |
 | D5（deviationAnchor/anchor 双轨） | 读侧回退解析已落地；与本 PR 无交互 | 已实施，无偏差 |
 | D6（内化单步执行收编） | `executeSelectedInternalizationTask` 已收编 run-once 6 分支 switch；本轮将其导出收紧至白名单（R4-10），跨包消费者（pd-cli run-once、codex-adapter worker）回归通过 | 已实施，导出边界本轮收紧 |
+
+### R4-12. Repair 任务身份完整验证（v0.14 新增）
+
+确定性任务 id（artificerRepairTaskId）不证明 diagnosticJson 内 repairPayload 与请求一致。复用/完成路径必须验证：任务为 artificer 且可 hydrate；repairPayload 存在（缺失不得猜测来源）；payload 来源/iteration 与请求一致；payload 派生 id 与 taskId 互证；来源 Evaluator 真实存在且类型正确；repair 的 parentTaskId 指向来源 Evaluator（缺失可回填、冲突拒绝）；correlationId 与来源权威 id 一致（缺失可回填、冲突拒绝）；channel 一致。host-runtime Seeder、pd-cli Seeder 与 orchestrator REOPEN_SOURCE_EVALUATOR 完成路径共享核心 verifyRepairTaskIdentity 单一实现，禁止各自演化。验证失败 = 零业务写入 + 结构化 lineage_refused / concurrent_modification（保留 reason/detail）；任何 Evaluator 修改之前必须完成验证。回填经 updateTaskIfDiagnosticJsonUnchanged 全快照 CAS（含 leaseGeneration），CAS 落败即中止，不得持过期验证继续执行。
+
+### R4-13. Reopen 快照生命周期（v0.14 新增）
+
+reopenTaskForRevision 的血缘解析可能对目标任务自身执行回填 CAS，第一读快照随即失效。四阶段契约：① 读取 + hydrate + 状态/cause 检查 + 权威血缘解析（含必要历史回填）；② 重新读取目标任务并 hydrate，以第二快照为唯一权威（复查 taskKind/status/attempt/lease 全字段/parentTaskId/correlationId/cause 消费历史——同因已消费返回幂等 no-op，状态已变返回明确冲突，被并发 lease 不得强制覆盖）；③ 基于第二快照 mergePITaskMetadata（保留回填的 parentTaskId 与权威 correlationId、完整 consumedRevisionCauseIds，正确清理上一轮 runnerDecision/completionIntent，revisionCount 只递增一次）；④ 以第二快照全字段前提执行单次原子 CAS。CAS 落败后重读分类：同因已消费 = idempotent_replay_same_revision，否则 = concurrent_modification；不得伪装成功、不得清除并发 lease、不得自动无限重试。
+
+### R4-14. 只读 lineage planner（v0.14 新增）
+
+planLegacyLineageResolution 与回填版走完全相同的推理路径（同一 inferLegacyParentTaskId、同一深度/环/孤儿分类），但不写库：推断边收集为 backfillEdges，再以 overlay getTask（虚拟补入计划边）跑 canonical resolver 终验——保证规划判定与回填后判定严格一致。dry-run 只使用 planner（零写入不变量）；confirm 执行既有 CAS 回填；Seeder 复用同一规划及验证规则。规划结果携带 authoritative correlationId/parentEdgeCount/backfillEdges/拒绝原因，调用方不得自行重新推断；CAS 并发冲突必须中止当前操作。
+
+### R4-15. Reconciliation 结果投影（v0.14 新增）
+
+reconciliation outcome 必须完整投影 taskId/decision/reason/detail/reopenedTaskId/successorTaskId/successorKind/conflictingSuccessorTaskIds——Repair 失败后 Owner 可直接从结果定位原本要重开的 Evaluator，证据不得在中间层丢失。
+
+### R4-16. leaseGeneration CAS 前提（v0.14 新增）
+
+leaseOwner/leaseExpiresAt 视觉相同的重租场景只有 leaseGeneration 单调递增可区分。所有 task-row CAS（含 reopenArtificerForSourceCorrection）必须含 expectedLeaseGeneration；generation 漂移即 CAS 落败，按 R4-13 分类处理，不得覆盖新租约。
+
+### R4-17. run-once 穷尽映射（v0.14 新增）
+
+runtime-internalization-run-once 必须对 CommitNextTaskResult 全联合类型逐一 narrowing 并以 never 赋值做编译期穷尽检查；新增 decision 未映射即编译错误。禁止运行时 fallback 吞没，禁止将 lineage_refused/concurrent_modification/revision_reopen_failed 折叠为 successor_exists，禁止宽泛类型断言绕过穷尽检查。
 
 ### 仍需 Owner 决策的事项
 
