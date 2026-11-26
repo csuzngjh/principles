@@ -182,6 +182,8 @@ export interface PITaskRecord extends TaskRecord {
   revisionFeedback?: string;
   /** P0-4 stable revision identity — same-cause reopen replays are no-ops. */
   revisionCauseId?: string;
+  /** PRI-1293 R5: 已消费 revision cause 有界历史 (见 pitask-metadata.ts 字段说明)。 */
+  readonly consumedRevisionCauseIds?: readonly string[];
   ruleBindingRevisionCauseId?: string;
   /**
    * SPEC-PRI-1047: one Owner source-correction epoch per candidate — the

@@ -301,6 +301,9 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
       if (id === 'dreamer-cand-5-prompt') return makeDreamerTask('dreamer-cand-5-prompt', 'cand-5');
       return null;
     });
+    // PRI-1293 R5: 父子扫描是唯一后继权威 (直查快路径已废除) — mock 必须经
+    // listTasks 服务链上行, 扫描才能命中 (parentTaskId/kind/channel 三元匹配)。
+    mockStateManager.listTasks.mockResolvedValue([evaluatorTask, rolloutTask]);
 
     const result = await makeOrchestrator().commitNextTaskProposal('evaluator-cand-5-prompt');
 
@@ -330,6 +333,8 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
       if (id === 'dreamer-cand-6-prompt') return makeDreamerTask('dreamer-cand-6-prompt', 'cand-6');
       return null;
     });
+    // PRI-1293 R5: 同上 — 扫描权威时代 mock 必须经 listTasks 服务链上行。
+    mockStateManager.listTasks.mockResolvedValue([evaluatorTask, rolloutTask]);
     // 真实 store 的 UNIQUE 约束: 同 id 任务已存在 → createTask 抛错
     mockStateManager.createTask.mockImplementation(async (input: { taskId: string; taskKind: string }) => {
       if (input.taskId === 'rollout_reviewer-cand-6-prompt') {

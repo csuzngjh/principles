@@ -625,6 +625,30 @@
       ],
       "whyNotInternal": "The dry-run preview in pd-cli must apply the exact same new-edge depth limit as commitNextTaskProposal; duplicating the numeric constant in pd-cli would silently drift from the authoritative core value and break the dry-run/confirm parity contract.",
       "alternativeConsidered": "Returning the limit only inside the lineage verdict detail string was rejected: parsing a numeric out of a human-facing detail string is fragile, and the constant is a policy value rather than task data."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "planExistingSuccessorTransition",
+      "kind": "value",
+      "addedIn": "PRI-1293",
+      "expiresAt": "2027-11-28",
+      "consumers": [
+        "packages/pd-cli/src/commands/runtime-internalization-enqueue-successors.ts"
+      ],
+      "whyNotInternal": "Round-5 review: the dry-run preview must apply the exact same existing-successor cascade determination as commitNextTaskProposal (exists_plain vs cascade_reopen vs cascade_already_materialized). Re-implementing the determination in pd-cli would silently drift — the round-5 defect was precisely the preview reporting successor_exists where confirm would cascade-reopen a terminal successor. The planner is a pure read-only function; the caller hydrates the successor and supplies the fields.",
+      "alternativeConsidered": "Returning the plan only as part of commitNextTaskProposal execution was rejected: a dry-run preview cannot call commit (it writes). A separate read-only orchestrator query method was rejected as redundant surface — the determination is a pure function of already-hydrated fields, so a free function is the narrower seam."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "deriveSuccessorTaskId",
+      "kind": "value",
+      "addedIn": "PRI-1293",
+      "expiresAt": "2027-11-28",
+      "consumers": [
+        "packages/pd-cli/src/commands/runtime-internalization-enqueue-successors.ts"
+      ],
+      "whyNotInternal": "Round-5 review: the preview derived the deterministic successor id from the raw source taskId instead of the correlation root — an algorithm that never matched what commit creates. The derivation must be a single shared source: commit (orchestrator) and the dry-run preview both consume this pure function. Duplicating it in pd-cli would re-create the exact drift class the round-5 review documented.",
+      "alternativeConsidered": "Embedding the derived id into NextTaskProposal was rejected: the proposal type is constructed at multiple sites (peer graph + diagnostician branch + test fixtures) and a new required field would break all constructors; a pure function of (proposal, sourceTaskId) is the narrower seam."
     }
   ],
   "removals": [

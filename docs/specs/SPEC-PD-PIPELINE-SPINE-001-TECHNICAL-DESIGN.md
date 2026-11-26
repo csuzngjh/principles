@@ -1,12 +1,13 @@
 # SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案
 
-- **版本**：v0.11
+- **版本**：v0.12
 - **日期**：2026-11-28
-- **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，v0.11 为其事实勘误，仍待 Owner 决策与批准）
-- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.11）](./SPEC-PD-PIPELINE-SPINE-001.md)
+- **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，v0.11/v0.12 为事实勘误与新一轮评审增补，仍待 Owner 决策与批准）
+- **上位规范**：[SPEC-PD-PIPELINE-SPINE-001（v0.12）](./SPEC-PD-PIPELINE-SPINE-001.md)
 - **源码事实基线**：`origin/main@679dcc93f`
 - **规范性数据契约**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)、[MVP Core Loop Contract](../architecture/MVP_CORE_LOOP_CONTRACT.md)
 - **标注约定**：文中标注 `〔现有能力〕` 的符号已在当前源码中存在；标注 `〔新增能力〕` 的符号当前不存在，实施前不得以现有能力名义引用；标注 `〔收编删除〕` 的代码块为重复组装，迁移后删除。
+- **v0.12 关键技术修订摘要（第五轮评审：一项事实勘误 + 三项行为规范增补）**：① 事实勘误——R4-1 原称根身份"双缺失 → 拒绝"，与实现不符：当 seed 与 taskId 双源均无法解析时，血缘解析器仍接受**与整条链一致的根自身 `correlationId`** 作为第三佐证来源（correlation-lineage.ts v0.5 设计，链上全部成员声明同一 id 时根身份可证明）；② R4-5 增补——`revisionCauseId` 单槽会被独立因果流（级联/修复/Owner）覆写，幂等判定必须读**有界消费历史** `consumedRevisionCauseIds`（上限 32，FIFO），且 `mergePITaskMetadata` 单一重建点执行写不变量：任何覆写槽的写路径自动折入旧槽值与新值；③ R4-6 改写——父子扫描是**唯一**后继权威（直查快路径废除：命中不校验 parent 会把异链 occupant 误认作本父子后继，导致跨链级联错链）；创建路径为 bounded 收敛循环——主派生 id 被异链占用时改用以父任务派生的 fallback id，UNIQUE 落败先重扫真实后继，两级均被占用则 fail-closed `successor_id_conflict`；④ R4-8 增补——预览必须复用共享只读级联判定 `planExistingSuccessorTransition`，终态后继将被级联重开时报告 `would_reopen_successor` 而非 `successor_exists`。
 - **v0.11 关键技术修订摘要（v0.10 事实勘误，无规范行为变更）**：评审指出 v0.10 回填条文存在若干与代码不一致的字段/类型名，逐项核实后勘误（规范意图不变，仅使事实描述与实施一致）：① R4-1 拒绝 reason 实为 `conflicting_root_identity_sources`（非 `conflicting_root_identity`）；② R4-4 CAS 前提集修正为实际实现——`taskId` 定位 + `diagnosticJson` 逐字节相等 + 六项显式快照前提（`status`/`attemptCount`/`maxAttempts`/`leaseOwner`/`leaseExpiresAt`/`leaseGeneration`，均为快照值而非恒 null），`revisionCount`/`revisionCauseId` 位于 `diagnosticJson` PI 信封内由字节相等覆盖而非独立前提；③ R4-4 幂等重放返回形状实为 `{ ok: true, reason: 'idempotent_replay_same_revision' }`（无 `outcome` 字段）；④ R4-6 状态枚举修正——`running` 不是 `PDTaskStatus`（实际六态：`pending`/`leased`/`succeeded`/`retry_wait`/`failed`/`needs_human_review`），非终态命中含 `failed`；⑤ R4-9 consumer cycle 机制修正——即时路径以 `successorDecision` 遥测透出，reconciliation 计入 `blocked`（不存在"计入 `skipped`"的机制），核心不变量（不计入 already-materialized、保留重试）不变；⑥ R4-10 类型名修正——实际导出为 `SelectedInternalizationTaskRunResult`（不存在 `ExecuteSelectedInternalizationTaskOutcome`），并补全白名单精确枚举。
 - **v0.10 关键技术修订摘要（PR #2803 实施期评审回填，未批准）**：Phase 2B/3 实施与多轮评审暴露出 v0.9 未规定的 10 项运行时规则，已在代码中落地并经生产路径回归验证；本版将其回填为规范条文（见文末「Round 4 implementation amendment」），覆盖：root correlationId 权威身份、parentTaskId 血缘完整性、最大父链深度与新增边检查、reopen 全快照 CAS、revisionCauseId 幂等、历史终态后继复用、RuleHost/enqueue-successors 统一幂等、dry-run/confirm 行为一致、并发冲突结构化透出与重试、host-runtime 公开 API 边界。**本文档仍为 Draft for Owner Review；其中标注〔待 Owner 决策〕的条目未经 Owner 批准不得视为定案。**
 - **v0.9 关键技术修订摘要**：
@@ -525,7 +526,8 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 
 - 双源一致（`A+A`）→ 采纳为权威 root correlationId；
 - 双源冲突（`A+B`）→ **fail-closed 拒绝**（`conflicting_root_identity_sources`），不得用 `??` 链偏向任一来源——自我佐证的冲突根不得传播到后代链；
-- 单边存在 → 采纳单边；双缺失 → 拒绝；
+- 单边存在 → 采纳单边；
+- 双源均缺失时的**第三佐证来源**（v0.12 勘误——原表述"双缺失 → 拒绝"与实现不符）：若根自身携带 `correlationId` 且该值**与整条链的链声明一致**（链上成员均声明同一 id，或根是唯一声明者），血缘解析器采纳根自身 `correlationId` 为权威身份——链一致性本身构成佐证（v0.5 设计：链成员互不矛盾地指向同一根身份时，身份可证明）；仅当该来源也不存在或链声明相互冲突时才拒绝；
 - 后代的链声明 `correlationId` 与根权威身份冲突时拒绝（`conflicting_parent_correlation_id`）；后代缺失 `correlationId` 时以根权威身份**安全补入**（历史链恢复语义），补入本身也走 CAS。
 
 ### R4-2. parentTaskId 血缘完整性规则
@@ -554,21 +556,29 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 
 ### R4-5. revisionCauseId 幂等规则
 
-- cascade reopen 的 causeId 派生自 `(sourceTaskId, sourceRevisionCount, targetTaskId)`：`` cascade-<source>-rc<N>-<target> ``；owner 直接修订的 causeId 由调用方给定。
-- 目标已携带同一 `revisionCauseId` → `revision_reopen_noop`，**不得双重递增** `revisionCount`（防双重应用保护独立于并发时序，先决于 CAS）。
+- cascade reopen 的 causeId 派生自 `(sourceTaskId, sourceRevisionCount, targetTaskId)`：`` cascade-<source>-rc<N>-<target> ``（单一构造点 `buildCascadeRevisionCauseId`）；owner 直接修订的 causeId 由调用方给定。
+- **幂等判定必须读消费历史而非单槽**（v0.12 增补）：`revisionCauseId` 是单槽字段，会被**独立因果流**覆写——级联 wave、repair 完成、Owner revise、source-correction 都写同一槽。覆写后旧 cause 的单槽相等判定失效，已传播的级联在修复完成后重扫时曾再次 reopen 目标，把依赖与 verdict 回滚到修复前（第五轮评审证实缺陷）。因此：
+  - PI 元数据携带 `consumedRevisionCauseIds` **有界追加历史**（上限 `CONSUMED_REVISION_CAUSE_IDS_CAP = 32`，最新在尾，FIFO 逐出——32 个独立修订 cause 已远超任何修订预算现实）；
+  - 全部 cause 幂等判定必须经 `hasConsumedRevisionCause`（单槽 ∪ 历史的成员判定），禁止直读单槽；
+  - **写不变量驻留 `mergePITaskMetadata` 单一重建点**：任何覆写 `revisionCauseId` 槽的写路径（reopenTaskForRevision、source-correction 续接、rule-binding、approved-rule-revision 等全部经该函数）自动把旧槽值与新值折入历史；不触碰槽的写（如 verdict 记录）不改写历史；
+  - `rule-binding` 预算耗尽判定同样覆盖历史（`rule-binding:` 前缀成员判定）。
+- 目标已消费同一 cause → `revision_reopen_noop`，**不得双重递增** `revisionCount`（防双重应用保护独立于并发时序，先决于 CAS）。
 - 源自身 reopen 的 causeId 幂等同样适用于 revision-refresh 路径。
 
 ### R4-6. 历史终态后继复用规则
 
-- `commitNextTaskProposal` 的后继识别顺序：
-  1. 确定性派生 id 直查（命中任何状态 → 按该状态的既有语义处理）；
-  2. 直查未命中时，按 `(parentTaskId, successorKind, channel)` 扫描全状态空间：
+- **父子扫描是唯一后继权威**（v0.12 改写——直查快路径废除）：确定性派生 id 直查曾在命中时跳过扫描且不校验 occupant 的 `parentTaskId`；候选身份经修订回填进另一条链（如 RuleHost 时间戳链）后其派生 id 与队列链相同，直查命中异链任务导致级联重开错链后继并替换其依赖（第五轮评审证实缺陷）。因此后继识别**只允许**按 `(parentTaskId, successorKind, channel)` 扫描全状态空间（`taskKind` 过滤下推 SQL `task_kind = ?`；`parentTaskId` 下推与复合索引属 PRI-1299 统一 Successor Lookup 范围）：
      - 命中非终态后继（`pending`/`leased`/`retry_wait`/`failed`——`PDTaskStatus` 共六态，无 `running` 状态）→ `successor_exists`（保留原任务 id，不重建、不抢占）；
      - 命中 `succeeded/needs_human_review` 终态后继：
        - `revisionCount = 0` → `successor_exists`（终态即完结，不重开）；
        - `revisionCount > 0` → 级联 reopen（R4-5 幂等 + R4-4 CAS + R4-1 血缘校验），原任务 id 与既有历史全部保留；
      - 未命中任何后继 → 进入新创建分支（R4-3 新增边检查适用）。
-- 扫描复用与 dry-run 同一套查询能力，**禁止**两条路径各自实现不同的查找逻辑。
+- 创建路径是 **bounded 收敛循环**（至多 2 次，v0.12 增补）：
+  1. 首次以主派生 id 创建；UNIQUE 落败先**重扫**真实后继——并发创建者已物化的按 `successor_exists` 收敛，绝不重复创建；
+  2. 重扫为空 = occupant 属异链，第二次改用**父派生 fallback id**（`<主派生id>-p-<parentTaskId>`）。fallback id 对同一 `(parent, kind, channel)` 确定性收敛：并发创建者碰壁后落到同一 fallback id，胜负由 UNIQUE 裁决，败者重扫收敛——不会双链并行；
+  3. 两级 id 均被异链占用且重扫仍空 → fail-closed 结构化 `successor_id_conflict` decision（**不得**折叠为 `successor_exists` 伪装幂等）；消费方（run-once / enqueue-successors）显式映射为带排查指引的结果；
+  4. 已知限制（如实记录）：无 `parentTaskId` 元数据的历史行对扫描不可见，可能被 fallback 路径复制一份逻辑后继——生产创建路径自始写入 parentTaskId，该边缘仅限损坏/手写数据，多后继完整性冲突检测归 PRI-1299。
+- 扫描复用与 dry-run 同一套查询能力，**禁止**两条路径各自实现不同的查找逻辑（dry-run 索引扫描同样废除了 id 直查快路径）。
 - 不得因任务 id 形态不同（确定性 id vs RuleHost 时间戳 id）创建第二条逻辑相同的任务链。
 
 ### R4-7. RuleHost 与 enqueue-successors 统一幂等规则〔待 Owner 决策：时间戳 id 是否收敛为确定性 id 的远期方向〕
@@ -583,6 +593,7 @@ Phase 2B/3（`PRI-1293`，PR #2803）实施与评审发现 v0.9 未规定的以�
 - 深度裁决按源任务的只读血缘结果预先计算，**仅在预览将要创建新后继时**应用（与 commit 的触发点逐点对应）；命中既有后继的预览不检查新增边。
 - 一致性矩阵（均有生产路径回归）：9→10 两侧放行 / 10→11 两侧拒绝且 reason 逐字节一致 / 10 边已有后继两侧 `successor_exists` / 血缘无效两侧拒绝。
 - dry-run 保持零写入（`cli-4`）；拒绝不增加 `createdCount`。
+- **级联判定一致性**（v0.12 增补）：预览必须复用共享只读判定 `planExistingSuccessorTransition`（core 导出，commit 路径同一函数）——终态后继 + 源 `revisionCount > 0` + 本 wave cause 未消费时，confirm 将级联 reopen 该后继（清除旧 verdict、重置 status/attemptCount），预览必须报告 `would_reopen_successor`（计入写入桶）而非 `successor_exists`；`cascade_already_materialized`（cause 已消费——含消费历史成员判定）与 `exists_plain` 两侧均无写动作，统一报告 `successor_exists`。预览的确定性 id 派生算法不再是匹配输入（扫描权威化后 id 不参与识别），预览不承诺具体创建 id（主/fallback 由创建时占用情况决定，两侧结果一致）。
 
 ### R4-9. 并发冲突的结构化错误与重试语义
 

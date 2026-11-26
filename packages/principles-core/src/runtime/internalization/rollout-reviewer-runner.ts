@@ -13,7 +13,7 @@ import { leaseFenceOf, type LeaseFence } from '../store/lifecycle/lease-fence.js
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type PITaskMetadata, type RolloutRevisionPayload, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, hasConsumedRevisionCause, type PITaskMetadata, type RolloutRevisionPayload, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
 import {
   planOwnerVerdictOverrideResume,
   markOwnerResolutionApplied,
@@ -1035,7 +1035,7 @@ export class RolloutReviewerRunner {
       // (crash before rollout succeeded 的重放) — 不得再次 reopen
       const targetTask = await this.stateManager.getTask(target.taskId);
       const targetPi = targetTask ? hydratePITaskRecord(targetTask) : null;
-      if (targetPi && targetPi.revisionCauseId === causeId) {
+      if (targetPi && hasConsumedRevisionCause(targetPi, causeId)) {
         this.emitRolloutReviewerEvent('rollout_revision_already_materialized', ctx.taskId, {
           targetTaskId: target.taskId,
           revisionIteration: iteration,

@@ -8,6 +8,7 @@ import {
   CORRELATION_LINEAGE_MAX_PARENT_EDGES,
 } from '@principles/core/runtime';
 import type { CommitNextTaskResult, PDTaskStatus } from '@principles/core/runtime';
+import { planExistingSuccessorTransition, deriveSuccessorTaskId } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createConsentLedgerSourceMaterialAuthorization } from '@principles/host-runtime/source-material-authorization';
 
@@ -20,6 +21,7 @@ interface EnqueueSuccessorsOptions {
 
 type EnqueueActionDecision =
   | 'would_create_successor'
+  | 'would_reopen_successor'
   | 'successor_created'
   | 'successor_exists'
   | 'no_successor'
@@ -170,6 +172,16 @@ function mapCommitDecisionToAction(
         reason: `concurrent_modification: cascade reopen of ${commitResult.reopenedTaskId} lost the CAS race (${commitResult.detail}); revision wave not propagated — nothing was written`,
         nextAction: 'Re-run enqueue-successors --confirm shortly; reopen is idempotent and the next wave retries honestly',
       };
+    case 'successor_id_conflict':
+      // PRI-1293 R5: 派生 id 与父派生 fallback id 均被异链占用 — fail-closed
+      // 结构化结果, 绝不折叠为 successor_exists (那会把未创建的链伪装成幂等)。
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `successor_id_conflict: ${commitResult.reason}${commitResult.detail !== undefined ? ` (${commitResult.detail})` : ''}; the derived successor id is occupied by a foreign chain and no successor exists for this parent`,
+        nextAction: 'Inspect the occupant tasks (pd runtime internalization list --json); cross-chain id collision requires Owner/manual resolution — nothing was written',
+      };
     case 'source_correction_reopened':
       return {
         taskId: commitResult.sourceTaskId,
@@ -286,6 +298,10 @@ interface SuccessorIndexEntry {
   parentTaskId: string | null;
   channel: string;
   hydrated: boolean;
+  // PRI-1293 R5: 级联判定字段 — 预览复用共享 planner 报告 would_reopen。
+  status: string;
+  revisionCauseId?: string | undefined;
+  consumedRevisionCauseIds?: readonly string[] | undefined;
 }
 
 async function buildSuccessorIndex(
@@ -305,6 +321,9 @@ async function buildSuccessorIndex(
       parentTaskId: piTask?.parentTaskId ?? null,
       channel: piTask?.channel ?? '',
       hydrated: piTask !== null,
+      status: task.status,
+      revisionCauseId: piTask?.revisionCauseId,
+      consumedRevisionCauseIds: piTask?.consumedRevisionCauseIds,
     });
   }
   return index;
@@ -312,15 +331,14 @@ async function buildSuccessorIndex(
 
 function findSuccessorInIndex(
   index: Map<string, SuccessorIndexEntry>,
-  opts: { parentTaskId: string; successorKind: string; channel: string; deterministicTaskId: string },
-): { taskId: string; hydrated: boolean } | null {
-  const byTaskId = index.get(opts.deterministicTaskId);
-  if (byTaskId) {
-    return { taskId: byTaskId.taskId, hydrated: byTaskId.hydrated };
-  }
+  opts: { parentTaskId: string; successorKind: string; channel: string },
+): SuccessorIndexEntry | null {
+  // PRI-1293 R5: 直查快路径废除 — 确定性 id 命中不校验 parent/kind/channel
+  // 时会把异链 occupant 误认作本父子后继 (与 orchestrator 跨链碰撞同源)。
+  // 父子扫描是唯一权威, 与 commit 的 findSuccessorByParent 判定条件一致。
   for (const entry of index.values()) {
     if (entry.taskKind === opts.successorKind && entry.parentTaskId === opts.parentTaskId && entry.channel === opts.channel) {
-      return { taskId: entry.taskId, hydrated: entry.hydrated };
+      return entry;
     }
   }
   return null;
@@ -503,7 +521,6 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             reason: 'No valid successor in job graph for this task kind and channel',
           });
         } else {
-          const deterministicTaskId = `${proposalResult.proposal.taskKind}-${task.taskId}-${proposalResult.proposal.channel}`;
           if (!successorIndex) {
             actions.push({
               taskId: task.taskId,
@@ -521,7 +538,6 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
               parentTaskId: task.taskId,
               successorKind: proposalResult.proposal.taskKind,
               channel: proposalResult.proposal.channel,
-              deterministicTaskId,
             },
           );
           if (existingSuccessor) {
@@ -535,15 +551,56 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
               });
               skippedCount++;
             } else {
-              actions.push({
-                taskId: task.taskId,
-                taskKind: piTask.taskKind,
-                decision: 'successor_exists',
-                successorKind: proposalResult.proposal.taskKind,
+              // PRI-1293 R5: 预览复用共享只读级联判定 — 终态后继 + 源 rc>0 +
+              // cause 未消费时 confirm 将 reopen 该后继 (清除旧 verdict, 重置
+              // status/attemptCount), 预览必须显式报告 would_reopen, 不得
+              // 误报 successor_exists (操作员视角的破坏性意外)。
+              const transitionPlan = planExistingSuccessorTransition({
+                sourceTaskId: task.taskId,
+                sourceRevisionCount: piTask.revisionCount ?? 0,
                 successorTaskId: existingSuccessor.taskId,
+                successorStatus: existingSuccessor.status,
+                successorRevisionCauseId: existingSuccessor.revisionCauseId,
+                successorConsumedRevisionCauseIds: existingSuccessor.consumedRevisionCauseIds,
               });
-              existingCount++;
+              if (transitionPlan.plan === 'cascade_reopen') {
+                actions.push({
+                  taskId: task.taskId,
+                  taskKind: piTask.taskKind,
+                  decision: 'would_reopen_successor',
+                  successorKind: proposalResult.proposal.taskKind,
+                  successorTaskId: existingSuccessor.taskId,
+                });
+                // reopen 是写动作 (与 confirm 的 successor_reopened 同级) —
+                // 计入创建/写入桶而非"已物化无需动作"桶。
+                createdCount++;
+              } else {
+                // exists_plain: 非终态或 rc=0 — confirm 报告 successor_exists;
+                // cascade_already_materialized: confirm 幂等 no-op 零写入 —
+                // 两者对操作员都意味着"无新写动作", 统一 successor_exists。
+                actions.push({
+                  taskId: task.taskId,
+                  taskKind: piTask.taskKind,
+                  decision: 'successor_exists',
+                  successorKind: proposalResult.proposal.taskKind,
+                  successorTaskId: existingSuccessor.taskId,
+                });
+                existingCount++;
+              }
             }
+          } else if (successorIndex.get(deriveSuccessorTaskId(proposalResult.proposal, task.taskId))?.hydrated === false) {
+            // PRI-1293 R5: 不可解析 occupant 占用确定性派生 id — 扫描按设计
+            // 不命中它 (parent/kind/channel 不可读), 但确认路径会 fail-closed
+            // (occupant_metadata_unparseable), 预览必须一致报告而非
+            // would_create。派生经共享单一来源 deriveSuccessorTaskId。
+            actions.push({
+              taskId: task.taskId,
+              taskKind: piTask.taskKind,
+              decision: 'skipped',
+              reason: 'successor_exists_with_malformed_metadata: taskId=' + deriveSuccessorTaskId(proposalResult.proposal, task.taskId) + ' has unparseable diagnosticJson',
+              nextAction: 'Run integrity-repair on the successor task, then re-run enqueue-successors',
+            });
+            skippedCount++;
           } else if (peerLineageParentEdgeCount !== null
             && peerLineageParentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
             // PRI-1293 R3: dry-run 与 confirm 共用同一新增边深度判定 — commit

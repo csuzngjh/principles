@@ -81,14 +81,17 @@ async function succeedFenced(taskId: string): Promise<void> {
 }
 
 // PRI-1293 Phase 3: 血缘可证明种子根 — commit 血缘门禁要求 orphan/rollout
-// 可回溯根 dreamer。根为 pending（不进 reconciliation 扫描, resolver 不读状态）,
-// 顶层 candidateId 与链 correlationId 同值作根侧佐证。
+// 可回溯根 dreamer。resolver 不读状态, 根态可自由选。
+// PRI-1293 R5 (F6): 根必须为**终态** — 此前 pending 根使 readyTaskCount 永不
+// 为 0, A2-idle 的"空队列早退后 reconciliation 仍执行"路径从未被真实覆盖
+// (早退回归也会绿灯)。needs_human_review 是三重安全的终态: 不进 ready 队列、
+// 不进 reconciliation 扫描 (仅扫 succeeded)、不触发失败恢复; 根侧佐证不变。
 async function seedProvableRoot(correlationId: string): Promise<string> {
   const dreamerId = `dreamer-${correlationId}-src`;
   const existing = await stateManager.getTask(dreamerId);
   if (!existing) {
     await stateManager.createTask({
-      taskId: dreamerId, taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      taskId: dreamerId, taskKind: 'dreamer', status: 'needs_human_review', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: JSON.stringify({
         pi_metadata: { dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
         candidateId: correlationId,

@@ -668,7 +668,9 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
   it('dry-run existing successor with malformed metadata: skipped, not would_create_successor', async () => {
     const dreamerTask = makeSucceededTask('dreamer-malformed-succ', 'dreamer');
     const malformedSuccessor = {
-      taskId: 'philosopher-dreamer-malformed-succ-prompt',
+      // PRI-1293 R5: 生产损坏行的 id 来自 commit 的正确派生 (correlation 根),
+      // 而非预览旧错误算法的源 taskId 派生 — 夹具按真实形态修正。
+      taskId: 'philosopher-corr-malformed-prompt',
       taskKind: 'philosopher',
       status: 'pending' as const,
       attemptCount: 0,

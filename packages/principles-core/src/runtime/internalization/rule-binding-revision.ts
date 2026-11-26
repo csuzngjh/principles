@@ -1,7 +1,7 @@
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { CandidateIdentityPort } from './candidate-identity.js';
 import { candidateIdFromDreamerSeed } from '../activation/ledger-identity.js';
-import { hydratePITaskRecord, mergePITaskMetadata, createPITaskDiagnosticJson } from './pitask-metadata.js';
+import { hydratePITaskRecord, mergePITaskMetadata, createPITaskDiagnosticJson, hasConsumedRevisionCause } from './pitask-metadata.js';
 
 type Refused = { status: 'refused'; reason: string; nextAction: string };
 const refuse = (reason: string): Refused => ({ status: 'refused', reason, nextAction: 'Inspect the candidate chain and its revision budget in Console.' });
@@ -51,7 +51,7 @@ export async function reviseRuleBindingOnce(args: {
   if (!task || !pi) return refuse('scribe_missing');
   const cause = `rule-binding:${args.candidateId}:${args.expectedBindingRevision}`;
   // Same-cause crash recovery precedes status/epoch checks, for every state.
-  if (pi.ruleBindingRevisionCauseId === cause || pi.revisionCauseId === cause) return { status: 'revision_already_started', scribeTaskId: task.taskId, taskRevisionEpoch: pi.revisionCount ?? 0 };
+  if (pi.ruleBindingRevisionCauseId === cause || hasConsumedRevisionCause(pi, cause)) return { status: 'revision_already_started', scribeTaskId: task.taskId, taskRevisionEpoch: pi.revisionCount ?? 0 };
   if (args.expectedTaskRevisionEpoch !== undefined && target.taskRevisionEpoch !== args.expectedTaskRevisionEpoch) return refuse('task_revision_stale');
   if (task.status !== 'succeeded' && task.status !== 'needs_human_review') return refuse(`task_in_flight_${task.status}`);
   // A lease blocks the reopen only while it is still live: a crashed worker's
@@ -61,7 +61,7 @@ export async function reviseRuleBindingOnce(args: {
     : false;
   if (leaseLive) return refuse('task_lease_present');
   // This repair cannot acquire a fresh budget through another binding revision.
-  if (pi.ruleBindingRevisionCauseId || pi.revisionCauseId?.startsWith('rule-binding:')) return refuse('revision_budget_exhausted');
+  if (pi.ruleBindingRevisionCauseId || pi.revisionCauseId?.startsWith('rule-binding:') || pi.consumedRevisionCauseIds?.some((c) => c.startsWith('rule-binding:'))) return refuse('revision_budget_exhausted');
   const metadata = mergePITaskMetadata(pi, {
     runnerDecision: undefined,
     completionIntent: undefined,

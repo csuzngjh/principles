@@ -18,6 +18,7 @@ import {
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
   mergePITaskMetadata,
+  hasConsumedRevisionCause,
   type PITaskMetadata,
 } from './pitask-metadata.js';
 
@@ -35,6 +36,55 @@ export function buildRepairRevisionCauseId(task: PITaskRecord): string {
   return rc === 0
     ? `repair-${task.taskId}`
     : `repair-${task.taskId}-rc${rc}`;
+}
+
+/**
+ * PRI-1293 R5: 级联 wave 的因果标识——单一构造点。
+ * 此前格式内联在 orchestrator 级联块, 预览/消费方无法复用同一推导。
+ */
+export function buildCascadeRevisionCauseId(sourceTaskId: string, sourceRevisionCount: number, cascadeTargetTaskId: string): string {
+  return `cascade-${sourceTaskId}-rc${sourceRevisionCount}-${cascadeTargetTaskId}`;
+}
+
+/**
+ * PRI-1293 R5 (预览漏报重开): 已存在后继的迁移判定——**唯一只读计划入口**。
+ * commit 路径 (internalization-orchestrator) 与 dry-run 预览
+ * (pd-cli enqueue-successors) 必须经本函数获得同一判定:
+ *   - exists_plain:               非终态后继, 或源未经历 revision (rc=0)
+ *                                 — confirm 只报告 successor_exists, 零写入;
+ *   - cascade_reopen:             终态后继 + 源 rc>0 + 本 wave cause 未消费
+ *                                 — confirm 将 reopen 该后继 (清除旧 verdict,
+ *                                 重置 status/attemptCount), 预览必须显式
+ *                                 报告 would_reopen 而非 successor_exists;
+ *   - cascade_already_materialized: 本 wave cause 已消费 (含历史折入后的
+ *                                 成员判定) — confirm 幂等 no-op, 零写入。
+ * 纯函数不读不写 store; 调用方负责 hydrate 后继并提供字段。
+ */
+export type ExistingSuccessorTransitionPlan =
+  | { readonly plan: 'exists_plain' }
+  | { readonly plan: 'cascade_reopen'; readonly cascadeCauseId: string }
+  | { readonly plan: 'cascade_already_materialized'; readonly cascadeCauseId: string };
+
+export function planExistingSuccessorTransition(input: {
+  readonly sourceTaskId: string;
+  readonly sourceRevisionCount: number;
+  readonly successorTaskId: string;
+  readonly successorStatus: string;
+  readonly successorRevisionCauseId?: string | undefined;
+  readonly successorConsumedRevisionCauseIds?: readonly string[] | undefined;
+}): ExistingSuccessorTransitionPlan {
+  const terminal = input.successorStatus === 'succeeded' || input.successorStatus === 'needs_human_review';
+  if (!terminal || input.sourceRevisionCount <= 0) {
+    return { plan: 'exists_plain' };
+  }
+  const cascadeCauseId = buildCascadeRevisionCauseId(input.sourceTaskId, input.sourceRevisionCount, input.successorTaskId);
+  if (hasConsumedRevisionCause(
+    { revisionCauseId: input.successorRevisionCauseId, consumedRevisionCauseIds: input.successorConsumedRevisionCauseIds },
+    cascadeCauseId,
+  )) {
+    return { plan: 'cascade_already_materialized', cascadeCauseId };
+  }
+  return { plan: 'cascade_reopen', cascadeCauseId };
 }
 
 export interface ReopenRevisionOptions {
@@ -75,7 +125,9 @@ export async function reopenTaskForRevision(
   // 是两次写,两写之间 crash 会留下 "terminal 状态 + 已写 causeId" 的残留,
   // 重放会再递增 revisionCount (破坏一次点击 = 一个 revision epoch)。
   // 单行原子写 + 全状态同因 no-op 双保险。
-  if (options?.revisionCauseId && piTask.revisionCauseId === options.revisionCauseId) {
+  // PRI-1293 R5: 幂等判定读消费历史而非单槽——单槽会被独立因果流
+  // (cascade/repair/owner) 覆盖, 覆盖后旧 cause 的保护失效。
+  if (options?.revisionCauseId && hasConsumedRevisionCause(piTask, options.revisionCauseId)) {
     return { ok: true, reason: 'idempotent_replay_same_revision' };
   }
   if (rawTask.status === 'pending' || rawTask.status === 'retry_wait') {
@@ -113,6 +165,8 @@ export async function reopenTaskForRevision(
     revisionCount: (piTask.revisionCount ?? 0) + 1,
     revisionFeedback: options?.revisionFeedback ?? piTask.revisionFeedback,
     revisionCauseId: options?.revisionCauseId,
+    // PRI-1293 R5: 消费历史折入由 mergePITaskMetadata 的写不变量自动执行
+    // (覆盖 revisionCauseId 槽时旧槽值+新值一并并入, 全写路径统一)。
     ...(authoritativeCorrelationId !== undefined ? { correlationId: authoritativeCorrelationId } : {}),
   });
 
@@ -164,7 +218,7 @@ export async function reopenTaskForRevision(
     if (options?.revisionCauseId !== undefined) {
       const reread = await stateManager.getTask(taskId);
       const rereadPi = reread ? hydratePITaskRecord(reread) : null;
-      if (rereadPi && rereadPi.revisionCauseId === options.revisionCauseId) {
+      if (rereadPi && hasConsumedRevisionCause(rereadPi, options.revisionCauseId)) {
         return { ok: true, reason: 'idempotent_replay_same_revision' };
       }
     }

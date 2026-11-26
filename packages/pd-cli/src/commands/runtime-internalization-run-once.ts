@@ -895,6 +895,12 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           // --no-enqueue-next (跳过排队解决不了并发冲突)。
           output.enqueueReason = `concurrent_modification: cascade reopen of ${commitResult.reopenedTaskId} lost the CAS race (${commitResult.detail}); the revision wave has not propagated yet — retry is safe`;
           output.nextAction = `Re-run the successor sweep shortly: pd runtime internalization enqueue-successors --workspace ${workspaceDir} --confirm — reopen is idempotent, the next wave retries honestly.`;
+        } else if (commitResult.decision === 'successor_id_conflict') {
+          // PRI-1293 R5: 跨链 id 占用冲突 — 真实 fail-closed 结果, 不得落入
+          // "Unexpected decision", 也不建议 --no-enqueue-next (跳过排队解决
+          // 不了 id 占用)。
+          output.enqueueReason = `successor_id_conflict: ${commitResult.reason}${commitResult.detail !== undefined ? ` (${commitResult.detail})` : ''}; the derived successor id is occupied by a foreign chain — no successor was created`;
+          output.nextAction = 'Inspect the occupant tasks with pd runtime internalization list --json; cross-chain id collision requires Owner/manual resolution.';
         } else {
           output.enqueueReason = `Unexpected commitNextTaskProposal decision: ${commitResult.decision}`;
           output.nextAction = 'Investigate orchestrator logic; re-run with --no-enqueue-next to skip auto-enqueue.';

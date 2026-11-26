@@ -102,6 +102,31 @@ export type RejectionFeedbackResult =
 
 // ── Next Task Proposal Types ─────────────────────────────────────────────────
 
+/**
+ * PRI-1293 R5: 后继确定性 taskId 派生——**单一来源**。
+ * commit (orchestrator) 与 dry-run 预览 (pd-cli) 必须经本函数派生,
+ * 禁止各自实现 (预览曾用源 taskId 替代 correlation 根, 派生永不命中)。
+ *
+ * Root = proposal.correlationId (intake 设置的原始 candidateId, 全链稳定);
+ * 回退: correlationId 缺失时用源 taskId 但剥离尾部 `-<channel>` (避免
+ * 通道后缀逐跳累积)。channel 缺失时整体省略通道段 (不出现 "-undefined")。
+ */
+export function deriveSuccessorTaskId(
+  proposal: { readonly taskKind: string; readonly correlationId?: string | undefined; readonly channel?: string | undefined },
+  sourceTaskId: string,
+): string {
+  let root = proposal.correlationId;
+  if (root === undefined || root === '') {
+    const suffix = proposal.channel !== undefined && proposal.channel !== '' ? `-${proposal.channel}` : '';
+    root = suffix !== '' && sourceTaskId.endsWith(suffix)
+      ? sourceTaskId.slice(0, sourceTaskId.length - suffix.length)
+      : sourceTaskId;
+  }
+  return proposal.channel !== undefined && proposal.channel !== ''
+    ? `${proposal.taskKind}-${root}-${proposal.channel}`
+    : `${proposal.taskKind}-${root}`;
+}
+
 export interface NextTaskProposal {
   taskKind: RunnerKind;
   parentTaskId: string;
