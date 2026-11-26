@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2071,
+  "count": 2075,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -718,6 +718,7 @@
     "LedgerTreeStore",
     "LegacyImportData",
     "LegacyImportDataSchema",
+    "LegacyLineagePlan",
     "LegacyPainSubmission",
     "LegacyRuleContractFinding",
     "LegacyRuleContractRuleSource",
@@ -1163,6 +1164,7 @@
     "RemediationStatus",
     "RemovedOrphanReference",
     "ReopenRevisionOptions",
+    "RepairIdentityVerification",
     "ReplayEvaluateFn",
     "ReplayReport",
     "ReplayResult",
@@ -1933,6 +1935,7 @@
     "piTaskBelongsToCandidates",
     "pickDiagnosticianCandidate",
     "planExistingSuccessorTransition",
+    "planLegacyLineageResolution",
     "planOwnerVerdictOverrideResume",
     "preflightArtificerIntentBasis",
     "preflightArtificerOwnerEvidence",
@@ -2072,6 +2075,7 @@
     "validateToolSemanticMappings",
     "verifyPiArtifactRowDigest",
     "verifyRecoveryProbeComposition",
+    "verifyRepairTaskIdentity",
     "writeOwnerIdentityFile"
   ]
 }
