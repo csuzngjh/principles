@@ -6,6 +6,7 @@ const mockGetTask = vi.hoisted(() => vi.fn());
 const mockCommitNextTaskProposal = vi.hoisted(() => vi.fn());
 const mockProposeNextTask = vi.hoisted(() => vi.fn());
 const mockResolveLineage = vi.hoisted(() => vi.fn());
+const mockLookupSuccessorByParent = vi.hoisted(() => vi.fn());
 const mockClose = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockInitialize = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockRuntimeStateManagerOpts = vi.hoisted(() => vi.fn());
@@ -45,6 +46,7 @@ vi.mock('@principles/core/runtime', async (importOriginal) => ({
   // 静态同一判定语义, 单测复用同一 mock  verdict 源 (返回形状兼容:
   // ok/correlationId/parentEdgeCount/reason/detail)。
   planLegacyLineageResolution: mockResolveLineage,
+  lookupSuccessorByParent: mockLookupSuccessorByParent,
   isPeerRunnerKind: vi.fn().mockImplementation((k: string) =>
     ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'].includes(k),
   ),
@@ -78,14 +80,34 @@ import { handleRuntimeInternalizationEnqueueSuccessors } from '../../src/command
 const WS = '/fake/workspace';
 
 function mockDryRunListTasks(succeededTasks: ReturnType<typeof makeSucceededTask>[], successorTasks: ReturnType<typeof makeSucceededTask>[] = []) {
-  mockListTasks
-    .mockResolvedValueOnce(succeededTasks)
-    .mockResolvedValueOnce(successorTasks)
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([]);
+  mockListTasks.mockResolvedValueOnce(succeededTasks);
+  // Unit-test double for the core authority seam: the command must consume
+  // lookupSuccessorByParent, while exact parent/kind/channel matching itself is
+  // covered by principles-core integration tests.
+  mockLookupSuccessorByParent.mockImplementation(async (_stateManager: unknown, query: { parentTaskId: string; successorKind: string; channel: string }) => {
+    const matches = successorTasks.filter((task) => {
+      try {
+        const meta = JSON.parse(task.diagnosticJson) as { parentTaskId?: string | null; channel?: string };
+        return task.taskKind === query.successorKind && meta.parentTaskId === query.parentTaskId && meta.channel === query.channel;
+      } catch {
+        return false;
+      }
+    }).sort((a, b) => (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0));
+    if (matches.length === 0) return { outcome: 'none' };
+    if (matches.length === 1) return { outcome: 'unique', successor: matches[0] };
+    const conflictingSuccessorTaskIds = matches.map((task) => task.taskId);
+    return {
+      outcome: 'conflict',
+      decision: 'successor_integrity_conflict',
+      reason: 'multiple_successors_for_parent',
+      detail: 'parentTaskId=' + query.parentTaskId + ';successorKind=' + query.successorKind + ';channel=' + query.channel + ';taskIds=[' + conflictingSuccessorTaskIds.join(',') + ']',
+      parentTaskId: query.parentTaskId,
+      successorKind: query.successorKind,
+      channel: query.channel,
+      conflictingSuccessors: matches,
+      conflictingSuccessorTaskIds,
+    };
+  });
 }
 
 function makePIMetadata(overrides: Record<string, unknown> = {}): string {
@@ -164,6 +186,12 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListTasks.mockReset();
+    mockGetTask.mockReset();
+    mockCommitNextTaskProposal.mockReset();
+    mockProposeNextTask.mockReset();
+    mockResolveLineage.mockReset();
+    mockLookupSuccessorByParent.mockReset();
     process.exitCode = 0;
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -171,6 +199,8 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     mockClose.mockResolvedValue(undefined);
     // Default: lineage provable — existing tests exercise the post-gate paths.
     mockResolveLineage.mockResolvedValue({ ok: true, correlationId: 'corr-default' });
+    mockLookupSuccessorByParent.mockResolvedValue({ outcome: 'none' });
+    mockGetTask.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -593,17 +623,22 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
   });
 
 
-  it('successor index build failure: fails closed with structured error', async () => {
-    const dreamerTask = makeSucceededTask('dreamer-index-err', 'dreamer');
-    mockListTasks
-      .mockResolvedValueOnce([dreamerTask])
-      .mockRejectedValueOnce(new Error('Database locked during index build'));
+  it('successor lookup failure: fails closed with structured error instead of partial success', async () => {
+    const dreamerTask = makeSucceededTask('dreamer-lookup-err', 'dreamer');
+    mockListTasks.mockResolvedValueOnce([dreamerTask]);
+    mockProposeNextTask.mockResolvedValue({
+      decision: 'proposal_created',
+      taskId: 'dreamer-lookup-err',
+      taskKind: 'dreamer',
+      proposal: { taskKind: 'philosopher', channel: 'prompt', dependencyTaskIds: ['dreamer-lookup-err'], inputArtifactRefs: [], parentTaskId: 'dreamer-lookup-err', correlationId: 'corr-lookup-err' },
+    });
+    mockLookupSuccessorByParent.mockRejectedValue(new Error('Database locked during lookup'));
 
     await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.status).toBe('failed');
-    expect(output.reason).toContain('successor_index_failed');
+    expect(output.reason).toContain('successor_lookup_failed');
     expect(output.nextAction).toBeDefined();
     expect(process.exitCode).toBe(1);
   });
@@ -687,6 +722,7 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
       diagnosticJson: 'not-valid-json{{{',
     };
     mockDryRunListTasks([dreamerTask], [malformedSuccessor]);
+    mockGetTask.mockImplementation(async (taskId: string) => taskId === malformedSuccessor.taskId ? malformedSuccessor : null);
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-malformed-succ',
@@ -704,7 +740,7 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(output.createdCount).toBe(0);
   });
 
-  it('dedupe scan is not N×full-table per source task (buildSuccessorIndex called once)', async () => {
+  it('dry-run delegates every source to the single core successor lookup authority', async () => {
     const dreamer1 = makeSucceededTask('dreamer-dedup-1', 'dreamer');
     const dreamer2 = makeSucceededTask('dreamer-dedup-2', 'dreamer');
     mockDryRunListTasks([dreamer1, dreamer2]);
@@ -724,10 +760,10 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
 
     await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
 
-    expect(mockListTasks.mock.calls.length).toBe(7);
-    const allCalls = mockListTasks.mock.calls.map(c => c[0]?.status);
-    const succeededCalls = allCalls.filter(s => s === 'succeeded').length;
-    expect(succeededCalls).toBe(2);
+    expect(mockListTasks.mock.calls.length).toBe(1);
+    expect(mockLookupSuccessorByParent).toHaveBeenCalledTimes(2);
+    expect(mockLookupSuccessorByParent.mock.calls[0][1]).toMatchObject({ parentTaskId: 'dreamer-dedup-1', successorKind: 'philosopher', channel: 'prompt' });
+    expect(mockLookupSuccessorByParent.mock.calls[1][1]).toMatchObject({ parentTaskId: 'dreamer-dedup-2', successorKind: 'philosopher', channel: 'prompt' });
   });
 
   it('diagnosticJson non-string returns null, no throw', async () => {

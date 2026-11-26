@@ -275,6 +275,107 @@ describe('F2 — 级联+修复交错: 消费历史使旧级联重扫幂等, 修�
   });
 });
 
+
+describe('PRI-1299 creation-id conflict regressions', () => {
+  it('foreign occupants of both derived and fallback ids produce successor_id_conflict, never successor_exists or a third row', async () => {
+    const chain = await seedFullChain('foreign-occupants', { timestamped: false });
+    const primaryId = 'evaluator-' + CAND_X + '-prompt';
+    const fallbackId = primaryId + '-p-' + chain.artificer;
+    await mkTask(primaryId, 'evaluator', 'pending', {
+      parentTaskId: 'foreign-parent-a',
+      correlationId: 'foreign-corr',
+      dependencyTaskIds: ['foreign-parent-a'],
+    });
+    await mkTask(fallbackId, 'evaluator', 'pending', {
+      parentTaskId: 'foreign-parent-b',
+      correlationId: 'foreign-corr',
+      dependencyTaskIds: ['foreign-parent-b'],
+    });
+    const beforeCount = (await stateManager.listTasks({})).length;
+
+    const result = await orchestrator.commitNextTaskProposal(chain.artificer);
+
+    expect(result.decision).toBe('successor_id_conflict');
+    if (result.decision === 'successor_id_conflict') {
+      expect(result.reason).toBe('derived_and_fallback_ids_occupied_by_foreign_chain');
+    }
+    expect((await stateManager.listTasks({})).length).toBe(beforeCount);
+  });
+
+  it('two concurrent creators both scan first, then converge through UNIQUE rescan to exactly one logical successor', async () => {
+    const chain = await seedFullChain('concurrent-create', { timestamped: false });
+    const beforeCount = (await stateManager.listTasks({})).length;
+    const originalListTasks = stateManager.listTasks.bind(stateManager);
+    let releaseBarrier: () => void = () => undefined;
+    const bothScanned = new Promise<void>((resolve) => { releaseBarrier = resolve; });
+    let exactScanCount = 0;
+    stateManager.listTasks = async (filter?: Parameters<RuntimeStateManager['listTasks']>[0]) => {
+      const isTargetExactScan = filter?.piParentTaskId === chain.artificer
+        && filter.taskKind === 'evaluator'
+        && filter.piChannel === 'prompt';
+      if (isTargetExactScan) {
+        exactScanCount++;
+        if (exactScanCount === 1) await bothScanned;
+        if (exactScanCount === 2) releaseBarrier();
+      }
+      return originalListTasks(filter);
+    };
+    const secondOrchestrator = new InternalizationOrchestrator(
+      { stateManager }, { owner: 'r5-itest-second', runtimeKind: 'test-double', dryRun: true },
+    );
+    let first: Awaited<ReturnType<InternalizationOrchestrator['commitNextTaskProposal']>>;
+    let second: Awaited<ReturnType<InternalizationOrchestrator['commitNextTaskProposal']>>;
+    try {
+      [first, second] = await Promise.all([
+        orchestrator.commitNextTaskProposal(chain.artificer),
+        secondOrchestrator.commitNextTaskProposal(chain.artificer),
+      ]);
+    } finally {
+      stateManager.listTasks = originalListTasks;
+    }
+
+    const decisions = [first.decision, second.decision].sort();
+    expect(decisions).toEqual(['successor_created', 'successor_exists']);
+    const created = first.decision === 'successor_created' ? first : second;
+    const exists = first.decision === 'successor_exists' ? first : second;
+    if (created.decision === 'successor_created' && exists.decision === 'successor_exists') {
+      expect(exists.successorTaskId).toBe(created.successorTaskId);
+    }
+    const logicalSuccessors = await stateManager.listTasks({
+      taskKind: 'evaluator',
+      piParentTaskId: chain.artificer,
+      piChannel: 'prompt',
+    });
+    expect(logicalSuccessors.map((task) => task.taskId)).toHaveLength(1);
+    expect((await stateManager.listTasks({})).length).toBe(beforeCount + 1);
+    expect(exactScanCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('unparseable occupant of the derived id remains successor_id_conflict and blocks fallback duplication', async () => {
+    const chain = await seedFullChain('malformed-occupant', { timestamped: false });
+    const primaryId = 'evaluator-' + CAND_X + '-prompt';
+    const fallbackId = primaryId + '-p-' + chain.artificer;
+    await stateManager.createTask({
+      taskId: primaryId,
+      taskKind: 'evaluator',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ pi_metadata: { channel: 42, dependencyTaskIds: [] } }),
+    });
+    const beforeCount = (await stateManager.listTasks({})).length;
+
+    const result = await orchestrator.commitNextTaskProposal(chain.artificer);
+
+    expect(result.decision).toBe('successor_id_conflict');
+    if (result.decision === 'successor_id_conflict') {
+      expect(result.reason).toBe('occupant_metadata_unparseable');
+    }
+    expect((await stateManager.listTasks({})).length).toBe(beforeCount);
+    expect(await stateManager.getTask(fallbackId)).toBeNull();
+  });
+});
+
 describe('F3 — 共享级联 planner 三态判定', () => {
   it('exists_plain: rc=0 或非终态后继', () => {
     expect(planExistingSuccessorTransition({

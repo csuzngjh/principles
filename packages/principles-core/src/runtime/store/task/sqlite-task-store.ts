@@ -314,6 +314,19 @@ export class SqliteTaskStore implements TaskStore {
       conditions.push("COALESCE(json_extract(diagnostic_json, '$.hostKind'), '') = ?");
       values.push(filter.diagnosticHostKind);
     }
+    // PRI-1299: successor lookup narrows candidates inside the same WHERE
+    // clause. No COALESCE here: SQL NULL (missing/malformed JSON metadata)
+    // must never compare equal to an empty-string filter — absence and the
+    // empty value are distinct metadata states. json_valid guards legacy rows:
+    // SQLite json_extract raises on malformed JSON instead of yielding NULL.
+    if (filter?.piParentTaskId !== undefined) {
+      conditions.push("(CASE WHEN json_valid(diagnostic_json) THEN json_extract(diagnostic_json, '$.pi_metadata.parentTaskId') END) = ?");
+      values.push(filter.piParentTaskId);
+    }
+    if (filter?.piChannel !== undefined) {
+      conditions.push("(CASE WHEN json_valid(diagnostic_json) THEN json_extract(diagnostic_json, '$.pi_metadata.channel') END) = ?");
+      values.push(filter.piChannel);
+    }
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
     if (filter?.orderBy === 'updated_at_asc') { sql += ' ORDER BY updated_at ASC, task_id ASC'; }
     else if (filter?.orderBy === 'updated_at_desc') { sql += ' ORDER BY updated_at DESC, task_id DESC'; }

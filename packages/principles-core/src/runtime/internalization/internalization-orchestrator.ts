@@ -14,15 +14,15 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
-import { PD_TASK_STATUSES, type TaskRecord, type PDTaskStatus } from '../task-status.js';
+import { type TaskRecord, type PDTaskStatus } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type { RunnerKind } from './peer-runner-contracts.js';
+import type { InternalizationChannel, RunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
 import { deriveSuccessorTaskId } from './internalization-state-machine.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, hasConsumedRevisionCause } from './pitask-metadata.js';
 import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition } from './revision-reopen.js';
 import { verifyRepairTaskIdentity } from './repair-task-identity.js';
-import { inferLegacyParentTaskId } from './correlation-lineage.js';
+import { lookupSuccessorByParent, type SuccessorLookupResult } from './successor-lookup.js';
 // PRI-1293 Phase 3: 唯一 PeerRunnerKind 血缘权威解析器 (core 内部模块,
 // 不入 barrel — 跨包消费方经 InternalizationOrchestrator 静态只读包装访问)。
 import {
@@ -934,15 +934,14 @@ export class InternalizationOrchestrator {
     // 与本队列链相同, 直查命中异链任务, 级联重开错链的后继并替换其依赖。
     // 扫描按 (parentTaskId, kind, channel) 匹配, 异链 occupant 自然不命中;
     // id 占用冲突在创建路径处理 (fallback 父派生 id + UNIQUE 竞态重扫)。
-    const scannedSuccessors = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
-    if (scannedSuccessors.length > 1) {
-      const conflictingSuccessorTaskIds = scannedSuccessors.map((candidate) => candidate.taskId);
-      return { decision: 'successor_integrity_conflict', sourceTaskId: taskId,
-        reason: 'multiple_successors_for_parent',
-        detail: 'parentTaskId=' + taskId + ';successorKind=' + proposal.taskKind + ';channel=' + proposal.channel + ';taskIds=[' + conflictingSuccessorTaskIds.join(',') + ']',
-        conflictingSuccessorTaskIds };
+    const successorLookup = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
+    if (successorLookup.outcome === 'conflict') {
+      return { decision: successorLookup.decision, sourceTaskId: taskId,
+        reason: successorLookup.reason,
+        detail: successorLookup.detail,
+        conflictingSuccessorTaskIds: [...successorLookup.conflictingSuccessorTaskIds] };
     }
-    const existingSuccessorCandidate = scannedSuccessors[0] ?? null;
+    const existingSuccessorCandidate = successorLookup.outcome === 'unique' ? successorLookup.successor : null;
     // PRI-1293 R5: 级联判定经共享只读 planner (revision-reopen.ts) — commit
     // 与 dry-run 预览消费同一判定, 预览不再把"将重开"误报为 successor_exists。
     const scannedSuccPi = existingSuccessorCandidate !== null ? hydratePITaskRecord(existingSuccessorCandidate) : null;
@@ -1132,16 +1131,15 @@ export class InternalizationOrchestrator {
         // successor_exists 收敛语义正确; 既有终态后继早在首个扫描即命中,
         // 不会到达此处。
         const rescanned = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
-        if (rescanned.length > 1) {
-          const conflictingSuccessorTaskIds = rescanned.map((candidate) => candidate.taskId);
-          return { decision: 'successor_integrity_conflict', sourceTaskId: taskId,
-            reason: 'multiple_successors_for_parent_after_unique_conflict',
-            detail: 'parentTaskId=' + taskId + ';successorKind=' + proposal.taskKind + ';channel=' + proposal.channel + ';taskIds=[' + conflictingSuccessorTaskIds.join(',') + ']',
-            conflictingSuccessorTaskIds };
+        if (rescanned.outcome === 'conflict') {
+          return { decision: rescanned.decision, sourceTaskId: taskId,
+            reason: rescanned.reason + '_after_unique_conflict',
+            detail: rescanned.detail,
+            conflictingSuccessorTaskIds: [...rescanned.conflictingSuccessorTaskIds] };
         }
-        if (rescanned.length === 1) {
+        if (rescanned.outcome === 'unique') {
           return { decision: 'successor_exists', sourceTaskId: taskId,
-            successorTaskId: rescanned.at(0)?.taskId ?? "", successorKind: proposal.taskKind };
+            successorTaskId: rescanned.successor.taskId, successorKind: proposal.taskKind };
         }
         // occupant 不可解析 = 损坏行 — 它可能是本链被腐蚀的后继也可能是异链
         // 残骸, 无法证明任一归属。fallback 创建会复制一条逻辑后继而腐蚀行
@@ -1599,45 +1597,22 @@ export class InternalizationOrchestrator {
    * (succeeded/needs_human_review) or failed — proves the logical successor
    * already exists. This mirrors the semantics the deterministic-id UNIQUE
    * constraint catch used to provide as a last resort, extended to chains
-   * whose ids are not derivable. Deterministic: ties break by taskId.
+   * whose ids are not derivable. Multiple matches are an integrity conflict;
+   * taskId ordering is used only for deterministic reporting, never selection.
    */
   private async findSuccessorByParent(
     parentTaskId: string,
     successorKind: RunnerKind,
-    channel: string,
-  ): Promise<TaskRecord[]> {
-    // PRI-1293 R5 (F4 部分缓解): taskKind 过滤下推至 SQL WHERE task_kind = ?
-    // (sqlite-task-store 既有能力), 扫描行数从全表收敛到单一 kind。
-    // parentTaskId 的 json_extract 下推与批量复合索引属 PRI-1299 范围
-    // (统一 Successor Lookup) — 本处是有界缓解而非完整修复。
-    const allTasks = await this.stateManager.listTasks({ statuses: [...PD_TASK_STATUSES], taskKind: successorKind });
-    const matches: TaskRecord[] = [];
-    for (const task of allTasks) {
-      if (task.taskKind !== successorKind) continue;
-      const piTask = hydratePITaskRecord(task);
-      if (!piTask) continue;
-      if (piTask.parentTaskId === parentTaskId && piTask.channel === channel) {
-        matches.push(task);
-      }
-    }
-    if (matches.length === 0) {
-      // PRI-1293 R8 (review #3): 历史未回填后继对持久化 parent 扫描不可见 —
-      // 协调扫描先处理旧父节点时会重复创建后继, 事后才被判完整性冲突。
-      // 创建前用**同一历史推断规则** (单边 inferLegacyParentTaskId, 非通用
-      // dependency 回退) 识别可证明的未回填后继纳入查重; 推断不出或证据
-      // 不足者不算后继 — 与回填门禁同一证明标准, 不放宽。
-      for (const task of allTasks) {
-        if (task.taskKind !== successorKind) continue;
-        const piTask = hydratePITaskRecord(task);
-        if (!piTask || piTask.parentTaskId || piTask.channel !== channel) continue;
-        const inferred = await inferLegacyParentTaskId(task, piTask, this.stateManager);
-        if (inferred.ok && inferred.parentTaskId === parentTaskId) {
-          matches.push(task);
-        }
-      }
-    }
-    matches.sort((a, b) => (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0));
-    return matches;
+    channel: InternalizationChannel,
+  ): Promise<SuccessorLookupResult> {
+    // PRI-1299: thin delegate only. Candidate narrowing is pushed into
+    // TaskStore; zero/unique/conflict adjudication and legacy-parent inference
+    // live in the single core successor-lookup seam shared with pd-cli.
+    return lookupSuccessorByParent(this.stateManager, {
+      parentTaskId,
+      successorKind,
+      channel,
+    });
   }
 
   /**

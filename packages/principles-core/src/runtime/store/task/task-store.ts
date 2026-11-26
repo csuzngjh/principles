@@ -49,6 +49,16 @@ export interface TaskStoreFilter {
    * a host-scoped bounded scan only spends its window on its own candidates.
    */
   diagnosticHostKind?: string;
+  /**
+   * Exact PI metadata parent task id filter (`$.pi_metadata.parentTaskId`).
+   * Missing/null values never match, including when the filter is an empty string.
+   */
+  piParentTaskId?: string;
+  /**
+   * Exact PI metadata channel filter (`$.pi_metadata.channel`).
+   * Missing/null values never match, including when the filter is an empty string.
+   */
+  piChannel?: string;
 }
 
 /** Narrow patch type — only the fields that are mutable in practice.

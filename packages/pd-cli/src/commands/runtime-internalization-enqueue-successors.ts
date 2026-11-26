@@ -4,10 +4,10 @@ import {
   InternalizationOrchestrator,
   isPeerRunnerKind,
   hydratePITaskRecord,
-  PD_TASK_STATUSES,
   CORRELATION_LINEAGE_MAX_PARENT_EDGES,
+  lookupSuccessorByParent,
 } from '@principles/core/runtime';
-import type { CommitNextTaskResult, PDTaskStatus } from '@principles/core/runtime';
+import type { CommitNextTaskResult } from '@principles/core/runtime';
 import { planExistingSuccessorTransition, deriveSuccessorTaskId, planLegacyLineageResolution, type LegacyLineagePlan } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createConsentLedgerSourceMaterialAuthorization } from '@principles/host-runtime/source-material-authorization';
@@ -322,61 +322,6 @@ function emitFailure(opts: EmitFailureOptions): void {
   process.exitCode = 1;
 }
 
-interface SuccessorIndexEntry {
-  taskId: string;
-  taskKind: string;
-  parentTaskId: string | null;
-  channel: string;
-  hydrated: boolean;
-  // PRI-1293 R5: 级联判定字段 — 预览复用共享 planner 报告 would_reopen。
-  status: string;
-  revisionCauseId?: string | undefined;
-  consumedRevisionCauseIds?: readonly string[] | undefined;
-}
-
-async function buildSuccessorIndex(
-  stateManager: RuntimeStateManager,
-): Promise<Map<string, SuccessorIndexEntry>> {
-  const allStatuses: PDTaskStatus[] = [...PD_TASK_STATUSES];
-  const index = new Map<string, SuccessorIndexEntry>();
-  const results = await Promise.all(
-    allStatuses.map(status => stateManager.listTasks({ status })),
-  );
-  for (const task of results.flat()) {
-    if (!isPeerRunnerKind(task.taskKind)) continue;
-    const piTask = hydratePITaskRecord(task);
-    index.set(task.taskId, {
-      taskId: task.taskId,
-      taskKind: task.taskKind,
-      parentTaskId: piTask?.parentTaskId ?? null,
-      channel: piTask?.channel ?? '',
-      hydrated: piTask !== null,
-      status: task.status,
-      revisionCauseId: piTask?.revisionCauseId,
-      consumedRevisionCauseIds: piTask?.consumedRevisionCauseIds,
-    });
-  }
-  return index;
-}
-
-function findSuccessorsInIndex(
-  index: Map<string, SuccessorIndexEntry>,
-  opts: { parentTaskId: string; successorKind: string; channel: string },
-): SuccessorIndexEntry[] {
-  // PRI-1293 R5: 直查快路径废除 — 确定性 id 命中不校验 parent/kind/channel
-  // 时会把异链 occupant 误认作本父子后继 (与 orchestrator 跨链碰撞同源)。
-  // 父子扫描是唯一权威, 与 commit 的 findSuccessorByParent 判定条件一致。
-  // PRI-1293 R6: 返回全部匹配 — 多个持久化后继声明同一 parent/kind/channel
-  // 是数据完整性冲突, 预览必须与 confirm 一样 fail-closed, 不得任选其一。
-  const matches: SuccessorIndexEntry[] = [];
-  for (const entry of index.values()) {
-    if (entry.taskKind === opts.successorKind && entry.parentTaskId === opts.parentTaskId && entry.channel === opts.channel) {
-      matches.push(entry);
-    }
-  }
-  return matches;
-}
-
 export async function handleRuntimeInternalizationEnqueueSuccessors(opts: EnqueueSuccessorsOptions): Promise<void> {
   const isDryRun = !opts.confirm;
 
@@ -455,25 +400,6 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
     }
 
     const piSucceededTasks = succeededTasks.filter(t => isPeerRunnerKind(t.taskKind));
-
-    let successorIndex: Map<string, SuccessorIndexEntry> | null = null;
-    if (isDryRun) {
-      const index = await buildSuccessorIndex(stateManager).catch((indexErr: unknown) => {
-        const message = indexErr instanceof Error ? indexErr.message : String(indexErr);
-        emitFailure({
-          error: `Failed to build successor index: ${message}`,
-          isDryRun,
-          json: !!opts.json,
-          reason: `successor_index_failed: ${message}`,
-          nextAction: 'Check database availability and re-run',
-        });
-        return null;
-      });
-      if (index === null) {
-        return;
-      }
-      successorIndex = index;
-    }
 
     const orchestrator = new InternalizationOrchestrator(
       { stateManager, sourceMaterialAuthorization: createConsentLedgerSourceMaterialAuthorization(workspaceDir) },
@@ -555,64 +481,71 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             reason: 'No valid successor in job graph for this task kind and channel',
           });
         } else {
-          if (!successorIndex) {
-            actions.push({
-              taskId: task.taskId,
-              taskKind: piTask.taskKind,
-              decision: 'skipped',
-              reason: 'successor_index_unavailable: index not built for dry-run path',
-              nextAction: 'Re-run the command',
+          const lookup = await lookupSuccessorByParent(stateManager, {
+            parentTaskId: task.taskId,
+            successorKind: proposalResult.proposal.taskKind,
+            channel: proposalResult.proposal.channel,
+          }).catch((lookupErr: unknown) => {
+            const message = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
+            return { outcome: 'lookup_failed' as const, reason: message };
+          });
+          if (lookup.outcome === 'lookup_failed') {
+            // Infrastructure lookup failure makes the preview incomplete; keep
+            // the pre-PRI-1299 fail-closed command contract instead of letting
+            // a partial dry-run masquerade as a successful complete scan.
+            emitFailure({
+              error: 'Failed to lookup successor: ' + lookup.reason,
+              isDryRun,
+              json: !!opts.json,
+              reason: 'successor_lookup_failed: ' + lookup.reason,
+              nextAction: 'Check database availability and re-run; no successor was created or reopened in dry-run',
             });
-            skippedCount++;
-            continue;
+            return;
           }
-          const successorMatches = findSuccessorsInIndex(
-            successorIndex,
-            {
-              parentTaskId: task.taskId,
-              successorKind: proposalResult.proposal.taskKind,
-              channel: proposalResult.proposal.channel,
-            },
-          );
-          if (successorMatches.length > 1) {
-            // PRI-1293 R6: 多后继完整性冲突 — 预览与 confirm 同一 fail-closed
-            // 判定: 不报告 successor_exists/would_reopen, 不创建不重开,
-            // 全部冲突 id 透出供人工排查。
-            const conflictIds = successorMatches.map((m) => m.taskId).sort();
-            actions.push({
-              taskId: task.taskId,
-              taskKind: piTask.taskKind,
-              decision: 'skipped',
-              reason: `successor_integrity_conflict: multiple persisted successors declare the same parent/kind/channel (parentTaskId=${task.taskId};kind=${proposalResult.proposal.taskKind};channel=${proposalResult.proposal.channel}); taskIds=[${conflictIds.join(',')}] — nothing would be created or reopened`,
-              nextAction: `Inspect the conflicting successor tasks [${conflictIds.join(', ')}]; resolve the duplicate-chain integrity conflict manually before re-running`,
+          if (lookup.outcome === 'conflict') {
+            // PRI-1299: the preview consumes the same core authority as commit.
+            // A multi-successor integrity conflict is never materialized/existing:
+            // it is skipped, carries the complete conflict set, and writes nothing.
+            const conflictIds = [...lookup.conflictingSuccessorTaskIds];
+            // Reuse the exact confirm-path mapper with the same structured
+            // conflict fields produced by the core authority, so decision,
+            // reason, detail, nextAction and the complete id set cannot drift.
+            const conflictAction = mapCommitDecisionToAction({
+              decision: lookup.decision,
+              sourceTaskId: task.taskId,
+              reason: lookup.reason,
+              detail: lookup.detail,
               conflictingSuccessorTaskIds: conflictIds,
             });
+            conflictAction.taskKind = piTask.taskKind;
+            actions.push(conflictAction);
             skippedCount++;
             continue;
           }
-          const existingSuccessor: SuccessorIndexEntry | null = successorMatches.length === 1 ? successorMatches[0] ?? null : null;
-          if (existingSuccessor) {
-            if (!existingSuccessor.hydrated) {
+          if (lookup.outcome === 'unique') {
+            const existingSuccessor = lookup.successor;
+            const existingSuccessorPi = hydratePITaskRecord(existingSuccessor);
+            if (!existingSuccessorPi) {
               actions.push({
                 taskId: task.taskId,
                 taskKind: piTask.taskKind,
                 decision: 'skipped',
-                reason: `successor_exists_with_malformed_metadata: taskId=${existingSuccessor.taskId} has unparseable diagnosticJson`,
+                reason: 'successor_exists_with_malformed_metadata: taskId=' + existingSuccessor.taskId + ' has unparseable diagnosticJson',
                 nextAction: 'Run integrity-repair on the successor task, then re-run enqueue-successors',
               });
               skippedCount++;
             } else {
-              // PRI-1293 R5: 预览复用共享只读级联判定 — 终态后继 + 源 rc>0 +
-              // cause 未消费时 confirm 将 reopen 该后继 (清除旧 verdict, 重置
-              // status/attemptCount), 预览必须显式报告 would_reopen, 不得
-              // 误报 successor_exists (操作员视角的破坏性意外)。
+              // PRI-1293 R5: preview reuses the shared read-only cascade planner.
+              // Terminal successor + revised source + unconsumed cause means confirm
+              // will reopen it; the preview must say would_reopen rather than
+              // successor_exists.
               const transitionPlan = planExistingSuccessorTransition({
                 sourceTaskId: task.taskId,
                 sourceRevisionCount: piTask.revisionCount ?? 0,
                 successorTaskId: existingSuccessor.taskId,
                 successorStatus: existingSuccessor.status,
-                successorRevisionCauseId: existingSuccessor.revisionCauseId,
-                successorConsumedRevisionCauseIds: existingSuccessor.consumedRevisionCauseIds,
+                successorRevisionCauseId: existingSuccessorPi.revisionCauseId,
+                successorConsumedRevisionCauseIds: existingSuccessorPi.consumedRevisionCauseIds,
               });
               if (transitionPlan.plan === 'cascade_reopen') {
                 actions.push({
@@ -622,13 +555,13 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
                   successorKind: proposalResult.proposal.taskKind,
                   successorTaskId: existingSuccessor.taskId,
                 });
-                // reopen 是写动作 (与 confirm 的 successor_reopened 同级) —
-                // 计入创建/写入桶而非"已物化无需动作"桶。
+                // Reopen is a write action at the same level as confirm's
+                // successor_reopened, so it belongs in the write bucket rather
+                // than the already-materialized bucket.
                 createdCount++;
               } else {
-                // exists_plain: 非终态或 rc=0 — confirm 报告 successor_exists;
-                // cascade_already_materialized: confirm 幂等 no-op 零写入 —
-                // 两者对操作员都意味着"无新写动作", 统一 successor_exists。
+                // exists_plain and cascade_already_materialized both mean no new
+                // write action for the operator; report successor_exists.
                 actions.push({
                   taskId: task.taskId,
                   taskKind: piTask.taskKind,
@@ -639,43 +572,43 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
                 existingCount++;
               }
             }
-          } else if (successorIndex.get(deriveSuccessorTaskId(proposalResult.proposal, task.taskId))?.hydrated === false) {
-            // PRI-1293 R5: 不可解析 occupant 占用确定性派生 id — 扫描按设计
-            // 不命中它 (parent/kind/channel 不可读), 但确认路径会 fail-closed
-            // (occupant_metadata_unparseable), 预览必须一致报告而非
-            // would_create。派生经共享单一来源 deriveSuccessorTaskId。
-            actions.push({
-              taskId: task.taskId,
-              taskKind: piTask.taskKind,
-              decision: 'skipped',
-              reason: 'successor_exists_with_malformed_metadata: taskId=' + deriveSuccessorTaskId(proposalResult.proposal, task.taskId) + ' has unparseable diagnosticJson',
-              nextAction: 'Run integrity-repair on the successor task, then re-run enqueue-successors',
-            });
-            skippedCount++;
-          } else if (peerLineageParentEdgeCount !== null
-            && peerLineageParentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
-            // PRI-1293 R3: dry-run 与 confirm 共用同一新增边深度判定 — commit
-            // (orchestrator) 只在确实要创建新后继时校验再加一条边是否越限,
-            // 预览必须在同一分支点应用同一规则, 否则 10 边任务预览
-            // would_create 而 confirm lineage_refused。已存在后继走上面的
-            // successor_exists 分支, 不受新增边限制影响 (与 commit 同序)。
-            const depthAction = mapCommitDecisionToAction({
-              decision: 'lineage_refused',
-              sourceTaskId: task.taskId,
-              reason: 'parent_chain_cycle_or_depth_exceeded',
-              detail: `successor_would_exceed_depth_limit:${peerLineageParentEdgeCount + 1}_edges_max_${CORRELATION_LINEAGE_MAX_PARENT_EDGES}`,
-            });
-            depthAction.taskKind = piTask.taskKind;
-            actions.push(depthAction);
-            skippedCount++;
           } else {
-            actions.push({
-              taskId: task.taskId,
-              taskKind: piTask.taskKind,
-              decision: 'would_create_successor',
-              successorKind: proposalResult.proposal.taskKind,
-            });
-            createdCount++;
+            const derivedSuccessorTaskId = deriveSuccessorTaskId(proposalResult.proposal, task.taskId);
+            const deterministicOccupant = (await stateManager.getTask(derivedSuccessorTaskId)) ?? null;
+            if (deterministicOccupant !== null && hydratePITaskRecord(deterministicOccupant) === null) {
+              // Not successor identity recognition: this is the same creation-id
+              // corruption preflight commit performs before attempting a write.
+              actions.push({
+                taskId: task.taskId,
+                taskKind: piTask.taskKind,
+                decision: 'skipped',
+                reason: 'successor_exists_with_malformed_metadata: taskId=' + derivedSuccessorTaskId + ' has unparseable diagnosticJson',
+                nextAction: 'Run integrity-repair on the successor task, then re-run enqueue-successors',
+              });
+              skippedCount++;
+            } else if (peerLineageParentEdgeCount !== null
+              && peerLineageParentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
+              // PRI-1293 R3: apply the same new-edge depth check at the same
+              // branch point as commit — only when a new successor would be
+              // created, never for an existing successor edge.
+              const depthAction = mapCommitDecisionToAction({
+                decision: 'lineage_refused',
+                sourceTaskId: task.taskId,
+                reason: 'parent_chain_cycle_or_depth_exceeded',
+                detail: 'successor_would_exceed_depth_limit:' + (peerLineageParentEdgeCount + 1) + '_edges_max_' + CORRELATION_LINEAGE_MAX_PARENT_EDGES,
+              });
+              depthAction.taskKind = piTask.taskKind;
+              actions.push(depthAction);
+              skippedCount++;
+            } else {
+              actions.push({
+                taskId: task.taskId,
+                taskKind: piTask.taskKind,
+                decision: 'would_create_successor',
+                successorKind: proposalResult.proposal.taskKind,
+              });
+              createdCount++;
+            }
           }
         }
       } else {

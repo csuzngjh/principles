@@ -652,6 +652,18 @@
     },
     {
       "entry": "./runtime",
+      "symbol": "lookupSuccessorByParent",
+      "kind": "value",
+      "addedIn": "PRI-1299",
+      "expiresAt": "2027-11-26",
+      "consumers": [
+        "packages/pd-cli/src/commands/runtime-internalization-enqueue-successors.ts"
+      ],
+      "whyNotInternal": "The enqueue-successors dry-run preview must consume the exact same successor identity and multi-successor integrity adjudication as commitNextTaskProposal; keeping the lookup core-internal forces pd-cli to retain a second parent/kind/channel matcher, the precise drift class PRI-1299 removes.",
+      "alternativeConsidered": "A read-only orchestrator convenience method was rejected as redundant surface: the lookup is a pure read-only query over RuntimeStateManager and pd-cli already holds that manager, so a free function is the narrower cross-package seam. Returning only commit results was rejected because dry-run must not perform writes."
+    },
+    {
+      "entry": "./runtime",
       "symbol": "verifyRepairTaskIdentity",
       "kind": "value",
       "addedIn": "PRI-1293",

@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2075,
+  "count": 2076,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1885,6 +1885,7 @@
     "listEvidenceWaitingTasks",
     "listOwnerEvidenceActions",
     "listRecoveryActions",
+    "lookupSuccessorByParent",
     "makeDeterministicDiagnosticianOutput",
     "makeIdempotencyKey",
     "makePrincipleArtifact",
