@@ -320,11 +320,11 @@ export class SqliteTaskStore implements TaskStore {
     // empty value are distinct metadata states. json_valid guards legacy rows:
     // SQLite json_extract raises on malformed JSON instead of yielding NULL.
     if (filter?.piParentTaskId !== undefined) {
-      conditions.push("(CASE WHEN json_valid(diagnostic_json) THEN json_extract(diagnostic_json, '$.pi_metadata.parentTaskId') END) = ?");
+      conditions.push("(CASE WHEN json_valid(diagnostic_json) THEN (CASE WHEN json_type(diagnostic_json, '$.pi_metadata.parentTaskId') = 'text' THEN json_extract(diagnostic_json, '$.pi_metadata.parentTaskId') END) END) = ?");
       values.push(filter.piParentTaskId);
     }
     if (filter?.piChannel !== undefined) {
-      conditions.push("(CASE WHEN json_valid(diagnostic_json) THEN json_extract(diagnostic_json, '$.pi_metadata.channel') END) = ?");
+      conditions.push("(CASE WHEN json_valid(diagnostic_json) THEN (CASE WHEN json_type(diagnostic_json, '$.pi_metadata.channel') = 'text' THEN json_extract(diagnostic_json, '$.pi_metadata.channel') END) END) = ?");
       values.push(filter.piChannel);
     }
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');

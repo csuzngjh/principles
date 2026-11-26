@@ -73,13 +73,22 @@ export async function lookupSuccessorByParent(
       taskKind: query.successorKind,
       piChannel: query.channel,
     });
-    for (const task of legacyCandidates) {
-      if (task.taskKind !== query.successorKind) continue;
-      const piTask = hydratePITaskRecord(task);
-      if (!piTask || piTask.parentTaskId || piTask.channel !== query.channel) continue;
-      const inferred = await inferLegacyParentTaskId(task, piTask, stateManager);
-      if (inferred.ok && inferred.parentTaskId === query.parentTaskId) {
-        matches.push(task);
+    // A reconciliation/backfill writer can persist a missing parent edge
+    // between the exact first read and this broader second read. Re-judge
+    // exact identity on this second snapshot first; otherwise that row would
+    // be skipped as "already parented" and neither exact nor inferred.
+    const exactInSecondSnapshot = legacyCandidates.filter((task) => exactMatch(task, query));
+    if (exactInSecondSnapshot.length > 0) {
+      matches.push(...exactInSecondSnapshot);
+    } else {
+      for (const task of legacyCandidates) {
+        if (task.taskKind !== query.successorKind) continue;
+        const piTask = hydratePITaskRecord(task);
+        if (!piTask || piTask.parentTaskId || piTask.channel !== query.channel) continue;
+        const inferred = await inferLegacyParentTaskId(task, piTask, stateManager);
+        if (inferred.ok && inferred.parentTaskId === query.parentTaskId) {
+          matches.push(task);
+        }
       }
     }
   }

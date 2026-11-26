@@ -161,4 +161,18 @@ describe.each([
       await expectSameIds(store, { piParentTaskId: 'parent-a' }, ['empty-channel', 'null-channel']);
     });
   });
+
+  it('does not match array/object metadata through SQLite JSON text coercion', async () => {
+    await withStore(async (store) => {
+      await store.createTask(taskInput('array-parent', {
+        diagnosticJson: diagnosticJson(piFields({ parentTaskId: [], channel: 'prompt' })),
+      }));
+      await store.createTask(taskInput('array-channel', {
+        diagnosticJson: diagnosticJson(piFields({ parentTaskId: 'parent-a', channel: [] })),
+      }));
+
+      await expectSameIds(store, { piParentTaskId: '[]' }, []);
+      await expectSameIds(store, { piChannel: '[]' }, []);
+    });
+  });
 });

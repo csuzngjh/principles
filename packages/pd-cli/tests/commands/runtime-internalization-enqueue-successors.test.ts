@@ -643,6 +643,56 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('dry-run derived-id preflight read failure: emits one structured JSON failure', async () => {
+    const dreamerTask = makeSucceededTask('dreamer-occupant-err', 'dreamer');
+    mockListTasks.mockResolvedValueOnce([dreamerTask]);
+    mockProposeNextTask.mockResolvedValue({
+      decision: 'proposal_created',
+      taskId: 'dreamer-occupant-err',
+      taskKind: 'dreamer',
+      proposal: { taskKind: 'philosopher', channel: 'prompt', dependencyTaskIds: ['dreamer-occupant-err'], inputArtifactRefs: [], parentTaskId: 'dreamer-occupant-err', correlationId: 'corr-occupant-err' },
+    });
+    mockGetTask.mockRejectedValue(new Error('Database locked during occupant preflight'));
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
+
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.status).toBe('failed');
+    expect(output.reason).toContain('successor_id_preflight_failed');
+    expect(output.reason).toContain('Database locked during occupant preflight');
+    expect(output.nextAction).toBeDefined();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('dry-run primary and fallback ids occupied by foreign chains: reports successor_id_conflict, not would_create', async () => {
+    const dreamerTask = makeSucceededTask('dreamer-double-occupied', 'dreamer');
+    const primaryId = 'philosopher-corr-double-occupied-prompt';
+    const fallbackId = primaryId + '-p-dreamer-double-occupied';
+    mockListTasks.mockResolvedValueOnce([dreamerTask]);
+    mockProposeNextTask.mockResolvedValue({
+      decision: 'proposal_created',
+      taskId: 'dreamer-double-occupied',
+      taskKind: 'dreamer',
+      proposal: { taskKind: 'philosopher', channel: 'prompt', dependencyTaskIds: ['dreamer-double-occupied'], inputArtifactRefs: [], parentTaskId: 'dreamer-double-occupied', correlationId: 'corr-double-occupied' },
+    });
+    mockGetTask.mockImplementation(async (taskId: string) => {
+      if (taskId === primaryId || taskId === fallbackId) {
+        return makeSucceededTask(taskId, 'philosopher', { parentTaskId: 'foreign-parent', channel: 'prompt' });
+      }
+      return null;
+    });
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.actions[0].decision).toBe('skipped');
+    expect(output.actions[0].reason).toContain('successor_id_conflict');
+    expect(output.actions[0].reason).toContain('derived_and_fallback_ids_occupied_by_foreign_chain');
+    expect(output.createdCount).toBe(0);
+    expect(output.skippedCount).toBe(1);
+  });
+
   it('dry-run with existing successor: reports successor_exists', async () => {
     const dreamerTask = makeSucceededTask('dreamer-existing-succ', 'dreamer');
     const philosopherPending = makeSucceededTask('philosopher-dreamer-existing-succ-prompt', 'philosopher', { parentTaskId: 'dreamer-existing-succ', channel: 'prompt' });

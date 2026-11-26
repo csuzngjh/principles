@@ -180,3 +180,81 @@ describe('#3 — 未回填历史后继纳入查重', () => {
     expect(scribes).toHaveLength(1);
   });
 });
+
+
+describe('PRI-1299 review — backfill races and conflict zero-write ordering', () => {
+  it('双连接竞态: 第一次 exact read 后真实回填父边, 第二次 read 重判 exact 并复用历史后继', async () => {
+    await mkTask('dreamer-race', 'dreamer', 'succeeded', { correlationId: 'racer', topCandidateId: 'racer', pipelineMode: 'full_chain' });
+    await mkTask('racer-philosopher-p1', 'philosopher', 'succeeded', {
+      parentTaskId: 'dreamer-race', correlationId: 'racer', pipelineMode: 'full_chain',
+    });
+    await mkTask('racer-scribe-s1', 'scribe', 'succeeded', {
+      correlationId: 'racer', dependencyTaskIds: ['racer-philosopher-p1'], pipelineMode: 'full_chain',
+    });
+    const beforeCount = (await sm.listTasks({})).length;
+    const secondConnection = new RuntimeStateManager({ workspaceDir });
+    await secondConnection.initialize();
+    const originalListTasks = sm.listTasks.bind(sm);
+    let targetExactReads = 0;
+    sm.listTasks = async (filter?: Parameters<RuntimeStateManager['listTasks']>[0]) => {
+      const isTargetExactScan = filter?.piParentTaskId === 'racer-philosopher-p1'
+        && filter.taskKind === 'scribe'
+        && filter.piChannel === 'prompt';
+      const rows = await originalListTasks(filter);
+      if (isTargetExactScan) {
+        targetExactReads += 1;
+        if (targetExactReads === 1) {
+          const leaf = need(await secondConnection.getTask('racer-scribe-s1'), 'legacy scribe on second connection');
+          const backfill = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(leaf, secondConnection);
+          expect(backfill.ok).toBe(true);
+        }
+      }
+      return rows;
+    };
+    try {
+      const orchestrator = new InternalizationOrchestrator(
+        { stateManager: sm }, { owner: 'r8-race', runtimeKind: 'test-double', dryRun: true },
+      );
+      const result = await orchestrator.commitNextTaskProposal('racer-philosopher-p1');
+      expect(result.decision).toBe('successor_exists');
+      if (result.decision === 'successor_exists') {
+        expect(result.successorTaskId).toBe('racer-scribe-s1');
+      }
+    } finally {
+      sm.listTasks = originalListTasks;
+      await secondConnection.close();
+    }
+    expect(targetExactReads).toBeGreaterThanOrEqual(1);
+    const scribes = (await sm.listTasks({})).filter((t) => t.taskKind === 'scribe');
+    expect(scribes.map((t) => t.taskId)).toEqual(['racer-scribe-s1']);
+    expect((await sm.listTasks({})).length).toBe(beforeCount);
+  });
+
+  it('来源链需要回填但后继已冲突 → 冲突先于回填写入, 源任务字节与行数不变', async () => {
+    await mkTask('c8-dreamer', 'dreamer', 'succeeded', { correlationId: 'c8', topCandidateId: 'c8', pipelineMode: 'full_chain' });
+    await mkTask('c8-philosopher-p1', 'philosopher', 'succeeded', {
+      correlationId: 'c8', dependencyTaskIds: ['c8-dreamer'], pipelineMode: 'full_chain',
+    });
+    await mkTask('c8-scribe-exact-a', 'scribe', 'succeeded', {
+      parentTaskId: 'c8-philosopher-p1', correlationId: 'c8', pipelineMode: 'full_chain',
+    });
+    await mkTask('c8-scribe-exact-b', 'scribe', 'pending', {
+      parentTaskId: 'c8-philosopher-p1', correlationId: 'c8', pipelineMode: 'full_chain',
+    });
+    const beforeSource = need(await sm.getTask('c8-philosopher-p1'), 'source before').diagnosticJson;
+    const beforeCount = (await sm.listTasks({})).length;
+    const orchestrator = new InternalizationOrchestrator(
+      { stateManager: sm }, { owner: 'r8-conflict', runtimeKind: 'test-double', dryRun: true },
+    );
+
+    const result = await orchestrator.commitNextTaskProposal('c8-philosopher-p1');
+
+    expect(result.decision).toBe('successor_integrity_conflict');
+    if (result.decision === 'successor_integrity_conflict') {
+      expect(result.conflictingSuccessorTaskIds).toEqual(['c8-scribe-exact-a', 'c8-scribe-exact-b']);
+    }
+    const afterSource = need(await sm.getTask('c8-philosopher-p1'), 'source after').diagnosticJson;
+    expect(afterSource).toBe(beforeSource);
+    expect((await sm.listTasks({})).length).toBe(beforeCount);
+  });
+});

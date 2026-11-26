@@ -574,7 +574,37 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             }
           } else {
             const derivedSuccessorTaskId = deriveSuccessorTaskId(proposalResult.proposal, task.taskId);
-            const deterministicOccupant = (await stateManager.getTask(derivedSuccessorTaskId)) ?? null;
+            let deterministicOccupant: Awaited<ReturnType<typeof stateManager.getTask>> = null;
+            try {
+              deterministicOccupant = await stateManager.getTask(derivedSuccessorTaskId);
+            } catch (occupantErr: unknown) {
+              const message = occupantErr instanceof Error ? occupantErr.message : String(occupantErr);
+              emitFailure({
+                error: 'Failed to inspect derived successor id occupant: ' + message,
+                isDryRun,
+                json: !!opts.json,
+                reason: 'successor_id_preflight_failed: ' + message,
+                nextAction: 'Check database availability and re-run; no successor was created or reopened in dry-run',
+              });
+              return;
+            }
+            const fallbackSuccessorTaskId = derivedSuccessorTaskId + '-p-' + task.taskId;
+            let fallbackOccupant: Awaited<ReturnType<typeof stateManager.getTask>> = null;
+            if (deterministicOccupant !== null) {
+              try {
+                fallbackOccupant = await stateManager.getTask(fallbackSuccessorTaskId);
+              } catch (occupantErr: unknown) {
+                const message = occupantErr instanceof Error ? occupantErr.message : String(occupantErr);
+                emitFailure({
+                  error: 'Failed to inspect fallback successor id occupant: ' + message,
+                  isDryRun,
+                  json: !!opts.json,
+                  reason: 'successor_id_preflight_failed: ' + message,
+                  nextAction: 'Check database availability and re-run; no successor was created or reopened in dry-run',
+                });
+                return;
+              }
+            }
             if (deterministicOccupant !== null && hydratePITaskRecord(deterministicOccupant) === null) {
               // Not successor identity recognition: this is the same creation-id
               // corruption preflight commit performs before attempting a write.
@@ -599,6 +629,16 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
               });
               depthAction.taskKind = piTask.taskKind;
               actions.push(depthAction);
+              skippedCount++;
+            } else if (deterministicOccupant !== null && fallbackOccupant !== null) {
+              const conflictAction = mapCommitDecisionToAction({
+                decision: 'successor_id_conflict',
+                sourceTaskId: task.taskId,
+                reason: 'derived_and_fallback_ids_occupied_by_foreign_chain',
+                detail: 'primary=' + derivedSuccessorTaskId + ' fallback=' + fallbackSuccessorTaskId + ' both occupied; scan found no successor for parent ' + task.taskId,
+              });
+              conflictAction.taskKind = piTask.taskKind;
+              actions.push(conflictAction);
               skippedCount++;
             } else {
               actions.push({

@@ -28,6 +28,7 @@ import { lookupSuccessorByParent, type SuccessorLookupResult } from './successor
 import {
   resolveAuthoritativeCorrelationId,
   resolveAuthoritativeCorrelationIdWithLegacyBackfill,
+  planLegacyLineageResolution,
   CORRELATION_LINEAGE_MAX_PARENT_EDGES,
   type CorrelationLineageGetTask,
   type CorrelationLineageResolution,
@@ -872,18 +873,21 @@ export class InternalizationOrchestrator {
     // 校验同时负责历史无 id 链的根侧恢复 — 成功结果 (含 recoveredFromLegacyRoot)
     // 写入新后继 metadata.correlationId; 后继 taskId 派生保持原样 (proposal.
     // correlationId ?? stripTrailingChannel), 不漂移在途历史链的确定性去重。
-    let authoritativeCorrelation: Extract<CorrelationLineageResolution, { ok: true }> | null = null;
+    // PRI-1299 review: first prove the lineage with the read-only planner.
+    // The writing backfill must not run before the successor integrity gate:
+    // otherwise a confirm that ends in successor_integrity_conflict would still
+    // have mutated historical parent edges. If the planner refuses, preserve the
+    // existing lineage_refused precedence with zero writes.
     if (isPeerRunnerKind(piTask.taskKind)) {
-      const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, this.stateManager);
-      if (!lineage.ok) {
+      const lineagePlan = await planLegacyLineageResolution(rawTask, this.stateManager);
+      if (!lineagePlan.ok) {
         return {
           decision: 'lineage_refused',
           sourceTaskId: taskId,
-          reason: lineage.reason,
-          detail: lineage.detail,
+          reason: lineagePlan.reason,
+          detail: lineagePlan.detail,
         };
       }
-      authoritativeCorrelation = lineage;
     }
 
     const proposalResult = await this.proposeNextTask(taskId);
@@ -941,6 +945,24 @@ export class InternalizationOrchestrator {
         detail: successorLookup.detail,
         conflictingSuccessorTaskIds: [...successorLookup.conflictingSuccessorTaskIds] };
     }
+    // The conflict gate above is now the first write-sensitive decision. Only
+    // after it passes may the legacy lineage resolver persist proven parent edges.
+    // This keeps successor_integrity_conflict truly zero-write while preserving
+    // the pre-existing backfill behavior for paths that can proceed.
+    let authoritativeCorrelation: Extract<CorrelationLineageResolution, { ok: true }> | null = null;
+    if (isPeerRunnerKind(piTask.taskKind)) {
+      const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, this.stateManager);
+      if (!lineage.ok) {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: lineage.reason,
+          detail: lineage.detail,
+        };
+      }
+      authoritativeCorrelation = lineage;
+    }
+
     const existingSuccessorCandidate = successorLookup.outcome === 'unique' ? successorLookup.successor : null;
     // PRI-1293 R5: 级联判定经共享只读 planner (revision-reopen.ts) — commit
     // 与 dry-run 预览消费同一判定, 预览不再把"将重开"误报为 successor_exists。
