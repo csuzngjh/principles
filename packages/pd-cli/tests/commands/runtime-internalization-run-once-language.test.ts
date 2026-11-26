@@ -108,7 +108,12 @@ vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
   resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
 }));
 
-vi.mock('@principles/core/runtime', () => ({
+vi.mock('@principles/core/runtime', async (importOriginal) => {
+  // PRI-1293 Phase 2B: host-runtime 的真实共享执行器 (mock 透传) 会从 core
+  // barrel 取余量导出 — mock 在覆盖项之外 spread 真实 barrel。
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
   RuntimeStateManager: vi.fn().mockImplementation(function () {
     return {
       initialize: mockInitialize,
@@ -193,7 +198,8 @@ vi.mock('@principles/core/runtime', () => ({
   // values this test exercises ('en' explicit / undefined default).
   resolveOutputLanguage: vi.fn().mockImplementation((raw: unknown) =>
     (raw === 'en' ? { outputLanguage: 'en' as const } : { outputLanguage: 'zh-CN' as const })),
-}));
+  };
+});
 
 // NOTE: `../../src/config-reader.js` is deliberately NOT mocked — the REAL
 // readOutputLanguageFromWorkspace runs against the temp workspace, proving
@@ -211,10 +217,16 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
   computeFlagsFromLoadResult: vi.fn().mockReturnValue({ flags: {}, enabledChannels: [], warnings: [] }),
 }));
 
-vi.mock('@principles/host-runtime', () => ({
-  createEvaluatorRuntimeContext: vi.fn().mockReturnValue({ ok: true, gateDeps: { evaluateInSandbox: vi.fn() } }),
-  createRolloutGovernanceDeps: vi.fn().mockReturnValue({ dispatchActivation: vi.fn(), reopenRevisionTarget: vi.fn() }),
-}));
+vi.mock('@principles/host-runtime', async (importOriginal) => {
+  // PRI-1293 Phase 2B: 保留真实 executeSelectedInternalizationTask (runner
+  // 构造收编点), 只覆盖 evaluator gate 上下文与 rollout 治理接线。
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    createEvaluatorRuntimeContext: vi.fn().mockReturnValue({ ok: true, gateDeps: { evaluateInSandbox: vi.fn() } }),
+    createRolloutGovernanceDeps: vi.fn().mockReturnValue({ dispatchActivation: vi.fn(), reopenRevisionTarget: vi.fn() }),
+  };
+});
 
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
 

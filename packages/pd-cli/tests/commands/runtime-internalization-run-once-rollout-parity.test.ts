@@ -176,6 +176,15 @@ async function seedWorkspace(workspaceDir: string): Promise<RuntimeStateManager>
     [ARTIFICER_ID, 'artificer', [SCRIBE_ID], 'succeeded'],
     [EVAL_ID, 'evaluator', [ARTIFICER_ID], 'pending'],
   ];
+  // PRI-1293 Phase 3: 链挂 dreamer 根 — commit/reopen 血缘门禁要求任务可
+  // 回溯根 dreamer (种子根: 顶层 candidateId 与链 correlationId 同值)。
+  await sm.createTask({
+    taskId: 'dreamer-parity-src', taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+    diagnosticJson: JSON.stringify({
+      pi_metadata: { dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+      candidateId: 'parity',
+    }),
+  });
   for (const [id, kind, deps, status] of chain) {
     // 先 pending 建 task → lease → succeeded（lease 门只接受 pending/retry_wait）
     await sm.createTask({
@@ -183,6 +192,7 @@ async function seedWorkspace(workspaceDir: string): Promise<RuntimeStateManager>
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: deps, channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000,
         inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'parity',
+        parentTaskId: deps[0] ?? 'dreamer-parity-src',
       }),
     });
     if (status === 'succeeded') {

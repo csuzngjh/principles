@@ -1,9 +1,17 @@
 # SPEC-PD-PIPELINE-SPINE-001 — PD 核心管道主干收敛规范
 
-- **版本**：v0.9
-- **日期**：2026-11-23
-- **状态**：Draft for Owner Review（未批准；未开始生产代码实现）
+- **版本**：v0.14
+- **日期**：2026-11-28
+- **状态**：Draft for Owner Review（未批准；v0.10 为实施期评审驱动的规范回填，v0.11/v0.12/v0.13 为事实勘误与评审增补，仍待 Owner 决策与批准）
 - **修订记录**：
+  - **v0.13（第六轮评审：四项行为规范增补 + 一项勘误）**：① R4-5 勘误——`consumedRevisionCauseIds` 为无淘汰追加历史（非上限 32 FIFO）；② R4-6 增补——多后继声明同一 parent/kind/channel 必须 fail-closed `successor_integrity_conflict`；③ R4-9 增补——repair reopen 失败结构化传播 + consumer 完整遥测；④ 新增 R4-11 历史血缘回填——dependencyTaskIds≠因果血缘，Adversarial round N>1 真实父为上一轮唯一 needs_revision Evaluator，孤儿任务保持 canonical 错误分类。规范条文详见 TECH 文档。
+  - **v0.14（第七轮评审：数据完整性 / 并发安全 / 状态机一致性）**：① 新增 R4-12——Repair 身份完整验证：确定性任务 id 不证明 repairPayload 身份，两个 Seeder 复用路径与 REOPEN_SOURCE_EVALUATOR 完成路径共享核心同一验证器，身份冲突 fail-closed 且零写入，缺失血缘经全快照 CAS 回填；② 新增 R4-13——Reopen 快照生命周期：血缘回填后重读权威快照，merge 与终写 CAS 均以第二快照为准；③ 新增 R4-14——只读 lineage planner 统一 dry-run/confirm/Seeder 判定，dry-run 零写入；④ 新增 R4-15——reconciliation 完整投影 reopenedTaskId/successorTaskId/successorKind；⑤ 新增 R4-16——全部 CAS 前提含 leaseGeneration；⑥ 新增 R4-17——run-once 决策映射编译期穷尽。规范条文详见 TECH 文档。
+  - **v0.12（第五轮评审：一项事实勘误 + 三项行为规范增补）**：① R4-1 勘误——根身份双源缺失时仍接受**链一致的根自身 `correlationId`** 作第三佐证（v0.5 实现设计，原"双缺失即拒绝"与代码不符）；② R4-5 增补——`revisionCauseId` 单槽覆写缺陷修复：幂等判定读有界消费历史 `consumedRevisionCauseIds`（上限 32 FIFO），写不变量驻留 `mergePITaskMetadata` 单一重建点；③ R4-6 改写——父子扫描为唯一后继权威（直查快路径废除，修复跨链派生 id 碰撞导致的错链级联），创建路径 bounded 收敛循环（UNIQUE 重扫 → 父派生 fallback id → fail-closed `successor_id_conflict`）；④ R4-8 增补——预览复用共享只读级联判定 `planExistingSuccessorTransition`，将被级联重开的终态后继报告 `would_reopen_successor` 而非 `successor_exists`。规范条文与回归证据详见 TECH 文档。
+  - **v0.11（v0.10 事实勘误，无规范行为变更）**：评审指出 v0.10 回填条文与代码存在字段/类型名不一致，逐项核实后于 TECH 文档勘误：① R4-1 拒绝 reason 实为 `conflicting_root_identity_sources`；② R4-4 CAS 前提集修正为 `taskId` + `diagnosticJson` 逐字节 + 六项显式快照前提（含 `maxAttempts`/`leaseGeneration`，v0.10 漏列且误标 lease 字段为恒 null），`revisionCount`/`revisionCauseId` 由 `diagnosticJson` 字节相等覆盖而非独立前提；③ R4-4 幂等重放返回实为 `{ ok: true, reason: 'idempotent_replay_same_revision' }`（无 `outcome` 字段）；④ R4-6 状态枚举修正（`running` 非 `PDTaskStatus`，非终态命中含 `failed`）；⑤ R4-9 consumer cycle 机制修正（即时路径 `successorDecision` 遥测透出 + reconciliation 计 `blocked`，不存在"计入 `skipped`"的机制）；⑥ R4-10 类型名修正（实为 `SelectedInternalizationTaskRunResult`）并补全白名单精确枚举。规范意图与代码行为均未变，仅事实描述与实施对齐。
+  - **v0.10（PR #2803 实施期评审回填修订）**：
+    1. **Phase 2B/3 运行时规则回填**：实施与多轮评审确认 v0.9 未规定的 10 项内化链运行时规则（root correlationId 权威身份、parentTaskId 血缘完整性、最大父链深度 10 与**创建前**新增边检查、reopen 全快照 CAS 前提集与并发失败语义、revisionCauseId 幂等、历史终态后继按 `(parentTaskId, kind, channel)` 复用、RuleHost 时间戳 id 链与 enqueue-successors 的统一幂等、dry-run/confirm 判定逐点一致、`concurrent_modification` 独立结构化透出且不计入 already-materialized、host-runtime barrel 显式导出白名单）。规范性条文见 TECH 文档「Round 4 implementation amendment」（R4-1 至 R4-10），代码已落地并经真实持久化生产路径回归验证。
+    2. **D1/D3/D4/D5/D6 逐项核对**：全部已实施且无偏差；D6 涉及的 `executeSelectedInternalizationTask` 导出边界本轮收紧为白名单制（详见 TECH 文档核对表）。
+    3. **待 Owner 决策**：(a) RuleHost 时间戳任务 id 是否远期收敛为确定性 id（当前工程结论：无必要）；(b) 本修正案整体批准。未经 Owner 批准，Draft 状态不变。
   - **v0.9（PR #2763 第七轮独立复核修订）**：
     1. **修正 §2.3 消费者描述**：v0.8 已将桶消费者收紧为仅 `pd-cli`，§2.3 残留 "pd-cli/host-runtime" 旧表述，统一为 `pd-cli`（`diagnose.ts`/`candidate.ts`）。
     2. **闭环 `diagnose` 拒绝结果终端可观察性**：核实 `diagnose.ts` TTY 输出循环（`:1049-1079`）无 `status:'refused'` 分支，且全候选被拒时 `internalizeNextAction` 落到 `'No candidates were generated from this diagnosis.'` 误报——要求 TTY 输出 `DREAMER SEED REFUSED` + 结构化 `reason`，全部被拒时 `nextAction` 明确报告拒绝原因（不误报"未生成候选"），补 TTY 回归测试。
@@ -39,7 +47,7 @@
   - **v0.2（对抗式自审修订）**：修正 `runtimeKind` / `hostKind` 混淆；按 P2.1 删除 `createPipelineRuntime` 大门面；用探针值端到端测试替代静态字段清单；删除 `PITaskMetadata` 三分组重排。
 - **范围**：Pain → 诊断 → 候选准入与账本入库 → 内化 → 激活 → 注入/拦截 → 行为证据 这条核心链路的协作者装配、跨跳数据连通性与有效性闭环
 - **事实基线**：`origin/main@679dcc93f`。§3 的全部数字与代码锚点均在该基线上实测，复跑命令见附录 A。
-- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.9）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
+- **配套技术设计**：[SPEC-PD-PIPELINE-SPINE-001 — 配套技术设计与实施方案（v0.12）](./SPEC-PD-PIPELINE-SPINE-001-TECHNICAL-DESIGN.md)
 - **不改变**：Pain 语义、诊断/内化业务规则、Owner 审批权、任务状态机（`MVP_CORE_LOOP_CONTRACT` INV-01..08）、物理数据库布局、Workspace 数据归属
 - **关联**：
   - `docs/architecture/MVP_CORE_LOOP_CONTRACT.md`（语义基线，本 SPEC 不修改）

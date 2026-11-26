@@ -269,16 +269,31 @@ describe('catchUpCodexIngestion', () => {
     // fixture lines include the REAL user turn (line 5/6); their timestamps
     // are modernized so the rows are operational (an aged row would be
     // expired-at-write and unable to demonstrate the tombstone).
+    //
+    // Time-bomb fix (2026-11-25, PRI-1293 PR CI): the modernization target was
+    // HARDCODED to 2026-11-18 — the governance operational window is ≤7 days
+    // (governance-observation-store header), so the fixture detonated exactly
+    // 7 days later and rows became expired-at-write on EVERY run (empty
+    // `turns()`), blocking unrelated PRs. Derive the fixture day from "now"
+    // (yesterday) instead of hardcoding a calendar date.
+    const fixtureDay = (): string => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - 1);
+      return d.toISOString().slice(0, 10); // YYYY-MM-DD, inside the ≤7d window
+    };
+    const fixtureDate = fixtureDay();
+    const compactedTimestamp = `${fixtureDate}T15:30:00.000Z`;
+    const postMarkerTimestamp = `${fixtureDate}T15:35:00.000Z`;
     const fixtureLines = fs.readFileSync(transcriptPath, 'utf8').split('\n').filter((line) => line.trim().length > 0)
       .slice(0, 6)
-      .map((line) => line.replaceAll('2026-08-28', '2026-11-18'));
+      .map((line) => line.replaceAll('2026-08-28', fixtureDate));
     const normalBefore = fixtureLines.join('\n') + '\n';
     const oversizeCompacted = JSON.stringify({
-      timestamp: '2026-11-18T15:30:00.000Z', ordinal: 39, type: 'compacted',
+      timestamp: compactedTimestamp, ordinal: 39, type: 'compacted',
       payload: { replacement_history: [{ text: `HUGE-REPLACEMENT-${'x'.repeat(1_500_000)}` }] },
     }) + '\n';
     const postMarkerTurn = JSON.stringify({
-      timestamp: '2026-11-18T15:35:00.000Z', ordinal: 40, type: 'event_msg',
+      timestamp: postMarkerTimestamp, ordinal: 40, type: 'event_msg',
       payload: { type: 'item_completed', thread_id: ROOT_SESSION, turn_id: '01a048af-7777-0000-0000-000000000003', item: { type: 'UserMessage', id: 'msg_post_marker', content: [{ type: 'Text', text: 'POST-COMPACTION-TEXT' }] } },
     }) + '\n';
     const oversizeStart = Buffer.byteLength(normalBefore, 'utf8');
@@ -309,7 +324,7 @@ describe('catchUpCodexIngestion', () => {
     if (skipOutcome?.status !== 'degraded') return;
     expect(skipOutcome.reason).toBe('transcript_record_too_large');
     expect(skipOutcome.warnings.join(' ')).toContain(`transcript_record_skipped_oversized:${oversizeEnd - oversizeStart}b@${oversizeStart}->${oversizeEnd}`);
-    expect(skipOutcome.warnings.join(' ')).toContain('transcript_record_skipped_oversized_compaction_applied:2026-11-18T15:30:00.000Z');
+    expect(skipOutcome.warnings.join(' ')).toContain(`transcript_record_skipped_oversized_compaction_applied:${compactedTimestamp}`);
     expect(cp()).toBe(oversizeEnd);
     expect(turns()).toEqual([]); // pre-marker turns tombstoned by the applied compaction
 

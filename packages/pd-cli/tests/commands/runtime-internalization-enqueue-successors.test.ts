@@ -5,6 +5,7 @@ const mockListTasks = vi.hoisted(() => vi.fn());
 const mockGetTask = vi.hoisted(() => vi.fn());
 const mockCommitNextTaskProposal = vi.hoisted(() => vi.fn());
 const mockProposeNextTask = vi.hoisted(() => vi.fn());
+const mockResolveLineage = vi.hoisted(() => vi.fn());
 const mockClose = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockInitialize = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockRuntimeStateManagerOpts = vi.hoisted(() => vi.fn());
@@ -28,12 +29,22 @@ vi.mock('@principles/core/runtime', async (importOriginal) => ({
       getTask: mockGetTask,
     };
   }),
-  InternalizationOrchestrator: vi.fn().mockImplementation(function () {
-    return {
-      commitNextTaskProposal: mockCommitNextTaskProposal,
-      proposeNextTask: mockProposeNextTask,
-    };
-  }),
+  InternalizationOrchestrator: Object.assign(
+    vi.fn().mockImplementation(function () {
+      return {
+        commitNextTaskProposal: mockCommitNextTaskProposal,
+        proposeNextTask: mockProposeNextTask,
+      };
+    }),
+    // PRI-1293 review fix: the dry-run preview shares the commit gate's
+    // read-only lineage verdict — the static must exist on the mocked
+    // constructor or every preview path throws TypeError.
+    { resolveAuthoritativeCorrelationId: mockResolveLineage },
+  ),
+  // PRI-1293 R7 (P2-1): dry-run 预览改用只读 planner — 与 orchestrator
+  // 静态同一判定语义, 单测复用同一 mock  verdict 源 (返回形状兼容:
+  // ok/correlationId/parentEdgeCount/reason/detail)。
+  planLegacyLineageResolution: mockResolveLineage,
   isPeerRunnerKind: vi.fn().mockImplementation((k: string) =>
     ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'].includes(k),
   ),
@@ -158,6 +169,8 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockInitialize.mockResolvedValue(undefined);
     mockClose.mockResolvedValue(undefined);
+    // Default: lineage provable — existing tests exercise the post-gate paths.
+    mockResolveLineage.mockResolvedValue({ ok: true, correlationId: 'corr-default' });
   });
 
   afterEach(() => {
@@ -499,6 +512,72 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('PRI-1293 review fix: preview shares the commit lineage gate — unprovable lineage is a structured skip, not would_create_successor', async () => {
+    const scribeTask = makeSucceededTask('scribe-lineage-001', 'scribe');
+    mockDryRunListTasks([scribeTask]);
+    mockResolveLineage.mockResolvedValue({
+      ok: false,
+      reason: 'root_not_dreamer_candidate',
+      detail: 'chain_values:[corr-x]',
+    });
+    mockProposeNextTask.mockResolvedValue({
+      decision: 'proposal_created',
+      taskId: 'scribe-lineage-001',
+      taskKind: 'scribe',
+      proposal: { taskKind: 'artificer', channel: 'prompt', dependencyTaskIds: ['scribe-lineage-001'], inputArtifactRefs: [], parentTaskId: 'scribe-lineage-001', correlationId: 'corr-x' },
+    });
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.status).toBe('dry_run');
+    expect(output.createdCount).toBe(0);
+    expect(output.skippedCount).toBe(1);
+    expect(output.actions).toHaveLength(1);
+    expect(output.actions[0].decision).toBe('skipped');
+    expect(output.actions[0].taskId).toBe('scribe-lineage-001');
+    expect(output.actions[0].taskKind).toBe('scribe');
+    // Same structured shape the confirm path produces for lineage_refused.
+    expect(output.actions[0].reason).toContain('lineage_refused: root_not_dreamer_candidate');
+    expect(output.actions[0].reason).toContain('chain_values:[corr-x]');
+    expect(output.actions[0].nextAction).toContain('Inspect the task chain');
+    // Preview never writes: no commit, and propose is never even consulted
+    // once the gate refuses.
+    expect(mockCommitNextTaskProposal).not.toHaveBeenCalled();
+    expect(mockProposeNextTask).not.toHaveBeenCalled();
+  });
+
+  it('preview skip shape matches confirm skip shape for the same lineage refusal', async () => {
+    const scribeTask = makeSucceededTask('scribe-lineage-002', 'scribe');
+    const refusal = {
+      ok: false as const,
+      reason: 'conflicting_parent_correlation_id',
+      detail: 'chain_values:[cand-a,cand-b]',
+    };
+    // ── preview pass ──
+    mockDryRunListTasks([scribeTask]);
+    mockResolveLineage.mockResolvedValue(refusal);
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
+    const previewOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    consoleLogSpy.mockClear();
+    // ── confirm pass over the same database state ──
+    mockListTasks.mockResolvedValue([scribeTask]);
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'lineage_refused',
+      sourceTaskId: 'scribe-lineage-002',
+      reason: refusal.reason,
+      detail: refusal.detail,
+    });
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, confirm: true, json: true });
+    const confirmOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+
+    expect(previewOutput.actions[0].decision).toBe('skipped');
+    expect(confirmOutput.actions[0].decision).toBe('skipped');
+    expect(previewOutput.actions[0].reason).toBe(confirmOutput.actions[0].reason);
+    expect(previewOutput.actions[0].nextAction).toBe(confirmOutput.actions[0].nextAction);
+    expect(confirmOutput.createdCount).toBe(0);
+  });
+
   it('confirm path commitNextTaskProposal throws: skipped with reason', async () => {
     const dreamerTask = makeSucceededTask('dreamer-commit-err', 'dreamer');
     mockListTasks.mockResolvedValue([dreamerTask]);
@@ -593,7 +672,9 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
   it('dry-run existing successor with malformed metadata: skipped, not would_create_successor', async () => {
     const dreamerTask = makeSucceededTask('dreamer-malformed-succ', 'dreamer');
     const malformedSuccessor = {
-      taskId: 'philosopher-dreamer-malformed-succ-prompt',
+      // PRI-1293 R5: 生产损坏行的 id 来自 commit 的正确派生 (correlation 根),
+      // 而非预览旧错误算法的源 taskId 派生 — 夹具按真实形态修正。
+      taskId: 'philosopher-corr-malformed-prompt',
       taskKind: 'philosopher',
       status: 'pending' as const,
       attemptCount: 0,

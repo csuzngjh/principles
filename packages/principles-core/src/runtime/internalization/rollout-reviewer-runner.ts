@@ -5,7 +5,7 @@ import type {
   RunStatus,
   StartRunInput,
 } from '../runtime-protocol.js';
-import type { StoreEventEmitter } from '../store/event-emitter.js';
+import type { PeerRunnerTelemetryEmitter } from '../runner/peer-runner-types.js';
 import type { RolloutReviewerOutputV1, RolloutReviewerValidator, RolloutReviewMode } from './rollout-reviewer-output.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
@@ -13,7 +13,7 @@ import { leaseFenceOf, type LeaseFence } from '../store/lifecycle/lease-fence.js
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type PITaskMetadata, type RolloutRevisionPayload, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, hasConsumedRevisionCause, type PITaskMetadata, type RolloutRevisionPayload, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
 import {
   planOwnerVerdictOverrideResume,
   markOwnerResolutionApplied,
@@ -91,7 +91,13 @@ export function resolveRolloutReviewerRunnerOptions(options: RolloutReviewerRunn
 export interface RolloutReviewerRunnerDeps {
   readonly stateManager: RuntimeStateManager;
   readonly runtimeAdapter: PDRuntimeAdapter;
-  readonly eventEmitter: StoreEventEmitter;
+  /**
+   * PRI-1293 Phase 2B: 与其余五种 Peer Runner 对齐的遥测窄端口 (本 runner
+   * 只调用 emitTelemetry)。此前声明为具体 StoreEventEmitter 类, 使
+   * workspace-scoped sink (WorkspaceTelemetryEmitter) 无法注入 — 收编进共享
+   * 执行器后统一为窄端口 (对既有具体 emitter 调用方完全兼容的结构放宽)。
+   */
+  readonly eventEmitter: PeerRunnerTelemetryEmitter;
   readonly validator: RolloutReviewerValidator;
   readonly artifactStore: PIArtifactStore;
   /**
@@ -195,7 +201,7 @@ export class RolloutReviewerRunner {
   private readonly resolvedOptions: ResolvedRolloutReviewerRunnerOptions;
   private readonly stateManager: RuntimeStateManager;
   private readonly runtimeAdapter: PDRuntimeAdapter;
-  private readonly eventEmitter: StoreEventEmitter;
+  private readonly eventEmitter: PeerRunnerTelemetryEmitter;
   private readonly validator: RolloutReviewerValidator;
   private readonly artifactStore: PIArtifactStore;
 
@@ -1029,7 +1035,7 @@ export class RolloutReviewerRunner {
       // (crash before rollout succeeded 的重放) — 不得再次 reopen
       const targetTask = await this.stateManager.getTask(target.taskId);
       const targetPi = targetTask ? hydratePITaskRecord(targetTask) : null;
-      if (targetPi && targetPi.revisionCauseId === causeId) {
+      if (targetPi && hasConsumedRevisionCause(targetPi, causeId)) {
         this.emitRolloutReviewerEvent('rollout_revision_already_materialized', ctx.taskId, {
           targetTaskId: target.taskId,
           revisionIteration: iteration,

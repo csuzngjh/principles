@@ -114,9 +114,18 @@ function scriptedAdapter(payload: unknown, runId: string, onStart?: () => void):
 }
 
 async function setupChain(channel: 'prompt' | 'code_tool_hook' = 'prompt'): Promise<string> {
+  // PRI-1293 Phase 3: 血缘可证明的链 — commit/reopen 血缘门禁要求任务可回溯
+  // 根 dreamer (种子根 + parentTaskId 线性挂链)。
+  await stateManager.createTask({
+    taskId: 'dreamer-p758-src', taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+    diagnosticJson: JSON.stringify({
+      pi_metadata: { dependencyTaskIds: [], channel, timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+      candidateId: 'p758',
+    }),
+  });
   await stateManager.createTask({
     taskId: PHILOSOPHER_ID, taskKind: 'philosopher', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
-    diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [], channel, timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+    diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [], channel, timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: 'dreamer-p758-src', correlationId: 'p758' }),
   });
   await store.upsertArtifact({
     artifactId: PHILOSOPHER_ART, artifactKind: 'principle', sourceTaskId: PHILOSOPHER_ID,
@@ -126,7 +135,7 @@ async function setupChain(channel: 'prompt' | 'code_tool_hook' = 'prompt'): Prom
   });
   await stateManager.createTask({
     taskId: SCRIBE_ID, taskKind: 'scribe', status: 'pending', attemptCount: 0, maxAttempts: 3,
-    diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [PHILOSOPHER_ID], channel, timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+    diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [PHILOSOPHER_ID], channel, timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: PHILOSOPHER_ID, correlationId: 'p758' }),
   });
   const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: SCRIBE_ID, owner: 'p758', runtimeKind: 'test-double' });
   await stateManager.markTaskSucceeded(SCRIBE_ID, undefined, { taskId: SCRIBE_ID, owner: 'p758', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
@@ -151,7 +160,7 @@ async function setupChain(channel: 'prompt' | 'code_tool_hook' = 'prompt'): Prom
   });
   await stateManager.createTask({
     taskId: ART_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
-    diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [SCRIBE_ID], channel, timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+    diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [SCRIBE_ID], channel, timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: SCRIBE_ID, correlationId: 'p758' }),
   });
   return ART_ID;
 }
@@ -265,7 +274,7 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
     await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease2.leaseGeneration }, __lease2.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: ART_ID, correlationId: 'p758' }),
     });
 
     const seeds: string[] = [];
@@ -296,7 +305,7 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
     await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease3.leaseGeneration }, __lease3.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'code_tool_hook', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'code_tool_hook', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: ART_ID, correlationId: 'p758' }),
     });
 
     const seeds: string[] = [];
@@ -319,7 +328,7 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
     await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease4.leaseGeneration }, __lease4.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: ART_ID, correlationId: 'p758' }),
     });
 
     const calls: string[] = [];
@@ -375,7 +384,7 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
     await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease5.leaseGeneration }, __lease5.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: ART_ID, correlationId: 'p758' }),
     });
 
     const calls: string[] = [];
@@ -399,7 +408,7 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
     await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease6.leaseGeneration }, __lease6.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: ART_ID, correlationId: 'p758' }),
     });
 
     const calls: string[] = [];
@@ -446,7 +455,7 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
     await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease7.leaseGeneration }, __lease7.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'code_tool_hook', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+      diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'code_tool_hook', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: ART_ID, correlationId: 'p758' }),
     });
 
     const calls: string[] = [];

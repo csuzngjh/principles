@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { TaskRecord } from '../../task-status.js';
 import { decideInternalizationTransition, transitionInputFromTask } from '../internalization-transition-decision.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson } from '../pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, PI_METADATA_KEY } from '../pitask-metadata.js';
 import type { PITaskMetadata, RepairPayload } from '../pitask-metadata.js';
 
 // ── 纯决策单元 ───────────────────────────────────────────────────────────────
@@ -136,6 +136,31 @@ function makeRepairPayload(iteration: number, evaluatorTaskId: string): RepairPa
   };
 }
 
+/**
+ * PRI-1293 Phase 3: 血缘可证明的 dreamer 根 — 本文件的 commit/reopen 夹具
+ * 链此前止步于 evaluator/rollout (根非 dreamer, 不可证明), 新血缘门禁按设计
+ * 拒绝。这些测试验证的是 verdict 迁移语义而非血缘, 因此夹具补齐 dreamer 根
+ * (taskId 非 UUID + seed 顶层 candidateId) 让链可证明, 断言保持不变。
+ */
+function makeDreamerTask(taskId: string, candidateId: string): TaskRecord {
+  return {
+    taskId,
+    taskKind: 'dreamer',
+    status: 'succeeded',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    attemptCount: 1,
+    maxAttempts: 3,
+    diagnosticJson: JSON.stringify({
+      [PI_METADATA_KEY]: {
+        dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain',
+        timeoutMs: 60_000, inputArtifactRefs: [], outputArtifactRefs: [],
+      },
+      candidateId,
+    }),
+  };
+}
+
 describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockStateManager: any;
@@ -153,6 +178,13 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
       })),
       updateTask: vi.fn().mockResolvedValue(undefined),
       updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined),
+      // PRI-1293 review fix: revision reopen 的写入改经 CAS 路径。mock 转发到
+      // updateTask — 既有"单行原子写"断言 (status+attemptCount+metadata 同参)
+      // 语义保持; 前提校验由 MemoryTaskStore-backed harness 与集成测试覆盖。
+      updateTaskIfDiagnosticJsonUnchanged: vi.fn().mockImplementation(async (taskId: string, _expected: string | null, patch: Record<string, unknown>) => {
+        await mockStateManager.updateTask(taskId, patch);
+        return makeTask({ taskId, taskKind: 'evaluator', status: 'pending' });
+      }),
     };
     const mod = await import('../internalization-orchestrator.js');
     OrchestratorClass = mod.InternalizationOrchestrator;
@@ -181,9 +213,13 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
   it('evaluator approved → 正常 seed rollout_reviewer', async () => {
     const evaluatorTask = makeTask({
       taskId: 'evaluator-cand-2-prompt', taskKind: 'evaluator', status: 'succeeded',
-      meta: makeMeta({ runnerDecision: 'approved', correlationId: 'cand-2' }),
+      meta: makeMeta({ runnerDecision: 'approved', correlationId: 'cand-2', parentTaskId: 'dreamer-cand-2-prompt' }),
     });
-    mockStateManager.getTask.mockResolvedValue(evaluatorTask);
+    mockStateManager.getTask.mockImplementation(async (id: string) => {
+      if (id === 'evaluator-cand-2-prompt') return evaluatorTask;
+      if (id === 'dreamer-cand-2-prompt') return makeDreamerTask('dreamer-cand-2-prompt', 'cand-2');
+      return null;
+    });
     mockStateManager.listTasks.mockResolvedValue([]);
 
     const result = await makeOrchestrator().commitNextTaskProposal('evaluator-cand-2-prompt');
@@ -210,24 +246,25 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
   it('artificer repair 完成 → revision_reopened: 来源 evaluator 被重开且 dep 指向 repair 任务', async () => {
     const evaluatorTask = makeTask({
       taskId: 'evaluator-cand-4-prompt', taskKind: 'evaluator', status: 'succeeded',
-      meta: makeMeta({ dependencyTaskIds: ['artificer-cand-4-prompt', 'scribe-cand-4-prompt'] }),
+      meta: makeMeta({ dependencyTaskIds: ['artificer-cand-4-prompt', 'scribe-cand-4-prompt'], parentTaskId: 'dreamer-cand-4-prompt' }),
     });
     const originalArtificer = makeTask({
       taskId: 'artificer-cand-4-prompt', taskKind: 'artificer', status: 'succeeded',
-      meta: makeMeta({ dependencyTaskIds: ['scribe-cand-4-prompt'] }),
+      meta: makeMeta({ dependencyTaskIds: ['scribe-cand-4-prompt'], parentTaskId: 'dreamer-cand-4-prompt' }),
     });
     const repairTask = makeTask({
-      taskId: 'artificer-repair-xyz', taskKind: 'artificer', status: 'succeeded',
+      taskId: 'artificer-repair-evaluator-cand-4-prompt-r1', taskKind: 'artificer', status: 'succeeded',
       meta: makeMeta({ repairPayload: makeRepairPayload(1, 'evaluator-cand-4-prompt') }),
     });
     mockStateManager.getTask.mockImplementation(async (id: string) => {
-      if (id === 'artificer-repair-xyz') return repairTask;
+      if (id === 'artificer-repair-evaluator-cand-4-prompt-r1') return repairTask;
       if (id === 'evaluator-cand-4-prompt') return evaluatorTask;
       if (id === 'artificer-cand-4-prompt') return originalArtificer;
+      if (id === 'dreamer-cand-4-prompt') return makeDreamerTask('dreamer-cand-4-prompt', 'cand-4');
       return null;
     });
 
-    const result = await makeOrchestrator().commitNextTaskProposal('artificer-repair-xyz');
+    const result = await makeOrchestrator().commitNextTaskProposal('artificer-repair-evaluator-cand-4-prompt-r1');
 
     expect(result.decision).toBe('revision_reopened');
     expect(result.reopenedTaskId).toBe('evaluator-cand-4-prompt');
@@ -241,7 +278,7 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
     // dep 替换: 原 artificer dep 移除, repair 任务成为唯一 artificer dep
     const writtenJson = reopenCall1?.diagnosticJson as string;
     const parsed = JSON.parse(writtenJson) as { pi_metadata: { dependencyTaskIds: string[]; revisionCount?: number } };
-    expect(parsed.pi_metadata.dependencyTaskIds).toContain('artificer-repair-xyz');
+    expect(parsed.pi_metadata.dependencyTaskIds).toContain('artificer-repair-evaluator-cand-4-prompt-r1');
     expect(parsed.pi_metadata.dependencyTaskIds).not.toContain('artificer-cand-4-prompt');
     expect(parsed.pi_metadata.dependencyTaskIds).toContain('scribe-cand-4-prompt'); // scribe 依赖保留
     expect(parsed.pi_metadata.revisionCount).toBe(1);
@@ -252,17 +289,21 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
   it('revision wave 级联: evaluator(revisionCount>0) re-succeed → 已 succeeded 的 rollout 被 reopen', async () => {
     const evaluatorTask = makeTask({
       taskId: 'evaluator-cand-5-prompt', taskKind: 'evaluator', status: 'succeeded',
-      meta: makeMeta({ runnerDecision: 'approved', correlationId: 'cand-5', revisionCount: 1 }),
+      meta: makeMeta({ runnerDecision: 'approved', correlationId: 'cand-5', revisionCount: 1, parentTaskId: 'dreamer-cand-5-prompt' }),
     });
     const rolloutTask = makeTask({
       taskId: 'rollout_reviewer-cand-5-prompt', taskKind: 'rollout_reviewer', status: 'succeeded',
-      meta: makeMeta({ dependencyTaskIds: ['evaluator-cand-5-prompt'] }),
+      meta: makeMeta({ dependencyTaskIds: ['evaluator-cand-5-prompt'], parentTaskId: 'evaluator-cand-5-prompt' }),
     });
     mockStateManager.getTask.mockImplementation(async (id: string) => {
       if (id === 'evaluator-cand-5-prompt') return evaluatorTask;
       if (id === 'rollout_reviewer-cand-5-prompt') return rolloutTask;
+      if (id === 'dreamer-cand-5-prompt') return makeDreamerTask('dreamer-cand-5-prompt', 'cand-5');
       return null;
     });
+    // PRI-1293 R5: 父子扫描是唯一后继权威 (直查快路径已废除) — mock 必须经
+    // listTasks 服务链上行, 扫描才能命中 (parentTaskId/kind/channel 三元匹配)。
+    mockStateManager.listTasks.mockResolvedValue([evaluatorTask, rolloutTask]);
 
     const result = await makeOrchestrator().commitNextTaskProposal('evaluator-cand-5-prompt');
 
@@ -280,17 +321,20 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
   it('无 revision 的幂等重扫: succeeded 后继存在 → successor_exists (不级联, 保持旧行为)', async () => {
     const evaluatorTask = makeTask({
       taskId: 'evaluator-cand-6-prompt', taskKind: 'evaluator', status: 'succeeded',
-      meta: makeMeta({ runnerDecision: 'approved', correlationId: 'cand-6' }),
+      meta: makeMeta({ runnerDecision: 'approved', correlationId: 'cand-6', parentTaskId: 'dreamer-cand-6-prompt' }),
     });
     const rolloutTask = makeTask({
       taskId: 'rollout_reviewer-cand-6-prompt', taskKind: 'rollout_reviewer', status: 'succeeded',
-      meta: makeMeta({ dependencyTaskIds: ['evaluator-cand-6-prompt'] }),
+      meta: makeMeta({ dependencyTaskIds: ['evaluator-cand-6-prompt'], parentTaskId: 'evaluator-cand-6-prompt' }),
     });
     mockStateManager.getTask.mockImplementation(async (id: string) => {
       if (id === 'evaluator-cand-6-prompt') return evaluatorTask;
       if (id === 'rollout_reviewer-cand-6-prompt') return rolloutTask;
+      if (id === 'dreamer-cand-6-prompt') return makeDreamerTask('dreamer-cand-6-prompt', 'cand-6');
       return null;
     });
+    // PRI-1293 R5: 同上 — 扫描权威时代 mock 必须经 listTasks 服务链上行。
+    mockStateManager.listTasks.mockResolvedValue([evaluatorTask, rolloutTask]);
     // 真实 store 的 UNIQUE 约束: 同 id 任务已存在 → createTask 抛错
     mockStateManager.createTask.mockImplementation(async (input: { taskId: string; taskKind: string }) => {
       if (input.taskId === 'rollout_reviewer-cand-6-prompt') {
@@ -308,9 +352,13 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
   it('reopenTaskForRevision 幂等: 目标已 pending → ok 且不重复递增', async () => {
     const evaluatorTask = makeTask({
       taskId: 'evaluator-cand-7-prompt', taskKind: 'evaluator', status: 'pending',
-      meta: makeMeta({ revisionCount: 1 }),
+      meta: makeMeta({ revisionCount: 1, parentTaskId: 'dreamer-cand-7-prompt' }),
     });
-    mockStateManager.getTask.mockResolvedValue(evaluatorTask);
+    mockStateManager.getTask.mockImplementation(async (id: string) => {
+      if (id === 'evaluator-cand-7-prompt') return evaluatorTask;
+      if (id === 'dreamer-cand-7-prompt') return makeDreamerTask('dreamer-cand-7-prompt', 'cand-7');
+      return null;
+    });
 
     const orchestrator = makeOrchestrator();
     const r1 = await orchestrator.reopenTaskForRevision('evaluator-cand-7-prompt', { reason: 'idempotent-check' });

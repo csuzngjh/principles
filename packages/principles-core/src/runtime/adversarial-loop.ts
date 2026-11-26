@@ -85,6 +85,13 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
   for (let round = 1; round <= maxRounds; round += 1) {
     // ── Round N: Artificer ──
     const artificerTaskId = `${correlation}-artificer-r${round}-${Date.now().toString(36)}`;
+    // PRI-1293 review fix: persist the REAL causal parent so the parentTaskId
+    // lineage stays walkable end-to-end (the repair seeder's lineage gate
+    // fails closed on dependency-only chains). Round 1 is caused by the
+    // scribe; round N>1 exists because round N-1's evaluator demanded
+    // revision — mirroring the lease-based repair flow whose repair artificer
+    // is parented on the source evaluator.
+    const artificerParentTaskId = round === 1 ? input.scribeTaskId : lastEvaluatorTaskId;
     try {
       await input.stateManager.createTask({
         taskId: artificerTaskId,
@@ -99,6 +106,7 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
           inputArtifactRefs: [],
           outputArtifactRefs: [],
           adversarialFeedback,
+          parentTaskId: artificerParentTaskId,
         }),
       });
     } catch (createErr) {
@@ -241,6 +249,10 @@ async function createEvaluatorTask(
       timeoutMs: 300_000,
       inputArtifactRefs: [],
       outputArtifactRefs: [],
+      // PRI-1293 review fix: the evaluator's causal parent is the same-round
+      // artificer — without it the parentTaskId chain breaks here and repair
+      // seeding is refused for legitimate synchronous evaluations.
+      parentTaskId: artificerTaskId,
     }),
   });
 }

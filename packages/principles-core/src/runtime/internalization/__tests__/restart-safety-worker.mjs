@@ -64,7 +64,7 @@ const j11LedgerIdentity = {
 };
 
 const EVAL_ID = 'evaluator-j11-prompt';
-const REPAIR_ID = 'artificer-repair-j11-1';
+const REPAIR_ID = 'artificer-repair-evaluator-j11-prompt-r1';
 const ROLLOUT_ID = 'rollout_reviewer-j11-prompt';
 const SCRIBE_ID = 'scribe-j11-prompt';
 const ORIGINAL_ARTIFICER_ID = 'artificer-j11-prompt';
@@ -116,11 +116,20 @@ async function main() {
   };
 
   if (stage === 'seed') {
-    await stateManager.createTask({ taskId: SCRIBE_ID, taskKind: 'scribe', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ correlationId: 'j11' }) });
+    // PRI-1293 Phase 3: 血缘可证明的链 — commit/reopen 血缘门禁要求任务可回溯
+    // 根 dreamer (种子根 + parentTaskId 线性挂链)。
+    await stateManager.createTask({
+      taskId: 'dreamer-j11-src', taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        pi_metadata: { dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+        candidateId: 'j11',
+      }),
+    });
+    await stateManager.createTask({ taskId: SCRIBE_ID, taskKind: 'scribe', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ correlationId: 'j11', parentTaskId: 'dreamer-j11-src' }) });
     await succeedFenced(SCRIBE_ID);
-    await stateManager.createTask({ taskId: ORIGINAL_ARTIFICER_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ dependencyTaskIds: [SCRIBE_ID], correlationId: 'j11' }) });
+    await stateManager.createTask({ taskId: ORIGINAL_ARTIFICER_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ dependencyTaskIds: [SCRIBE_ID], correlationId: 'j11', parentTaskId: SCRIBE_ID }) });
     await succeedFenced(ORIGINAL_ARTIFICER_ID);
-    await stateManager.createTask({ taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ dependencyTaskIds: [ORIGINAL_ARTIFICER_ID], correlationId: 'j11' }) });
+    await stateManager.createTask({ taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ dependencyTaskIds: [ORIGINAL_ARTIFICER_ID], correlationId: 'j11', parentTaskId: ORIGINAL_ARTIFICER_ID }) });
     await succeedFenced(EVAL_ID);
     const t = await stateManager.getTask(EVAL_ID);
     const pi = hydratePITaskRecord(t);
@@ -128,7 +137,9 @@ async function main() {
     await stateManager.createTask({
       taskId: REPAIR_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: meta({
-        dependencyTaskIds: [SCRIBE_ID], correlationId: 'j11',
+        // PRI-1293 R7: repair 的 causal parent 是来源 evaluator (生产语义),
+        // 依赖输入仍是 scribe — 二者不可混同。
+        dependencyTaskIds: [SCRIBE_ID], correlationId: 'j11', parentTaskId: EVAL_ID,
         repairPayload: { requiredChanges: ['fix guard'], concerns: [], previousScore: 0.4, repairIteration: 1, sourceArtificerArtifactId: 'pi-art-a-j11', sourceEvaluatorTaskId: EVAL_ID },
       }),
     });
@@ -166,7 +177,7 @@ async function main() {
     if (!existingRollout) {
       await stateManager.createTask({
         taskId: ROLLOUT_ID, taskKind: 'rollout_reviewer', status: 'pending', attemptCount: 0, maxAttempts: 3,
-        diagnosticJson: meta({ dependencyTaskIds: [EVAL_ID], correlationId: 'j11' }),
+        diagnosticJson: meta({ dependencyTaskIds: [EVAL_ID], correlationId: 'j11', parentTaskId: EVAL_ID }),
       });
     }
     // artifacts 先落 SQLite(幂等),真实形状 (P0-1):

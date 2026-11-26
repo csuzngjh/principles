@@ -61,7 +61,13 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
   }),
 }));
 
-vi.mock('@principles/core/runtime', () => ({
+vi.mock('@principles/core/runtime', async (importOriginal) => {
+  // PRI-1293 Phase 2B: host-runtime 的真实共享执行器 (mock 透传) 会从 core
+  // barrel 取余量导出 (如 RECOVERY_CONTROL_SURFACES) — mock 必须在覆盖项之
+  // 外 spread 真实 barrel, 否则经 host-runtime dist 的传递导入会缺符号。
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
   RuntimeStateManager: vi.fn().mockImplementation(function () {
     return {
       initialize: mockInitialize,
@@ -197,7 +203,8 @@ vi.mock('@principles/core/runtime', () => ({
     rollout_reviewer: 'rolloutReviewer',
   },
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
-}));
+  };
+});
 
 vi.mock('../../src/config-reader.js', () => ({
   readOutputLanguageFromWorkspace: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
@@ -235,11 +242,18 @@ const { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mock
   });
   return { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mockResolveWorkspaceHostToolSemantics };
 });
-vi.mock('@principles/host-runtime', () => ({
-  createEvaluatorRuntimeContext: mockCreateEvaluatorRuntimeContext,
-  createRolloutGovernanceDeps: mockCreateRolloutGovernanceDeps,
-  resolveWorkspaceHostToolSemantics: mockResolveWorkspaceHostToolSemantics,
-}));
+vi.mock('@principles/host-runtime', async (importOriginal) => {
+  // PRI-1293 Phase 2B: runner 构造收编进 host-runtime 的共享执行器 — mock
+  // 必须保留真实 executeSelectedInternalizationTask (core 层 Runner mock 经
+  // 它触达), 只覆盖本文件关注的宿主接线。
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    createEvaluatorRuntimeContext: mockCreateEvaluatorRuntimeContext,
+    createRolloutGovernanceDeps: mockCreateRolloutGovernanceDeps,
+    resolveWorkspaceHostToolSemantics: mockResolveWorkspaceHostToolSemantics,
+  };
+});
 
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
 
@@ -728,6 +742,44 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.enqueueDecision).toBe('no_successor');
+    expect(output.successorTaskIds).toEqual([]);
+  });
+
+  it('auto-enqueue: lineage_refused surfaces the structured refusal — never folded into Unexpected decision, never advised to skip enqueue', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-enq-lineage',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-enq-lineage',
+      runId: 'run-enq-lineage',
+      artifactId: 'pi-art-enq-lineage',
+      resultRef: 'dreamer://run-enq-lineage',
+      contextHash: 'ctx-enq-lineage',
+      output: { valid: true, taskId: 'task-dreamer-enq-lineage', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'lineage_refused',
+      sourceTaskId: 'task-dreamer-enq-lineage',
+      reason: 'conflicting_parent_correlation_id',
+      detail: 'chain_values:[cand-a,cand-b]',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.enqueueDecision).toBe('lineage_refused');
+    expect(output.enqueueReason).toContain('lineage_refused: conflicting_parent_correlation_id');
+    expect(output.enqueueReason).toContain('chain_values:[cand-a,cand-b]');
+    expect(output.enqueueReason).not.toContain('Unexpected commitNextTaskProposal decision');
+    expect(output.nextAction).toContain('parentTaskId');
+    expect(output.nextAction).not.toContain('--no-enqueue-next');
+    expect(output.successorTasksCreated).toBe(0);
     expect(output.successorTaskIds).toEqual([]);
   });
 

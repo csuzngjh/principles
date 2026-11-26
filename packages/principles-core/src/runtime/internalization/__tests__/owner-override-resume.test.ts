@@ -34,9 +34,34 @@ const RUN_ID = 'run-evaluator-001';
 const EVAL_ARTIFACT_ID = `pi-art-${EVAL_ID}-${RUN_ID}`;
 const SCRIBE_ARTIFACT_ID = 'pi-art-scribe-001';
 
+// PRI-1293 Phase 3: 血缘可证明的 dreamer 根 — 修复轮完成后的来源 evaluator
+// reopen 走新的血缘门禁, 夹具链必须可回溯根 dreamer (taskId 非 UUID + seed
+// 顶层 candidateId)。
+const RESUME_DREAMER_ROOT = 'dreamer-resume-root';
+
+function dreamerRootTask(): TaskRecord {
+  return {
+    taskId: RESUME_DREAMER_ROOT,
+    taskKind: 'dreamer',
+    status: 'succeeded',
+    attemptCount: 1,
+    maxAttempts: 3,
+    createdAt: '2026-08-28T00:00:00.000Z',
+    updatedAt: '2026-08-28T00:00:00.000Z',
+    diagnosticJson: JSON.stringify({
+      pi_metadata: {
+        dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+      },
+      candidateId: 'cand-resume-root',
+    }),
+  };
+}
+
 function meta(overrides: Partial<PITaskMetadata> = {}): PITaskMetadata {
   return {
     dependencyTaskIds: [ARTIFER_ID],
+    parentTaskId: RESUME_DREAMER_ROOT,
     channel: 'prompt',
     timeoutMs: 300_000,
     inputArtifactRefs: [],
@@ -129,6 +154,10 @@ function makeHarness(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore) {
     async getRunsByTask(id: string) { return [...runs.values()].filter((r) => r.taskId === id); },
     async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+    // eslint-disable-next-line @typescript-eslint/max-params -- 镜像生产 stateManager CAS 签名 (第4参为前提)。
+    async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
+      return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+    },
     async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
     async markTaskFailed(id: string, lastError: TaskRecord['lastError']) { await store.updateTask(id, { status: 'failed' as const, lastError }); },
     getRetryPolicy: () => ({ shouldRetry: () => false }),
@@ -163,6 +192,8 @@ const artificerR2 = task({
   status: 'succeeded',
   meta: meta({
     dependencyTaskIds: [SCRIBE_ID],
+    parentTaskId: EVAL_ID,
+    correlationId: 'cand-resume-root',
     repairPayload: {
       requiredChanges: ['fix timeout'], concerns: ['c1'], previousScore: 0.7,
       repairIteration: 2, sourceArtificerArtifactId: 'pi-art-artificer-old', sourceEvaluatorTaskId: EVAL_ID,
@@ -288,6 +319,10 @@ function rolloutHarness(res: OwnerResolutionRecord, dispatchDecision: string | n
     async getRunsByTask(id: string) { return [...runs.values()].filter((r) => r.taskId === id); },
     async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+    // eslint-disable-next-line @typescript-eslint/max-params -- 镜像生产 stateManager CAS 签名 (第4参为前提)。
+    async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
+      return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+    },
     async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
     getRetryPolicy: () => ({ shouldRetry: () => false }),
   });
@@ -295,7 +330,7 @@ function rolloutHarness(res: OwnerResolutionRecord, dispatchDecision: string | n
     {
       stateManager: stateManager,
       runtimeAdapter: { startRun, pollRun: vi.fn(), fetchOutput: vi.fn(), cancelRun: vi.fn() } as never,
-      eventEmitter: { emitTelemetry: vi.fn() } as never,
+      eventEmitter: { emitTelemetry: vi.fn() },
       artifactStore: artifacts,
       validator: new DefaultRolloutReviewerValidator(),
       ...(dispatchDecision !== null ? { dispatchActivation } : {}),
@@ -373,6 +408,8 @@ describe('PRI-629 P0: epoch-aware repair reopen (SPEC §12)', () => {
       status: 'succeeded',
       meta: meta({
         dependencyTaskIds: [SCRIBE_ID],
+        parentTaskId: EVAL_ID,
+        correlationId: 'cand-resume-root',
         revisionCount: artificerRevisionCount,
         repairPayload: {
           requiredChanges: ['fix'], concerns: [], previousScore: 0.7, repairIteration: 2,
@@ -381,12 +418,16 @@ describe('PRI-629 P0: epoch-aware repair reopen (SPEC §12)', () => {
       }),
     });
     const store = new MemoryTaskStore();
-    for (const t of [evalTask, repair, scribeTask]) void store.createTask({ ...t });
+    for (const t of [dreamerRootTask(), evalTask, repair, scribeTask]) void store.createTask({ ...t });
     const stateManager = {
       async getTask(id: string) { return store.getTask(id); },
       async listTasks() { return [] as TaskRecord[]; },
       async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
       async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+      // eslint-disable-next-line @typescript-eslint/max-params -- 镜像生产 stateManager CAS 签名 (第4参为前提)。
+      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
+        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+      },
       async getRunsByTask() { return []; },
     };
     return { orchestrator: new InternalizationOrchestrator({ stateManager: stateManager as never }, { owner: 'test', runtimeKind: 'test' }), store };
@@ -439,7 +480,7 @@ describe('PRI-718: stale repair completion must not downgrade the evaluator dep'
       taskKind: 'artificer',
       status: 'succeeded',
       meta: meta({
-        dependencyTaskIds: [SCRIBE_ID], repairPayload: repairPayloadFor(1),
+        dependencyTaskIds: [SCRIBE_ID], parentTaskId: EVAL_ID, correlationId: 'cand-resume-root', repairPayload: repairPayloadFor(1),
       }),
     });
     const r2 = task({
@@ -447,16 +488,20 @@ describe('PRI-718: stale repair completion must not downgrade the evaluator dep'
       taskKind: 'artificer',
       status: 'succeeded',
       meta: meta({
-        dependencyTaskIds: [SCRIBE_ID], repairPayload: repairPayloadFor(2),
+        dependencyTaskIds: [SCRIBE_ID], parentTaskId: EVAL_ID, correlationId: 'cand-resume-root', repairPayload: repairPayloadFor(2),
       }),
     });
     const store = new MemoryTaskStore();
-    for (const t of [evalTask, r1, r2, scribeTask]) void store.createTask({ ...t });
+    for (const t of [dreamerRootTask(), evalTask, r1, r2, scribeTask]) void store.createTask({ ...t });
     const stateManager = {
       async getTask(id: string) { return store.getTask(id); },
       async listTasks() { return [] as TaskRecord[]; },
       async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
       async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+      // eslint-disable-next-line @typescript-eslint/max-params -- 镜像生产 stateManager CAS 签名 (第4参为前提)。
+      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
+        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+      },
       async getRunsByTask() { return []; },
     };
     return {

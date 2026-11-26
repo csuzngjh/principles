@@ -56,7 +56,7 @@ describe('Journey 11 — Restart Safety (独立 Worker 逐阶段推进)', () => 
       // ── Worker 1: seed (evaluator needs_revision + repair seeded) ──
       const s1 = await runStage(workspaceDir, 'seed');
       expect(s1.tasks['evaluator-j11-prompt']).toBe('succeeded');
-      expect(s1.tasks['artificer-repair-j11-1']).toBe('pending');
+      expect(s1.tasks['artificer-repair-evaluator-j11-prompt-r1']).toBe('pending');
       expect(s1.approvals).toBe(0);
       expect(s1.activations.length).toBe(0);
 

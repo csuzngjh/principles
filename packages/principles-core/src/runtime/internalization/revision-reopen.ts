@@ -10,10 +10,15 @@
 import type { TaskRecord } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PITaskRecord } from './peer-runner-contracts.js';
+import { isPeerRunnerKind } from './peer-runner-contracts.js';
+// PRI-1293 Phase 3: reopen 与 commit 共享同一唯一血缘权威 (§5.3 — 只包
+// orchestrator wrapper 不合格; 此处是四条生产 reopen 路径的共同核心)。
+import { resolveAuthoritativeCorrelationIdWithLegacyBackfill } from './correlation-lineage.js';
 import {
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
   mergePITaskMetadata,
+  hasConsumedRevisionCause,
   type PITaskMetadata,
 } from './pitask-metadata.js';
 
@@ -31,6 +36,55 @@ export function buildRepairRevisionCauseId(task: PITaskRecord): string {
   return rc === 0
     ? `repair-${task.taskId}`
     : `repair-${task.taskId}-rc${rc}`;
+}
+
+/**
+ * PRI-1293 R5: 级联 wave 的因果标识——单一构造点。
+ * 此前格式内联在 orchestrator 级联块, 预览/消费方无法复用同一推导。
+ */
+export function buildCascadeRevisionCauseId(sourceTaskId: string, sourceRevisionCount: number, cascadeTargetTaskId: string): string {
+  return `cascade-${sourceTaskId}-rc${sourceRevisionCount}-${cascadeTargetTaskId}`;
+}
+
+/**
+ * PRI-1293 R5 (预览漏报重开): 已存在后继的迁移判定——**唯一只读计划入口**。
+ * commit 路径 (internalization-orchestrator) 与 dry-run 预览
+ * (pd-cli enqueue-successors) 必须经本函数获得同一判定:
+ *   - exists_plain:               非终态后继, 或源未经历 revision (rc=0)
+ *                                 — confirm 只报告 successor_exists, 零写入;
+ *   - cascade_reopen:             终态后继 + 源 rc>0 + 本 wave cause 未消费
+ *                                 — confirm 将 reopen 该后继 (清除旧 verdict,
+ *                                 重置 status/attemptCount), 预览必须显式
+ *                                 报告 would_reopen 而非 successor_exists;
+ *   - cascade_already_materialized: 本 wave cause 已消费 (含历史折入后的
+ *                                 成员判定) — confirm 幂等 no-op, 零写入。
+ * 纯函数不读不写 store; 调用方负责 hydrate 后继并提供字段。
+ */
+export type ExistingSuccessorTransitionPlan =
+  | { readonly plan: 'exists_plain' }
+  | { readonly plan: 'cascade_reopen'; readonly cascadeCauseId: string }
+  | { readonly plan: 'cascade_already_materialized'; readonly cascadeCauseId: string };
+
+export function planExistingSuccessorTransition(input: {
+  readonly sourceTaskId: string;
+  readonly sourceRevisionCount: number;
+  readonly successorTaskId: string;
+  readonly successorStatus: string;
+  readonly successorRevisionCauseId?: string | undefined;
+  readonly successorConsumedRevisionCauseIds?: readonly string[] | undefined;
+}): ExistingSuccessorTransitionPlan {
+  const terminal = input.successorStatus === 'succeeded' || input.successorStatus === 'needs_human_review';
+  if (!terminal || input.sourceRevisionCount <= 0) {
+    return { plan: 'exists_plain' };
+  }
+  const cascadeCauseId = buildCascadeRevisionCauseId(input.sourceTaskId, input.sourceRevisionCount, input.successorTaskId);
+  if (hasConsumedRevisionCause(
+    { revisionCauseId: input.successorRevisionCauseId, consumedRevisionCauseIds: input.successorConsumedRevisionCauseIds },
+    cascadeCauseId,
+  )) {
+    return { plan: 'cascade_already_materialized', cascadeCauseId };
+  }
+  return { plan: 'cascade_reopen', cascadeCauseId };
 }
 
 export interface ReopenRevisionOptions {
@@ -57,7 +111,7 @@ export async function reopenTaskForRevision(
   stateManager: RuntimeStateManager,
   taskId: string,
   options?: ReopenRevisionOptions,
-): Promise<{ ok: boolean; reason: string }> {
+): Promise<{ ok: boolean; reason: string; detail?: string }> {
   const rawTask = await stateManager.getTask(taskId);
   if (!rawTask) {
     return { ok: false, reason: 'task_not_found' };
@@ -71,7 +125,9 @@ export async function reopenTaskForRevision(
   // 是两次写,两写之间 crash 会留下 "terminal 状态 + 已写 causeId" 的残留,
   // 重放会再递增 revisionCount (破坏一次点击 = 一个 revision epoch)。
   // 单行原子写 + 全状态同因 no-op 双保险。
-  if (options?.revisionCauseId && piTask.revisionCauseId === options.revisionCauseId) {
+  // PRI-1293 R5: 幂等判定读消费历史而非单槽——单槽会被独立因果流
+  // (cascade/repair/owner) 覆盖, 覆盖后旧 cause 的保护失效。
+  if (options?.revisionCauseId && hasConsumedRevisionCause(piTask, options.revisionCauseId)) {
     return { ok: true, reason: 'idempotent_replay_same_revision' };
   }
   if (rawTask.status === 'pending' || rawTask.status === 'retry_wait') {
@@ -80,22 +136,108 @@ export async function reopenTaskForRevision(
     return { ok: false, reason: `task_in_flight_${rawTask.status}` };
   }
 
-  const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
+  // ── PRI-1293 Phase 3: 血缘门禁 (所有生产 reopen 路径的同一关口) ──
+  // 覆盖: Owner revise_once (owner-resolution 直接调本函数)、rollout
+  // needs_revision (governance 经 orchestrator 委托)、repair 完成后 reopen
+  // 来源 evaluator (orchestrator REOPEN_SOURCE_EVALUATOR)、revision cascade。
+  // causeId 幂等重放短路已在其上 — 同因重放不重复校验也不写状态。
+  // 校验先于任何写入: 拒绝 = 零 mutation + 结构化 reason (rc-9)。
+  // DiagnosticianStageKind 目标不在本函数的生产目标集合内; 防御性跳过
+  // (血缘门禁严格限于 PeerRunnerKind, §4.2 作用域隔离)。
+  let resolvedLineageCorrelationId: string | undefined;
+  if (isPeerRunnerKind(piTask.taskKind)) {
+    const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, stateManager);
+    if (!lineage.ok) {
+      return { ok: false, reason: `lineage_refused:${lineage.reason}`, detail: lineage.detail };
+    }
+    resolvedLineageCorrelationId = lineage.correlationId;
+  }
+
+  // ── PRI-1293 R7 (P1-2): 快照生命周期修复 — 血缘解析可能刚对本任务执行了
+  // 历史回填 CAS (补齐 parentTaskId/correlationId), 第一次读取的 rawTask/
+  // piTask 已失效: 继续用旧快照既是 CAS 前提必然落败 (自身回填即并发),
+  // 又会让 merge 丢失刚回填的 parentTaskId (双重腐蚀)。因此血缘门禁后必须
+  // 重新读取, 一切以第二次快照为准。 ──
+  const rawTask2 = await stateManager.getTask(taskId);
+  if (!rawTask2) {
+    return { ok: false, reason: 'task_not_found', detail: 'disappeared_after_lineage_validation' };
+  }
+  const piTask2 = hydratePITaskRecord(rawTask2);
+  if (!piTask2) {
+    return { ok: false, reason: 'invalid_task_metadata', detail: 'metadata_became_unparseable_after_lineage_validation' };
+  }
+  // 并发消费检查: 血缘解析期间他者可能已完成同一 cause 的 reopen — 幂等 no-op
+  // (诚实事实); 不同 cause 的并发修改由下方 CAS 裁决。
+  if (options?.revisionCauseId && hasConsumedRevisionCause(piTask2, options.revisionCauseId)) {
+    return { ok: true, reason: 'idempotent_replay_same_revision' };
+  }
+  // 状态再校验: 血缘解析期间状态可能翻转 — leased 表示他者正在执行,
+  // 不得覆盖; failed 等非可 reopen 状态同样拒绝。pending/retry_wait 为
+  // 可继续状态 (同一任务在修订输入上更新后继续)。
+  if (rawTask2.status === 'leased') {
+    return {
+      ok: false,
+      reason: 'concurrent_modification',
+      detail: `task_leased_during_lineage_validation:${taskId}:owner=${rawTask2.leaseOwner ?? 'unknown'} — reopen NOT applied, concurrent lease untouched`,
+    };
+  }
+  if (rawTask2.status !== 'pending' && rawTask2.status !== 'retry_wait'
+    && rawTask2.status !== 'succeeded' && rawTask2.status !== 'needs_human_review') {
+    return { ok: false, reason: `task_in_flight_${rawTask2.status}` };
+  }
+
+  // ── PRI-1293 R8 (review #1): 双快照漂移校验 — 两次读取之间唯一合法的
+  // 差异是血缘回填对 diagnosticJson parent/correlation 的补齐。任何其他
+  // 变化 (status/lease/revisionCount/runnerDecision — 例如 Owner 在血缘
+  // 验证期间提交人工裁决: 裁决绑定当前轮次 + status 切 pending) 都是
+  // 并发写入。若吞掉该差异继续 CAS, 裁决将被推进的轮次永远跳过
+  // (resume 入口只读当前轮次)。诚实分类为 concurrent_modification —
+  // reopen 不写, Owner 裁决与状态原样保留, 修订波可安全重试。 ──
+  const leaseDrift = (rawTask2.leaseOwner ?? null) !== (rawTask.leaseOwner ?? null)
+    || (rawTask2.leaseExpiresAt ?? null) !== (rawTask.leaseExpiresAt ?? null)
+    || (rawTask2.leaseGeneration ?? 0) !== (rawTask.leaseGeneration ?? 0);
+  const stateDrift = rawTask2.status !== rawTask.status
+    || rawTask2.attemptCount !== rawTask.attemptCount
+    || rawTask2.maxAttempts !== rawTask.maxAttempts;
+  const metadataDrift = (piTask2.revisionCount ?? 0) !== (piTask.revisionCount ?? 0)
+    || piTask2.runnerDecision !== piTask.runnerDecision
+    // completionIntent 为对象 — 引用比较恒不等 (hydrate 每次新实例), 须语义比较。
+    || JSON.stringify(piTask2.completionIntent ?? null) !== JSON.stringify(piTask.completionIntent ?? null);
+  if (leaseDrift || stateDrift || metadataDrift) {
+    return {
+      ok: false,
+      reason: 'concurrent_modification',
+      detail: `snapshot_drift_during_lineage_validation:${taskId}:lease=${String(leaseDrift)}:state=${String(stateDrift)}:metadata=${String(metadataDrift)} — reopen NOT applied, concurrent write (e.g. owner verdict) preserved, safe to retry`,
+    };
+  }
+
+  // 可恢复历史任务: 校验通过后把根侧恢复的 id 安全补入本次 reopen 写
+  // (§5.3.7) — 与第二次快照比较, 只有差异才需要补入 (回填只写 parentTaskId,
+  // 链上 id 一致性在血缘门禁内已验证, 权威值在两次读取间稳定)。
+  const authoritativeCorrelationId = resolvedLineageCorrelationId !== undefined
+    && resolvedLineageCorrelationId !== (piTask2.correlationId?.trim() ?? '')
+    ? resolvedLineageCorrelationId
+    : undefined;
+
+  const merged: PITaskMetadata = mergePITaskMetadata(piTask2, {
     runnerDecision: undefined, // 新一轮 verdict 未定,清空旧判定 (INV-02 单一决策依据)
     // P0 verdict drift: revision reopen = 新 execution epoch — 旧 completion
     // intent 失去 authority,必须随旧 verdict 一并清空;否则重跑时入口门
     // 会 resume 旧 intent,新 epoch 的重新评估被永远跳过。
     completionIntent: undefined,
-    revisionCount: (piTask.revisionCount ?? 0) + 1,
-    revisionFeedback: options?.revisionFeedback ?? piTask.revisionFeedback,
+    revisionCount: (piTask2.revisionCount ?? 0) + 1,
+    revisionFeedback: options?.revisionFeedback ?? piTask2.revisionFeedback,
     revisionCauseId: options?.revisionCauseId,
+    // PRI-1293 R5: 消费历史折入由 mergePITaskMetadata 的写不变量自动执行
+    // (覆盖 revisionCauseId 槽时旧槽值+新值一并并入, 全写路径统一)。
+    ...(authoritativeCorrelationId !== undefined ? { correlationId: authoritativeCorrelationId } : {}),
   });
 
   if (options?.replaceArtificerDependencyWith) {
     // 替换 artificer 依赖为指定任务(修订轮读取其 repairPayload/artifacts)。
     // 链是线性的: evaluator 的 artificer dep 只有一个。
     const nonArtificerDeps: string[] = [];
-    for (const depId of piTask.dependencyTaskIds) {
+    for (const depId of piTask2.dependencyTaskIds) {
       if (depId === options.replaceArtificerDependencyWith) continue;
       const dep = await stateManager.getTask(depId);
       if (dep && dep.taskKind === 'artificer') continue;
@@ -108,11 +250,47 @@ export async function reopenTaskForRevision(
 
   // P1 评审修复: 单次 task-row mutation——metadata + status + attemptCount
   // 一个 UPDATE 落库,消除 "metadata 已写但 status 未翻" 的 crash 窗口。
-  await stateManager.updateTask(taskId, {
-    diagnosticJson: createPITaskDiagnosticJson(merged),
-    status: 'pending',
-    attemptCount: 0,
-  });
+  // PRI-1293 review fix (并发安全): 上面的血缘门禁是异步多跳读取,期间另一
+  // consumer 可能已把任务 lease 走 — 无条件 updateTask 会把 status 覆盖回
+  // pending、attemptCount 清零,却不动 lease_owner/lease_expires_at,造成
+  // lease 与状态不一致及重复执行。因此写入必须 CAS: 断言读取时的
+  // diagnosticJson/status/attemptCount/maxAttempts/leaseOwner/leaseExpiresAt/
+  // leaseGeneration 全部未变; 任一被并发触碰 → 放弃写入, 返回明确并发冲突,
+  // 由下一轮 reconciliation/调用方重试 (reopen 本身幂等, 重试安全)。
+  const casResult = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+    taskId,
+    rawTask2.diagnosticJson ?? null,
+    {
+      diagnosticJson: createPITaskDiagnosticJson(merged),
+      status: 'pending',
+      attemptCount: 0,
+    },
+    {
+      expectedStatus: rawTask2.status,
+      expectedAttemptCount: rawTask2.attemptCount,
+      expectedMaxAttempts: rawTask2.maxAttempts,
+      expectedLeaseOwner: rawTask2.leaseOwner ?? null,
+      expectedLeaseExpiresAt: rawTask2.leaseExpiresAt ?? null,
+      expectedLeaseGeneration: rawTask2.leaseGeneration ?? 0,
+    },
+  );
+  if (casResult === null) {
+    // PRI-1293 review round 3: CAS 落败后重读 — 若并发执行者完成的正是**同一
+    // revisionCauseId** 的 reopen, 本轮修订已 materialize, 按幂等重放处理
+    // (诚实事实, 非伪装); 否则返回明确的并发冲突, 由下一轮重试。
+    if (options?.revisionCauseId !== undefined) {
+      const reread = await stateManager.getTask(taskId);
+      const rereadPi = reread ? hydratePITaskRecord(reread) : null;
+      if (rereadPi && hasConsumedRevisionCause(rereadPi, options.revisionCauseId)) {
+        return { ok: true, reason: 'idempotent_replay_same_revision' };
+      }
+    }
+    return {
+      ok: false,
+      reason: 'concurrent_modification',
+      detail: `cas_precondition_failed:${taskId} — task state changed during lineage validation (likely leased concurrently); reopen NOT applied, retry next wave`,
+    };
+  }
   return { ok: true, reason: options?.reason ?? 'revision_reopen' };
 }
 

@@ -1171,6 +1171,10 @@ export type {
 
 export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalization/internalization-orchestrator.js';
 
+// PRI-1293 R3: dry-run/confirm 共享同一新增边深度上限 — pd-cli 预览路径
+// 必须引用同一常量而非复刻字面值 (P4 单一真值源)。
+export { CORRELATION_LINEAGE_MAX_PARENT_EDGES } from './internalization/correlation-lineage.js';
+
 // Golden fixtures (PRI-385)
 export type { FixtureDataSet } from './internalization/golden-dogfood-fixtures.js';
 export { GOLDEN_FIXTURES } from './internalization/golden-dogfood-fixtures.js';
@@ -1597,7 +1601,13 @@ export type {
   OwnerResolutionOutcome,
   OwnerIdentityContext,
 } from './internalization/owner-resolution-service.js';
-export { reopenTaskForRevision, resolveRolloutRevisionTarget, buildRepairRevisionCauseId } from './internalization/revision-reopen.js';
+export { deriveSuccessorTaskId } from './internalization/internalization-state-machine.js';
+export { verifyRepairTaskIdentity } from './internalization/repair-task-identity.js';
+export { planLegacyLineageResolution } from './internalization/correlation-lineage.js';
+export type { LegacyLineagePlan } from './internalization/correlation-lineage.js';
+export type { RepairIdentityVerification } from './internalization/repair-task-identity.js';
+// PRI-1293 R5: 共享只读级联判定 — commit 与 dry-run 预览消费同一计划入口。
+export { reopenTaskForRevision, resolveRolloutRevisionTarget, buildRepairRevisionCauseId, planExistingSuccessorTransition } from './internalization/revision-reopen.js';
 export type { ReopenRevisionOptions, RolloutRevisionTarget } from './internalization/revision-reopen.js';
 
 // ── RuntimeStateHandle (PRI-198) ────────────────────────────────────────────

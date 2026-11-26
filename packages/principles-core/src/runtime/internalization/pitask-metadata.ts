@@ -43,6 +43,43 @@ import { isValidIntentSnapshot } from '../intent/intent-snapshot.js';
 export const PI_METADATA_KEY = 'pi_metadata' as const;
 
 /**
+ * PRI-1293 R5: 幂等判定的唯一入口——cause 是否已被该任务消费。
+ * 检查当前槽 (revisionCauseId, 兼容历史无 history 字段的旧行) 与
+ * 持久消费历史 (consumedRevisionCauseIds)。任何 cause 幂等判定不得
+ * 绕过本 helper 直读单槽——单槽会被独立因果流 (cascade/repair/owner)
+ * 覆盖, 覆盖后旧 cause 的保护失效 (修复完成后旧级联重新传播,
+ * 回滚修复成果)。
+ */
+export function hasConsumedRevisionCause(
+  piTask: { readonly revisionCauseId?: string | undefined; readonly consumedRevisionCauseIds?: readonly string[] | undefined },
+  causeId: string,
+): boolean {
+  if (piTask.revisionCauseId === causeId) return true;
+  return piTask.consumedRevisionCauseIds?.includes(causeId) ?? false;
+}
+
+/**
+ * PRI-1293 R5: reopen 写入时的历史折入——旧槽值 (代表已消费的 cause)
+ * 与新 cause 一并并入, 去重保序 (最新在尾), 任务生命周期内不逐出。
+ */
+export function appendConsumedRevisionCause(
+  piTask: { readonly revisionCauseId?: string | undefined; readonly consumedRevisionCauseIds?: readonly string[] | undefined },
+  newCauseId?: string,
+): readonly string[] {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const c of piTask.consumedRevisionCauseIds ?? []) {
+    if (!seen.has(c)) { seen.add(c); ordered.push(c); }
+  }
+  if (piTask.revisionCauseId !== undefined && piTask.revisionCauseId !== '' && !seen.has(piTask.revisionCauseId)) {
+    seen.add(piTask.revisionCauseId);
+    ordered.push(piTask.revisionCauseId);
+  }
+  if (newCauseId !== undefined && newCauseId !== '' && !seen.has(newCauseId)) ordered.push(newCauseId);
+  return ordered;
+}
+
+/**
  * Evaluator repair payload (PRI-509).
  *
  * Carries the evaluator's structured feedback when decision === 'needs_revision'
@@ -394,6 +431,17 @@ export interface PITaskMetadata {
    * reopenTaskForRevision 对相同 causeId 的重放是真正 no-op。
    */
   revisionCauseId?: string;
+  /**
+   * PRI-1293 R5 (旧修订覆盖修复): 已消费 revision cause 的有界追加历史
+   * (最新在尾, 任务生命周期内保留, 不做 FIFO 逐出)。
+   * revisionCauseId 单槽会被**独立因果流**覆盖 (级联 wave 与 repair 轮
+   * 写同一字段), 覆盖后旧 cause 的幂等重放保护失效——已传播的级联在
+   * 修复完成后重扫时再次 reopen 目标, 把依赖与结论回滚到修复前。
+   * 幂等判定必须读本历史 (hasConsumedRevisionCause), 不得只读单槽。
+   * 每次 reopen 写入时把旧槽值与新 cause 一并折入 (旧槽值代表已消费
+   * 的 cause, 丢失即重放)。
+   */
+  consumedRevisionCauseIds?: readonly string[];
   /** Execution budget receipt: one binding repair per candidate; not a relation authority. */
   ruleBindingRevisionCauseId?: string;
   /**
@@ -793,6 +841,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       revisionCount: metadata.revisionCount,
       revisionFeedback: metadata.revisionFeedback,
       revisionCauseId: metadata.revisionCauseId,
+      consumedRevisionCauseIds: metadata.consumedRevisionCauseIds !== undefined ? [...metadata.consumedRevisionCauseIds] : undefined,
       ruleBindingRevisionCauseId: metadata.ruleBindingRevisionCauseId,
       sourceCorrectionCauseId: metadata.sourceCorrectionCauseId,
       sourceCorrectionReceipt: metadata.sourceCorrectionReceipt,
@@ -823,7 +872,7 @@ export const createPITaskDiagnosticJson = serializePITaskMetadata;
  * 用于"清除旧 verdict"语义。
  */
 export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITaskMetadata>): PITaskMetadata {
-  return {
+  const merged: PITaskMetadata = {
     dependencyTaskIds: base.dependencyTaskIds,
     channel: base.channel,
     pipelineMode: base.pipelineMode,
@@ -839,6 +888,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     revisionCount: base.revisionCount,
     revisionFeedback: base.revisionFeedback,
     revisionCauseId: base.revisionCauseId,
+    consumedRevisionCauseIds: base.consumedRevisionCauseIds,
     ruleBindingRevisionCauseId: base.ruleBindingRevisionCauseId,
     sourceCorrectionCauseId: base.sourceCorrectionCauseId,
     sourceCorrectionReceipt: base.sourceCorrectionReceipt,
@@ -854,6 +904,16 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     intentSnapshot: base.intentSnapshot,
     ...overrides,
   };
+  // PRI-1293 R5 write invariant (单一重建点执行): 任何写路径一旦 (重)写
+  // revisionCauseId 槽——reopenTaskForRevision、source-correction 续接、
+  // rule-binding、approved-rule-revision 等全部经本函数——旧槽值与新值
+  // 必须折入持久消费历史,否则覆盖后旧 cause 的幂等重放保护失效
+  // (已传播的级联在修复完成后重扫时再次 reopen,回滚修复成果)。
+  // 调用方显式给 consumedRevisionCauseIds 时以调用方为准 (测试/迁移逃生门)。
+  if (Object.hasOwn(overrides, 'revisionCauseId') && !Object.hasOwn(overrides, 'consumedRevisionCauseIds')) {
+    merged.consumedRevisionCauseIds = appendConsumedRevisionCause(base, merged.revisionCauseId);
+  }
+  return merged;
 }
 
 // ── ArtifactRef validation ─────────────────────────────────────────────────────
@@ -1179,6 +1239,10 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
   if (Object.hasOwn(m, 'revisionCauseId') && m.revisionCauseId !== undefined) {
     if (typeof m.revisionCauseId !== 'string' || m.revisionCauseId.trim() === '') return null;
   }
+  if (Object.hasOwn(m, 'consumedRevisionCauseIds') && m.consumedRevisionCauseIds !== undefined) {
+    if (!Array.isArray(m.consumedRevisionCauseIds)
+      || !m.consumedRevisionCauseIds.every((c) => typeof c === 'string' && c.trim() !== '' && c.length <= 512)) return null;
+  }
   if (Object.hasOwn(m, 'ruleBindingRevisionCauseId') && m.ruleBindingRevisionCauseId !== undefined) {
     if (typeof m.ruleBindingRevisionCauseId !== 'string' || !m.ruleBindingRevisionCauseId.startsWith('rule-binding:') || m.ruleBindingRevisionCauseId.length > 512) return null;
   }
@@ -1355,6 +1419,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     revisionCount: typeof m.revisionCount === 'number' ? m.revisionCount : undefined,
     revisionFeedback: typeof m.revisionFeedback === 'string' ? m.revisionFeedback : undefined,
     revisionCauseId: typeof m.revisionCauseId === 'string' ? m.revisionCauseId : undefined,
+    consumedRevisionCauseIds: Array.isArray(m.consumedRevisionCauseIds) ? [...(m.consumedRevisionCauseIds as string[])] : undefined,
     ruleBindingRevisionCauseId: typeof m.ruleBindingRevisionCauseId === 'string' ? m.ruleBindingRevisionCauseId : undefined,
     sourceCorrectionCauseId: typeof m.sourceCorrectionCauseId === 'string' ? m.sourceCorrectionCauseId : undefined,
     sourceCorrectionReceipt,
@@ -1463,6 +1528,7 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     revisionCount: meta.revisionCount,
     revisionFeedback: meta.revisionFeedback,
     revisionCauseId: meta.revisionCauseId,
+    consumedRevisionCauseIds: meta.consumedRevisionCauseIds,
     ruleBindingRevisionCauseId: meta.ruleBindingRevisionCauseId,
     sourceCorrectionCauseId: meta.sourceCorrectionCauseId,
     sourceCorrectionReceipt: meta.sourceCorrectionReceipt,

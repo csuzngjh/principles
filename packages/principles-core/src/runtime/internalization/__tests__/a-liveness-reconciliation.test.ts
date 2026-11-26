@@ -47,9 +47,37 @@ function meta(correlationId: string): string {
   });
 }
 
+/**
+ * PRI-1293 Phase 3: 血缘可证明的种子 — commit 的 ADVANCE 路径现在带血缘门禁,
+ * orphan 恢复测试的 succeeded 任务必须可回溯根 dreamer (种子根: 顶层
+ * candidateId = correlationId, 任务 parentTaskId 指向该根)。
+ */
+async function seedProvableRoot(correlationId: string): Promise<string> {
+  const dreamerId = `dreamer-${correlationId}-src`;
+  const existing = await stateManager.getTask(dreamerId);
+  if (!existing) {
+    await stateManager.createTask({
+      // pending (非 succeeded) — 根自身不得进入 reconciliation 扫描 (它只作
+      // 血缘佐证, resolver 不读任务状态)。
+      taskId: dreamerId, taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        pi_metadata: { dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+        candidateId: correlationId,
+      }),
+    });
+  }
+  return dreamerId;
+}
+
 /** 建一个 succeeded evaluator (durable verdict=approved)。orphan = commit 未跑。 */
 async function seedSucceededEvaluator(id: string): Promise<void> {
+  const dreamerId = await seedProvableRoot(id);
   await stateManager.createTask({ taskId: id, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(id) });
+  const raw0 = await stateManager.getTask(id);
+  if (!raw0) throw new Error(`seed: task ${id} missing`);
+  const pi0 = hydratePITaskRecord(raw0);
+  if (!pi0) throw new Error(`seed: task ${id} not hydratable`);
+  await stateManager.updateTaskDiagnosticJson(id, createPITaskDiagnosticJson(mergePITaskMetadata(pi0, { parentTaskId: dreamerId })));
   const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'aliv', runtimeKind: 'test-double' });
   await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'aliv', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
   const raw = await stateManager.getTask(id);
@@ -64,7 +92,13 @@ async function seedSucceededEvaluator(id: string): Promise<void> {
 /** 建一个已 materialized 的 succeeded 任务: rollout_reviewer (终节点, commit=no_successor)。 */
 async function seedMaterializedSucceeded(id: string, index: number): Promise<void> {
   const corr = `mat-${index}`;
+  const dreamerId = await seedProvableRoot(corr);
   await stateManager.createTask({ taskId: id, taskKind: 'rollout_reviewer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(corr) });
+  const raw0 = await stateManager.getTask(id);
+  if (!raw0) throw new Error(`seed: task ${id} missing`);
+  const pi0 = hydratePITaskRecord(raw0);
+  if (!pi0) throw new Error(`seed: task ${id} not hydratable`);
+  await stateManager.updateTaskDiagnosticJson(id, createPITaskDiagnosticJson(mergePITaskMetadata(pi0, { parentTaskId: dreamerId })));
   const __lease2 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'aliv', runtimeKind: 'test-double' });
   await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'aliv', leaseGeneration: __lease2.leaseGeneration }, __lease2.runId);
   const raw = await stateManager.getTask(id);

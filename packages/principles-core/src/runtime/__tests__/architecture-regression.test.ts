@@ -1818,14 +1818,22 @@ describe('PRI-87 DefaultDreamerValidator strict validation', () => {
     expect(src).not.toContain('node:process');
   });
 
-  it('PRODUCTION_USES_STRICT_VALIDATOR: run-once CLI uses DefaultDreamerValidator, not PassThroughDreamerValidator', async () => {
+  it('PRODUCTION_USES_STRICT_VALIDATOR: run-once delegates to the shared executor, which pins DefaultDreamerValidator (PRI-1293 Phase 2B moved construction out of run-once)', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
+    const runOnceSrc = readFileSync(resolve(
       __dirname, '..', '..', '..', '..', 'pd-cli', 'src', 'commands', 'runtime-internalization-run-once.ts'
     ), 'utf-8');
-    expect(src).toContain('DefaultDreamerValidator');
-    expect(src).not.toContain('new PassThroughDreamerValidator()');
+    // run-once no longer constructs runners at all — the executor owns that.
+    expect(runOnceSrc).toContain('executeSelectedInternalizationTask');
+    expect(runOnceSrc).not.toContain('new DreamerRunner(');
+    expect(runOnceSrc).not.toContain('new PassThroughDreamerValidator()');
+    // The strict validator is pinned once, inside the ONE shared executor.
+    const executorSrc = readFileSync(resolve(
+      __dirname, '..', '..', '..', '..', 'host-runtime', 'src', 'internalization-consumer-cycle.ts'
+    ), 'utf-8');
+    expect(executorSrc).toContain('new DefaultDreamerValidator()');
+    expect(executorSrc).not.toContain('PassThroughDreamerValidator');
   });
 
   it('BARREL_EXPORTS: DefaultDreamerValidator is exported from internalization/index.ts', async () => {
@@ -4465,6 +4473,246 @@ describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2A: pipeline-spine assembly wiring', 
     expect(body).toContain('let bridgeOwnsStateManager = false');
     expect(body).toContain('bridgeOwnsStateManager = true');
     expect(body).toContain('await stateManager.close().catch(() => undefined)');
+  });
+
+});
+
+// ===========================================================================
+// SPEC-PD-PIPELINE-SPINE-001 §3.5.2 (PRI-1293 Phase 2B) — production
+// construction-point whitelists for the four guarded constructor families:
+//   A. Diagnostician runners (DiagRootCause/DiagDistiller/DiagRouter/Split)
+//   B. Internalization peer runners (dreamer…rollout_reviewer)
+//   C. PainSignalBridge
+//   D. PainToPrincipleService
+//
+// A new production entry must not re-introduce hand-rolled Runner / Bridge /
+// Service construction: internalization peer runners are constructed ONLY by
+// `executeSelectedInternalizationTask` (the ONE shared single-step executor in
+// host-runtime) and the explicit synchronous adversarial operator
+// (`rulehost-pipeline-runner`, per §2.6 NOT merged into the lease orchestrator).
+// The scan walks every packages/*/src/**/*.ts EXCLUDING test files, and the
+// constructor regex is whitespace-tolerant so multi-line construction syntax
+// (`new XxxRunner(\n  deps,\n)`) is still recognized. Every violation message
+// carries the concrete file path, line, and construction type (EP-03 rc-9).
+// Whitelist exceptions each have an explicit business reason recorded inline.
+// ===========================================================================
+describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2B: production construction-point whitelists', () => {
+  const REPO_ROOT_2B = pathSync.resolve(__dirname, '../../../../..');
+
+  function readProductionSource2B(relFromPackages: string): string {
+    return fsSync.readFileSync(pathSync.join(REPO_ROOT_2B, 'packages', relFromPackages), 'utf8');
+  }
+
+  /** Every production source file under packages/<pkg>/src, tests excluded. */
+  function listProductionSourceFiles(): string[] {
+    const packagesRoot = pathSync.join(REPO_ROOT_2B, 'packages');
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fsSync.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
+          walk(pathSync.join(dir, entry.name));
+          continue;
+        }
+        if (!entry.name.endsWith('.ts')) continue;
+        if (entry.name.endsWith('.test.ts') || entry.name.endsWith('.d.ts')) continue;
+        out.push(pathSync.join(dir, entry.name));
+      }
+    };
+    for (const entry of fsSync.readdirSync(packagesRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const srcRoot = pathSync.join(packagesRoot, entry.name, 'src');
+      if (!fsSync.existsSync(srcRoot)) continue;
+      walk(srcRoot);
+    }
+    return out;
+  }
+
+  function toRepoRel(absolutePath: string): string {
+    return pathSync.relative(REPO_ROOT_2B, absolutePath).split(pathSync.sep).join('/');
+  }
+
+  /**
+   * Multiline-tolerant construction scan: `\s+` / `\s*` also match newlines,
+   * so a constructor invocation wrapped across lines is still one hit, with
+   * the 1-based line of the `new` keyword.
+   */
+  function scanConstructions(
+    files: readonly string[],
+    pattern: RegExp,
+  ): { file: string; line: number }[] {
+    const hits: { file: string; line: number }[] = [];
+    for (const file of files) {
+      let src: string;
+      try {
+        src = fsSync.readFileSync(file, 'utf8');
+      } catch {
+        continue;
+      }
+      const re = new RegExp(pattern.source, 'g');
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(src)) !== null) {
+        const line = src.slice(0, match.index).split('\n').length;
+        hits.push({ file: toRepoRel(file), line });
+      }
+    }
+    return hits;
+  }
+
+  function unauthorizedConstructions(
+    hits: readonly { file: string; line: number }[],
+    whitelist: readonly string[],
+    constructionType: string,
+  ): string[] {
+    return hits
+      .filter((hit) => !whitelist.includes(hit.file))
+      .map((hit) =>
+        `${constructionType} constructed at ${hit.file}:${hit.line} — outside the SPEC §3.5.2 whitelist. `
+        + 'Route the entry through the shared assembly, or extend the whitelist with an Owner-approved business reason (never to silence CI).',
+      );
+  }
+
+  const ALL_PRODUCTION_FILES = listProductionSourceFiles();
+
+  // ── A. Diagnostician runners ─────────────────────────────────────────────
+  const DIAGNOSTIC_RUNNER_CONSTRUCTION
+    = /\bnew\s+(?:DiagRootCause|DiagDistiller|DiagRouter|SplitDiagnostician)Runner\s*\(/;
+  const DIAGNOSTIC_RUNNER_WHITELIST = [
+    // The ONE diagnostician bundle factory (cache-free createDiagnosticianRunnerBundle).
+    'packages/principles-core/src/runtime/pain-signal-runtime-factory.ts',
+    // Experiment/simulation harnesses that drive the split pipeline directly.
+    'packages/pd-cli/src/services/synthetic-baseline-runner.ts',
+    'packages/pd-cli/src/services/pain-flood-simulation-runner.ts',
+  ];
+
+  it('Phase 2B A: Diagnostician Runner constructions stay inside the §3.5.2 whitelist', () => {
+    const hits = scanConstructions(ALL_PRODUCTION_FILES, DIAGNOSTIC_RUNNER_CONSTRUCTION);
+    expect(hits.length, 'diagnostician runner constructions must still exist (the whitelist pins real sites, not an empty scan)').toBeGreaterThan(0);
+    expect(
+      unauthorizedConstructions(hits, DIAGNOSTIC_RUNNER_WHITELIST, 'DiagnosticianRunner (DiagRootCause/DiagDistiller/DiagRouter/SplitDiagnostician)'),
+    ).toEqual([]);
+  });
+
+  // ── B. Internalization peer runners ─────────────────────────────────────
+  const PEER_RUNNER_CONSTRUCTION
+    = /\bnew\s+(?:Dreamer|Philosopher|Scribe|Artificer|Evaluator|RolloutReviewer)Runner\s*\(/;
+  const PEER_RUNNER_WHITELIST = [
+    // The ONE shared single-step executor (consumer cycle + run-once 收编点).
+    'packages/host-runtime/src/internalization-consumer-cycle.ts',
+    // Explicit synchronous adversarial operator — NOT a lease orchestrator
+    // (§2.6: never merged into runInternalizationConsumerCycle).
+    'packages/pd-cli/src/services/rulehost-pipeline-runner.ts',
+  ];
+  // File-level whitelisting alone cannot stop a second construction site from
+  // being added INSIDE a whitelisted file (bypassing the shared executor while
+  // the guard stays green). Pin the exact construction count per whitelisted
+  // file: any additional `new <Peer>Runner(` — even in these files — breaks
+  // this test and forces an explicit, review-visible update of the pin.
+  const PEER_RUNNER_CONSTRUCTION_COUNT_BY_FILE: Readonly<Record<string, number>> = {
+    // Six factory branches — exactly one construction per peer runner kind.
+    'packages/host-runtime/src/internalization-consumer-cycle.ts': 6,
+    // Synchronous pipeline stages: dreamer/philosopher/scribe/artificer/evaluator
+    // (no RolloutReviewer — the operator terminates at the adversarial loop).
+    'packages/pd-cli/src/services/rulehost-pipeline-runner.ts': 5,
+  };
+
+  it('Phase 2B B: Internalization peer Runner constructions stay inside the §3.5.2 whitelist', () => {
+    const hits = scanConstructions(ALL_PRODUCTION_FILES, PEER_RUNNER_CONSTRUCTION);
+    const byFile = new Map(hits.map((hit) => [hit.file, true]));
+    // Positive assertions (EP-09): the executor still constructs all six
+    // runners, and the rulehost operator keeps its own construction — a
+    // "whitelist emptied by deleting constructions" must fail loudly too.
+    for (const kind of ['Dreamer', 'Philosopher', 'Scribe', 'Artificer', 'Evaluator', 'RolloutReviewer']) {
+      expect(
+        new RegExp(`\\bnew\\s+${kind}Runner\\s*\\(`).test(readProductionSource2B('host-runtime/src/internalization-consumer-cycle.ts')),
+        `the shared executor must still construct ${kind}Runner inside internalization-consumer-cycle.ts`,
+      ).toBe(true);
+    }
+    expect(
+      byFile.get('packages/pd-cli/src/services/rulehost-pipeline-runner.ts') === true,
+      'rulehost-pipeline-runner must keep its explicit synchronous constructions (whitelisted operator)',
+    ).toBe(true);
+    expect(
+      unauthorizedConstructions(hits, PEER_RUNNER_WHITELIST, 'PeerRunner (Dreamer/Philosopher/Scribe/Artificer/Evaluator/RolloutReviewer)'),
+    ).toEqual([]);
+    // Sole-constructor pin: the count inside each whitelisted file is exact.
+    // A new construction site within the file is a whitelist-evading change
+    // and must never land silently (update requires editing this pin, which
+    // CODEOWNERS/review surfaces as an architecture decision).
+    for (const [file, expectedCount] of Object.entries(PEER_RUNNER_CONSTRUCTION_COUNT_BY_FILE)) {
+      const actualCount = hits.filter((hit) => hit.file === file).length;
+      expect(
+        actualCount,
+        `${file} must keep exactly ${expectedCount} peer Runner construction(s) — found ${actualCount}. `
+        + 'A new construction inside a whitelisted file bypasses the §3.5.2 sole-executor contract; '
+        + 'remove it or justify the new site in the whitelist comment AND update this pin in the same PR.',
+      ).toBe(expectedCount);
+    }
+  });
+
+  // ── C. PainSignalBridge ─────────────────────────────────────────────────
+  const PAIN_SIGNAL_BRIDGE_CONSTRUCTION = /\bnew\s+PainSignalBridge\s*\(/;
+  const PAIN_SIGNAL_BRIDGE_WHITELIST = [
+    'packages/principles-core/src/runtime/pain-signal-runtime-factory.ts',
+    // Dead-letter replay branch — the runner MUST come from the cache-free
+    // bundle (asserted below), never from a locally hand-rolled one.
+    'packages/pd-cli/src/commands/pain-retry.ts',
+    'packages/pd-cli/src/services/synthetic-baseline-runner.ts',
+    'packages/pd-cli/src/services/pain-flood-simulation-runner.ts',
+  ];
+
+  it('Phase 2B C: PainSignalBridge constructions stay inside the §3.5.2 whitelist', () => {
+    const hits = scanConstructions(ALL_PRODUCTION_FILES, PAIN_SIGNAL_BRIDGE_CONSTRUCTION);
+    expect(hits.length).toBeGreaterThan(0);
+    expect(
+      unauthorizedConstructions(hits, PAIN_SIGNAL_BRIDGE_WHITELIST, 'PainSignalBridge'),
+    ).toEqual([]);
+    // The dead-letter exception is conditional on the bundle wiring.
+    expect(
+      readProductionSource2B('pd-cli/src/commands/pain-retry.ts'),
+      'pain-retry dead-letter replay must assemble its runner via createDiagnosticianRunnerBundle',
+    ).toContain('createDiagnosticianRunnerBundle');
+  });
+
+  // ── D. PainToPrincipleService ───────────────────────────────────────────
+  const PAIN_TO_PRINCIPLE_SERVICE_CONSTRUCTION = /\bnew\s+PainToPrincipleService\s*\(/;
+  const PAIN_TO_PRINCIPLE_SERVICE_WHITELIST = [
+    'packages/pd-cli/src/commands/pain-record.ts',
+    'packages/openclaw-plugin/src/core/pain-service.ts',
+    // asyncMode: true — the two async fire-and-forget submission sites.
+    'packages/host-runtime/src/governance-signal-admission.ts',
+    'packages/principles-core/src/runtime/pain-submit-capability.ts',
+  ];
+
+  it('Phase 2B D: PainToPrincipleService constructions stay inside the §3.5.2 whitelist', () => {
+    const hits = scanConstructions(ALL_PRODUCTION_FILES, PAIN_TO_PRINCIPLE_SERVICE_CONSTRUCTION);
+    expect(hits.length).toBeGreaterThan(0);
+    expect(
+      unauthorizedConstructions(hits, PAIN_TO_PRINCIPLE_SERVICE_WHITELIST, 'PainToPrincipleService'),
+    ).toEqual([]);
+    // Non-asyncMode construction sites must assemble full dependencies via
+    // the shared host deps resolver (§3.5.2 D rule; the two asyncMode sites
+    // are exempt by contract).
+    for (const rel of ['pd-cli/src/commands/pain-record.ts', 'openclaw-plugin/src/core/pain-service.ts'] as const) {
+      expect(
+        readProductionSource2B(rel),
+        `${rel} constructs PainToPrincipleService synchronously — it must resolve full deps via resolveWorkspacePipelineHostDeps`,
+      ).toContain('resolveWorkspacePipelineHostDeps');
+    }
+    for (const rel of ['host-runtime/src/governance-signal-admission.ts', 'principles-core/src/runtime/pain-submit-capability.ts'] as const) {
+      expect(
+        readProductionSource2B(rel),
+        `${rel} must declare the asyncMode contract for its whitelisted construction`,
+      ).toContain('asyncMode: true');
+    }
+  });
+
+  // ── Package dependency direction (Phase 2B additions) ───────────────────
+  it('Phase 2B: the shared executor file never imports pd-cli or concrete host adapters', () => {
+    const executorSrc = readProductionSource2B('host-runtime/src/internalization-consumer-cycle.ts');
+    for (const token of ['@principles/pd-cli', '@principles/codex-adapter', '@principles/workbuddy-adapter', 'packages/pd-cli']) {
+      expect(executorSrc, `executor must not import ${token} (host-runtime → pd-cli is a forbidden direction)`).not.toContain(token);
+    }
   });
 
 });

@@ -32,8 +32,8 @@ function readSrc(p: string): string {
   return fs.readFileSync(p, 'utf8');
 }
 
-/** evaluator case 的精确切片：从 `case 'evaluator':` 到下一个 `case '` */
-function evaluatorCase(): string {
+/** 执行器的 evaluator case 切片 (PRI-1293 Phase 2B 后 Runner 构造在此, 文件首个 `case 'evaluator':`)。 */
+function executorEvaluatorCase(): string {
   const source = readSrc(CYCLE_SRC);
   const start = source.indexOf("case 'evaluator':");
   const end = source.indexOf("case '", start + "case 'evaluator':".length);
@@ -41,29 +41,41 @@ function evaluatorCase(): string {
   return source.slice(start, end);
 }
 
+/** consumer cycle 的 evaluator 输入装配切片 (gateDeps/emitter 在此装配)。 */
+function cycleEvaluatorInput(): string {
+  const source = readSrc(CYCLE_SRC);
+  const anchor = source.indexOf('repairDeps: createEvaluatorRepairDeps(workspaceDir');
+  if (anchor < 0) return '';
+  const start = source.lastIndexOf("case 'evaluator':", anchor);
+  const end = source.indexOf("case '", anchor);
+  if (start < 0 || end < 0) return '';
+  return source.slice(start, end);
+}
+
 describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction site)', () => {
-  it('Guard A: shared cycle evaluator case 注入 gateDeps: createProductionGateDeps(...)', () => {
+  it('Guard A: shared cycle evaluator 输入注入 gateDeps: createProductionGateDeps(...)', () => {
     // PRI-634-F: the call now carries replay-parity options (toolSemantics
     // when the host declared them + the workspace root for path
     // normalization). The guarded invariant is the WIRING itself — the
-    // canonical production gateDeps must be constructed at this site.
-    expect(evaluatorCase()).toContain('gateDeps: createProductionGateDeps(');
+    // canonical production gateDeps must be constructed at the cycle site
+    // (PRI-1293 Phase 2B 收编后: 构造仍在 cycle, 注入经执行器透传)。
+    expect(cycleEvaluatorInput()).toContain('gateDeps: createProductionGateDeps(');
   });
 
-  it('Guard B: gateDeps 位于 OPTIONS 参数（第二个构造参数）且在 ...runnerOptions 之后', () => {
+  it('Guard B: gateDeps 经执行器注入 OPTIONS 参数（第二个构造参数）且在 ...runnerOptions 之后', () => {
     // EvaluatorRunner 构造: this.gateDeps = options.gateDeps ?? null
     // (evaluator-runner.ts) —— 注入到第一个参数会被静默丢弃, R2 会以
     // capability_missing fail-loud。E2E 曾把 gateDeps 错放到 deps (PRI-634
     // 修复 40d47738 的教训), 本断言锁死正确位置。
-    const slice = evaluatorCase();
+    const slice = executorEvaluatorCase();
     const optsStart = slice.indexOf('...runnerOptions');
     expect(optsStart).toBeGreaterThan(-1);
     const afterOpts = slice.slice(optsStart);
-    expect(afterOpts).toContain('gateDeps: createProductionGateDeps(');
+    expect(afterOpts).toContain('gateDeps: input.gateDeps');
   });
 
   it('Guard C: 第一个 Evaluator deps object 中不得出现 gateDeps', () => {
-    const slice = evaluatorCase();
+    const slice = executorEvaluatorCase();
     const optsStart = slice.indexOf('...runnerOptions');
     expect(optsStart).toBeGreaterThan(-1);
     const depsBlock = slice.slice(0, optsStart);
@@ -76,7 +88,7 @@ describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction 
     expect(shell).not.toContain('new EvaluatorRunner');
     // 守卫对象本身必须仍是 shared cycle 源文件。
     expect(CYCLE_SRC).toContain('internalization-consumer-cycle.ts');
-    expect(evaluatorCase()).toContain('new EvaluatorRunner');
+    expect(executorEvaluatorCase()).toContain('new EvaluatorRunner');
   });
 
   it('AC-2: Codex worker 也不得另建 EvaluatorRunner（gate wiring 由 shared cycle 统一提供）', () => {
@@ -85,11 +97,11 @@ describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction 
     expect(worker).toContain('runInternalizationConsumerCycle');
   });
 
-  it('shared cycle evaluator case 的事件走 workspace-scoped emitter 而非全局 storeEmitter', () => {
+  it('shared cycle evaluator 输入的事件走 workspace-scoped emitter 而非全局 storeEmitter', () => {
     // PRI-795 review P1: the emitter was renamed evaluatorEmitter →
     // workspaceEmitter because the ArtificerL2 adapter now shares it.
-    expect(evaluatorCase()).toContain('eventEmitter: workspaceEmitter');
-    expect(evaluatorCase()).not.toContain('eventEmitter: storeEmitter');
+    expect(cycleEvaluatorInput()).toContain('eventEmitter: workspaceEmitter');
+    expect(cycleEvaluatorInput()).not.toContain('eventEmitter: storeEmitter');
   });
 
   it('WorkspaceTelemetryEmitter 在 per-wake 装配处构造（workspaceDir 在作用域内）且落盘失败走注入回调', () => {
@@ -144,44 +156,47 @@ describe('PRI-661 pd-cli evaluator entries (host-neutral runtime context)', () =
 
 describe('PRI-708 rollout revision routing wiring guard', () => {
   /**
-   * rollout case 的精确切片：从 `case 'rollout_reviewer':` 到下一个分支起点。
+   * cycle 的 rollout 输入装配切片：PRI-1293 Phase 2B 后文件内有两个
+   * `case 'rollout_reviewer':` (执行器在前, cycle dispatch 在后) — 取后者。
    */
   function cycleRolloutCase(): string {
     const source = readSrc(CYCLE_SRC);
-    const start = source.indexOf("case 'rollout_reviewer':");
+    const start = source.lastIndexOf("case 'rollout_reviewer':");
     const end = source.indexOf('default:', start + "case 'rollout_reviewer':".length);
     if (start < 0 || end < 0) return '';
     return source.slice(start, end);
   }
 
-  /** run-once 的 rollout 分支切片：唯一锚点 = handler if/else 链的 else-if 形态。 */
+  /** run-once 的 rollout 分支切片 (Phase 2B 收编后为 switch case 形态)。 */
   function runOnceRolloutBranch(): string {
     const source = readSrc(RUN_ONCE_SRC);
     // 注意: buildTestDoubleAdapter 内也有 `runnerKind === 'rollout_reviewer'`
-    // （test-double payload 分支），必须锚定 handler 装配链特有的 else-if 形态。
-    const anchor = "} else if (runnerKind === 'rollout_reviewer')";
+    // （test-double payload 分支），必须锚定 dispatch switch 的 case 形态。
+    const anchor = "case 'rollout_reviewer': {";
     const start = source.indexOf(anchor);
-    const end = source.indexOf('} else {', start);
+    const end = source.indexOf('default:', start);
     if (start < 0 || end < 0) return '';
     return source.slice(start, end);
   }
 
-  it('Guard R1: shared cycle rollout case 注入 canonical createRolloutGovernanceDeps（生产构造点）', () => {
+  it('Guard R1: shared cycle rollout 输入注入 canonical createRolloutGovernanceDeps（生产构造点）', () => {
     const slice = cycleRolloutCase();
-    expect(slice).toContain('new RolloutReviewerRunner');
-    expect(slice).toContain('createRolloutGovernanceDeps(workspaceDir, orchestrator');
+    expect(slice).toContain('governanceDeps: createRolloutGovernanceDeps(workspaceDir, orchestrator');
+    // 构造本体在共享执行器 (同一文件内)。
+    expect(readSrc(CYCLE_SRC)).toContain('new RolloutReviewerRunner');
   });
 
-  it('Guard R2: run-once rollout 分支从同一 canonical 工厂接线 reopenRevisionTarget，不得内联第二套 reopen', () => {
+  it('Guard R2: run-once rollout 分支从同一 canonical 工厂接线治理 deps，不得内联第二套 reopen', () => {
     // PRI-708 关闭的漂移正是「run-once 缺这根接线」——未来任何回退（删装配
     // 行 / 手写 inline reopen 回调）都会让 needs_revision 重新落 recovery-only
     // NHR。此 guard 与 parity 测试共同守住「多入口同语义」。
     const slice = runOnceRolloutBranch();
-    expect(slice).toContain('new RolloutReviewerRunner');
     expect(slice).toContain('createRolloutGovernanceDeps(');
-    expect(slice).toContain('reopenRevisionTarget');
+    expect(slice).toContain('governanceDeps');
     // canonical 工厂委托 orchestrator.reopenTaskForRevision —— run-once 侧
     // 出现直接调用 = 第二套实现（漂移复发信号）。
     expect(slice).not.toContain('reopenTaskForRevision(');
+    // 执行器把工厂产物的 reopenRevisionTarget 注入 RolloutReviewerRunner。
+    expect(readSrc(CYCLE_SRC)).toContain('reopenRevisionTarget: input.governanceDeps.reopenRevisionTarget');
   });
 });

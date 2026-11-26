@@ -40,6 +40,10 @@ function makeRawTask(overrides: {
     timeoutMs: 60000,
     inputArtifactRefs: [],
     outputArtifactRefs: [],
+    // PRI-1293 Phase 3: dreamer 根自身携带 correlationId — commit 血缘门禁的
+    // 根侧佐证来源 (§4.5 根自身 id)。刻意不写顶层 candidateId: claim 期的
+    // admission 复核只解析 seed/taskId 双源, 本 mock 不模拟 admission 文档。
+    correlationId: `cand-${taskId}`,
   };
 
   const diagnosticJson = JSON.stringify({ pi_metadata: piMetadata });

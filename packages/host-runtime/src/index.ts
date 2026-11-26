@@ -74,7 +74,33 @@ export * from './host-liveness-contract.js';
 // PRI-624 Slice C: shared internalization consumer execution (OpenClaw
 // auto-consumer + Companion workspace worker call the same cycle).
 export * from './internalization-consumer-governance.js';
-export * from './internalization-consumer-cycle.js';
+// PRI-1293 R3 (export surface tightening): explicit whitelist instead of
+// `export *` — the public API is the consumer cycle entry, the selected-task
+// executor entry, and their necessary input/output types. The internal
+// assembly helper types (SelectedTaskTelemetryEmitter /
+// SelectedInternalizationTaskBaseDeps / SelectedEvaluatorRepairDeps /
+// SelectedRolloutGovernanceDeps) stay module-exported for in-package wiring
+// but are NOT part of the package public API: they are composition details
+// of the input union, and callers construct them structurally.
+// SelectedInternalizationTaskRunnerOptions IS public — pd-cli run-once
+// constructs it directly (verified cross-package consumer).
+export {
+  INTERNALIZATION_AUTO_CONSUMER_FLAG_ID,
+  orderKindsByOldestReadyStage,
+  oldestReadyAgeMs,
+  executeSelectedInternalizationTask,
+  runInternalizationConsumerCycle,
+} from './internalization-consumer-cycle.js';
+export type {
+  ConsumerCycleLogger,
+  ConsumerHostToolCatalog,
+  InternalizationConsumerCyclePorts,
+  InternalizationConsumerCycleOutcome,
+  InternalizationConsumerCycleSignals,
+  ExecuteSelectedInternalizationTaskInput,
+  SelectedInternalizationTaskRunResult,
+  SelectedInternalizationTaskRunnerOptions,
+} from './internalization-consumer-cycle.js';
 // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: pure adaptive schedule
 // policy for the existing consumer timer chain (no new background service).
 export * from './adaptive-consumer-schedule.js';

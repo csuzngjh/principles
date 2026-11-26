@@ -18,9 +18,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { runRuleHostPipeline, backfillScribeIdentity, readScribeOwnerRequirementGaps } from '../../src/services/rulehost-pipeline-runner.js';
+import { handleRuntimeInternalizationEnqueueSuccessors } from '../../src/commands/runtime-internalization-enqueue-successors.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime';
-import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId } from '@principles/core/runtime';
+import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId, hydratePITaskRecord } from '@principles/core/runtime';
 import { addPrincipleToLedger, updatePrinciple, appendReuseEvidence } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
@@ -418,6 +419,55 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
     expect(result.approvalId).not.toBeNull();
+
+    // PRI-1293 review fix regression: the final approval is NOT sufficient
+    // evidence. Round 1 ended needs_revision with the repair loop defaulting
+    // ON — the round-1 evaluator must be durably succeeded (never stranded in
+    // needs_human_review), its repair task must actually exist, and the whole
+    // synchronous chain must carry a provable parentTaskId lineage back to the
+    // selected dreamer seed.
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const tasks = await verify.listTasks();
+      const evalR1 = tasks.find((t) => t.taskId.includes('-evaluator-r1-'));
+      const evalR2 = tasks.find((t) => t.taskId.includes('-evaluator-r2-'));
+      const artR1 = tasks.find((t) => t.taskId.includes('-artificer-r1-'));
+      const artR2 = tasks.find((t) => t.taskId.includes('-artificer-r2-'));
+      const philosopher = tasks.find((t) => t.taskKind === 'philosopher');
+      const scribe = tasks.find((t) => t.taskKind === 'scribe' && t.taskId.includes('-scribe-'));
+      if (!evalR1 || !evalR2 || !artR1 || !artR2 || !philosopher || !scribe) {
+        throw new Error(`expected full round-1/round-2 chain in persisted tasks, got: ${tasks.map((t) => `${t.taskKind}:${t.taskId}`).join(',')}`);
+      }
+      // 1. Round-1 evaluator completed normally — repair seeding was NOT refused.
+      expect(evalR1.status, 'round-1 evaluator must not be stranded in needs_human_review').toBe('succeeded');
+      // 2. The persisted repair task exists, parented on the round-1 evaluator,
+      //    carrying the candidate identity recovered from the dreamer seed root.
+      const repairTask = tasks.find((t) => {
+        if (t.taskKind !== 'artificer') return false;
+        const pi = hydratePITaskRecord(t);
+        return pi?.repairPayload?.sourceEvaluatorTaskId === evalR1.taskId;
+      });
+      if (!repairTask) throw new Error('expected a persisted artificer repair task for the round-1 evaluator');
+      const repairPi = hydratePITaskRecord(repairTask);
+      expect(repairPi?.parentTaskId).toBe(evalR1.taskId);
+      expect(repairPi?.correlationId).toBe('candidate-dreamer-feedback-001');
+      expect(repairTask.status === 'pending' || repairTask.status === 'retry_wait').toBe(true);
+      // 3. End-to-end parent chain: dreamer seed → philosopher → scribe →
+      //    artificer-r1 → evaluator-r1 → artificer-r2 → evaluator-r2.
+      const parentOf = (t: typeof tasks[number]) => hydratePITaskRecord(t)?.parentTaskId;
+      expect(parentOf(philosopher)).toBe('dreamer-feedback-001');
+      expect(parentOf(scribe)).toBe(philosopher.taskId);
+      expect(parentOf(artR1)).toBe(scribe.taskId);
+      expect(parentOf(evalR1)).toBe(artR1.taskId);
+      expect(parentOf(artR2)).toBe(evalR1.taskId);
+      expect(parentOf(evalR2)).toBe(artR2.taskId);
+      // 4. The loop's naming correlation must NOT be mistaken for a candidate
+      //    id — sync tasks carry no correlationId of their own.
+      expect(hydratePITaskRecord(evalR1)?.correlationId).toBeUndefined();
+    } finally {
+      await verify.close();
+    }
   }, 60_000);
 
   // ── Test 2: Capability OFF (explicitly disabled) → text_principle_only ──
@@ -1372,4 +1422,247 @@ describe('ownerRequirementGaps result carriage (r6 review fix P1-2)', () => {
     expect(result.degradationReason).toContain('behavior_example_pack_missing');
     expect(result.ownerRequirementGaps).toEqual(['protected/ read access requires confirmation — contract narrowed to write-only gating']);
   }, 60_000);
+});
+
+// ── PRI-1293 R3 (review P1): enqueue-successors dry-run/confirm idempotency ──
+//
+// RuleHost persists timestamp-suffixed task ids that the orchestrator's
+// deterministic successor-id derivation never reproduces. Before the unified
+// parentage scan, confirm on a revisionCount=0 chain re-created successors the
+// dry-run (all-status index) already saw — duplicating the whole logical chain.
+// This test drives the REAL production path end to end: pipeline → sqlite
+// persistence → real enqueue-successors command handler → DB assertions.
+describe('PRI-1293 R3: enqueue-successors dry-run/confirm idempotency on the real RuleHost chain', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } tmpDir = ''; }
+  });
+
+  interface EnqueueOutput {
+    actions: { taskId: string; decision: string; successorTaskId?: string; reason?: string }[];
+    createdCount: number;
+    existingCount: number;
+    skippedCount: number;
+  }
+
+  async function runEnqueue(confirm: boolean): Promise<EnqueueOutput> {
+    const lines: string[] = [];
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = (msg?: unknown) => { lines.push(String(msg)); };
+    console.error = () => undefined;
+    try {
+      await handleRuntimeInternalizationEnqueueSuccessors({
+        workspace: tmpDir,
+        json: true,
+        ...(confirm ? { confirm: true } : {}),
+      });
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      process.exitCode = undefined;
+    }
+    return JSON.parse(lines.join('\n')) as EnqueueOutput;
+  }
+
+  async function readAllTasks(): Promise<import('@principles/core/runtime').TaskRecord[]> {
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      return await verify.listTasks();
+    } finally {
+      await verify.close();
+    }
+  }
+
+  it('dry-run then confirm never duplicate the timestamp-id chain; re-confirm stays idempotent', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-idem-001', 'pain-test-001');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const capability: CodeRuleCapability = { enabled: true, artificerAdapter: adapter };
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-test-001', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: capability,
+      behaviorExamplePack: PIPE_PACK,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+    expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
+
+    const before = await readAllTasks();
+    const countByKind = (tasks: typeof before): Map<string, number> => {
+      const m = new Map<string, number>();
+      for (const t of tasks) m.set(t.taskKind, (m.get(t.taskKind) ?? 0) + 1);
+      return m;
+    };
+    const beforeCounts = countByKind(before);
+    // Chain sanity: exactly one task per stage, all timestamp-suffixed ids the
+    // deterministic derivation cannot reproduce.
+    expect(beforeCounts.get('dreamer')).toBe(1);
+    expect(beforeCounts.get('philosopher')).toBe(1);
+    expect(beforeCounts.get('scribe')).toBe(1);
+    expect(beforeCounts.get('artificer')).toBe(1);
+    expect(beforeCounts.get('evaluator')).toBe(1);
+    const philosopher = before.find((t) => t.taskKind === 'philosopher')!;
+    const scribe = before.find((t) => t.taskKind === 'scribe')!;
+    const artificer = before.find((t) => t.taskKind === 'artificer')!;
+    const evaluator = before.find((t) => t.taskKind === 'evaluator')!;
+    const actionFor = (out: EnqueueOutput, taskId: string) => out.actions.find((a) => a.taskId === taskId);
+
+    // ── Step D: dry-run — zero writes; existing edges resolve to the REAL ids ──
+    const dryRun = await runEnqueue(false);
+    const afterDry = await readAllTasks();
+    expect(afterDry.length, 'dry-run must be zero-write').toBe(before.length);
+    expect(actionFor(dryRun, 'dreamer-idem-001')?.decision).toBe('successor_exists');
+    expect(actionFor(dryRun, 'dreamer-idem-001')?.successorTaskId).toBe(philosopher.taskId);
+    expect(actionFor(dryRun, philosopher.taskId)?.decision).toBe('successor_exists');
+    expect(actionFor(dryRun, philosopher.taskId)?.successorTaskId).toBe(scribe.taskId);
+    expect(actionFor(dryRun, scribe.taskId)?.decision).toBe('successor_exists');
+    expect(actionFor(dryRun, scribe.taskId)?.successorTaskId).toBe(artificer.taskId);
+    expect(actionFor(dryRun, artificer.taskId)?.decision).toBe('successor_exists');
+    expect(actionFor(dryRun, artificer.taskId)?.successorTaskId).toBe(evaluator.taskId);
+    // Positive control: the evaluator genuinely lacks a rollout successor —
+    // dry-run must still promise creation exactly there (proves the scan is
+    // not vacuously reporting exists everywhere).
+    expect(actionFor(dryRun, evaluator.taskId)?.decision).toBe('would_create_successor');
+
+    // ── Step E: confirm — exactly ONE new row (the rollout), nothing duplicated ──
+    const confirm = await runEnqueue(true);
+    const afterConfirm = await readAllTasks();
+    expect(afterConfirm.length, 'confirm must create only the genuinely missing rollout successor').toBe(before.length + 1);
+    const confirmCounts = countByKind(afterConfirm);
+    expect(confirmCounts.get('dreamer')).toBe(1);
+    expect(confirmCounts.get('philosopher')).toBe(1);
+    expect(confirmCounts.get('scribe')).toBe(1);
+    expect(confirmCounts.get('artificer')).toBe(1);
+    expect(confirmCounts.get('evaluator')).toBe(1);
+    const rollouts = afterConfirm.filter((t) => t.taskKind === 'rollout_reviewer');
+    expect(rollouts).toHaveLength(1);
+    const rolloutPi = hydratePITaskRecord(rollouts[0]!);
+    expect(rolloutPi?.parentTaskId).toBe(evaluator.taskId);
+    expect(rolloutPi?.channel).toBe('code_tool_hook');
+    expect(rollouts[0]!.status).toBe('pending');
+    // dry-run / confirm parity on the existing edges — same decision, same real id.
+    expect(actionFor(confirm, 'dreamer-idem-001')?.decision).toBe('successor_exists');
+    expect(actionFor(confirm, 'dreamer-idem-001')?.successorTaskId).toBe(philosopher.taskId);
+    expect(actionFor(confirm, scribe.taskId)?.decision).toBe('successor_exists');
+    expect(actionFor(confirm, scribe.taskId)?.successorTaskId).toBe(artificer.taskId);
+    expect(actionFor(confirm, artificer.taskId)?.decision).toBe('successor_exists');
+    expect(actionFor(confirm, artificer.taskId)?.successorTaskId).toBe(evaluator.taskId);
+    expect(actionFor(confirm, evaluator.taskId)?.decision).toBe('successor_created');
+    expect(actionFor(confirm, evaluator.taskId)?.successorTaskId).toBe(rollouts[0]!.taskId);
+
+    // ── Step G: re-confirm — fully idempotent, zero new rows anywhere ──
+    const reconfirm = await runEnqueue(true);
+    const afterReconfirm = await readAllTasks();
+    expect(afterReconfirm.length, 're-confirm must not create any further task').toBe(afterConfirm.length);
+    expect(actionFor(reconfirm, evaluator.taskId)?.decision).toBe('successor_exists');
+    expect(actionFor(reconfirm, evaluator.taskId)?.successorTaskId).toBe(rollouts[0]!.taskId);
+    expect(actionFor(reconfirm, scribe.taskId)?.decision).toBe('successor_exists');
+    expect(actionFor(reconfirm, scribe.taskId)?.successorTaskId).toBe(artificer.taskId);
+  }, 90_000);
+
+  // ── PRI-1293 R3 (review P2): dry-run/confirm 深度门禁一致性矩阵 ──
+  // 链构造与 core integration test 11 同源: dreamer + 顺序 parentTaskId 链,
+  // depth-pN 的父边数 = N。两路径必须同决策: 9→10 都放行, 10→11 都拒绝,
+  // 已有后继不受新增边限制。
+  // 每条独立链一个 correlationId — 同 correlation 的多个同 kind 源会竞争同一
+  // 确定性后继 id (生产里一个 correlation 只有一条链)。中间节点置 pending:
+  // 扫描只选 succeeded 源, 血缘回溯不关心祖先状态, 消除噪声动作。
+  async function seedDepthChain(prefix: string, depth: number): Promise<string> {
+    const smw = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await smw.initialize();
+    try {
+      const correlationId = `cand-${prefix}`;
+      const meta = (parentTaskId?: string) => JSON.stringify({
+        pi_metadata: {
+          dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+          inputArtifactRefs: [], outputArtifactRefs: [],
+          correlationId,
+          ...(parentTaskId !== undefined ? { parentTaskId } : {}),
+        },
+      });
+      await smw.createTask({
+        taskId: `dreamer-${prefix}-prompt`, taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({
+          pi_metadata: {
+            dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+            inputArtifactRefs: [], outputArtifactRefs: [], correlationId,
+          },
+          candidateId: correlationId,
+        }),
+      });
+      for (let i = 1; i <= depth; i++) {
+        await smw.createTask({
+          taskId: `${prefix}-p${i}`, taskKind: 'philosopher',
+          status: i === depth ? 'succeeded' : 'pending',
+          attemptCount: i === depth ? 1 : 0, maxAttempts: 3,
+          diagnosticJson: meta(i === 1 ? `dreamer-${prefix}-prompt` : `${prefix}-p${i - 1}`),
+        });
+      }
+      return `${prefix}-p${depth}`;
+    } finally {
+      await smw.close();
+    }
+  }
+
+  it('depth matrix: 9→10 both allow, 10→11 both refuse with identical structured verdict, existing successor exempt', async () => {
+    tmpDir = makeTmpDir();
+    const actionFor = (out: EnqueueOutput, taskId: string) => out.actions.find((a) => a.taskId === taskId);
+    // (a) 9-edge source → successor would be edge 10: BOTH paths allow.
+    const nineEdgeSource = await seedDepthChain('d9', 9);
+    // (b) 10-edge source → successor would be edge 11: BOTH paths refuse.
+    const tenEdgeSource = await seedDepthChain('d10', 10);
+    // (c) 10-edge source WITH existing scribe successor → both successor_exists.
+    const tenEdgeWithSucc = await seedDepthChain('d10s', 10);
+    const smw = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await smw.initialize();
+    const existingSuccessorId = 'scribe-d10s-existing';
+    try {
+      await smw.createTask({
+        taskId: existingSuccessorId, taskKind: 'scribe', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({
+          pi_metadata: {
+            dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+            inputArtifactRefs: [], outputArtifactRefs: [],
+            parentTaskId: tenEdgeWithSucc, correlationId: 'cand-d10s',
+          },
+        }),
+      });
+    } finally {
+      await smw.close();
+    }
+
+    // ── dry-run matrix ──
+    const dry = await runEnqueue(false);
+    expect(actionFor(dry, nineEdgeSource)?.decision, JSON.stringify(actionFor(dry, nineEdgeSource))).toBe('would_create_successor');
+    const dryB = actionFor(dry, tenEdgeSource);
+    expect(dryB?.decision, JSON.stringify(dryB)).toBe('skipped');
+    expect(dryB?.reason ?? '').toContain('lineage_refused');
+    expect(dryB?.reason ?? '').toContain('successor_would_exceed_depth_limit:11_edges_max_10');
+    expect(actionFor(dry, tenEdgeWithSucc)?.decision).toBe('successor_exists');
+    expect(actionFor(dry, tenEdgeWithSucc)?.successorTaskId).toBe(existingSuccessorId);
+
+    // ── confirm matrix — byte-identical verdicts on the same edges ──
+    const confirm = await runEnqueue(true);
+    expect(actionFor(confirm, nineEdgeSource)?.decision).toBe('successor_created');
+    const confirmB = actionFor(confirm, tenEdgeSource);
+    expect(confirmB?.decision).toBe('skipped');
+    expect(confirmB?.reason ?? '').toContain('lineage_refused');
+    expect(confirmB?.reason ?? '').toContain('successor_would_exceed_depth_limit:11_edges_max_10');
+    expect(actionFor(confirm, tenEdgeWithSucc)?.decision).toBe('successor_exists');
+    expect(actionFor(confirm, tenEdgeWithSucc)?.successorTaskId).toBe(existingSuccessorId);
+
+    // 拒绝零写入: depth-10 源没有任何 scribe 后继被创建。
+    const tasks = await readAllTasks();
+    expect(tasks.some((t) => hydratePITaskRecord(t)?.parentTaskId === tenEdgeSource && t.taskKind === 'scribe')).toBe(false);
+    // 9→10 放行确实落库: depth-9 源的 scribe 后继真实存在且 parentTaskId 正确。
+    const created = tasks.find((t) => hydratePITaskRecord(t)?.parentTaskId === nineEdgeSource && t.taskKind === 'scribe');
+    expect(created, 'depth-9 source successor must be persisted').toBeDefined();
+    expect(created?.status).toBe('pending');
+  }, 90_000);
 });

@@ -26,6 +26,7 @@ import {
   PhilosopherRunner,
   ScribeRunner,
   getDefaultPdConfig,
+  hydratePITaskRecord,
   type RuntimeStateManager,
 } from '@principles/core/runtime';
 import { runInternalizationConsumerCycle, orderKindsByOldestReadyStage } from '../src/internalization-consumer-cycle.js';
@@ -78,6 +79,9 @@ async function seedTask(workspaceDir: string, taskId: string, taskKind: string, 
         inputArtifactRefs: [],
         outputArtifactRefs: [],
         correlationId: 'corr-fair',
+        // PRI-1293 Phase 3: 线性挂链 — commit 血缘门禁要求后继创建者的链可
+        // 回溯根 dreamer (dreamer 无 deps 即根, 自带 correlationId 佐证)。
+        parentTaskId: deps[0],
       }),
     });
   });
@@ -262,12 +266,31 @@ describe('PRI-954 oldest-ready-stage-first fairness', () => {
     const second = await cycle(workspace);
     expect(second.taskKind).toBe('scribe');
 
-    // Next: the philosopher successor created in cycle 1 (older than the
-    // newcomer) — only then does the late dreamer get its turn.
+    // PRI-1293 R3 ordering correction: the seeded philosopher-1 IS recognized
+    // as dreamer-seed's successor by the unified parentage scan, so NO
+    // duplicate deterministic-id philosopher is ever materialized. The queue
+    // after cycle 2 holds: artificer (created in cycle 2 — YOUNGER than the
+    // newcomer) and dreamer-new. Oldest-ready-first therefore serves the
+    // newcomer dreamer next, then the artificer. Before the dedup fix this
+    // test unknowingly relied on the duplicate philosopher row existing.
     const third = await cycle(workspace);
-    expect(third.taskKind).toBe('philosopher');
+    expect(third.taskKind).toBe('dreamer');
     const fourth = await cycle(workspace);
-    expect(fourth.taskKind).toBe('dreamer');
+    expect(fourth.taskKind).toBe('artificer');
+
+    // Dedup proof: exactly one philosopher row is parented on dreamer-seed —
+    // the unified successor scan recognized the seeded row and never
+    // materialized a deterministic-id duplicate for the same logical edge.
+    // (dreamer-new legitimately spawns its own philosopher in cycle 3; both
+    // chains share correlation corr-fair, so parentage is the only honest
+    // dedup lens.)
+    await withState(workspace, async (sm) => {
+      const all = await sm.listTasks({});
+      const forSeed = all.filter(
+        (t) => t.taskKind === 'philosopher' && hydratePITaskRecord(t)?.parentTaskId === 'dreamer-seed-corr-fair-prompt',
+      );
+      expect(forSeed.map((t) => t.taskId)).toEqual(['philosopher-1-corr-fair-prompt']);
+    });
   });
 
   it('H: the ordering policy is stateless — identical inputs across simulated process restarts order identically', async () => {

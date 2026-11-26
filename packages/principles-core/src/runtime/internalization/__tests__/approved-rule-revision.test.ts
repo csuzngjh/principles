@@ -43,7 +43,10 @@ describe('approved shadow revision uses one immutable-artifact budget (real SQLi
     ids = { scribe: `scribe-${candidateId}-code_tool_hook`, artificer: `artificer-${candidateId}-code_tool_hook`,
       evaluator: `evaluator-${candidateId}-code_tool_hook`, rollout_reviewer: `rollout_reviewer-${candidateId}-code_tool_hook` };
     const base = (deps: string[]) => ({ dependencyTaskIds: deps, channel: 'code_tool_hook' as const, timeoutMs: 1234,
-      inputArtifactRefs: [], outputArtifactRefs: [], correlationId: candidateId });
+      inputArtifactRefs: [], outputArtifactRefs: [], correlationId: candidateId,
+      // PRI-1293 Phase 3: parentTaskId 链 — commit/reopen 血缘门禁要求任务
+      // 可回溯根 dreamer (线性链: 首个依赖即父)。
+      parentTaskId: deps[0] });
     await manager.createTask({ taskId: 'dreamer', taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
       diagnosticJson: JSON.stringify({ ...JSON.parse(createPITaskDiagnosticJson(base([]))), candidateId }) });
     await manager.createTask({ taskId: 'philosopher', taskKind: 'philosopher', status: 'succeeded', attemptCount: 1, maxAttempts: 3,

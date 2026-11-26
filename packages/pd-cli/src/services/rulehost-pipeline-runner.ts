@@ -37,10 +37,15 @@ import {
   DefaultArtificerValidator,
   EvaluatorRunner,
   DefaultEvaluatorValidator,
+  InternalizationOrchestrator,
   createPITaskDiagnosticJson,
+  mergePITaskMetadata,
+  hydratePITaskRecord,
   parsePITaskMetadata,
   parseSeedSourcePainId,
   artificerRepairTaskId,
+  verifyRepairTaskIdentity,
+  type RepairIdentityVerification,
   runAdversarialLoop,
   evaluateInRefinerSandbox,
   DEFAULT_MAX_ROUNDS,
@@ -351,7 +356,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // ── Stage: philosopher ──
     onProgress('philosopher', 'start');
     const philosopherTaskId = `${correlation}-philosopher-${Date.now().toString(36)}`;
-    await createInternalizationTask(stateManager, philosopherTaskId, 'philosopher', [dreamerSeedTaskId], channel, timeoutMs);
+    await createInternalizationTask(stateManager, philosopherTaskId, 'philosopher', [dreamerSeedTaskId], channel, timeoutMs, dreamerSeedTaskId);
     const philosopherRunner = new PhilosopherRunner(
       { stateManager, runtimeAdapter: agentAdapters.philosopher, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore },
       runnerOptsFor(agentAdapters.philosopher),
@@ -367,7 +372,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // ── Stage: scribe ──
     onProgress('scribe', 'start');
     const scribeTaskId = `${correlation}-scribe-${Date.now().toString(36)}`;
-    await createInternalizationTask(stateManager, scribeTaskId, 'scribe', [philosopherTaskId], channel, timeoutMs);
+    await createInternalizationTask(stateManager, scribeTaskId, 'scribe', [philosopherTaskId], channel, timeoutMs, philosopherTaskId);
     const scribeRunner = new ScribeRunner(
       {
         stateManager, runtimeAdapter: agentAdapters.scribe, eventEmitter, validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }), artifactStore,
@@ -738,6 +743,7 @@ async function createInternalizationTask(
   dependencyTaskIds: string[],
   channel: 'prompt' | 'code_tool_hook' | 'defer_archive',
   timeoutMs: number,
+  parentTaskId?: string,
 ): Promise<void> {
   await stateManager.createTask({
     taskId,
@@ -751,6 +757,11 @@ async function createInternalizationTask(
       timeoutMs,
       inputArtifactRefs: [],
       outputArtifactRefs: [],
+      // PRI-1293 review fix: the synchronous path must persist the REAL
+      // producing parent chain — the lineage gate (correlation-lineage.ts)
+      // walks parentTaskId only, so a dependency-only chain is unprovable and
+      // the evaluator repair seeder fails closed on legitimate tasks.
+      ...(parentTaskId !== undefined ? { parentTaskId } : {}),
     }),
   });
 }
@@ -854,7 +865,66 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
             `repair task ${repairTaskId} already reached terminal status ${existing.status}; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)`,
           );
         }
+        // PRI-1293 R7 (P1-1): 复用前完整身份验证 — 共享 core 唯一实现
+        // (verifyRepairTaskIdentity), 与 host-runtime seeder / orchestrator
+        // 完成路径同一规则, 禁止两份实现各自演化。
+        const identity: RepairIdentityVerification = await verifyRepairTaskIdentity(
+          existing,
+          params.repairPayload.sourceEvaluatorTaskId,
+          params.repairPayload.repairIteration,
+          stateManager,
+        );
+        if (!identity.ok) {
+          throw new Error(`evaluator_repair_seed_lineage_refused:${identity.reason}:${identity.detail}`);
+        }
+        const existingPi = hydratePITaskRecord(existing);
+        if (!existingPi) {
+          throw new Error(`evaluator_repair_seed_lineage_refused:invalid_task_metadata:repair task ${repairTaskId} diagnosticJson unreadable`);
+        }
+        if (identity.needsLineageBackfill) {
+          const merged = mergePITaskMetadata(existingPi, {
+            parentTaskId: params.repairPayload.sourceEvaluatorTaskId,
+            correlationId: identity.authoritativeCorrelationId,
+          });
+          const casResult = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+            repairTaskId,
+            existing.diagnosticJson ?? null,
+            { diagnosticJson: createPITaskDiagnosticJson(merged) },
+            {
+              expectedStatus: existing.status,
+              expectedAttemptCount: existing.attemptCount,
+              expectedMaxAttempts: existing.maxAttempts,
+              expectedLeaseOwner: existing.leaseOwner ?? null,
+              expectedLeaseExpiresAt: existing.leaseExpiresAt ?? null,
+              expectedLeaseGeneration: existing.leaseGeneration ?? 0,
+            },
+          );
+          if (casResult === null) {
+            throw new Error(
+              `evaluator_repair_seed_concurrent_modification: repair task ${repairTaskId} changed during lineage backfill — seed NOT applied, safe to retry`,
+            );
+          }
+        }
         return repairTaskId;
+      }
+      // PRI-1293 Phase 3 (§5.2): 与 host-runtime seeder 相同的权威血缘关口 —
+      // 唯一实现经 InternalizationOrchestrator.resolveAuthoritativeCorrelationId
+      // 静态只读包装访问, 绝不本地重写父链遍历。校验失败结构化抛出 (evaluator
+      // 侧 repair_task_seed_failed 路径), 成功则 repair 任务携带验证过的
+      // correlationId + parentTaskId=sourceEvaluatorTaskId, 下一轮 evaluator
+      // 经 metadata 继承同一 id。
+      const sourceEvaluatorTask = await stateManager.getTask(params.repairPayload.sourceEvaluatorTaskId);
+      if (!sourceEvaluatorTask) {
+        throw new Error(
+          `evaluator_repair_seed_lineage_refused: source evaluator task ${params.repairPayload.sourceEvaluatorTaskId} not found`,
+        );
+      }
+      const lineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
+        sourceEvaluatorTask,
+        (taskId: string) => stateManager.getTask(taskId),
+      );
+      if (!lineage.ok) {
+        throw new Error(`evaluator_repair_seed_lineage_refused:${lineage.reason}:${lineage.detail}`);
       }
       await stateManager.createTask({
         taskId: repairTaskId,
@@ -880,6 +950,8 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
           timeoutMs: params.inheritedTimeoutMs,
           inputArtifactRefs: [...params.inheritedInputArtifactRefs],
           outputArtifactRefs: [],
+          parentTaskId: params.repairPayload.sourceEvaluatorTaskId,
+          correlationId: lineage.correlationId,
           ...(params.ownerEvidenceSelection !== undefined
             ? { ownerEvidenceSelection: params.ownerEvidenceSelection }
             : {}),

@@ -21,7 +21,7 @@ import { EvaluatorRunner } from '../evaluator-runner.js';
 import { DefaultEvaluatorValidator } from '../evaluator-output.js';
 import { DefaultRolloutReviewerValidator } from '../rollout-reviewer-output.js';
 import type { RolloutReviewerOutputV1 } from '../rollout-reviewer-output.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson } from '../pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from '../pitask-metadata.js';
 import { storeEmitter } from '../../store/event-emitter.js';
 import { ActivationDispatcher } from '../../activation/activation-dispatcher.js';
 import { PromptWriter, DeferArchiveWriter } from '../../activation/low-risk-writers.js';
@@ -72,9 +72,38 @@ function meta(overrides: Record<string, unknown> = {}): string {
 }
 
 async function createTask(taskId: string, taskKind: string, diagnosticJson: string): Promise<void> {
+  // PRI-1293 Phase 3: 链挂 dreamer 根 — commit/reopen 血缘门禁要求任务可
+  // 回溯根 dreamer。本文件全部是 scribe→…→rollout 线性链: scribe 按其
+  // correlationId 挂种子根 (顶层 candidateId 同值), 其余任务挂首个依赖。
+  const pi = hydratePITaskRecord({ taskKind, diagnosticJson } as unknown as TaskRecord);
+  let parentTaskId: string | undefined;
+  if (taskKind === 'scribe' && pi?.correlationId) {
+    const dreamerId = `dreamer-${pi.correlationId}-src`;
+    const existingDreamer = await stateManager.getTask(dreamerId);
+    if (!existingDreamer) {
+      await stateManager.createTask({
+        taskId: dreamerId, taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({
+          pi_metadata: {
+            dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain',
+            timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [],
+          },
+          candidateId: pi.correlationId,
+        }),
+      });
+    }
+    parentTaskId = dreamerId;
+  } else {
+    // PRI-1293 R7: 显式 parentTaskId 优先 — repair 的 causal parent 是来源
+    // evaluator 而非输入 dep; 缺省才回退 dep[0] 线性链布线。
+    parentTaskId = pi?.parentTaskId ?? pi?.dependencyTaskIds[0];
+  }
+  const finalJson = pi && parentTaskId !== undefined
+    ? createPITaskDiagnosticJson(mergePITaskMetadata(pi, { parentTaskId }))
+    : diagnosticJson;
   await stateManager.createTask({
     taskId, taskKind, status: 'pending', attemptCount: 0, maxAttempts: 3,
-    diagnosticJson,
+    diagnosticJson: finalJson,
   });
 }
 
@@ -163,7 +192,7 @@ describe('Journey 5 — Evaluator needs_revision 无旁路 + repair reopen', () 
     await succeedWithDecision(evalId, 'needs_revision');
 
     // 模拟 evaluator runner 已 seed 的 repair 任务 (生产中由 seeder dep 创建)
-    const repairId = 'artificer-repair-j5-1';
+    const repairId = 'artificer-repair-evaluator-j5-prompt-r1';
     await createTask(repairId, 'artificer', meta({
       repairPayload: {
         requiredChanges: ['fix guard clause'],
@@ -174,6 +203,8 @@ describe('Journey 5 — Evaluator needs_revision 无旁路 + repair reopen', () 
         sourceEvaluatorTaskId: evalId,
       },
       dependencyTaskIds: ['scribe-j5-prompt'],
+      parentTaskId: evalId,
+      correlationId: 'j5',
     }));
 
     // host 提交 evaluator 后继 (auto-consumer 行为)
@@ -233,6 +264,8 @@ describe('Journey 5 — Evaluator needs_revision 无旁路 + repair reopen', () 
         sourceEvaluatorTaskId: evalId,
       },
       dependencyTaskIds: ['scribe-j5b-prompt'],
+      parentTaskId: evalId,
+      correlationId: 'j5b',
     }));
     await succeedWithDecision(repairId);
     await orchestrator.commitNextTaskProposal(repairId); // REOPEN_SOURCE_EVALUATOR: dep → repair
@@ -266,16 +299,18 @@ describe('Journey 6 — Repair 耗尽 → needs_human_review,零副作用', () =
   it('第三轮 needs_revision (priorIteration>=2) → needs_human_review,无 rollout/approval/activation', async () => {
     const evalId = 'evaluator-j6-prompt';
     await createTask(evalId, 'evaluator', meta({
-      dependencyTaskIds: ['artificer-repair-j6-2'],
+      dependencyTaskIds: ['artificer-repair-evaluator-j6-prompt-r2'],
       correlationId: 'j6',
     }));
     // evaluator 依赖的 repair 任务已是第 2 轮 → 下一次 needs_revision 耗尽
-    await createTask('artificer-repair-j6-2', 'artificer', meta({
+    await createTask('artificer-repair-evaluator-j6-prompt-r2', 'artificer', meta({
       repairPayload: {
         requiredChanges: ['x'], concerns: [], previousScore: 0.3,
         repairIteration: 2, sourceArtificerArtifactId: 'pi-art-a2',
         sourceEvaluatorTaskId: evalId,
       },
+      parentTaskId: evalId,
+      correlationId: 'j6',
     }));
     // 生产路径: evaluator runner 判定耗尽 → updateTask(needs_human_review)
     const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: evalId, owner: 't', runtimeKind: 'test-double' });
