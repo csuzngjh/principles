@@ -306,8 +306,7 @@ describe('P2-2 — reconciliation outcome 完整投影', () => {
     const recon = await orchestrator.reconcileSucceededTransitions({ limit: 50 });
     const outcome = recon.outcomes.find((o) => o.taskId === rep);
     expect(outcome).toBeDefined();
-    if (outcome && 'reopenedTaskId' in outcome) {
-      expect(outcome.reopenedTaskId).toBe(ev);
-    }
+    // 强制锁定投影字段 — 字段缺失必须失败而非静默通过 (评审 #7)。
+    expect(outcome?.reopenedTaskId).toBe(ev);
   });
 });

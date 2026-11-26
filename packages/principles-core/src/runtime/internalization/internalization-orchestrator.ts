@@ -22,6 +22,7 @@ import { deriveSuccessorTaskId } from './internalization-state-machine.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, hasConsumedRevisionCause } from './pitask-metadata.js';
 import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition } from './revision-reopen.js';
 import { verifyRepairTaskIdentity } from './repair-task-identity.js';
+import { inferLegacyParentTaskId } from './correlation-lineage.js';
 // PRI-1293 Phase 3: 唯一 PeerRunnerKind 血缘权威解析器 (core 内部模块,
 // 不入 barrel — 跨包消费方经 InternalizationOrchestrator 静态只读包装访问)。
 import {
@@ -243,14 +244,6 @@ export class InternalizationOrchestrator {
     getTask: CorrelationLineageGetTask,
   ): Promise<CorrelationLineageResolution> {
     return resolveAuthoritativeCorrelationId(leafTaskRecord, getTask);
-  }
-
-  /** One-time CAS backfill for exact legacy producer shapes, then the same lineage authority. */
-  static resolveAuthoritativeCorrelationIdWithLegacyBackfill(
-    leafTaskRecord: Parameters<typeof resolveAuthoritativeCorrelationId>[0],
-    stateManager: RuntimeStateManager,
-  ): Promise<CorrelationLineageResolution> {
-    return resolveAuthoritativeCorrelationIdWithLegacyBackfill(leafTaskRecord, stateManager);
   }
 
   // ── wakeOnce ──────────────────────────────────────────────────────────────
@@ -1625,6 +1618,22 @@ export class InternalizationOrchestrator {
       if (!piTask) continue;
       if (piTask.parentTaskId === parentTaskId && piTask.channel === channel) {
         matches.push(task);
+      }
+    }
+    if (matches.length === 0) {
+      // PRI-1293 R8 (review #3): 历史未回填后继对持久化 parent 扫描不可见 —
+      // 协调扫描先处理旧父节点时会重复创建后继, 事后才被判完整性冲突。
+      // 创建前用**同一历史推断规则** (单边 inferLegacyParentTaskId, 非通用
+      // dependency 回退) 识别可证明的未回填后继纳入查重; 推断不出或证据
+      // 不足者不算后继 — 与回填门禁同一证明标准, 不放宽。
+      for (const task of allTasks) {
+        if (task.taskKind !== successorKind) continue;
+        const piTask = hydratePITaskRecord(task);
+        if (!piTask || piTask.parentTaskId || piTask.channel !== channel) continue;
+        const inferred = await inferLegacyParentTaskId(task, piTask, this.stateManager);
+        if (inferred.ok && inferred.parentTaskId === parentTaskId) {
+          matches.push(task);
+        }
       }
     }
     matches.sort((a, b) => (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0));

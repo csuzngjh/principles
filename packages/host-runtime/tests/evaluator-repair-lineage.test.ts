@@ -203,12 +203,19 @@ describe('createEvaluatorRepairDeps.seedArtificerRepairTask — PRI-1293 Phase 3
           outputArtifactRefs: [],
           parentTaskId: sourceEvaluator,
           correlationId: 'cand-attacker-or-drift',
+          // PRI-1293 R7: 完整身份契约下缺 payload 会先行 fail-closed — 夹具
+          // 必须携带合法 payload 才能真正走到 correlation 冲突分类。
+          repairPayload: {
+            requiredChanges: ['x'], concerns: [], previousScore: 0.4,
+            repairIteration: 1, sourceArtificerArtifactId: 'art-1',
+            sourceEvaluatorTaskId: sourceEvaluator,
+          },
         },
       }),
     });
     const seeder = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
     await expect(seeder.seedArtificerRepairTask(repairParams(sourceEvaluator)))
-      .rejects.toThrow(/conflicting_parent_correlation_id/);
+      .rejects.toThrow(/repair_correlation_conflicts_authoritative/);
     // 冲突值不被权威来源覆盖 — 保持原状待人工处置。
     const after = hydratePITaskRecord((await stateManager.getTask(repairTaskId))!);
     expect(after?.correlationId).toBe('cand-attacker-or-drift');

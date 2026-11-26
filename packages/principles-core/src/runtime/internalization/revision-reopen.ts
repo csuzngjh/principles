@@ -186,6 +186,31 @@ export async function reopenTaskForRevision(
     return { ok: false, reason: `task_in_flight_${rawTask2.status}` };
   }
 
+  // ── PRI-1293 R8 (review #1): 双快照漂移校验 — 两次读取之间唯一合法的
+  // 差异是血缘回填对 diagnosticJson parent/correlation 的补齐。任何其他
+  // 变化 (status/lease/revisionCount/runnerDecision — 例如 Owner 在血缘
+  // 验证期间提交人工裁决: 裁决绑定当前轮次 + status 切 pending) 都是
+  // 并发写入。若吞掉该差异继续 CAS, 裁决将被推进的轮次永远跳过
+  // (resume 入口只读当前轮次)。诚实分类为 concurrent_modification —
+  // reopen 不写, Owner 裁决与状态原样保留, 修订波可安全重试。 ──
+  const leaseDrift = (rawTask2.leaseOwner ?? null) !== (rawTask.leaseOwner ?? null)
+    || (rawTask2.leaseExpiresAt ?? null) !== (rawTask.leaseExpiresAt ?? null)
+    || (rawTask2.leaseGeneration ?? 0) !== (rawTask.leaseGeneration ?? 0);
+  const stateDrift = rawTask2.status !== rawTask.status
+    || rawTask2.attemptCount !== rawTask.attemptCount
+    || rawTask2.maxAttempts !== rawTask.maxAttempts;
+  const metadataDrift = (piTask2.revisionCount ?? 0) !== (piTask.revisionCount ?? 0)
+    || piTask2.runnerDecision !== piTask.runnerDecision
+    // completionIntent 为对象 — 引用比较恒不等 (hydrate 每次新实例), 须语义比较。
+    || JSON.stringify(piTask2.completionIntent ?? null) !== JSON.stringify(piTask.completionIntent ?? null);
+  if (leaseDrift || stateDrift || metadataDrift) {
+    return {
+      ok: false,
+      reason: 'concurrent_modification',
+      detail: `snapshot_drift_during_lineage_validation:${taskId}:lease=${String(leaseDrift)}:state=${String(stateDrift)}:metadata=${String(metadataDrift)} — reopen NOT applied, concurrent write (e.g. owner verdict) preserved, safe to retry`,
+    };
+  }
+
   // 可恢复历史任务: 校验通过后把根侧恢复的 id 安全补入本次 reopen 写
   // (§5.3.7) — 与第二次快照比较, 只有差异才需要补入 (回填只写 parentTaskId,
   // 链上 id 一致性在血缘门禁内已验证, 权威值在两次读取间稳定)。

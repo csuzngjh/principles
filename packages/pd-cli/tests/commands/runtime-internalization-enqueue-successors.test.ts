@@ -41,6 +41,10 @@ vi.mock('@principles/core/runtime', async (importOriginal) => ({
     // constructor or every preview path throws TypeError.
     { resolveAuthoritativeCorrelationId: mockResolveLineage },
   ),
+  // PRI-1293 R7 (P2-1): dry-run 预览改用只读 planner — 与 orchestrator
+  // 静态同一判定语义, 单测复用同一 mock  verdict 源 (返回形状兼容:
+  // ok/correlationId/parentEdgeCount/reason/detail)。
+  planLegacyLineageResolution: mockResolveLineage,
   isPeerRunnerKind: vi.fn().mockImplementation((k: string) =>
     ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'].includes(k),
   ),

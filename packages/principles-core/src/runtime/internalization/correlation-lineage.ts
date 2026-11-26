@@ -244,7 +244,7 @@ export async function resolveAuthoritativeCorrelationId(
  * 便捷构造: 以 RuntimeStateManager 为存储的 getTask 绑定。
  * (生产调用方也可直接传 `stateManager.getTask.bind(stateManager)`。)
  */
-type LegacyParentInference = { ok: true; parentTaskId: string } | { ok: false; reason: string };
+export type LegacyParentInference = { ok: true; parentTaskId: string } | { ok: false; reason: string };
 
 function legacyCorrelationCompatible(child: PITaskRecord, parent: PITaskRecord): boolean {
   const childId = child.correlationId?.trim();
@@ -252,7 +252,7 @@ function legacyCorrelationCompatible(child: PITaskRecord, parent: PITaskRecord):
   return !childId || !parentId || childId === parentId;
 }
 
-async function inferLegacyParentTaskId(
+export async function inferLegacyParentTaskId(
   raw: TaskRecord,
   pi: PITaskRecord,
   stateManager: RuntimeStateManager,
@@ -307,6 +307,12 @@ async function inferLegacyParentTaskId(
       if (!priorArtificer || !priorArtificerPi || priorArtificerPi.taskKind !== 'artificer'
         || !priorArtificer.taskId.startsWith(correlation + '-artificer-r' + String(round - 1) + '-')
         || priorArtificerPi.channel !== pi.channel || !legacyCorrelationCompatible(candidatePi, priorArtificerPi)) continue;
+      // PRI-1293 R8 (review #2): 同痛点多次运行共享 correlation 前缀 — 候选
+      // Evaluator 的同轮 Artificer 必须与当前 Artificer 依赖**同一 Scribe**
+      // 才属同一次运行; 否则异链 Evaluator 会被错写为父节点 (或虚假多候选
+      // 拒绝可恢复的链)。根侧 correlation 核对无法发现此错连 — 两次运行
+      // 都追溯到同一 Dreamer。
+      if (!priorArtificerPi.dependencyTaskIds.includes(deps[0] ?? '')) continue;
       candidates.push(candidate);
     }
     const chosen = candidates.at(0);
@@ -454,69 +460,55 @@ export async function resolveAuthoritativeCorrelationIdWithLegacyBackfill(
   leafTaskRecord: TaskRecord,
   stateManager: RuntimeStateManager,
 ): Promise<CorrelationLineageResolution> {
-  let current = leafTaskRecord;
-  const visited = new Set<string>();
-  for (let depth = 0; depth <= CORRELATION_LINEAGE_MAX_PARENT_EDGES; depth += 1) {
-    if (visited.has(current.taskId)) {
-      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_cycle_at:' + current.taskId };
-    }
-    visited.add(current.taskId);
-    const pi = hydratePITaskRecord(current);
-    if (!pi) return { ok: false, reason: 'missing_correlation_id_lineage', detail: 'invalid_legacy_backfill_metadata:' + current.taskId };
-    if (pi.taskKind === 'dreamer') break;
+  // PRI-1293 R8 (review #5/#8): plan-then-write — 完整链先经只读 planner
+  // 验证 (含 canonical overlay 终验), 验证失败 = 零写入; 验证通过后才逐边
+  // 持久化。消除旧实现"逐边上溯即写、上层失败留下部分结果"的
+  // cli-5-failure-no-mutation 违反, 同时消除 planner/writer 双遍历漂移。
+  const plan = await planLegacyLineageResolution(leafTaskRecord, stateManager);
+  if (!plan.ok) return plan;
 
-    const existingParentId = pi.parentTaskId?.trim();
-    if (existingParentId) {
-      const parent = await stateManager.getTask(existingParentId);
-      if (!parent) break; // canonical resolver reports dangling_parent_reference
-      current = parent;
+  for (const edge of plan.backfillEdges) {
+    const row = await stateManager.getTask(edge.taskId);
+    if (!row) {
+      return { ok: false, reason: 'dangling_parent_reference', detail: 'legacy_backfill_target_vanished:' + edge.taskId };
+    }
+    const pi = hydratePITaskRecord(row);
+    if (!pi) {
+      return { ok: false, reason: 'missing_correlation_id_lineage', detail: 'invalid_legacy_backfill_metadata:' + edge.taskId };
+    }
+    const existingParent = pi.parentTaskId?.trim();
+    if (existingParent) {
+      // 已持久化 (幂等重放或并发写入): 同值跳过, 异值 = 冲突拒绝, 不得覆盖。
+      if (existingParent !== edge.parentTaskId) {
+        return { ok: false, reason: 'legacy_parent_backfill_conflict', detail: 'task=' + edge.taskId + ';persistedParent=' + existingParent + ';plannedParent=' + edge.parentTaskId };
+      }
       continue;
     }
-    if (depth === CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
-      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_depth_exceeded:' + current.taskId };
-    }
-
-    const inferred = await inferLegacyParentTaskId(current, pi, stateManager);
-    if (!inferred.ok) {
-      if (inferred.reason === 'task_id_shape_not_from_a_supported_legacy_producer') {
-        // 不匹配任何已知历史生产者结构 = 该节点根本不是历史生产者任务,
-        // 血缘链到此为止。分类权交还 canonical resolver — 无身份来源的孤儿
-        // 必须保持 missing_correlation_id_lineage (root_not_dreamer /
-        // unrecoverable root), 不得被粗暴归类为 legacy_parent_inference_refused
-        // (该分类专为"已知生产者结构但候选父节点无法证明"保留)。
-        break;
-      }
-      return { ok: false, reason: 'legacy_parent_inference_refused', detail: 'task=' + current.taskId + ';taskKind=' + pi.taskKind + ';' + inferred.reason };
-    }
-    if (visited.has(inferred.parentTaskId)) {
-      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_inferred_cycle_at:' + inferred.parentTaskId };
-    }
-    const parent = await stateManager.getTask(inferred.parentTaskId);
-    if (!parent) return { ok: false, reason: 'dangling_parent_reference', detail: 'legacy_inferred_parent_not_found:' + inferred.parentTaskId };
-
-    const merged = mergePITaskMetadata(pi, { parentTaskId: inferred.parentTaskId });
+    const merged = mergePITaskMetadata(pi, { parentTaskId: edge.parentTaskId });
     const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
-      current.taskId,
-      current.diagnosticJson ?? null,
+      edge.taskId,
+      row.diagnosticJson ?? null,
       { diagnosticJson: createPITaskDiagnosticJson(merged) },
       {
-        expectedStatus: current.status,
-        expectedAttemptCount: current.attemptCount,
-        expectedMaxAttempts: current.maxAttempts,
-        expectedLeaseOwner: current.leaseOwner ?? null,
-        expectedLeaseExpiresAt: current.leaseExpiresAt ?? null,
-        expectedLeaseGeneration: current.leaseGeneration ?? 0,
+        expectedStatus: row.status,
+        expectedAttemptCount: row.attemptCount,
+        expectedMaxAttempts: row.maxAttempts,
+        expectedLeaseOwner: row.leaseOwner ?? null,
+        expectedLeaseExpiresAt: row.leaseExpiresAt ?? null,
+        expectedLeaseGeneration: row.leaseGeneration ?? 0,
       },
     );
     if (!updated) {
-      const reread = await stateManager.getTask(current.taskId);
+      const reread = await stateManager.getTask(edge.taskId);
       const rereadPi = reread ? hydratePITaskRecord(reread) : null;
-      if (!reread || rereadPi?.parentTaskId !== inferred.parentTaskId) {
-        return { ok: false, reason: 'legacy_parent_backfill_conflict', detail: 'CAS lost for task=' + current.taskId + ';expectedParent=' + inferred.parentTaskId };
+      if (!reread || rereadPi?.parentTaskId !== edge.parentTaskId) {
+        return { ok: false, reason: 'legacy_parent_backfill_conflict', detail: 'CAS lost for task=' + edge.taskId + ';expectedParent=' + edge.parentTaskId };
       }
     }
-    current = parent;
   }
+
+  // 终验: 真实链 canonical 解析 (与 planner overlay 判定一致, 此处为持久化
+  // 后的权威复核 — 双保险, 不一致说明中间被并发改写)。
   const refreshedLeaf = await stateManager.getTask(leafTaskRecord.taskId);
   return resolveAuthoritativeCorrelationId(refreshedLeaf ?? leafTaskRecord, (id: string) => stateManager.getTask(id));
 }
