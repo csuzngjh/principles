@@ -99,12 +99,16 @@ function fail(reason: string, detail: string): RepairLineageBackfillResult {
   return { ok: false, reason, detail };
 }
 
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function parseDiagnosticRoot(diagnosticJson: string | null): Record<string, unknown> | null {
   if (diagnosticJson === null || diagnosticJson.trim() === '') return {};
   try {
     const parsed: unknown = JSON.parse(diagnosticJson);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    return parsed as Record<string, unknown>;
+    if (!isPlainObjectRecord(parsed)) return null;
+    return parsed;
   } catch {
     return null;
   }
