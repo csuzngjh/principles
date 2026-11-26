@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2069,
+  "count": 2071,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1722,6 +1722,7 @@
     "deriveOwnerGovernanceView",
     "deriveProvenanceFromIngressFacts",
     "deriveSeverity",
+    "deriveSuccessorTaskId",
     "deriveToolHintsFromCanonicalKind",
     "deriveWorkspaceScopeId",
     "detectHardGateFailureFromArtifact",
@@ -1931,6 +1932,7 @@
     "persistPainDiagnosis",
     "piTaskBelongsToCandidates",
     "pickDiagnosticianCandidate",
+    "planExistingSuccessorTransition",
     "planOwnerVerdictOverrideResume",
     "preflightArtificerIntentBasis",
     "preflightArtificerOwnerEvidence",
