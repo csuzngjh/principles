@@ -22,6 +22,10 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const CYCLE_SRC = fileURLToPath(new URL('../src/internalization-consumer-cycle.ts', import.meta.url));
+// PRI-1301: 共享单步执行器独立成模块 — Runner 构造/透传断言读执行器模块,
+// consumer dispatch 输入装配断言仍读 cycle (两文件各自只剩一处同名 case,
+// occurrence 0 即唯一分支, 不再有同文件双分支歧义)。
+const EXECUTOR_SRC = fileURLToPath(new URL('../src/internalization-task-executor.ts', import.meta.url));
 const RUN_ONCE_SRC = fileURLToPath(new URL('../../pd-cli/src/commands/runtime-internalization-run-once.ts', import.meta.url));
 const PIPELINE_RUNNER_SRC = fileURLToPath(new URL('../../pd-cli/src/services/rulehost-pipeline-runner.ts', import.meta.url));
 const OPENCLAW_SERVICE_SRC = fileURLToPath(new URL('../../openclaw-plugin/src/service/internalization-auto-consumer-service.ts', import.meta.url));
@@ -36,12 +40,13 @@ function caseSlice(source: string, caseName: string): string {
 }
 
 /**
- * Slice the Nth (0-based) occurrence of a case label. The file has TWO
- * `case 'artificer':` switches — the shared executor's (first) and the
- * consumer dispatch input assembly (second). CodeRabbit review: full-file
- * assertions are vacuous for the consumer assembly point because the other
- * branch's identical line still satisfies them; each guard must pin the
- * exact branch it owns.
+ * Slice the Nth (0-based) occurrence of a case label. CodeRabbit review:
+ * full-file assertions are vacuous when two branches in scope carry the
+ * same line; each guard must pin the exact branch it owns. PRI-1301: the
+ * executor branch and the dispatch branch now live in DIFFERENT files
+ * (executor module vs consumer cycle), so each file has exactly one
+ * occurrence — the slicing discipline is kept so a future re-merge or
+ * duplication fails loudly instead of silently re-aliasing.
  */
 function caseSliceAt(source: string, caseName: string, occurrence: number): string {
   let idx = -1;
@@ -63,16 +68,14 @@ describe('PRI-741 host semantic projection wiring guard', () => {
   });
 
   it('Guard A2: shared cycle threads hostSemanticContext into the artificer prompt', () => {
-    // PRI-1293 Phase 2B: Runner 构造收编进文件内的共享执行器 (文件中第一个
-    // `case 'artificer':`) — 执行器把 input.hostSemanticContext 透传进
-    // ArtificerRunner options。CodeRabbit review: consumer 的 artificer
-    // 装配输入 (文件中第二个 `case 'artificer':` — dispatch switch) 必须
-    // 单独断言 — 全文件断言会被 evaluator 分支的相同行 vacuously 满足。
-    const src = readSrc(CYCLE_SRC);
-    const executorSlice = caseSliceAt(src, "case 'artificer':", 0);
+    // PRI-1301: Runner 构造在独立 executor 模块 — 执行器把
+    // input.hostSemanticContext 透传进 ArtificerRunner options; consumer 的
+    // artificer 装配输入 (cycle dispatch switch) 单独断言 — 跨文件断言
+    // 不可互替, 两处分别捕获透传/装配回归。
+    const executorSlice = caseSliceAt(readSrc(EXECUTOR_SRC), "case 'artificer':", 0);
     expect(executorSlice).toContain('new ArtificerRunner');
     expect(executorSlice).toContain('hostSemanticContext: input.hostSemanticContext');
-    const dispatchSlice = caseSliceAt(src, "case 'artificer':", 1);
+    const dispatchSlice = caseSliceAt(readSrc(CYCLE_SRC), "case 'artificer':", 0);
     expect(dispatchSlice).toContain('executionInput = {');
     expect(dispatchSlice).toContain('hostSemanticContext: artificerHostSemanticContext');
   });
@@ -81,11 +84,11 @@ describe('PRI-741 host semantic projection wiring guard', () => {
     // CodeRabbit review: 执行器透传断言之外, consumer 的 evaluator 装配输入
     // (dispatch switch 的 `case 'evaluator':`) 也必须断言 — 否则 consumer
     // 停止传入时执行器透传代码仍让本守卫空转通过。两处分别捕获装配/透传回归。
-    const src = readSrc(CYCLE_SRC);
-    const executorSlice = caseSliceAt(src, "case 'evaluator':", 0);
+    // PRI-1301: 透传断言读独立 executor 模块, 装配断言读 cycle。
+    const executorSlice = caseSliceAt(readSrc(EXECUTOR_SRC), "case 'evaluator':", 0);
     expect(executorSlice).toContain('new EvaluatorRunner');
     expect(executorSlice).toContain('hostSemanticContext: input.hostSemanticContext');
-    const dispatchSlice = caseSliceAt(src, "case 'evaluator':", 1);
+    const dispatchSlice = caseSliceAt(readSrc(CYCLE_SRC), "case 'evaluator':", 0);
     expect(dispatchSlice).toContain('executionInput = {');
     expect(dispatchSlice).toContain('hostSemanticContext: artificerHostSemanticContext');
   });

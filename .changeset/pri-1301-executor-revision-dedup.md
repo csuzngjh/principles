@@ -1,0 +1,12 @@
+---
+"@principles/core": patch
+"@principles/host-runtime": patch
+"principles-disciple": patch
+"create-principles-disciple": patch
+---
+
+PRI-1301 (SPEC-PD-PIPELINE-SPINE-001 follow-through): executor module separation + rollout revision-target dedup — pure move + deduplication, zero behavior change.
+
+A — `executeSelectedInternalizationTask` and its typed input/output union move verbatim from `internalization-consumer-cycle.ts` into the new host-runtime module `internalization-task-executor.ts`. The consumer cycle keeps task selection/scheduling/per-kind runtime-profile resolution/adapter-L2 routing/preflight/input assembly/successor commit/recovery sweep/reconciliation; the six Peer Runner constructions now live in the executor module alone. The package public API is symbol-for-symbol unchanged — the executor entries re-export from the new module while cycle entries stay sourced from the cycle module (verified: identical export symbol set in dist/index.d.ts; only the internal re-export paths differ). The SPEC §3.5.2 construction-point whitelist guard tracks the new module (sole-constructor pin moved with equal strength, plus a zero-construction contract on the cycle file by non-whitelisting).
+
+B — the rollout reviewer's private `resolveRevisionTarget` copy is deleted; `handleRevisionRouting` now calls the shared `resolveRolloutRevisionTarget` (revision-reopen.ts) through the bound `stateManager.getTask` — the same single source the Owner revise_once route already consumes (owner-resolution-service). The two implementations were verified line-by-line equivalent before removal. `RolloutRevisionTarget` gains the optional `viaArtifactId` field to preserve the runner's status-quo type semantics exactly: git history proves the field was never assigned by any implementation since its introduction (c41e91032) — no `viaArtifactId:` object literal exists in any commit — so `target.viaArtifactId ?? ctx.taskId` has always evaluated to the rollout task id. That fact is pinned by regression tests (`rollout-revision-routing-convergence.test.ts`: resolution results never carry the property; persisted rolloutRevisionPayload.sourceArtifactId === rollout taskId; exact `rollout_revision_routed` telemetry payload; exact `rollout_revision_target_unresolved` reason string; cross-route same-target parity) plus a new Owner-route end-to-end revise_once test on a rollout task. Error strings, telemetry events and routing semantics are unchanged; future population of the field must update those pins explicitly, never silently.

@@ -26,6 +26,12 @@ import { RolloutReviewerPromptBuilder } from './rollout-reviewer-prompt-builder.
 import { reconcileLineageEcho, type PITaskRecord } from './peer-runner-contracts.js';
 import { checkRuleActivationContent } from './rule-activation-contract.js';
 import type { OutputLanguage } from '../language-directive.js';
+// PRI-1301 (SPEC-PD-PIPELINE-SPINE-001 去重收编): 修订目标解析的唯一权威
+// 实现 — 与 Owner revise_once 路由 (owner-resolution-service) 同一来源。
+// 本 runner 此前的私有 resolveRevisionTarget 副本已删除; `viaArtifactId`
+// 字段语义 (从未被任何实现赋值, 恒走 `?? ctx.taskId` fallback) 由共享返回
+// 类型原样保留, 并有回归测试钉住 (rollout-revision-routing-convergence)。
+import { resolveRolloutRevisionTarget } from './revision-reopen.js';
 
 export type RolloutReviewerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
 
@@ -1004,7 +1010,13 @@ export class RolloutReviewerRunner {
    * → 入口门 resume 同一 completion (无 LLM 重问)。
    */
   private async handleRevisionRouting(ctx: SucceedContext, iteration: number): Promise<boolean> {
-    const target = await this.resolveRevisionTarget(ctx.taskId, ctx.channel ?? 'prompt');
+    // PRI-1301: 唯一权威实现 (revision-reopen.ts) — 绑定 stateManager.getTask
+    // 调用, 与被删除的私有副本逐行等价 (同一遍历序/同一路由判决)。
+    const target = await resolveRolloutRevisionTarget(
+      (id) => this.stateManager.getTask(id),
+      ctx.taskId,
+      ctx.channel ?? 'prompt',
+    );
     if (!target) {
       await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_target_unresolved', ctx);
       return false;
@@ -1076,70 +1088,6 @@ export class RolloutReviewerRunner {
       });
       throw err;
     }
-  }
-
-  /**
-   * 解析修订目标任务 (只读遍历 dep 链):
-   *   rollout → evaluator → artificer → scribe (code 链);
-   *   rollout → scribe (PRI-720 principle 语义链: scribe 是直接依赖)。
-   * code_tool_hook → artificer; 其他 → scribe (走到底)。
-   */
-  private async resolveRevisionTarget(
-    taskId: string,
-    channel: string,
-  ): Promise<{ taskId: string; kind: 'scribe' | 'artificer'; viaArtifactId?: string } | null> {
-    const rawTask = await this.stateManager.getTask(taskId);
-    if (!rawTask) return null;
-    const piTask = hydratePITaskRecord(rawTask);
-
-    // 第一跳: rollout deps → evaluator; evaluator deps → artificer
-    let artificerTaskId: string | null = null;
-    let artificerDeps: string[] = [];
-    const firstHop = piTask?.dependencyTaskIds ?? [];
-    for (const depId of firstHop) {
-      const dep = await this.stateManager.getTask(depId);
-      if (!dep) continue;
-      if (dep.taskKind === 'artificer') {
-        const depPi = hydratePITaskRecord(dep);
-        artificerTaskId = dep.taskId;
-        artificerDeps = depPi?.dependencyTaskIds ?? [];
-        break;
-      }
-      if (dep.taskKind === 'evaluator') {
-        const evalPi = hydratePITaskRecord(dep);
-        for (const evalDepId of evalPi?.dependencyTaskIds ?? []) {
-          const evalDep = await this.stateManager.getTask(evalDepId);
-          if (!evalDep || evalDep.taskKind !== 'artificer') continue;
-          const evalDepPi = hydratePITaskRecord(evalDep);
-          artificerTaskId = evalDep.taskId;
-          artificerDeps = evalDepPi?.dependencyTaskIds ?? [];
-          break;
-        }
-        if (artificerTaskId) break;
-      }
-    }
-    if (!artificerTaskId) {
-      // PRI-720 (C4): principle semantic chain — the scribe is a DIRECT dep of
-      // the rollout (the graph never created an artificer/evaluator). Route
-      // the revision straight back to the authoring scribe instead of
-      // dead-ending in needs_human_review.
-      for (const depId of firstHop) {
-        const dep = await this.stateManager.getTask(depId);
-        if (!dep || dep.taskKind !== 'scribe') continue;
-        return { taskId: dep.taskId, kind: 'scribe' };
-      }
-      return null;
-    }
-
-    if (channel === 'code_tool_hook') {
-      return { taskId: artificerTaskId, kind: 'artificer' };
-    }
-    for (const depId of artificerDeps) {
-      const dep = await this.stateManager.getTask(depId);
-      if (!dep || dep.taskKind !== 'scribe') continue;
-      return { taskId: dep.taskId, kind: 'scribe' };
-    }
-    return null;
   }
 
   private static formatRevisionFeedback(output: RolloutReviewerOutputV1): string {
