@@ -393,7 +393,7 @@ export interface SelectedTaskTelemetryEmitter {
 
 /** 全部 kind 共享的调用方依赖。 */
 export interface SelectedInternalizationTaskBaseDeps {
-  /** 要执行的已租约任务。 */
+  /** 要执行的已**选中**任务 — 执行租约由 Runner 在 run() 内自行获取, 调用方不在本层租约。 */
   readonly taskId: string;
   readonly stateManager: RuntimeStateManager;
   /** 入口自建的 runtime adapter (含 L2 / test-double 路由决策)。 */
@@ -494,8 +494,15 @@ function buildWorkspaceLedgerIdentity(
 }
 
 /**
- * Execute ONE leased internalization task with the kind-selected runner.
+ * Execute ONE selected internalization task with the kind-selected runner.
  * Constructs the runner from the typed input and returns the raw run result.
+ *
+ * Lease ownership contract (CodeRabbit review fix): the caller is responsible
+ * for SELECTING the task (e.g. a dry-run `wakeOnce` `would_lease` candidate);
+ * the runner itself acquires the execution lease inside `run()` — callers must
+ * NOT lease at this layer. The doc previously demanded an already-leased task,
+ * which would lead new callers to acquire the lease at the wrong layer.
+ *
  * Runner crashes propagate to the caller (each entry keeps its own crash
  * semantics: consumer rethrows without state writes; run-once logs + rethrows).
  */

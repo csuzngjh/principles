@@ -25,6 +25,7 @@ import { reopenTaskForRevision, buildRepairRevisionCauseId } from './revision-re
 import {
   resolveAuthoritativeCorrelationId,
   correlationLineageGetTask,
+  CORRELATION_LINEAGE_MAX_PARENT_EDGES,
   type CorrelationLineageGetTask,
   type CorrelationLineageResolution,
 } from './correlation-lineage.js';
@@ -986,6 +987,23 @@ export class InternalizationOrchestrator {
         sourceTaskId: taskId,
         successorTaskId: existingSuccessorCandidate.taskId,
         successorKind: proposal.taskKind,
+      };
+    }
+
+    // PRI-1293 review fix: 创建前校验"再加一条边是否越限"。resolver 只校验
+    // 源任务自身链 (读取侧 — 深度 10 的在途任务保持可读), 但深度 10 的源
+    // 若创建后继, 新任务即刻成为第 11 条边, 之后它自身的每次 commit/reopen
+    // 都被同一 resolver 拒绝 — 产出"已创建但永远无法推进"的任务。因此在
+    // 持久化前 fail-closed: 源深度 9 → 后继 10 放行; 源深度 10 → 结构化拒绝,
+    // 零 createTask 零写入。注意此检查只在创建路径 — 上方在途/终态后继的
+    // successor_exists 与级联 reopen 不受影响 (reopen 有自身的血缘校验)。
+    if (authoritativeCorrelation !== null
+      && authoritativeCorrelation.parentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
+      return {
+        decision: 'lineage_refused',
+        sourceTaskId: taskId,
+        reason: 'parent_chain_cycle_or_depth_exceeded',
+        detail: `successor_would_exceed_depth_limit:${authoritativeCorrelation.parentEdgeCount + 1}_edges_max_${CORRELATION_LINEAGE_MAX_PARENT_EDGES}`,
       };
     }
 

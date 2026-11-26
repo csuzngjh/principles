@@ -178,6 +178,13 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
       })),
       updateTask: vi.fn().mockResolvedValue(undefined),
       updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined),
+      // PRI-1293 review fix: revision reopen 的写入改经 CAS 路径。mock 转发到
+      // updateTask — 既有"单行原子写"断言 (status+attemptCount+metadata 同参)
+      // 语义保持; 前提校验由 MemoryTaskStore-backed harness 与集成测试覆盖。
+      updateTaskIfDiagnosticJsonUnchanged: vi.fn().mockImplementation(async (taskId: string, _expected: string | null, patch: Record<string, unknown>) => {
+        await mockStateManager.updateTask(taskId, patch);
+        return makeTask({ taskId, taskKind: 'evaluator', status: 'pending' });
+      }),
     };
     const mod = await import('../internalization-orchestrator.js');
     OrchestratorClass = mod.InternalizationOrchestrator;

@@ -124,13 +124,94 @@ describe('createEvaluatorRepairDeps.seedArtificerRepairTask — PRI-1293 Phase 3
       .rejects.toThrow(/evaluator_repair_seed_lineage_refused: source evaluator task evaluator-never-existed not found/);
   });
 
-  it('在途复用语义保持: 同 id repair 已存在 (in-flight) → reuse, 不重复校验不重建', async () => {
+  it('在途复用语义保持: 同 id repair 已存在 (in-flight) 且亲缘一致 → reuse, 不重建', async () => {
     const sourceEvaluator = await seedProvableChain();
     const seeder = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
     const first = await seeder.seedArtificerRepairTask(repairParams(sourceEvaluator));
-    // 重放同一 params — 幂等 reuse (repair 生命周期语义不变)。
+    // 重放同一 params — 幂等 reuse (repair 生命周期语义不变); 复用路径同样
+    // 经过血缘校验 (PRI-1293 review), 亲缘一致时静默通过。
     const second = await seeder.seedArtificerRepairTask(repairParams(sourceEvaluator));
     expect(second).toBe(first);
+  });
+
+  it('PRI-1293 review: 旧版无亲缘 repair task 复用前安全补齐 parentTaskId + correlationId', async () => {
+    // 升级前创建的旧 repair task: 确定性 id 相同, 但 diagnosticJson 里没有
+    // parentTaskId/correlationId。复用不得绕过门禁 — 来源链可证明时按权威
+    // 来源补齐, 任务不被重建 (状态/其余 metadata 保持)。
+    const sourceEvaluator = await seedProvableChain();
+    const repairTaskId = artificerRepairTaskId(sourceEvaluator, 1);
+    await stateManager.createTask({
+      taskId: repairTaskId, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        pi_metadata: {
+          dependencyTaskIds: ['scribe-x'],
+          channel: 'prompt',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+          repairPayload: repairParams(sourceEvaluator).repairPayload,
+        },
+      }),
+    });
+    const seeder = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
+    const reused = await seeder.seedArtificerRepairTask(repairParams(sourceEvaluator));
+    expect(reused).toBe(repairTaskId);
+    const after = hydratePITaskRecord((await stateManager.getTask(repairTaskId))!);
+    expect(after?.parentTaskId).toBe(sourceEvaluator);
+    expect(after?.correlationId).toBe(CAND_A);
+    // 既有字段保持 — 补齐是 merge 不是重建。
+    expect(after?.repairPayload?.sourceEvaluatorTaskId).toBe(sourceEvaluator);
+    expect(after?.dependencyTaskIds).toContain('scribe-x');
+    expect((await stateManager.getTask(repairTaskId))?.status).toBe('pending');
+  });
+
+  it('PRI-1293 review: 来源链不可证明的旧 repair task — 复用同样被拒绝', async () => {
+    // 孤儿 evaluator + 旧 repair task 同时在库: 修复前复用路径直接返回 id,
+    // 绕过血缘门禁; 修复后必须与新建同一拒绝。
+    await stateManager.createTask({
+      taskId: 'evaluator-orphan-reuse', taskKind: 'evaluator', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+      }),
+    });
+    const repairTaskId = artificerRepairTaskId('evaluator-orphan-reuse', 1);
+    const beforeJson = JSON.stringify({
+      pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+    });
+    await stateManager.createTask({
+      taskId: repairTaskId, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: beforeJson,
+    });
+    const seeder = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
+    await expect(seeder.seedArtificerRepairTask(repairParams('evaluator-orphan-reuse')))
+      .rejects.toThrow(/evaluator_repair_seed_lineage_refused/);
+    // 零写入 — 旧 task metadata 逐字节不变。
+    expect((await stateManager.getTask(repairTaskId))?.diagnosticJson).toBe(beforeJson);
+  });
+
+  it('PRI-1293 review: 旧 repair task 携带冲突 correlationId — 拒绝而非覆盖', async () => {
+    const sourceEvaluator = await seedProvableChain();
+    const repairTaskId = artificerRepairTaskId(sourceEvaluator, 1);
+    await stateManager.createTask({
+      taskId: repairTaskId, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        pi_metadata: {
+          dependencyTaskIds: [],
+          channel: 'prompt',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+          parentTaskId: sourceEvaluator,
+          correlationId: 'cand-attacker-or-drift',
+        },
+      }),
+    });
+    const seeder = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
+    await expect(seeder.seedArtificerRepairTask(repairParams(sourceEvaluator)))
+      .rejects.toThrow(/conflicting_parent_correlation_id/);
+    // 冲突值不被权威来源覆盖 — 保持原状待人工处置。
+    const after = hydratePITaskRecord((await stateManager.getTask(repairTaskId))!);
+    expect(after?.correlationId).toBe('cand-attacker-or-drift');
   });
 
   it('repair 完成后来源 evaluator reopen 继承同一 id (test 6 后半)', async () => {

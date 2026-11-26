@@ -108,6 +108,19 @@ function createMockStateManager(): {
       createdTasks.push(task);
       return task;
     }),
+    // 简化 CAS: 仅在 diagnosticJson 逐字节一致时应用 patch, 否则返回 null —
+    // 与生产 store 的前提失败语义同形 (precondition-only, 不模拟 lease 竞争)。
+    updateTaskIfDiagnosticJsonUnchanged: vi.fn(async (
+      taskId: string,
+      expectedDiagnosticJson: string | null,
+      patch: Record<string, unknown>,
+    ) => {
+      const task = createdTasks.find((t) => t.taskId === taskId);
+      if (!task) return null;
+      if ((task.diagnosticJson ?? null) !== expectedDiagnosticJson) return null;
+      Object.assign(task, patch);
+      return task;
+    }),
   } as unknown as RuntimeStateManager;
   return { stateManager, createdTasks };
 }
@@ -381,6 +394,71 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
       createdTasks.push({ ...base, status: terminalStatus });
       await expect(deps.seedArtificerRepairTask(params)).rejects.toThrow(new RegExp(`terminal status ${terminalStatus}`));
     }
+  });
+
+  it('PRI-1293 review: 旧版无亲缘 repair task 复用前 CAS 补齐 parentTaskId + correlationId; 来源不可证明则拒绝', async () => {
+    const workspaceDir = createTempWorkspace(true);
+    tmpWorkspaces.push(workspaceDir);
+    const { stateManager, createdTasks } = createMockStateManager();
+    const params = makeValidSeedParams();
+
+    const deps = createEvaluatorRunnerDeps({
+      stateManager,
+      runtimeAdapter: {} as never,
+      eventEmitter: {} as never,
+      validator: {} as never,
+      artifactStore: {} as never,
+      workspaceDir,
+    });
+    if (typeof deps.seedArtificerRepairTask !== 'function') throw new Error('seedArtificerRepairTask missing');
+
+    // 可证明来源链: dreamer(seed cand-r0) ← evaluator-r0。
+    await stateManager.createTask({
+      taskId: 'dreamer-r0-src', taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }, candidateId: 'cand-r0' }),
+    });
+    await stateManager.createTask({
+      taskId: 'evaluator-r0', taskKind: 'evaluator', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'cand-r0', parentTaskId: 'dreamer-r0-src' } }),
+    });
+
+    // 升级前创建的旧 repair task: 确定性 id 相同, 但无 parentTaskId /
+    // correlationId。复用不得绕过血缘门禁 — 按权威来源 CAS 补齐, 不重建。
+    const repairTaskId = `artificer-repair-${params.repairPayload.sourceEvaluatorTaskId}-r${params.repairPayload.repairIteration}`;
+    const legacyJson = JSON.stringify({ pi_metadata: { dependencyTaskIds: ['scribe-task-001'], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], repairPayload: params.repairPayload } });
+    await stateManager.createTask({
+      taskId: repairTaskId, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: legacyJson,
+    });
+    const countBefore = createdTasks.length;
+    const reused = await deps.seedArtificerRepairTask(params);
+    expect(reused).toBe(repairTaskId);
+    expect(createdTasks.length).toBe(countBefore); // 复用不新建
+    const after = createdTasks.find((t) => t.taskId === repairTaskId);
+    const afterMeta = JSON.parse(after?.diagnosticJson ?? '{}') as { pi_metadata?: Record<string, unknown> };
+    expect(afterMeta.pi_metadata?.parentTaskId).toBe('evaluator-r0');
+    expect(afterMeta.pi_metadata?.correlationId).toBe('cand-r0');
+    // 既有字段保持 (merge 而非重建)。
+    expect(afterMeta.pi_metadata?.repairPayload).toEqual(params.repairPayload);
+
+    // 反向: 来源链不可证明时, 旧 repair task 的复用同样被拒绝且零写入。
+    createdTasks.length = 0;
+    await stateManager.createTask({
+      taskId: 'evaluator-orphan-cli', taskKind: 'evaluator', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] } }),
+    });
+    const orphanRepairId = 'artificer-repair-evaluator-orphan-cli-r1';
+    const orphanJson = JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] } });
+    await stateManager.createTask({
+      taskId: orphanRepairId, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: orphanJson,
+    });
+    const orphanParams = {
+      ...params,
+      repairPayload: { ...params.repairPayload, sourceEvaluatorTaskId: 'evaluator-orphan-cli' },
+    };
+    await expect(deps.seedArtificerRepairTask(orphanParams)).rejects.toThrow(/evaluator_repair_seed_lineage_refused/);
+    expect(createdTasks.find((t) => t.taskId === orphanRepairId)?.diagnosticJson).toBe(orphanJson);
   });
 
   it('deps spread contains all required base PeerRunnerDeps fields (EP-02: real path gets full deps)', () => {

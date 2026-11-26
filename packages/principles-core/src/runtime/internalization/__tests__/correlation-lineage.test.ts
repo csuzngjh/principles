@@ -26,10 +26,11 @@ function seedJson(options: {
   correlationId?: string;
   topCandidateId?: string;
   taskKind?: string;
+  dependencyTaskIds?: string[];
 }): string {
   return JSON.stringify({
     [PI_METADATA_KEY]: {
-      dependencyTaskIds: [],
+      dependencyTaskIds: options.dependencyTaskIds ?? [],
       channel: 'prompt',
       timeoutMs: 300_000,
       inputArtifactRefs: [],
@@ -45,7 +46,7 @@ function seedJson(options: {
 function mkTask(
   taskId: string,
   taskKind: string,
-  options: { parentTaskId?: string; correlationId?: string; topCandidateId?: string } = {},
+  options: { parentTaskId?: string; correlationId?: string; topCandidateId?: string; dependencyTaskIds?: string[] } = {},
 ): TaskRecord {
   return {
     taskId,
@@ -57,6 +58,7 @@ function mkTask(
       parentTaskId: options.parentTaskId,
       correlationId: options.correlationId,
       topCandidateId: options.topCandidateId,
+      dependencyTaskIds: options.dependencyTaskIds,
     }),
     createdAt: '2026-11-25T00:00:00.000Z',
     updatedAt: '2026-11-25T00:00:00.000Z',
@@ -81,7 +83,7 @@ describe('resolveAuthoritativeCorrelationId — 正常链与历史恢复', () =>
     const philosopher = mkTask(`philosopher-${UUID_A}-prompt`, 'philosopher', { parentTaskId: dreamer.taskId, correlationId: UUID_A });
     const scribe = mkTask(`scribe-${UUID_A}-prompt`, 'scribe', { parentTaskId: philosopher.taskId, correlationId: UUID_A });
     const result = await resolveAuthoritativeCorrelationId(scribe, makeStore([dreamer, philosopher, scribe]));
-    expect(result).toEqual({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: false });
+    expect(result).toEqual(expect.objectContaining({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: false }));
   });
 
   it('历史恢复: 全链无 id、根 dreamer 仅 taskId 双源可解析 (A/null) → 恢复 A, recoveredFromLegacyRoot=true', async () => {
@@ -89,26 +91,29 @@ describe('resolveAuthoritativeCorrelationId — 正常链与历史恢复', () =>
     const philosopher = mkTask(`philosopher-${UUID_A}-prompt`, 'philosopher', { parentTaskId: dreamer.taskId });
     const scribe = mkTask(`scribe-${UUID_A}-prompt`, 'scribe', { parentTaskId: philosopher.taskId });
     const result = await resolveAuthoritativeCorrelationId(scribe, makeStore([dreamer, philosopher, scribe]));
-    expect(result).toEqual({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: true });
+    expect(result).toEqual(expect.objectContaining({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: true }));
   });
 
   it('历史恢复: 根 taskId 非 UUID 格式、seed 顶层 candidateId 存在 (null/B) → 恢复 B', async () => {
     const dreamer = mkTask('dreamer-legacy-format-prompt', 'dreamer', { topCandidateId: UUID_B });
     const scribe = mkTask(`scribe-${UUID_B}-prompt`, 'scribe', { parentTaskId: dreamer.taskId });
     const result = await resolveAuthoritativeCorrelationId(scribe, makeStore([dreamer, scribe]));
-    expect(result).toEqual({ ok: true, correlationId: UUID_B, recoveredFromLegacyRoot: true });
+    expect(result).toEqual(expect.objectContaining({ ok: true, correlationId: UUID_B, recoveredFromLegacyRoot: true }));
   });
 
   it('历史恢复: 根双源 A/A 相等 → 恢复 A (双源一致的确定性)', async () => {
     const dreamer = mkTask(`dreamer-${UUID_A}-prompt`, 'dreamer', { topCandidateId: UUID_A });
     const philosopher = mkTask(`philosopher-x`, 'philosopher', { parentTaskId: dreamer.taskId });
     const result = await resolveAuthoritativeCorrelationId(philosopher, makeStore([dreamer, philosopher]));
-    expect(result).toEqual({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: true });
+    expect(result).toEqual(expect.objectContaining({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: true }));
   });
 
   it('不使用 dependencyTaskIds 代替 parentTaskId: 仅靠依赖相连的链视为孤立单节点 → 非 dreamer 叶子拒绝', async () => {
     const dreamer = mkTask(`dreamer-${UUID_A}-prompt`, 'dreamer', { correlationId: UUID_A, topCandidateId: UUID_A });
-    const scribe = mkTask(`scribe-${UUID_A}-prompt`, 'scribe'); // 无 parentTaskId
+    // CodeRabbit review fix: scribe 无 parentTaskId 但**确实**把 dreamer 写进
+    // dependencyTaskIds — 若 resolver 错误地沿依赖找父节点, 链将解析成功,
+    // 本测试即时变红 (修复前依赖为空数组, 断言 vacuous)。
+    const scribe = mkTask(`scribe-${UUID_A}-prompt`, 'scribe', { dependencyTaskIds: [dreamer.taskId] });
     const result = await resolveAuthoritativeCorrelationId(scribe, makeStore([dreamer, scribe]));
     expect(result).toEqual({
       ok: false,
@@ -205,7 +210,9 @@ describe('resolveAuthoritativeCorrelationId — 拒绝路径 (fail-closed)', () 
     const leafOk = mkTask('leaf-ok', 'scribe', { parentTaskId: 'p9', correlationId: UUID_A });
     chainOk.push(leafOk);
     const ok = await resolveAuthoritativeCorrelationId(leafOk, makeStore(chainOk));
-    expect(ok).toEqual({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: false });
+    // parentEdgeCount 是创建侧"再加一边是否越限"判定的输入 — 深度语义
+    // 本身必须精确断言, 不能 objectContaining 略过。
+    expect(ok).toEqual({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: false, parentEdgeCount: 10 });
     expect(CORRELATION_LINEAGE_MAX_PARENT_EDGES).toBe(10);
 
     // 11 条边: 再加一层 → 拒绝。
@@ -270,7 +277,7 @@ describe('resolveAuthoritativeCorrelationId — 拒绝路径 (fail-closed)', () 
     const dreamer = mkTask(`dreamer-${UUID_A}-prompt`, 'dreamer', { correlationId: UUID_A, topCandidateId: UUID_A });
     const scribe = mkTask('scribe-anchor-a', 'scribe', { parentTaskId: dreamer.taskId, correlationId: UUID_A });
     const result = await resolveAuthoritativeCorrelationId(scribe, makeStore([dreamer, scribe]));
-    expect(result).toEqual({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: false });
+    expect(result).toEqual(expect.objectContaining({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: false }));
   });
 
   it('根全盲 (A=null, B=null, 根自身无 id) 而仅后代声明 correlationId → 拒绝 (test 12)', async () => {
@@ -288,7 +295,7 @@ describe('resolveAuthoritativeCorrelationId — 拒绝路径 (fail-closed)', () 
     const dreamer = mkTask('dreamer-blind-own-id-prompt', 'dreamer', { correlationId: UUID_C });
     const philosopher = mkTask('philosopher-of-blind', 'philosopher', { parentTaskId: dreamer.taskId, correlationId: UUID_C });
     const result = await resolveAuthoritativeCorrelationId(philosopher, makeStore([dreamer, philosopher]));
-    expect(result).toEqual({ ok: true, correlationId: UUID_C, recoveredFromLegacyRoot: false });
+    expect(result).toEqual(expect.objectContaining({ ok: true, correlationId: UUID_C, recoveredFromLegacyRoot: false }));
   });
 
   it('根双缺失且全链无 id (null/null) → 不可恢复拒绝', async () => {
@@ -339,7 +346,7 @@ describe('resolveAuthoritativeCorrelationId — 根双源身份交叉表 (指令
         expect(result.ok).toBe(false);
         if (!result.ok) expect(result.reason).toBe(c.expectReason);
       } else {
-        expect(result).toEqual({ ok: true, correlationId: c.expectId, recoveredFromLegacyRoot: true });
+        expect(result).toEqual(expect.objectContaining({ ok: true, correlationId: c.expectId, recoveredFromLegacyRoot: true }));
       }
     });
   }
@@ -353,7 +360,7 @@ describe('静态包装与自由函数同判', () => {
     const viaStatic = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(scribe, getTask);
     const viaFree = await resolveAuthoritativeCorrelationId(scribe, getTask);
     expect(viaStatic).toEqual(viaFree);
-    expect(viaStatic).toEqual({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: false });
+    expect(viaStatic).toEqual(expect.objectContaining({ ok: true, correlationId: UUID_A, recoveredFromLegacyRoot: false }));
   });
 
   it('静态包装同样传播拒绝 (dangling)', async () => {

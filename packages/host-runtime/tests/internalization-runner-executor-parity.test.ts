@@ -44,6 +44,7 @@ import {
   createEvaluatorRepairDeps,
   createRolloutGovernanceDeps,
   resolveWorkspaceHostToolSemantics,
+  type ExecuteSelectedInternalizationTaskInput,
 } from '../src/index.js';
 import { WorkspaceTelemetryEmitter } from '../src/workspace-telemetry-emitter.js';
 

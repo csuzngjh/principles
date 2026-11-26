@@ -154,6 +154,9 @@ function makeHarness(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore) {
     async getRunsByTask(id: string) { return [...runs.values()].filter((r) => r.taskId === id); },
     async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+    async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
+      return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+    },
     async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
     async markTaskFailed(id: string, lastError: TaskRecord['lastError']) { await store.updateTask(id, { status: 'failed' as const, lastError }); },
     getRetryPolicy: () => ({ shouldRetry: () => false }),
@@ -313,6 +316,9 @@ function rolloutHarness(res: OwnerResolutionRecord, dispatchDecision: string | n
     async getRunsByTask(id: string) { return [...runs.values()].filter((r) => r.taskId === id); },
     async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+    async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
+      return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+    },
     async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
     getRetryPolicy: () => ({ shouldRetry: () => false }),
   });
@@ -412,6 +418,9 @@ describe('PRI-629 P0: epoch-aware repair reopen (SPEC §12)', () => {
       async listTasks() { return [] as TaskRecord[]; },
       async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
       async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
+        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+      },
       async getRunsByTask() { return []; },
     };
     return { orchestrator: new InternalizationOrchestrator({ stateManager: stateManager as never }, { owner: 'test', runtimeKind: 'test' }), store };
@@ -482,6 +491,9 @@ describe('PRI-718: stale repair completion must not downgrade the evaluator dep'
       async listTasks() { return [] as TaskRecord[]; },
       async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
       async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
+        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+      },
       async getRunsByTask() { return []; },
     };
     return {

@@ -182,17 +182,37 @@ describe('§3.6.3 (2)(4)(8)(10)(11)(12) — commit 拒绝路径 (零后继零写
     if (result.decision === 'lineage_refused') expect(result.reason).toBe('parent_chain_cycle_or_depth_exceeded');
   });
 
-  it('test 11: 10 条父链边通过 (后继创建), 11 条边拒绝 (lineage_refused)', async () => {
-    // 10 条边: dreamer + p1..p9 + leaf (11 节点, 10 边) → 通过。
+  it('test 11: 深度上限语义 — 9→10 边创建放行, 10→11 创建前结构化拒绝, 11 边源读取侧拒绝', async () => {
+    // 链: dreamer(深度0) → p1..p9 (p9 深度9) → leaf (深度10)。
     await mkTask('dreamer-depth-prompt', 'dreamer', 'succeeded', { correlationId: CAND_A, topCandidateId: CAND_A });
     for (let i = 1; i <= 9; i++) {
       await mkTask(`depth-p${i}`, 'philosopher', 'succeeded', { parentTaskId: i === 1 ? 'dreamer-depth-prompt' : `depth-p${i - 1}`, correlationId: CAND_A });
     }
-    const leafOk = await mkTask('depth-leaf-ok', 'scribe', 'succeeded', { parentTaskId: 'depth-p9', correlationId: CAND_A });
-    const ok = await orchestrator.commitNextTaskProposal(leafOk);
-    expect(ok.decision).toBe('successor_created');
 
-    // 11 条边: 在同一链上再挂一层 → 拒绝。
+    // (a) 深度 9 的源创建深度 10 的后继 — 放行 (评审: 9→10 应通过)。
+    const nineEdge = await orchestrator.commitNextTaskProposal('depth-p9');
+    expect(nineEdge.decision, JSON.stringify(nineEdge)).toBe('successor_created');
+
+    // (b) 深度 10 的源创建后继会变成第 11 条边 — 必须在持久化前结构化
+    // 拒绝, 零 createTask (评审: 修复前此处断言 successor_created, 恰好
+    // 制造"已创建但永远无法推进"的任务)。
+    const leafAtCap = await mkTask('depth-leaf-ok', 'scribe', 'succeeded', { parentTaskId: 'depth-p9', correlationId: CAND_A });
+    const taskCountBefore = (await successorIds()).length;
+    const atCap = await orchestrator.commitNextTaskProposal(leafAtCap);
+    expect(atCap.decision, JSON.stringify(atCap)).toBe('lineage_refused');
+    if (atCap.decision === 'lineage_refused') {
+      expect(atCap.reason).toBe('parent_chain_cycle_or_depth_exceeded');
+      expect(atCap.detail).toContain('successor_would_exceed_depth_limit:11_edges_max_10');
+    }
+    expect((await successorIds()).length).toBe(taskCountBefore);
+    // 深度 10 的源自身保持可读 (读取侧不拒绝) — 拒绝只发生在后继创建。
+    const { resolveAuthoritativeCorrelationId, correlationLineageGetTask } = await import('../correlation-lineage.js');
+    const rawLeaf = await stateManager.getTask(leafAtCap);
+    if (!rawLeaf) throw new Error('depth-capped leaf missing');
+    const readable = await resolveAuthoritativeCorrelationId(rawLeaf, correlationLineageGetTask(stateManager));
+    expect(readable.ok).toBe(true);
+
+    // (c) 11 条边的源: resolver 读取侧即拒绝 (行为保持)。
     await mkTask('depth-p10', 'philosopher', 'succeeded', { parentTaskId: 'depth-p9', correlationId: CAND_A });
     const leafDeep = await mkTask('depth-leaf-deep', 'scribe', 'succeeded', { parentTaskId: 'depth-p10', correlationId: CAND_A });
     const deep = await orchestrator.commitNextTaskProposal(leafDeep);
@@ -217,18 +237,22 @@ describe('§3.6.3 (2)(4)(8)(10)(11)(12) — commit 拒绝路径 (零后继零写
 });
 
 describe('§3.6.3 (5) — DiagnosticianStageKind 作用域隔离', () => {
-  it('诊断链分支不受血缘门禁影响: diag 任务 proposeNextTask 照常产出 diag 后继 proposal', async () => {
+  it('诊断链分支不受血缘门禁影响: diag 任务经 commit 真实创建 diag 后继', async () => {
     expect(isDiagnosticianStageKind('diag_rootcause')).toBe(true);
-    // 诊断子任务没有 correlationId / 可校验父链 — 若被误纳入门禁, proposal 将
-    // 无法生成。这是 §4.2 作用域隔离的正向证明。
+    // CodeRabbit review: proposeNextTask 不经过血缘门禁, 即使门禁错误地把
+    // 诊断任务一并拒绝该路径仍会通过 — 必须走 commitNextTaskProposal 生产
+    // 路径并断言后继真实落库。诊断子任务没有 correlationId/可校验父链,
+    // 若被误纳入门禁, commit 将拒绝而非创建。
     await mkTask('diag_rootcause-1', 'diag_rootcause', 'succeeded', {});
-    const proposal = await orchestrator.proposeNextTask('diag_rootcause-1');
-    expect(proposal?.decision).toBe('proposal_created');
-    if (proposal?.decision === 'proposal_created') {
-      expect(proposal.proposal.taskKind).toBe('diag_distiller');
-      expect(proposal.proposal.correlationId).toBeUndefined();
-      expect(proposal.proposal.parentTaskId).toBe('diag_rootcause-1');
-    }
+    const result = await orchestrator.commitNextTaskProposal('diag_rootcause-1');
+    expect(result.decision, JSON.stringify(result)).toBe('successor_created');
+    if (result.decision !== 'successor_created') return;
+    const successor = await stateManager.getTask(result.successorTaskId);
+    expect(successor?.taskKind).toBe('diag_distiller');
+    const pi = hydratePITaskRecord(successor!);
+    expect(pi?.parentTaskId).toBe('diag_rootcause-1');
+    expect(pi?.correlationId).toBeUndefined();
+    expect(pi?.dependencyTaskIds).toContain('diag_rootcause-1');
   });
 });
 
@@ -296,11 +320,12 @@ describe('§3.6.3 (7) — reopenTaskForRevision 血缘保持 / 篡改拒绝 (Own
 
 describe('§3.6.3 (6) — repair → 来源 evaluator reopen 继承同一 correlationId', () => {
   it('repair 完成触发 REOPEN_SOURCE_EVALUATOR: evaluator 保留原 id (mergePITaskMetadata 不丢字段)', async () => {
-    // 链: dreamer(A) → scribe(A) → artificer(A, repairPayload) — repairPayload
-    // 的 sourceEvaluatorTaskId 指向 evaluator(A)。
+    // 链: dreamer(A) → scribe(A) → artificer-original(A) → evaluator(A)
+    // evaluator needs_revision 产出 repair artificer (parent=evaluator),
+    // repairPayload.sourceEvaluatorTaskId 指回 evaluator。
     const dreamer = await mkTask('dreamer-repair-prompt', 'dreamer', 'succeeded', { correlationId: CAND_A, topCandidateId: CAND_A });
     const scribe = await mkTask('scribe-repair', 'scribe', 'succeeded', { parentTaskId: dreamer, correlationId: CAND_A });
-    const artificer = await mkTask('artificer-repair-1', 'artificer', 'succeeded', {
+    await mkTask('artificer-repair-1', 'artificer', 'succeeded', {
       parentTaskId: scribe,
       correlationId: CAND_A,
       runnerDecision: 'approved',
@@ -322,11 +347,29 @@ describe('§3.6.3 (6) — repair → 来源 evaluator reopen 继承同一 correl
         },
       }),
     });
+    // CodeRabbit review fix: evaluator 初始必须依赖**原** artificer — 修复前
+    // 夹具直接把 repair artificer 写成依赖, 即使 reopen 不换依赖最终断言也
+    // 照样通过 (vacuous)。生产方向: evaluator 的 parent/dep 是产出被评工件
+    // 的原 artificer; repair artificer 的 parent 才是 evaluator。
+    const originalArtificer = await mkTask('artificer-original', 'artificer', 'succeeded', {
+      parentTaskId: scribe,
+      correlationId: CAND_A,
+      runnerDecision: 'approved',
+    });
     const evaluator = await mkTask('evaluator-repair-src', 'evaluator', 'succeeded', {
-      parentTaskId: 'artificer-repair-1',
+      parentTaskId: originalArtificer,
       correlationId: CAND_A,
       runnerDecision: 'needs_revision',
-      dependencyTaskIds: [artificer],
+      dependencyTaskIds: [originalArtificer],
+    });
+    // repair artificer 的父链按生产方向指向来源 evaluator。
+    const repairRaw = await stateManager.getTask('artificer-repair-1');
+    const repairPi = hydratePITaskRecord(need(repairRaw, 'repair artificer'));
+    await stateManager.updateTask('artificer-repair-1', {
+      diagnosticJson: createPITaskDiagnosticJson({
+        ...need(repairPi, 'repair artificer metadata'),
+        parentTaskId: evaluator,
+      }),
     });
 
     const result = await orchestrator.commitNextTaskProposal('artificer-repair-1');
@@ -337,8 +380,10 @@ describe('§3.6.3 (6) — repair → 来源 evaluator reopen 继承同一 correl
     // 继承语义: evaluator 的 correlationId 经 reopen 原样保留。
     expect(reopened?.correlationId).toBe(CAND_A);
     expect(reopened?.status).toBe('pending');
-    // 依赖换到 repair artificer (PRI-668 / P0-D 语义保持)。
+    // 依赖替换的真实证明: 原 artificer 依赖被换出, repair artificer 换入
+    // (PRI-668 / P0-D 语义保持) — 两个方向都必须断言。
     expect(reopened?.dependencyTaskIds).toContain('artificer-repair-1');
+    expect(reopened?.dependencyTaskIds).not.toContain('artificer-original');
   });
 });
 
@@ -424,5 +469,64 @@ describe('PRI-1293 review fix — 级联重开拒绝透出真实血缘原因 (fi
     expect(result.detail ?? '').toContain('cascade_reopen_refused:evaluator-cascade-conflict');
     // 拒绝不折叠、不创建任何任务。
     expect((await successorIds()).some((id) => id.startsWith('evaluator-cand'))).toBe(false);
+  });
+});
+
+describe('PRI-1293 review fix — revision reopen CAS 并发安全 (finding: lease clobbering)', () => {
+  it('血缘异步读取期间任务被并发 lease → CAS 拒绝,  reopen 零写入, 任务保持 leased 原状', async () => {
+    // 真实竞态形态: 目标处于 pending (revision-refresh 路径), 血缘多跳
+    // 读取期间另一 consumer 取得 lease。修复前无条件 updateTask 会把
+    // status 覆盖回 pending、attemptCount 清零, lease 字段悬空。
+    const dreamer = await mkTask('dreamer-cas-prompt', 'dreamer', 'succeeded', { correlationId: CAND_A, topCandidateId: CAND_A });
+    const philosopher = await mkTask('philosopher-cas', 'philosopher', 'succeeded', { parentTaskId: dreamer, correlationId: CAND_A });
+    const scribe = await mkTask('scribe-cas', 'scribe', 'pending', { parentTaskId: philosopher, correlationId: CAND_A });
+    const beforeJson = (await stateManager.getTask(scribe))?.diagnosticJson;
+
+    // 在血缘链读取 philosopher 一跳时注入并发 lease — 这正是 reopen
+    // 校验窗口内的真实交错 ( leased 先于写入落地 )。
+    const originalGetTask = stateManager.getTask.bind(stateManager);
+    let leaseInjected = false;
+    stateManager.getTask = async (id: string) => {
+      if (!leaseInjected && id === philosopher) {
+        leaseInjected = true;
+        await stateManager.acquireLease({ taskId: scribe, owner: 'rival-consumer', runtimeKind: 'test-double' });
+      }
+      return originalGetTask(id);
+    };
+    let result;
+    try {
+      result = await reopenTaskForRevision(stateManager, scribe, {
+        revisionCauseId: 'owner-cas-race',
+        reason: 'owner_revise_once',
+      });
+    } finally {
+      stateManager.getTask = originalGetTask;
+    }
+
+    expect(leaseInjected).toBe(true);
+    expect(result.ok, JSON.stringify(result)).toBe(false);
+    expect(result.reason).toBe('concurrent_modification');
+    // 零写入: 任务仍是 rival 的 leased 状态, metadata 逐字节不变,
+    // revisionCount/revisionCauseId 均未落地。
+    const after = need(await stateManager.getTask(scribe), 'scribe after cas conflict');
+    expect(after.status).toBe('leased');
+    expect(after.leaseOwner).toBe('rival-consumer');
+    expect(after.diagnosticJson).toBe(beforeJson);
+    const afterPi = hydratePITaskRecord(after);
+    expect(afterPi?.revisionCauseId).toBeUndefined();
+    expect(afterPi?.revisionCount ?? 0).toBe(0);
+  });
+
+  it('无并发干扰时 CAS 路径 reopen 照常成功 (回归保护)', async () => {
+    const { scribe } = await seedLegacyChain({ topCandidateId: CAND_A });
+    const result = await reopenTaskForRevision(stateManager, scribe, {
+      revisionCauseId: 'owner-cas-normal',
+      reason: 'owner_revise_once',
+    });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const after = hydratePITaskRecord(need(await stateManager.getTask(scribe), 'reopened scribe'));
+    expect(after?.status).toBe('pending');
+    expect(after?.revisionCount).toBe(1);
+    expect(after?.correlationId).toBe(CAND_A);
   });
 });

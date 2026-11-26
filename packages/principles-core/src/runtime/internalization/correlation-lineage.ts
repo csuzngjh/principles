@@ -61,6 +61,12 @@ export type CorrelationLineageResolution =
     correlationId: string;
     /** true = 叶子链全程无 id，身份从根 dreamer 双源恢复 (历史在途链)。 */
     recoveredFromLegacyRoot: boolean;
+    /**
+     * 叶子到根的父子边数 (叶自身深度)。读取侧不据此拒绝 — 10 边深度的
+     * 在途任务保持可读; 该值供创建侧判定"再加一条边是否越限"
+     * (successor depth = parentEdgeCount + 1, 不得超过 MAX)。
+     */
+    parentEdgeCount: number;
   }
   | { ok: false; reason: CorrelationLineageFailureReason; detail: string };
 
@@ -206,7 +212,7 @@ export async function resolveAuthoritativeCorrelationId(
         detail: `root_corroboration_failed:claimed=${chainId},task_id_source=${fromTaskId ?? 'null'},seed_source=${fromSeed ?? 'null'},root_own=null`,
       };
     }
-    return { ok: true, correlationId: chainId, recoveredFromLegacyRoot: false };
+    return { ok: true, correlationId: chainId, recoveredFromLegacyRoot: false, parentEdgeCount: edges };
   }
 
   // ── 5. 纯历史恢复: 链上无任何 id，从根 dreamer 双源恢复 ──
@@ -218,10 +224,10 @@ export async function resolveAuthoritativeCorrelationId(
     };
   }
   if (fromTaskId !== null) {
-    return { ok: true, correlationId: fromTaskId, recoveredFromLegacyRoot: true };
+    return { ok: true, correlationId: fromTaskId, recoveredFromLegacyRoot: true, parentEdgeCount: edges };
   }
   if (fromSeed !== null) {
-    return { ok: true, correlationId: fromSeed, recoveredFromLegacyRoot: true };
+    return { ok: true, correlationId: fromSeed, recoveredFromLegacyRoot: true, parentEdgeCount: edges };
   }
   return {
     ok: false,

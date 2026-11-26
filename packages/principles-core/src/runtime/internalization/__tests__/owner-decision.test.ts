@@ -262,8 +262,8 @@ function makeInMemoryStateManager(tasks: TaskRecord[], artifacts: MemoryPIArtifa
     async getRunsByTask(id: string) { return [...runs.values()].filter((r) => r.taskId === id); },
     async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
-    async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1]) {
-      return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch);
+    async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
+      return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
     },
     async updateTaskIfDiagnosticJsonAndArtifactsUnchanged(input: {
       taskId: string;
@@ -1150,6 +1150,9 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
       async getTask(id: string) { return store.getTask(id); },
       async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
       async updateTask(id: string, patch: Record<string, unknown>) { return store.updateTask(id, patch); },
+      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Record<string, unknown>, options?: Record<string, unknown>) {
+        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+      },
     };
     const outcome = await reopenTaskForRevision(sm as never, ARTIFER_ID, {
       revisionCauseId: 'owner-res-ores_x',
@@ -1176,6 +1179,12 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
       async updateTask(id: string, patch: Record<string, unknown>) {
         writes.push(patch);
         return store.updateTask(id, patch);
+      },
+      // PRI-1293 review fix: reopen 写入改经 CAS — 单行原子写语义不变
+      // (patch 整体一次落库), writes 观测同一契约。
+      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Record<string, unknown>, options?: Record<string, unknown>) {
+        writes.push(patch);
+        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
       },
     };
     await reopenTaskForRevision(sm as never, ARTIFER_ID, {

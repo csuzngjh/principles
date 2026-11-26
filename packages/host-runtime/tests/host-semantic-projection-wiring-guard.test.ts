@@ -32,10 +32,28 @@ function readSrc(p: string): string {
 }
 
 function caseSlice(source: string, caseName: string): string {
-  const start = source.indexOf(caseName);
-  const end = source.indexOf("case '", start + caseName.length);
-  if (start < 0 || end < 0) return '';
-  return source.slice(start, end);
+  return caseSliceAt(source, caseName, 0);
+}
+
+/**
+ * Slice the Nth (0-based) occurrence of a case label. The file has TWO
+ * `case 'artificer':` switches — the shared executor's (first) and the
+ * consumer dispatch input assembly (second). CodeRabbit review: full-file
+ * assertions are vacuous for the consumer assembly point because the other
+ * branch's identical line still satisfies them; each guard must pin the
+ * exact branch it owns.
+ */
+function caseSliceAt(source: string, caseName: string, occurrence: number): string {
+  let idx = -1;
+  let from = 0;
+  for (let i = 0; i <= occurrence; i++) {
+    idx = source.indexOf(caseName, from);
+    if (idx < 0) return '';
+    from = idx + caseName.length;
+  }
+  const end = source.indexOf("case '", from);
+  if (end < 0) return source.slice(idx);
+  return source.slice(idx, end);
 }
 
 describe('PRI-741 host semantic projection wiring guard', () => {
@@ -47,18 +65,29 @@ describe('PRI-741 host semantic projection wiring guard', () => {
   it('Guard A2: shared cycle threads hostSemanticContext into the artificer prompt', () => {
     // PRI-1293 Phase 2B: Runner 构造收编进文件内的共享执行器 (文件中第一个
     // `case 'artificer':`) — 执行器把 input.hostSemanticContext 透传进
-    // ArtificerRunner options; cycle 的 dispatch 输入以同一个
-    // artificerHostSemanticContext 变量装配 (单一 provenance 不变)。
-    const slice = caseSlice(readSrc(CYCLE_SRC), "case 'artificer':");
-    expect(slice).toContain('new ArtificerRunner');
-    expect(slice).toContain('hostSemanticContext: input.hostSemanticContext');
-    expect(readSrc(CYCLE_SRC)).toContain('hostSemanticContext: artificerHostSemanticContext');
+    // ArtificerRunner options。CodeRabbit review: consumer 的 artificer
+    // 装配输入 (文件中第二个 `case 'artificer':` — dispatch switch) 必须
+    // 单独断言 — 全文件断言会被 evaluator 分支的相同行 vacuously 满足。
+    const src = readSrc(CYCLE_SRC);
+    const executorSlice = caseSliceAt(src, "case 'artificer':", 0);
+    expect(executorSlice).toContain('new ArtificerRunner');
+    expect(executorSlice).toContain('hostSemanticContext: input.hostSemanticContext');
+    const dispatchSlice = caseSliceAt(src, "case 'artificer':", 1);
+    expect(dispatchSlice).toContain('executionInput = {');
+    expect(dispatchSlice).toContain('hostSemanticContext: artificerHostSemanticContext');
   });
 
   it('Guard A3: shared cycle threads hostSemanticContext into the evaluator replay', () => {
-    const slice = caseSlice(readSrc(CYCLE_SRC), "case 'evaluator':");
-    expect(slice).toContain('new EvaluatorRunner');
-    expect(slice).toContain('hostSemanticContext: input.hostSemanticContext');
+    // CodeRabbit review: 执行器透传断言之外, consumer 的 evaluator 装配输入
+    // (dispatch switch 的 `case 'evaluator':`) 也必须断言 — 否则 consumer
+    // 停止传入时执行器透传代码仍让本守卫空转通过。两处分别捕获装配/透传回归。
+    const src = readSrc(CYCLE_SRC);
+    const executorSlice = caseSliceAt(src, "case 'evaluator':", 0);
+    expect(executorSlice).toContain('new EvaluatorRunner');
+    expect(executorSlice).toContain('hostSemanticContext: input.hostSemanticContext');
+    const dispatchSlice = caseSliceAt(src, "case 'evaluator':", 1);
+    expect(dispatchSlice).toContain('executionInput = {');
+    expect(dispatchSlice).toContain('hostSemanticContext: artificerHostSemanticContext');
   });
 
   it('Guard B: run-once artificer branch resolves the durable declaration and degrades observably', () => {

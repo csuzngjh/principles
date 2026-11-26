@@ -133,11 +133,37 @@ export async function reopenTaskForRevision(
 
   // P1 评审修复: 单次 task-row mutation——metadata + status + attemptCount
   // 一个 UPDATE 落库,消除 "metadata 已写但 status 未翻" 的 crash 窗口。
-  await stateManager.updateTask(taskId, {
-    diagnosticJson: createPITaskDiagnosticJson(merged),
-    status: 'pending',
-    attemptCount: 0,
-  });
+  // PRI-1293 review fix (并发安全): 上面的血缘门禁是异步多跳读取,期间另一
+  // consumer 可能已把任务 lease 走 — 无条件 updateTask 会把 status 覆盖回
+  // pending、attemptCount 清零,却不动 lease_owner/lease_expires_at,造成
+  // lease 与状态不一致及重复执行。因此写入必须 CAS: 断言读取时的
+  // diagnosticJson/status/attemptCount/maxAttempts/leaseOwner/leaseExpiresAt/
+  // leaseGeneration 全部未变; 任一被并发触碰 → 放弃写入, 返回明确并发冲突,
+  // 由下一轮 reconciliation/调用方重试 (reopen 本身幂等, 重试安全)。
+  const casResult = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+    taskId,
+    rawTask.diagnosticJson ?? null,
+    {
+      diagnosticJson: createPITaskDiagnosticJson(merged),
+      status: 'pending',
+      attemptCount: 0,
+    },
+    {
+      expectedStatus: rawTask.status,
+      expectedAttemptCount: rawTask.attemptCount,
+      expectedMaxAttempts: rawTask.maxAttempts,
+      expectedLeaseOwner: rawTask.leaseOwner ?? null,
+      expectedLeaseExpiresAt: rawTask.leaseExpiresAt ?? null,
+      expectedLeaseGeneration: rawTask.leaseGeneration ?? 0,
+    },
+  );
+  if (casResult === null) {
+    return {
+      ok: false,
+      reason: 'concurrent_modification',
+      detail: `cas_precondition_failed:${taskId} — task state changed during lineage validation (likely leased concurrently); reopen NOT applied, retry next wave`,
+    };
+  }
   return { ok: true, reason: options?.reason ?? 'revision_reopen' };
 }
 
