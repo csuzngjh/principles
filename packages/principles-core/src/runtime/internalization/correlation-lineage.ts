@@ -33,8 +33,10 @@
 
 import type { TaskRecord } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import { hydratePITaskRecord } from './pitask-metadata.js';
-import type { PITaskRecord } from './peer-runner-contracts.js';
+import { createPITaskDiagnosticJson, hydratePITaskRecord, mergePITaskMetadata } from './pitask-metadata.js';
+import { getAllowedPredecessors } from './internalization-job-graph.js';
+import { isPeerRunnerKind, type PITaskRecord } from './peer-runner-contracts.js';
+
 import {
   candidateIdFromDreamerSeed,
   candidateIdFromDreamerTaskId,
@@ -48,7 +50,9 @@ export type CorrelationLineageFailureReason =
   | 'conflicting_parent_correlation_id'
   | 'conflicting_root_identity_sources'
   | 'dangling_parent_reference'
-  | 'parent_chain_cycle_or_depth_exceeded';
+  | 'parent_chain_cycle_or_depth_exceeded'
+  | 'legacy_parent_inference_refused'
+  | 'legacy_parent_backfill_conflict';
 
 /**
  * TECH §3.6.2 判别联合。失败一律结构化携带 reason + detail，
@@ -240,6 +244,184 @@ export async function resolveAuthoritativeCorrelationId(
  * 便捷构造: 以 RuntimeStateManager 为存储的 getTask 绑定。
  * (生产调用方也可直接传 `stateManager.getTask.bind(stateManager)`。)
  */
+/**
+ * Upgrade only known historical producer shapes. This helper is intentionally
+ * separate from the read-only resolver: each inferred edge is proven from a
+ * producer-specific task-id shape plus a unique typed predecessor, then
+ * persisted with the existing task-row CAS. There is no generic dependency
+ * fallback. Old AdversarialLoop Artificer rounds >1 depend on Scribe for input,
+ * but are causally parented by the immediately preceding needs_revision Evaluator.
+ */
+export async function resolveAuthoritativeCorrelationIdWithLegacyBackfill(
+  leafTaskRecord: TaskRecord,
+  stateManager: RuntimeStateManager,
+): Promise<CorrelationLineageResolution> {
+  let current = leafTaskRecord;
+  const visited = new Set<string>();
+  for (let depth = 0; depth <= CORRELATION_LINEAGE_MAX_PARENT_EDGES; depth += 1) {
+    if (visited.has(current.taskId)) {
+      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_cycle_at:' + current.taskId };
+    }
+    visited.add(current.taskId);
+    const pi = hydratePITaskRecord(current);
+    if (!pi) return { ok: false, reason: 'missing_correlation_id_lineage', detail: 'invalid_legacy_backfill_metadata:' + current.taskId };
+    if (pi.taskKind === 'dreamer') break;
+
+    const existingParentId = pi.parentTaskId?.trim();
+    if (existingParentId) {
+      const parent = await stateManager.getTask(existingParentId);
+      if (!parent) break; // canonical resolver reports dangling_parent_reference
+      current = parent;
+      continue;
+    }
+    if (depth === CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
+      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_backfill_depth_exceeded:' + current.taskId };
+    }
+
+    const inferred = await inferLegacyParentTaskId(current, pi, stateManager);
+    if (!inferred.ok) {
+      return { ok: false, reason: 'legacy_parent_inference_refused', detail: 'task=' + current.taskId + ';taskKind=' + pi.taskKind + ';' + inferred.reason };
+    }
+    if (visited.has(inferred.parentTaskId)) {
+      return { ok: false, reason: 'parent_chain_cycle_or_depth_exceeded', detail: 'legacy_inferred_cycle_at:' + inferred.parentTaskId };
+    }
+    const parent = await stateManager.getTask(inferred.parentTaskId);
+    if (!parent) return { ok: false, reason: 'dangling_parent_reference', detail: 'legacy_inferred_parent_not_found:' + inferred.parentTaskId };
+
+    const merged = mergePITaskMetadata(pi, { parentTaskId: inferred.parentTaskId });
+    const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      current.taskId,
+      current.diagnosticJson ?? null,
+      { diagnosticJson: createPITaskDiagnosticJson(merged) },
+      {
+        expectedStatus: current.status,
+        expectedAttemptCount: current.attemptCount,
+        expectedMaxAttempts: current.maxAttempts,
+        expectedLeaseOwner: current.leaseOwner ?? null,
+        expectedLeaseExpiresAt: current.leaseExpiresAt ?? null,
+        expectedLeaseGeneration: current.leaseGeneration ?? 0,
+      },
+    );
+    if (!updated) {
+      const reread = await stateManager.getTask(current.taskId);
+      const rereadPi = reread ? hydratePITaskRecord(reread) : null;
+      if (!reread || rereadPi?.parentTaskId !== inferred.parentTaskId) {
+        return { ok: false, reason: 'legacy_parent_backfill_conflict', detail: 'CAS lost for task=' + current.taskId + ';expectedParent=' + inferred.parentTaskId };
+      }
+    }
+    current = parent;
+  }
+  const refreshedLeaf = await stateManager.getTask(leafTaskRecord.taskId);
+  return resolveAuthoritativeCorrelationId(refreshedLeaf ?? leafTaskRecord, (id: string) => stateManager.getTask(id));
+}
+
+type LegacyParentInference = { ok: true; parentTaskId: string } | { ok: false; reason: string };
+
+function legacyCorrelationCompatible(child: PITaskRecord, parent: PITaskRecord): boolean {
+  const childId = child.correlationId?.trim();
+  const parentId = parent.correlationId?.trim();
+  return !childId || !parentId || childId === parentId;
+}
+
+async function inferLegacyParentTaskId(
+  raw: TaskRecord,
+  pi: PITaskRecord,
+  stateManager: RuntimeStateManager,
+): Promise<LegacyParentInference> {
+  const deps = pi.dependencyTaskIds;
+  const loadTypedParent = async (parentTaskId: string, expectedKind: string): Promise<LegacyParentInference> => {
+    const parentRaw = await stateManager.getTask(parentTaskId);
+    if (!parentRaw) return { ok: false, reason: 'dependency_parent_missing:' + parentTaskId };
+    const parentPi = hydratePITaskRecord(parentRaw);
+    if (!parentPi) return { ok: false, reason: 'dependency_parent_metadata_invalid:' + parentTaskId };
+    if (parentPi.taskKind !== expectedKind) return { ok: false, reason: 'dependency_parent_kind_mismatch:' + parentTaskId };
+    if (parentPi.channel !== pi.channel || !legacyCorrelationCompatible(pi, parentPi)) {
+      return { ok: false, reason: 'dependency_parent_chain_mismatch:' + parentTaskId };
+    }
+    return { ok: true, parentTaskId };
+  };
+
+  // Old repair seeder persisted an explicit sourceEvaluatorTaskId in repairPayload.
+  if (pi.taskKind === 'artificer' && pi.repairPayload) {
+    const sourceEvaluatorTaskId = pi.repairPayload.sourceEvaluatorTaskId;
+    const expectedId = 'artificer-repair-' + sourceEvaluatorTaskId + '-r' + pi.repairPayload.repairIteration;
+    if (raw.taskId !== expectedId) return { ok: false, reason: 'repair_task_id_does_not_match_repair_payload' };
+    return loadTypedParent(sourceEvaluatorTaskId, 'evaluator');
+  }
+
+  // Old AdversarialLoop Artificer: round 1 is caused by Scribe; later rounds
+  // are caused by the unique preceding Evaluator that durably said needs_revision.
+  const artificerRound = pi.taskKind === 'artificer'
+    ? /^(.+)-artificer-r([1-9]\d*)-([a-z0-9]+)$/.exec(raw.taskId)
+    : null;
+  if (artificerRound) {
+    const correlation = artificerRound[1] ?? '';
+    const round = Number(artificerRound[2] ?? '0');
+    if (!correlation || deps.length !== 1) return { ok: false, reason: 'legacy_adversarial_artificer_requires_one_scribe_dependency' };
+    const scribe = await stateManager.getTask(deps[0] ?? '');
+    const scribePi = scribe ? hydratePITaskRecord(scribe) : null;
+    if (!scribe || !scribePi || scribePi.taskKind !== 'scribe' || scribePi.channel !== pi.channel) {
+      return { ok: false, reason: 'legacy_adversarial_artificer_scribe_input_not_provable' };
+    }
+    if (round === 1) return loadTypedParent(scribe.taskId, 'scribe');
+
+    const prefix = correlation + '-evaluator-r' + String(round - 1) + '-';
+    const evaluatorRows = await stateManager.listTasks({ taskKind: 'evaluator' });
+    const candidates: TaskRecord[] = [];
+    for (const candidate of evaluatorRows) {
+      if (!candidate.taskId.startsWith(prefix) || candidate.status !== 'succeeded') continue;
+      const candidatePi = hydratePITaskRecord(candidate);
+      if (!candidatePi || candidatePi.runnerDecision !== 'needs_revision' || candidatePi.channel !== pi.channel
+        || !legacyCorrelationCompatible(pi, candidatePi) || candidatePi.dependencyTaskIds.length !== 1) continue;
+      const priorArtificer = await stateManager.getTask(candidatePi.dependencyTaskIds[0] ?? '');
+      const priorArtificerPi = priorArtificer ? hydratePITaskRecord(priorArtificer) : null;
+      if (!priorArtificer || !priorArtificerPi || priorArtificerPi.taskKind !== 'artificer'
+        || !priorArtificer.taskId.startsWith(correlation + '-artificer-r' + String(round - 1) + '-')
+        || priorArtificerPi.channel !== pi.channel || !legacyCorrelationCompatible(candidatePi, priorArtificerPi)) continue;
+      candidates.push(candidate);
+    }
+    if (candidates.length !== 1) {
+      return { ok: false, reason: 'previous_round_evaluator_not_unique_or_not_needs_revision:round=' + String(round - 1) + ':matches=' + String(candidates.length) };
+    }
+    return { ok: true, parentTaskId: candidates[0]!.taskId };
+  }
+
+  // Old AdversarialLoop Evaluator IDs encode the exact Artificer round.
+  const evaluatorRound = pi.taskKind === 'evaluator'
+    ? /^(.+)-evaluator-r([1-9]\d*)-([a-z0-9]+)$/.exec(raw.taskId)
+    : null;
+  if (evaluatorRound) {
+    const correlation = evaluatorRound[1] ?? '';
+    const round = evaluatorRound[2] ?? '';
+    if (!correlation || deps.length !== 1) return { ok: false, reason: 'legacy_adversarial_evaluator_requires_one_artificer_dependency' };
+    const parent = await loadTypedParent(deps[0] ?? '', 'artificer');
+    if (!parent.ok) return parent;
+    const parentRaw = await stateManager.getTask(parent.parentTaskId);
+    if (!parentRaw?.taskId.startsWith(correlation + '-artificer-r' + round + '-')) {
+      return { ok: false, reason: 'legacy_adversarial_evaluator_round_parent_mismatch' };
+    }
+    return parent;
+  }
+
+  // Old RuleHost philosopher/scribe IDs are timestamp-suffixed; the producer
+  // passed exactly the causal predecessor as the sole dependency.
+  const ruleHostStage = /^(.+)-(philosopher|scribe)-([a-z0-9]+)$/.exec(raw.taskId);
+  if (ruleHostStage && (pi.taskKind === 'philosopher' || pi.taskKind === 'scribe')
+    && ruleHostStage[2] === pi.taskKind && deps.length === 1) {
+    const parentRaw = await stateManager.getTask(deps[0] ?? '');
+    const parentPi = parentRaw ? hydratePITaskRecord(parentRaw) : null;
+    if (!parentRaw || !parentPi) return { ok: false, reason: 'legacy_rulehost_parent_missing_or_invalid' };
+    if (!isPeerRunnerKind(parentPi.taskKind)) return { ok: false, reason: 'legacy_rulehost_parent_not_peer_runner' };
+    const allowed = getAllowedPredecessors(pi.taskKind, pi.channel, pi.pipelineMode);
+    if (!allowed.includes(parentPi.taskKind) || parentPi.channel !== pi.channel || !legacyCorrelationCompatible(pi, parentPi)) {
+      return { ok: false, reason: 'legacy_rulehost_parent_not_unique_typed_predecessor' };
+    }
+    return { ok: true, parentTaskId: parentRaw.taskId };
+  }
+
+  return { ok: false, reason: 'task_id_shape_not_from_a_supported_legacy_producer' };
+}
+
 export function correlationLineageGetTask(stateManager: RuntimeStateManager): CorrelationLineageGetTask {
   return (taskId: string) => stateManager.getTask(taskId);
 }
