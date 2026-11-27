@@ -26,13 +26,14 @@ import type { ArtificerRuleOutput } from '../internalization/artificer-output.js
 import type { BehaviorExamplePack } from '../internalization/behavior-example-pack.js';
 import type { EvaluatorOutputV1, EvaluatorOutputV2 } from '../internalization/evaluator-output.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
 import { StoreEventEmitter } from '../store/event-emitter.js';
-import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
+import { createPITaskDiagnosticJson, artificerRepairTaskId, hydratePITaskRecord } from '../internalization/pitask-metadata.js';
+import { InternalizationOrchestrator } from '../internalization/internalization-orchestrator.js';
 import type { PIArtifactRecord, PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { RefinerRuleHostGateDeps } from '../internalization/refiner-rulehost-gate.js';
 import { runAdversarialLoop } from '../adversarial-loop.js';
+import { createLogicalSuccessorTask } from '../internalization/successor-create.js';
 
 /* eslint-disable @typescript-eslint/no-non-null-assertion, @typescript-eslint/class-methods-use-this, @typescript-eslint/prefer-destructuring -- test double + guaranteed indexed lookups */
 import { parsePITaskMetadata } from '../internalization/pitask-metadata.js';
@@ -235,7 +236,7 @@ function makeFailingGateDeps(): RefinerRuleHostGateDeps {
 
 interface Harness {
   stateManager: RuntimeStateManager;
-  artifactStore: MemoryPIArtifactStore;
+  artifactStore: PIArtifactStore;
   artificerRunner: ArtificerRunner;
   evaluatorRunner: EvaluatorRunner;
   adapter: FactoryAdapter;
@@ -247,7 +248,7 @@ async function makeHarness(opts: { gateDeps?: RefinerRuleHostGateDeps } = {}): P
   fs.mkdirSync(tmpDir, { recursive: true });
   const stateManager = new RuntimeStateManager({ workspaceDir: tmpDir });
   await stateManager.initialize();
-  const artifactStore = new MemoryPIArtifactStore();
+  const artifactStore = stateManager.piArtifactStore;
   const eventEmitter = new StoreEventEmitter();
   const adapter = new FactoryAdapter();
   adapter.artifactStore = artifactStore;
@@ -262,6 +263,22 @@ async function makeHarness(opts: { gateDeps?: RefinerRuleHostGateDeps } = {}): P
   );
 
   await stateManager.createTask({
+    taskId: 'dreamer-loop-root',
+    taskKind: 'dreamer',
+    status: 'succeeded',
+    attemptCount: 1,
+    maxAttempts: 3,
+    resultRef: 'dreamer://x',
+    diagnosticJson: createPITaskDiagnosticJson({
+      dependencyTaskIds: [],
+      channel: 'prompt',
+      correlationId: 'candidate-loop-001',
+      timeoutMs: 1000,
+      inputArtifactRefs: [],
+      outputArtifactRefs: [],
+    }),
+  });
+  await stateManager.createTask({
     taskId: SCRIBE_TASK_ID,
     taskKind: 'scribe',
     status: 'succeeded',
@@ -269,11 +286,13 @@ async function makeHarness(opts: { gateDeps?: RefinerRuleHostGateDeps } = {}): P
     maxAttempts: 3,
     resultRef: 'scribe://x',
     diagnosticJson: createPITaskDiagnosticJson({
-      dependencyTaskIds: [],
+      dependencyTaskIds: ['dreamer-loop-root'],
       channel: 'prompt',
+      correlationId: 'candidate-loop-001',
       timeoutMs: 1000,
       inputArtifactRefs: [],
       outputArtifactRefs: [{ artifactType: 'principle', ref: 'pi-art-scribe-loop-001' }],
+      parentTaskId: 'dreamer-loop-root',
     }),
   });
   await artifactStore.upsertArtifact(makeScribeArtifact());
@@ -573,4 +592,508 @@ describe('runAdversarialLoop (PRI-428)', () => {
     expect(result.degradationReason).toContain('artificer_run_threw');
     expect(result.ruleArtifactId).toBeNull();
   });
+
+  it('recovers succeeded artificer and evaluator results on rerun without another runtime execution', async () => {
+    h.adapter.queueArtificer(makeArtificerOutput);
+    h.adapter.queueEvaluator(makeEvaluatorApproved);
+    const input = {
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    };
+
+    const first = await runAdversarialLoop(input);
+    expect(first.decision).toBe('approved');
+    const executionsAfterFirst = h.adapter.startRunCalls.length;
+    expect(executionsAfterFirst).toBe(2);
+
+    const second = await runAdversarialLoop(input);
+    expect(second, JSON.stringify(second)).toMatchObject({
+      decision: 'approved',
+      finalEvaluatorTaskId: first.finalEvaluatorTaskId,
+      ruleArtifactId: first.ruleArtifactId,
+      principleArtifactId: first.principleArtifactId,
+    });
+    expect(h.adapter.startRunCalls).toHaveLength(executionsAfterFirst);
+
+    const evaluatorRuns = await h.stateManager.getRunsByTask(first.finalEvaluatorTaskId);
+    const authoritativeRunId = first.finalEvaluatorTaskId
+      ? (await h.stateManager.getTask(first.finalEvaluatorTaskId))?.resultRef?.replace('evaluator://', '')
+      : undefined;
+    const authoritativeRun = evaluatorRuns.find((run) => run.runId === authoritativeRunId);
+    expect(authoritativeRun?.executionStatus).toBe('succeeded');
+    expect(authoritativeRun?.reason).toBe('task_completed');
+    expect(authoritativeRun?.outputPayload).toBeTruthy();
+  }, 60_000);
+
+  it('recovers approved-plus-failed-replay evidence as a repair-required round instead of rejecting raw metadata', async () => {
+    const oldH = h;
+    h = await makeHarness({ gateDeps: makeFailingGateDeps() });
+    await oldH.stateManager.close();
+    try { fs.rmSync(oldH.tmpDir, { recursive: true, force: true }); } catch { /* temp */ }
+    h.adapter.queueArtificer(makeArtificerOutput);
+    h.adapter.queueEvaluator(makeEvaluatorApproved);
+    h.adapter.queueArtificer(makeArtificerOutput);
+    h.adapter.queueEvaluator(makeEvaluatorApproved);
+    const input = {
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    };
+
+    const first = await runAdversarialLoop(input);
+    expect(first.decision).toBe('rejected');
+    expect(first.degradationReason).toContain('max_rounds_exhausted');
+    const executionsAfterFirst = h.adapter.startRunCalls.length;
+    expect(executionsAfterFirst).toBe(4);
+
+    const second = await runAdversarialLoop(input);
+    expect(second, JSON.stringify(second)).toMatchObject({
+      decision: 'rejected',
+      finalEvaluatorTaskId: first.finalEvaluatorTaskId,
+    });
+    expect(second.degradationReason).toContain('max_rounds_exhausted');
+    expect(second.degradationReason).not.toContain('runner_decision_mismatch');
+    expect(h.adapter.startRunCalls).toHaveLength(executionsAfterFirst);
+  }, 60_000);
+
+  it('recovers a partially completed chain: succeeded artificer is reused while evaluator executes once', async () => {
+    const creation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: SCRIBE_TASK_ID,
+      successorKind: 'artificer',
+      channel: 'prompt',
+      preferredTaskId: 'loop-partial-artificer',
+      metadata: {
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: SCRIBE_TASK_ID,
+      },
+    });
+    if (creation.outcome !== 'created') throw new Error(`expected artificer creation, got ${creation.outcome}`);
+    h.adapter.queueArtificer(makeArtificerOutput);
+    const direct = await h.artificerRunner.run(creation.task.taskId);
+    expect(direct.status).toBe('succeeded');
+    expect(h.adapter.startRunCalls).toHaveLength(1);
+
+    h.adapter.queueEvaluator(makeEvaluatorApproved);
+    const result = await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    });
+
+    expect(result, JSON.stringify(result)).toMatchObject({ decision: 'approved', rounds: 1 });
+    expect(h.adapter.startRunCalls).toHaveLength(2);
+    expect(h.adapter.startRunCalls[1]?.taskId).toBe(result.finalEvaluatorTaskId);
+    const artificerTasks = (await h.stateManager.listTasks()).filter((task) => task.taskKind === 'artificer');
+    expect(artificerTasks.map((task) => task.taskId)).toEqual([creation.task.taskId]);
+  }, 60_000);
+
+  it('fails closed when a succeeded task has corrupted durable output and never re-executes it', async () => {
+    h.adapter.queueArtificer(makeArtificerOutput);
+    h.adapter.queueEvaluator(makeEvaluatorApproved);
+    const input = {
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    };
+    const first = await runAdversarialLoop(input);
+    expect(first.decision).toBe('approved');
+    const evaluatorTask = await h.stateManager.getTask(first.finalEvaluatorTaskId);
+    const runId = evaluatorTask?.resultRef?.replace('evaluator://', '');
+    expect(runId).toBeTruthy();
+    await h.stateManager.runStore.updateRun(runId!, { outputPayload: '{corrupted' });
+    const executionsAfterFirst = h.adapter.startRunCalls.length;
+
+    const second = await runAdversarialLoop(input);
+    expect(second.decision).toBe('rejected');
+    expect(second.degradationReason).toContain('evaluator_recovery_invalid');
+    expect(h.adapter.startRunCalls).toHaveLength(executionsAfterFirst);
+    expect((await h.stateManager.getTask(first.finalEvaluatorTaskId))?.status).toBe('succeeded');
+  }, 60_000);
+
+  it.each([
+    ['failed', 'artificer_successor_failed_terminal'],
+    ['needs_human_review', 'artificer_successor_needs_human_review'],
+  ] as const)('existing %s artificer successor is not bypassed or re-executed', async (status, expectedReason) => {
+    await h.stateManager.createTask({
+      taskId: `loop-terminal-artificer-${status}`,
+      taskKind: 'artificer',
+      status,
+      attemptCount: 1,
+      maxAttempts: 3,
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: SCRIBE_TASK_ID,
+      }),
+    });
+
+    const result = await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    });
+
+    expect(result.decision).toBe('rejected');
+    expect(result.degradationReason).toContain(expectedReason);
+    expect(h.adapter.startRunCalls).toEqual([]);
+    expect((await h.stateManager.getTask(`loop-terminal-artificer-${status}`))?.status).toBe(status);
+  }, 60_000);
+
+  it.each(['pending', 'retry_wait'] as const)('existing %s artificer successor continues without a duplicate logical task', async (status) => {
+    const taskId = `loop-${status}-artificer`;
+    await h.stateManager.createTask({
+      taskId,
+      taskKind: 'artificer',
+      status,
+      attemptCount: status === 'retry_wait' ? 1 : 0,
+      maxAttempts: 3,
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: SCRIBE_TASK_ID,
+      }),
+    });
+    h.adapter.queueArtificer(makeArtificerOutput);
+    h.adapter.queueEvaluator(makeEvaluatorApproved);
+
+    const result = await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    });
+
+    expect(result, JSON.stringify(result)).toMatchObject({ decision: 'approved', rounds: 1 });
+    expect(h.adapter.startRunCalls.map((call) => call.taskId)).toEqual([taskId, result.finalEvaluatorTaskId]);
+    const artificerTasks = (await h.stateManager.listTasks()).filter((task) => task.taskKind === 'artificer');
+    expect(artificerTasks.map((task) => task.taskId)).toEqual([taskId]);
+  }, 60_000);
+
+  it('resumes the reopened original evaluator after a crash between repair reopen and revision execution', async () => {
+    // Build the pre-repair chain with real runner executions against real
+    // SQLite/artifact persistence. The repair task shape mirrors the production
+    // seeder; the transition itself below is performed only by the orchestrator.
+    const artificerCreation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: SCRIBE_TASK_ID,
+      successorKind: 'artificer',
+      channel: 'prompt',
+      preferredTaskId: 'loop-crash-artificer-r1',
+      metadata: {
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: SCRIBE_TASK_ID,
+      },
+    });
+    if (artificerCreation.outcome !== 'created') throw new Error(`expected round artificer creation, got ${artificerCreation.outcome}`);
+    h.adapter.queueArtificer(makeArtificerOutput);
+    const artificerResult = await h.artificerRunner.run(artificerCreation.task.taskId);
+    expect(artificerResult.status).toBe('succeeded');
+    const sourceArtificerArtifactId = artificerResult.artifactId;
+    expect(sourceArtificerArtifactId).toBeTruthy();
+
+    const evaluatorCreation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: artificerCreation.task.taskId,
+      successorKind: 'evaluator',
+      channel: 'prompt',
+      preferredTaskId: 'loop-crash-evaluator-r1',
+      metadata: {
+        dependencyTaskIds: [artificerCreation.task.taskId],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: artificerCreation.task.taskId,
+      },
+    });
+    if (evaluatorCreation.outcome !== 'created') throw new Error(`expected evaluator creation, got ${evaluatorCreation.outcome}`);
+    h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
+    const sourceEvaluatorResult = await h.evaluatorRunner.run(evaluatorCreation.task.taskId);
+    expect(sourceEvaluatorResult.status).toBe('succeeded');
+
+    const repairPayload = {
+      requiredChanges: ['fix matcher'],
+      concerns: ['code gap'],
+      previousScore: 0.4,
+      repairIteration: 1,
+      sourceArtificerArtifactId: sourceArtificerArtifactId!,
+      sourceEvaluatorTaskId: evaluatorCreation.task.taskId,
+      sourceEvaluatorRunId: sourceEvaluatorResult.runId,
+    };
+    const repairCreation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: evaluatorCreation.task.taskId,
+      successorKind: 'artificer',
+      channel: 'prompt',
+      preferredTaskId: artificerRepairTaskId(evaluatorCreation.task.taskId, 1),
+      metadata: {
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: evaluatorCreation.task.taskId,
+        repairPayload,
+      },
+    });
+    if (repairCreation.outcome !== 'created') throw new Error(`expected repair creation, got ${repairCreation.outcome}`);
+    h.adapter.queueArtificer(makeArtificerOutput);
+    expect((await h.artificerRunner.run(repairCreation.task.taskId)).status).toBe('succeeded');
+
+    const orchestrator = new InternalizationOrchestrator(
+      { stateManager: h.stateManager },
+      { owner: 'loop-test', runtimeKind: 'test-double', dryRun: true },
+    );
+    const baseLoopInput = {
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    };
+
+    // First entry commits the formal reopen, then crashes before the reopened
+    // evaluator can run. The throw is deliberately outside the evaluator runner:
+    // it models process termination after the commit transaction succeeded.
+    const crashed = await runAdversarialLoop({
+      ...baseLoopInput,
+      commitRepairTransition: async (repairTaskId) => {
+        const commit = await orchestrator.commitNextTaskProposal(repairTaskId);
+        if (commit.decision === 'revision_reopened') throw new Error('simulated crash after formal reopen');
+        return commit;
+      },
+    });
+    expect(crashed.decision).toBe('rejected');
+    const reopenedAfterCrash = hydratePITaskRecord((await h.stateManager.getTask(evaluatorCreation.task.taskId))!);
+    expect(reopenedAfterCrash).toMatchObject({
+      taskId: evaluatorCreation.task.taskId,
+      status: 'pending',
+      revisionCount: 1,
+    });
+    expect(reopenedAfterCrash?.dependencyTaskIds).toEqual([repairCreation.task.taskId]);
+    const callsBeforeResume = h.adapter.startRunCalls.length;
+
+    const approvedFactory: EvaluatorFactory = (taskId, artificerArtifactId) => ({
+      ...makeEvaluatorApproved(taskId, artificerArtifactId),
+      evaluation: {
+        ...makeEvaluatorApproved(taskId, artificerArtifactId).evaluation,
+        priorRequirementStatuses: [{ id: 'req-1', status: 'resolved' }],
+        requirementLedger: [{ id: 'req-1', statement: 'fix matcher', status: 'resolved' }],
+      },
+    });
+    h.adapter.queueEvaluator(approvedFactory);
+    const resumed = await runAdversarialLoop({
+      ...baseLoopInput,
+      commitRepairTransition: (repairTaskId) => orchestrator.commitNextTaskProposal(repairTaskId),
+    });
+
+    expect(resumed, JSON.stringify(resumed)).toMatchObject({
+      decision: 'approved',
+      finalEvaluatorTaskId: evaluatorCreation.task.taskId,
+    });
+    expect(h.adapter.startRunCalls.length - callsBeforeResume).toBe(1);
+    expect(h.adapter.startRunCalls.at(-1)?.taskId).toBe(evaluatorCreation.task.taskId);
+    const finalEvaluator = hydratePITaskRecord((await h.stateManager.getTask(evaluatorCreation.task.taskId))!);
+    expect(finalEvaluator?.revisionCount).toBe(1);
+    const evaluatorTasks = (await h.stateManager.listTasks()).filter((task) => task.taskKind === 'evaluator');
+    expect(evaluatorTasks.map((task) => task.taskId)).toEqual([evaluatorCreation.task.taskId]);
+    const evaluatorRuns = await h.stateManager.getRunsByTask(evaluatorCreation.task.taskId);
+    expect(evaluatorRuns.filter((run) => run.executionStatus === 'succeeded')).toHaveLength(2);
+  }, 60_000);
+
+  it('approved output with owner-provenance transition override reaches the existing repair instead of stopping without a rule artifact', async () => {
+    const artificerCreation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: SCRIBE_TASK_ID,
+      successorKind: 'artificer',
+      channel: 'prompt',
+      preferredTaskId: 'loop-owner-stamp-artificer-r1',
+      metadata: {
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: SCRIBE_TASK_ID,
+      },
+    });
+    if (artificerCreation.outcome !== 'created') throw new Error(`expected artificer creation, got ${artificerCreation.outcome}`);
+    h.adapter.queueArtificer(makeArtificerOutput);
+    const artificerResult = await h.artificerRunner.run(artificerCreation.task.taskId);
+    expect(artificerResult.status).toBe('succeeded');
+
+    const evaluatorCreation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: artificerCreation.task.taskId,
+      successorKind: 'evaluator',
+      channel: 'prompt',
+      preferredTaskId: 'loop-owner-stamp-evaluator-r1',
+      metadata: {
+        dependencyTaskIds: [artificerCreation.task.taskId],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: artificerCreation.task.taskId,
+      },
+    });
+    if (evaluatorCreation.outcome !== 'created') throw new Error(`expected evaluator creation, got ${evaluatorCreation.outcome}`);
+    h.adapter.queueEvaluator(makeEvaluatorApproved);
+    expect((await h.evaluatorRunner.run(evaluatorCreation.task.taskId)).status).toBe('succeeded');
+
+    // The owner-provenance recovery trigger itself is covered by the dedicated
+    // evaluator test. Here we place the same durable transition marker on the
+    // evaluator and prove the synchronous loop consumes the formal decision.
+    const evaluatorRow = await h.stateManager.getTask(evaluatorCreation.task.taskId);
+    const evaluatorPi = evaluatorRow ? hydratePITaskRecord(evaluatorRow) : null;
+    if (!evaluatorPi?.completionIntent) throw new Error('expected completion intent on approved evaluator');
+    await h.stateManager.updateTask(evaluatorCreation.task.taskId, {
+      diagnosticJson: createPITaskDiagnosticJson({
+        ...evaluatorPi,
+        completionIntent: {
+          ...evaluatorPi.completionIntent,
+          transitionOverrideReason: 'owner_golden_trace_provenance_missing',
+        },
+      }),
+    });
+    const repairPayload = {
+      requiredChanges: ['restore owner provenance'],
+      concerns: [],
+      previousScore: 0.9,
+      repairIteration: 1,
+      sourceArtificerArtifactId: artificerResult.artifactId!,
+      sourceEvaluatorTaskId: evaluatorCreation.task.taskId,
+    };
+    const repairCreation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: evaluatorCreation.task.taskId,
+      successorKind: 'artificer',
+      channel: 'prompt',
+      preferredTaskId: artificerRepairTaskId(evaluatorCreation.task.taskId, 1),
+      metadata: {
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: evaluatorCreation.task.taskId,
+        repairPayload,
+      },
+    });
+    if (repairCreation.outcome !== 'created') throw new Error(`expected repair creation, got ${repairCreation.outcome}`);
+
+    h.adapter.queueArtificer(makeArtificerOutput);
+    h.adapter.queueEvaluator((taskId, artificerArtifactId) => ({
+      ...makeEvaluatorApproved(taskId, artificerArtifactId),
+      evaluation: {
+        ...makeEvaluatorApproved(taskId, artificerArtifactId).evaluation,
+        priorRequirementStatuses: [{ id: 'req-1', status: 'resolved' }],
+        requirementLedger: [{ id: 'req-1', statement: 'restore owner provenance', status: 'resolved' }],
+      },
+    }));
+    const orchestrator = new InternalizationOrchestrator(
+      { stateManager: h.stateManager },
+      { owner: 'loop-test', runtimeKind: 'test-double', dryRun: true },
+    );
+    const result = await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+      commitRepairTransition: (repairTaskId) => orchestrator.commitNextTaskProposal(repairTaskId),
+    });
+
+    expect(result, JSON.stringify(result)).toMatchObject({
+      decision: 'approved',
+      rounds: 2,
+      finalEvaluatorTaskId: evaluatorCreation.task.taskId,
+    });
+    expect(h.adapter.startRunCalls.map((call) => call.taskId)).toEqual([
+      artificerCreation.task.taskId,
+      evaluatorCreation.task.taskId,
+      repairCreation.task.taskId,
+      evaluatorCreation.task.taskId,
+    ]);
+    const evaluatorTasks = (await h.stateManager.listTasks()).filter((task) => task.taskKind === 'evaluator');
+    expect(evaluatorTasks.map((task) => task.taskId)).toEqual([evaluatorCreation.task.taskId]);
+    expect(hydratePITaskRecord(evaluatorTasks[0]!)?.revisionCount).toBe(1);
+  }, 60_000);
+
+  it('existing leased artificer successor is not preempted by a second executor', async () => {
+    const creation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: SCRIBE_TASK_ID,
+      successorKind: 'artificer',
+      channel: 'prompt',
+      preferredTaskId: 'loop-leased-artificer',
+      metadata: {
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: SCRIBE_TASK_ID,
+      },
+    });
+    if (creation.outcome !== 'created') throw new Error(`expected artificer creation, got ${creation.outcome}`);
+    // A second independent RuntimeStateManager owns the lease: the loop must
+    // respect the real cross-connection lease rather than treating same-object
+    // state as a test-only shortcut.
+    const foreignManager = new RuntimeStateManager({ workspaceDir: h.tmpDir });
+    await foreignManager.initialize();
+    try {
+      const lease = await foreignManager.acquireLeaseDetailed({
+        taskId: creation.task.taskId,
+        owner: 'foreign-consumer',
+        runtimeKind: 'test-double',
+      });
+      expect(lease.task.status).toBe('leased');
+      expect(lease.runId).toBeTruthy();
+
+      const result = await runAdversarialLoop({
+        artificerRunner: h.artificerRunner,
+        artifactStore: h.artifactStore,
+        evaluatorRunner: h.evaluatorRunner,
+        stateManager: h.stateManager,
+        scribeTaskId: SCRIBE_TASK_ID,
+      });
+
+      expect(result.decision).toBe('rejected');
+      expect(result.degradationReason).toContain('artificer_successor_leased_active');
+      expect(h.adapter.startRunCalls).toEqual([]);
+      const leased = await foreignManager.getTask(creation.task.taskId);
+      expect(leased?.status).toBe('leased');
+      expect(leased?.leaseOwner).toBe('foreign-consumer');
+    } finally {
+      await foreignManager.close();
+    }
+  }, 60_000);
 });

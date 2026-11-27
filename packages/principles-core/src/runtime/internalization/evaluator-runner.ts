@@ -68,6 +68,7 @@ import type {
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
+import { recoverSucceededPeerRunnerResult, type SucceededRunnerRecovery } from '../runner/succeeded-result-recovery.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { extractExecutionConditions, extractIntentContract, type IntentContractV1 } from './intent-contract.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
@@ -928,6 +929,52 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       errors: result.errors,
       errorCategory,
     };
+  }
+
+  /**
+   * Recover an already-succeeded evaluator execution from durable evidence.
+   * The run output is authoritative for execution-time replay evidence; the
+   * principle artifact may legitimately lack a late best-effort replay update,
+   * so consistency is checked on stable verdict/lineage fields rather than by
+   * requiring byte equality.
+   */
+  async recoverSucceededResult(task: TaskRecord): Promise<SucceededRunnerRecovery<EvaluatorOutputV1>> {
+    return recoverSucceededPeerRunnerResult<EvaluatorOutputV1>({
+      task,
+      expectedTaskKind: 'evaluator',
+      resultRefPrefix: this.config.resultRefPrefix,
+      stateManager: this.stateManager,
+      artifactStore: this.artifactStore,
+      validateOutput: (output, taskId) => this.validator.validate(output, taskId),
+      verifyRecoveredEvidence: ({ task: terminalTask, output, artifactOutput, runId }) => {
+        if (output.taskId !== terminalTask.taskId) return 'output_task_id_mismatch';
+        if (output.evaluation.decision !== artifactOutput.evaluation.decision) {
+          return 'artifact_evaluation_decision_mismatch';
+        }
+        if ((output.sourceArtificerArtifactId ?? null) !== (artifactOutput.sourceArtificerArtifactId ?? null)) {
+          return 'artifact_source_artificer_mismatch';
+        }
+        if (isEvaluatorOutputV2(output) && isEvaluatorOutputV2(artifactOutput)
+          && output.adversarialResult !== undefined && artifactOutput.adversarialResult !== undefined
+          && JSON.stringify(output.adversarialResult) !== JSON.stringify(artifactOutput.adversarialResult)) {
+          return 'artifact_adversarial_result_conflicts_run_output';
+        }
+        const piTask = hydratePITaskRecord(terminalTask);
+        if (piTask) {
+          const rawDecision = output.evaluation.decision;
+          if (piTask.runnerDecision !== undefined && piTask.runnerDecision !== rawDecision) {
+            return `runner_decision_mismatch:${piTask.runnerDecision}!=${rawDecision}`;
+          }
+          if (piTask.completionIntent !== undefined) {
+            if (piTask.completionIntent.sourceRunId !== runId) return 'completion_intent_run_mismatch';
+            if (piTask.completionIntent.decision !== rawDecision) {
+              return `completion_intent_decision_mismatch:${piTask.completionIntent.decision}!=${rawDecision}`;
+            }
+          }
+        }
+        return null;
+      },
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/max-params

@@ -591,6 +591,13 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       },
     );
 
+    // Repair completion must consume the SAME formal transition authority as
+    // the host consumer/reconciliation path. The synchronous loop may execute
+    // the reopened evaluator, but never creates a parallel evaluator successor.
+    const repairTransitionOrchestrator = new InternalizationOrchestrator(
+      { stateManager },
+      { owner, runtimeKind: agentAdapters.evaluator.kind(), dryRun: true },
+    );
     const loopResult = await runAdversarialLoop({
       artificerRunner,
       evaluatorRunner,
@@ -600,6 +607,8 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       maxRounds,
       correlationId: correlation,
       channel,
+      commitRepairTransition: (repairArtificerTaskId) =>
+        repairTransitionOrchestrator.commitNextTaskProposal(repairArtificerTaskId),
     });
 
     const loopStatus: RuleHostPipelineStageStatus = loopResult.decision === 'approved' ? 'succeeded' : 'degraded';

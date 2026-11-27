@@ -21,7 +21,7 @@ import { runRuleHostPipeline, backfillScribeIdentity, readScribeOwnerRequirement
 import { handleRuntimeInternalizationEnqueueSuccessors } from '../../src/commands/runtime-internalization-enqueue-successors.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime';
-import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId, hydratePITaskRecord, reopenTaskForRevision } from '@principles/core/runtime';
+import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId, hydratePITaskRecord, reopenTaskForRevision, InternalizationOrchestrator } from '@principles/core/runtime';
 import { addPrincipleToLedger, updatePrinciple, appendReuseEvidence } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
@@ -454,9 +454,10 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       });
       const philosopher = tasks.find((t) => t.taskKind === 'philosopher');
       const scribe = tasks.find((t) => t.taskKind === 'scribe' && t.taskId.includes('-scribe-'));
-      if (!evalR1 || !evalR2 || !artR1 || !artR2 || !philosopher || !scribe) {
-        throw new Error(`expected full round-1/round-2 chain in persisted tasks, got: ${tasks.map((t) => `${t.taskKind}:${t.taskId}`).join(',')}`);
+      if (!evalR1 || !artR1 || !artR2 || !philosopher || !scribe) {
+        throw new Error(`expected formal repair revision chain in persisted tasks, got: ${tasks.map((t) => `${t.taskKind}:${t.taskId}`).join(',')}`);
       }
+      expect(evalR2, 'repair completion must reopen the original evaluator instead of creating evaluator-r2').toBeUndefined();
       // 1. Round-1 evaluator completed normally — repair seeding was NOT refused.
       expect(evalR1.status, 'round-1 evaluator must not be stranded in needs_human_review').toBe('succeeded');
       // 2. The persisted repair task exists, parented on the round-1 evaluator,
@@ -470,19 +471,80 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       expect(repairPi?.correlationId).toBe('candidate-dreamer-feedback-001');
       expect(repairTask.status).toBe('succeeded');
       // 3. End-to-end parent chain: dreamer seed → philosopher → scribe →
-      //    artificer-r1 → evaluator-r1 → repair/round-2 artificer → evaluator-r2.
+      //    artificer-r1 → evaluator-r1 → repair/round-2 artificer. The second
+      //    evaluation is a new revision of evalR1, not a separate evaluator row.
       const parentOf = (t: typeof tasks[number]) => hydratePITaskRecord(t)?.parentTaskId;
       expect(parentOf(philosopher)).toBe('dreamer-feedback-001');
       expect(parentOf(scribe)).toBe(philosopher.taskId);
       expect(parentOf(artR1)).toBe(scribe.taskId);
       expect(parentOf(evalR1)).toBe(artR1.taskId);
       expect(parentOf(artR2)).toBe(evalR1.taskId);
-      expect(parentOf(evalR2)).toBe(artR2.taskId);
-      // 4. The loop's naming correlation must NOT be mistaken for a candidate
-      //    id — sync tasks carry no correlationId of their own.
-      expect(hydratePITaskRecord(evalR1)?.correlationId).toBeUndefined();
+      const evalR1Pi = hydratePITaskRecord(evalR1);
+      expect(evalR1Pi?.revisionCount).toBe(1);
+      expect(evalR1Pi?.dependencyTaskIds).toContain(artR2.taskId);
+      expect(evalR1Pi?.dependencyTaskIds).not.toContain(artR1.taskId);
+      expect(evalR1Pi?.revisionCauseId).toContain(artR2.taskId);
+      const evalR1Runs = await verify.getRunsByTask(evalR1.taskId);
+      expect(evalR1Runs.filter((run) => run.executionStatus === 'succeeded')).toHaveLength(2);
+      const evaluatorArtifacts = await verify.piArtifactStore.listBySourceTaskId(evalR1.taskId);
+      expect(evaluatorArtifacts.find((artifact) => artifact.artifactKind === 'rule')?.artifactId).toBe(result.ruleArtifactId);
+      // Formal transition replay (the reconciliation path) must consume the
+      // same revision cause exactly once: no second reopen, no revision drift.
+      const reconciliationAuthority = new InternalizationOrchestrator(
+        { stateManager: verify },
+        { owner: 'reconciliation-verify', runtimeKind: 'test-double', dryRun: true },
+      );
+      const replayedCommit = await reconciliationAuthority.commitNextTaskProposal(repairTask.taskId);
+      expect(replayedCommit).toMatchObject({
+        decision: 'revision_reopen_noop',
+        sourceTaskId: repairTask.taskId,
+        reopenedTaskId: evalR1.taskId,
+      });
+      expect(hydratePITaskRecord((await verify.getTask(evalR1.taskId))!)?.revisionCount).toBe(1);
+      // 4. Formal reopen may backfill the authoritative candidate correlation
+      //    onto the reopened evaluator; that lineage value is distinct from the
+      //    loop's display/naming prefix and must match the dreamer candidate root.
+      expect(evalR1Pi?.correlationId).toBe('candidate-dreamer-feedback-001');
     } finally {
       await verify.close();
+    }
+
+    // Crash-safe/idempotent production replay: the same RuleHost invocation must
+    // recover the succeeded repair revision chain from SQLite instead of
+    // re-entering runners or materializing a second evaluator chain.
+    const callsBeforeReplay = adapter.startRunCalls.length;
+    const replay = await runRuleHostPipeline({
+      workspaceDir: tmpDir,
+      painId: 'pain-feedback-001',
+      runtimeAdapter: adapter,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      behaviorExamplePack: PIPE_PACK,
+      channel: 'code_tool_hook',
+      pollIntervalMs: 5,
+      timeoutMs: 1000,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+    expect(replay, JSON.stringify(replay)).toMatchObject({
+      decision: 'candidate_ready_for_owner_review',
+      ruleArtifactId: result.ruleArtifactId,
+    });
+    expect(adapter.startRunCalls, 'terminal pipeline replay must not invoke any LLM/runtime stage').toHaveLength(callsBeforeReplay);
+
+    const verifyReplay = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verifyReplay.initialize();
+    try {
+      const replayTasks = await verifyReplay.listTasks();
+      const evaluatorRows = replayTasks.filter((task) => task.taskKind === 'evaluator');
+      const repairRows = replayTasks.filter((task) => task.taskKind === 'artificer' && task.taskId.startsWith('artificer-repair-'));
+      expect(evaluatorRows).toHaveLength(1);
+      expect(repairRows).toHaveLength(1);
+      const replayEvaluatorPi = hydratePITaskRecord(evaluatorRows[0]!);
+      expect(replayEvaluatorPi?.revisionCount).toBe(1);
+      expect(replayEvaluatorPi?.dependencyTaskIds).toEqual([repairRows[0]!.taskId]);
+      const evaluatorRuns = await verifyReplay.getRunsByTask(evaluatorRows[0]!.taskId);
+      expect(evaluatorRuns.filter((run) => run.executionStatus === 'succeeded')).toHaveLength(2);
+    } finally {
+      await verifyReplay.close();
     }
   }, 60_000);
 

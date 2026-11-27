@@ -28,7 +28,13 @@ import type { EvaluatorAdversarialResult } from './internalization/evaluator-out
 import { formatAdversarialFeedback } from './internalization/adversarial-feedback.js';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helper functions declared after main, matching codebase convention */
 import type { createPITaskDiagnosticJson } from './internalization/pitask-metadata.js';
+import { hydratePITaskRecord } from './internalization/pitask-metadata.js';
 import { createLogicalSuccessorTask } from './internalization/successor-create.js';
+import type { TaskRecord } from './task-status.js';
+import type { PeerRunnerResult } from './runner/peer-runner-types.js';
+import type { SucceededRunnerRecovery } from './runner/succeeded-result-recovery.js';
+import type { CommitNextTaskResult } from './internalization/internalization-orchestrator.js';
+import { decideInternalizationTransition, transitionInputFromTask } from './internalization/internalization-transition-decision.js';
 
 /** PRD hard cap on adversarial rounds. */
 export const DEFAULT_MAX_ROUNDS = 2;
@@ -47,6 +53,12 @@ export interface AdversarialLoopInput {
   readonly correlationId?: string;
   /** Channel for created tasks (default 'prompt'). */
   readonly channel?: 'prompt' | 'code_tool_hook' | 'defer_archive';
+  /**
+   * Formal transition authority for repair artificer completion. Production
+   * hosts must inject InternalizationOrchestrator.commitNextTaskProposal.
+   * The loop deliberately has no fallback that creates a second evaluator.
+   */
+  readonly commitRepairTransition?: (repairArtificerTaskId: string) => Promise<CommitNextTaskResult>;
 }
 
 export interface AdversarialLoopResult {
@@ -64,6 +76,75 @@ export interface AdversarialLoopResult {
   readonly adversarialResult?: EvaluatorAdversarialResult;
   /** Structured reason when decision === 'rejected'. */
   readonly degradationReason?: string;
+}
+
+type LoopSuccessorPlan =
+  | { readonly action: 'execute'; readonly task: TaskRecord; readonly creationOutcome: 'created' | 'existing' }
+  | { readonly action: 'recover'; readonly task: TaskRecord; readonly creationOutcome: 'existing' }
+  | { readonly action: 'blocked'; readonly reason: string };
+
+interface RecoverableRunner<TOutput> {
+  run(taskId: string): Promise<PeerRunnerResult<TOutput>>;
+  recoverSucceededResult(task: TaskRecord): Promise<SucceededRunnerRecovery<TOutput>>;
+}
+
+type PlannedRunnerOutcome<TOutput> =
+  | { readonly kind: 'result'; readonly result: PeerRunnerResult<TOutput> }
+  | { readonly kind: 'blocked'; readonly reason: string };
+
+async function recoverOrRunTask<TOutput>(input: {
+  readonly runner: RecoverableRunner<TOutput>;
+  readonly task: TaskRecord;
+  readonly stage: 'artificer' | 'evaluator';
+  readonly getTask: (taskId: string) => Promise<TaskRecord | null>;
+}): Promise<PlannedRunnerOutcome<TOutput>> {
+  const { runner, task, stage, getTask } = input;
+  if (task.status === 'succeeded') {
+    const recovery = await runner.recoverSucceededResult(task);
+    return recovery.outcome === 'recovered'
+      ? { kind: 'result', result: recovery.result }
+      : { kind: 'blocked', reason: `${stage}_recovery_invalid:${recovery.reason}` };
+  }
+  if (task.status === 'pending' || task.status === 'retry_wait') {
+    const result = await runner.run(task.taskId);
+    if (result.status !== 'failed' || result.errorCategory !== 'lease_conflict') {
+      return { kind: 'result', result };
+    }
+    // State may have changed between successor lookup and lease acquisition.
+    // Lease remains authoritative: re-read once, recover a completed result,
+    // and never preempt an active lease or execute a terminal task again.
+    const current = await getTask(task.taskId);
+    if (!current) return { kind: 'blocked', reason: `${stage}_task_disappeared_after_lease_conflict` };
+    if (current.status === 'succeeded') {
+      const recovery = await runner.recoverSucceededResult(current);
+      return recovery.outcome === 'recovered'
+        ? { kind: 'result', result: recovery.result }
+        : { kind: 'blocked', reason: `${stage}_recovery_invalid_after_lease_conflict:${recovery.reason}` };
+    }
+    if (current.status === 'leased') {
+      return { kind: 'blocked', reason: `${stage}_successor_leased_active` };
+    }
+    return { kind: 'blocked', reason: `${stage}_successor_state_changed:${current.status}` };
+  }
+  if (task.status === 'leased') return { kind: 'blocked', reason: `${stage}_successor_leased_active` };
+  if (task.status === 'failed') return { kind: 'blocked', reason: `${stage}_successor_failed_terminal` };
+  if (task.status === 'needs_human_review') return { kind: 'blocked', reason: `${stage}_successor_needs_human_review` };
+  return { kind: 'blocked', reason: `${stage}_successor_unknown_status:${task.status}` };
+}
+
+async function runPlannedSuccessor<TOutput>(input: {
+  readonly plan: LoopSuccessorPlan;
+  readonly runner: RecoverableRunner<TOutput>;
+  readonly stage: 'artificer' | 'evaluator';
+  readonly getTask: (taskId: string) => Promise<TaskRecord | null>;
+}): Promise<PlannedRunnerOutcome<TOutput>> {
+  if (input.plan.action === 'blocked') return { kind: 'blocked', reason: input.plan.reason };
+  return recoverOrRunTask({
+    runner: input.runner,
+    task: input.plan.task,
+    stage: input.stage,
+    getTask: input.getTask,
+  });
 }
 
 /**
@@ -93,9 +174,9 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
     // revision — mirroring the lease-based repair flow whose repair artificer
     // is parented on the source evaluator.
     const artificerParentTaskId = round === 1 ? input.scribeTaskId : lastEvaluatorTaskId;
-    let resolvedArtificerTaskId: string;
+    let artificerPlan: LoopSuccessorPlan;
     try {
-      resolvedArtificerTaskId = await createLoopSuccessorTask(input.stateManager, {
+      artificerPlan = await createLoopSuccessorTask(input.stateManager, {
         preferredTaskId: artificerTaskId,
         taskKind: 'artificer',
         parentTaskId: artificerParentTaskId,
@@ -114,10 +195,21 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
       return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
         `artificer_task_create_failed: ${createErr instanceof Error ? createErr.message : String(createErr)}`);
     }
+    const resolvedArtificerTaskId = artificerPlan.action === 'blocked' ? artificerTaskId : artificerPlan.task.taskId;
 
     let artificerResult;
     try {
-      artificerResult = await input.artificerRunner.run(resolvedArtificerTaskId);
+      const planned = await runPlannedSuccessor({
+        plan: artificerPlan,
+        runner: input.artificerRunner,
+        stage: 'artificer',
+        getTask: (taskId) => input.stateManager.getTask(taskId),
+      });
+      if (planned.kind === 'blocked') {
+        return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+          planned.reason);
+      }
+      artificerResult = planned.result;
     } catch (runErr) {
       return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
         `artificer_run_threw: ${runErr instanceof Error ? runErr.message : String(runErr)}`);
@@ -135,49 +227,141 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
     // If Artificer failed to produce valid code, ArtificerRunner.startRun throws
     // PDRuntimeError and artificerResult.status !== 'succeeded' is caught above.
     // There is no V1 plan-only degradation path.
-    const evaluatorTaskId = `${correlation}-evaluator-r${round}-${Date.now().toString(36)}`;
-    let resolvedEvaluatorTaskId: string;
-    try {
-      resolvedEvaluatorTaskId = await createEvaluatorTask(input.stateManager, evaluatorTaskId, resolvedArtificerTaskId, channel);
-      lastEvaluatorTaskId = resolvedEvaluatorTaskId;
-    } catch (createErr) {
-      return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
-        `evaluator_task_create_failed: ${createErr instanceof Error ? createErr.message : String(createErr)}`);
-    }
-
+    let resolvedEvaluatorTaskId = '';
     let evaluatorResult;
     try {
-      evaluatorResult = await input.evaluatorRunner.run(resolvedEvaluatorTaskId);
+      const artificerTask = await input.stateManager.getTask(resolvedArtificerTaskId);
+      const artificerPi = artificerTask ? hydratePITaskRecord(artificerTask) : null;
+      if (!artificerTask || !artificerPi) {
+        return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+          'artificer_successor_metadata_malformed');
+      }
+
+      if (artificerPi.repairPayload) {
+        // Formal repair completion has exactly one transition authority. A
+        // synchronous loop may drive the reopened evaluator, but must never
+        // materialize a parallel evaluator successor chain.
+        if (!input.commitRepairTransition) {
+          return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            'repair_transition_authority_missing');
+        }
+        const commit = await input.commitRepairTransition(resolvedArtificerTaskId);
+        if (commit.decision !== 'revision_reopened' && commit.decision !== 'revision_reopen_noop') {
+          const reasonValue: unknown = Reflect.get(commit, 'reason');
+          const detail = typeof reasonValue === 'string' && reasonValue !== '' ? `:${reasonValue}` : '';
+          return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            `repair_transition_${commit.decision}${detail}`);
+        }
+        // A successful-looking commit must still be bound to the exact repair
+        // task and source evaluator carried by the repair lineage. Otherwise a
+        // malformed injected authority could redirect this loop onto another
+        // chain while appearing to satisfy the two accepted decision values.
+        if (commit.sourceTaskId !== resolvedArtificerTaskId) {
+          return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            'repair_transition_source_task_mismatch');
+        }
+        if (commit.reopenedTaskId !== artificerPi.repairPayload.sourceEvaluatorTaskId) {
+          return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            'repair_transition_reopened_task_mismatch');
+        }
+        resolvedEvaluatorTaskId = commit.reopenedTaskId;
+        const evaluatorTask = await input.stateManager.getTask(resolvedEvaluatorTaskId);
+        const evaluatorPi = evaluatorTask ? hydratePITaskRecord(evaluatorTask) : null;
+        if (!evaluatorTask || !evaluatorPi) {
+          return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            'repair_reopened_evaluator_metadata_malformed');
+        }
+        if (!evaluatorPi.dependencyTaskIds.includes(resolvedArtificerTaskId)) {
+          return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            'repair_transition_not_materialized_for_current_repair');
+        }
+        lastEvaluatorTaskId = resolvedEvaluatorTaskId;
+        const planned = await recoverOrRunTask({
+          runner: input.evaluatorRunner,
+          task: evaluatorTask,
+          stage: 'evaluator',
+          getTask: (taskId) => input.stateManager.getTask(taskId),
+        });
+        if (planned.kind === 'blocked') {
+          return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            planned.reason);
+        }
+        evaluatorResult = planned.result;
+      } else {
+        // ── Round N: Evaluator (code-review + adversarial replay) ──
+        // Ordinary adversarial feedback rounds still use a same-round evaluator
+        // successor. The formal repair branch above is the only exception.
+        const evaluatorTaskId = `${correlation}-evaluator-r${round}-${Date.now().toString(36)}`;
+        const evaluatorPlan = await createEvaluatorTask(input.stateManager, evaluatorTaskId, resolvedArtificerTaskId, channel);
+        resolvedEvaluatorTaskId = evaluatorPlan.action === 'blocked' ? evaluatorTaskId : evaluatorPlan.task.taskId;
+        lastEvaluatorTaskId = resolvedEvaluatorTaskId;
+        const planned = await runPlannedSuccessor({
+          plan: evaluatorPlan,
+          runner: input.evaluatorRunner,
+          stage: 'evaluator',
+          getTask: (taskId) => input.stateManager.getTask(taskId),
+        });
+        if (planned.kind === 'blocked') {
+          return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            planned.reason);
+        }
+        evaluatorResult = planned.result;
+      }
     } catch (runErr) {
-      return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+      return rejected(round, resolvedEvaluatorTaskId || lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
         `evaluator_run_threw: ${runErr instanceof Error ? runErr.message : String(runErr)}`);
     }
 
-    if (evaluatorResult.status !== 'succeeded' || !evaluatorResult.output) {
+    if (!evaluatorResult || evaluatorResult.status !== 'succeeded' || !evaluatorResult.output) {
       return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
-        `evaluator_run_status_${evaluatorResult.status ?? 'unknown'}`);
+        `evaluator_run_status_${evaluatorResult?.status ?? 'unknown'}`);
+    }
+
+    // Evaluator decision effects can deliberately route the task to Owner
+    // attention while still returning the evaluated output (for example repair
+    // seeding exhausted/failed). The synchronous loop must honor that durable
+    // terminal state instead of using the output as permission to continue.
+    const durableEvaluatorTask = await input.stateManager.getTask(resolvedEvaluatorTaskId);
+    if (durableEvaluatorTask?.status === 'needs_human_review') {
+      return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+        'evaluator_needs_human_review');
+    }
+    if (durableEvaluatorTask?.status !== 'succeeded') {
+      return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+        `evaluator_durable_status_${durableEvaluatorTask?.status ?? 'missing'}`);
     }
 
     const evaluatorOutput = evaluatorResult.output;
-    const reviewDecision = evaluatorOutput.evaluation.decision;
     lastPrincipleArtifactId = evaluatorResult.artifactId ?? await resolvePrincipleArtifactId(input, resolvedEvaluatorTaskId);
     if (isEvaluatorOutputV2(evaluatorOutput) && evaluatorOutput.adversarialResult) {
       lastAdversarialResult = evaluatorOutput.adversarialResult;
     }
 
-    // EP002-R4: align with PRI-758's dual semantics. The evaluator preserves
-    // the RAW review verdict ('approved') on its artifact while the transition
-    // layer routes approved+replay-failed into repair (needs_revision). This
-    // loop previously read only the raw verdict and rejected with the
-    // misleading 'evaluator_approved_without_rule_artifact' — burning the
-    // remaining round instead of feeding the failed cases back. Approved with
-    // a failed/not-passed adversarial replay IS needs_revision for this loop.
+    // The evaluator artifact preserves the RAW semantic verdict, while the
+    // formal transition decision owns replay-failure and owner-provenance
+    // overrides. Use that same authority here; duplicating only the replay
+    // branch leaves owner-stamp repair seeded but unreachable.
+    const durableEvaluatorPi = hydratePITaskRecord(durableEvaluatorTask);
+    if (!durableEvaluatorPi) {
+      return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+        'evaluator_successor_metadata_malformed');
+    }
     const replayFailed = isEvaluatorOutputV2(evaluatorOutput)
       && evaluatorOutput.adversarialResult !== undefined
       && evaluatorOutput.adversarialResult.passed !== true;
-    const decision = reviewDecision === 'approved' && replayFailed
-      ? 'needs_revision'
-      : reviewDecision;
+    const transition = decideInternalizationTransition(transitionInputFromTask(
+      durableEvaluatorPi,
+      evaluatorOutput.evaluation.decision,
+      { adversarialReplayFailed: replayFailed },
+    ));
+    let decision: 'approved' | 'needs_revision' | 'rejected';
+    if (transition.kind === 'ADVANCE') decision = 'approved';
+    else if (transition.kind === 'REVISION_REQUIRED') decision = 'needs_revision';
+    else if (transition.kind === 'TERMINAL_REJECT') decision = 'rejected';
+    else {
+      return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+        `evaluator_transition_${transition.kind}:${transition.reason}`);
+    }
 
     if (decision === 'approved') {
       // Rule artifact written by EvaluatorRunner.succeedTask (PRI-427) when
@@ -241,7 +425,7 @@ async function createLoopSuccessorTask(
     readonly channel: 'prompt' | 'code_tool_hook' | 'defer_archive';
     readonly metadata: Parameters<typeof createPITaskDiagnosticJson>[0];
   },
-): Promise<string> {
+): Promise<LoopSuccessorPlan> {
   const creation = await createLogicalSuccessorTask({
     stateManager,
     parentTaskId: input.parentTaskId,
@@ -250,9 +434,24 @@ async function createLoopSuccessorTask(
     preferredTaskId: input.preferredTaskId,
     metadata: input.metadata,
   });
-  if (creation.outcome === 'created' || creation.outcome === 'existing') return creation.task.taskId;
-  if (creation.outcome === 'lookup') throw new Error(creation.lookup.decision + ':' + creation.lookup.detail);
-  throw new Error('successor_id_conflict:' + creation.allocation.detail);
+  if (creation.outcome === 'created') {
+    return { action: 'execute', task: creation.task, creationOutcome: 'created' };
+  }
+  if (creation.outcome === 'existing') {
+    const { status } = creation.task;
+    if (status === 'succeeded') return { action: 'recover', task: creation.task, creationOutcome: 'existing' };
+    if (status === 'pending' || status === 'retry_wait') {
+      return { action: 'execute', task: creation.task, creationOutcome: 'existing' };
+    }
+    if (status === 'leased') return { action: 'blocked', reason: `${input.taskKind}_successor_leased_active` };
+    if (status === 'failed') return { action: 'blocked', reason: `${input.taskKind}_successor_failed_terminal` };
+    if (status === 'needs_human_review') return { action: 'blocked', reason: `${input.taskKind}_successor_needs_human_review` };
+    return { action: 'blocked', reason: `${input.taskKind}_successor_unknown_status:${status}` };
+  }
+  if (creation.outcome === 'lookup') {
+    return { action: 'blocked', reason: `${input.taskKind}_successor_lookup_${creation.lookup.decision}:${creation.lookup.detail}` };
+  }
+  return { action: 'blocked', reason: `${input.taskKind}_successor_id_conflict:${creation.allocation.detail}` };
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
@@ -261,7 +460,7 @@ async function createEvaluatorTask(
   evaluatorTaskId: string,
   artificerTaskId: string,
   channel: 'prompt' | 'code_tool_hook' | 'defer_archive',
-): Promise<string> {
+): Promise<LoopSuccessorPlan> {
   return createLoopSuccessorTask(stateManager, {
     preferredTaskId: evaluatorTaskId,
     taskKind: 'evaluator',
