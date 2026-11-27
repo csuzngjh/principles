@@ -576,6 +576,8 @@ export interface GatewayStopConfirmationDeps {
   processAlive?: (pid: number) => boolean;
   /** Test seam: the bounded window, so a refusal case costs milliseconds. */
   confirmTimeoutMs?: number;
+  /** Ownership-transfer mode: port-clear without the observed process exit is not quiesce evidence. */
+  requireProcessExit?: boolean;
 }
 
 /**
@@ -611,6 +613,13 @@ async function confirmGatewayStopped(
     return { ok: false, reason: 'verification_unavailable', error: `${rawError} — the gateway port was not observable, so its stopped state could not be verified` };
   }
   const pid = observed?.pid;
+  if (deps.requireProcessExit === true && pid === undefined) {
+    return {
+      ok: false,
+      reason: 'verification_unavailable',
+      error: `${rawError} — the gateway PID was not resolved, so process exit could not be verified for ownership transfer`,
+    };
+  }
 
   try {
     let listening: boolean;

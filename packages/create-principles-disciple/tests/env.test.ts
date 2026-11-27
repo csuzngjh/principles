@@ -563,6 +563,32 @@ describe('environment detection utilities', () => {
       expect(res.error).toContain('verification itself failed');
     });
 
+
+
+    it('ownership-transfer mode treats port-clear without a verified PID as unverifiable', async () => {
+      const gw = await openListener();
+      await gw.close();
+      stopCommandFails();
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port },
+        { sleep: noWait, processAlive: () => false, confirmTimeoutMs: 20, requireProcessExit: true },
+      );
+      expect(res.ok).toBe(false);
+      expect(res.reason).toBe('verification_unavailable');
+      expect(res.error).toContain('process exit could not be verified');
+    });
+
+    it('ownership-transfer mode accepts only observed-process exit plus a clear listener', async () => {
+      const gw = await openListener();
+      await gw.close();
+      stopCommandFails();
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port, pid: 5150 },
+        { sleep: noWait, processAlive: () => false, confirmTimeoutMs: 20, requireProcessExit: true },
+      );
+      expect(res).toEqual({ ok: true });
+    });
+
     it('a successful stop command is not ownership evidence until the observed gateway is verified stopped', async () => {
       const gw = await openListener();
       mockExecFileSync.mockImplementation(() => '');

@@ -556,7 +556,99 @@ describe('install() gateway lock pre-flight', () => {
 
     await install({ ...baseInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
 
-    expect(stopOpenClawGateway).toHaveBeenCalledWith({ isRunning: true, port: 18789, pid: 33584 });
+    expect(stopOpenClawGateway).toHaveBeenCalledWith(
+      { isRunning: true, port: 18789, pid: 33584 },
+      { requireProcessExit: false },
+    );
+  });
+
+
+
+  it('hostless explicit Service Host migration discovers the authoritative OpenClaw binding and refuses before mutation', async () => {
+    const actualFs = await vi.importActual<typeof import('fs')>('fs');
+    const workspaceDir = path.join(ISOLATED_HOME, 'migration workspace with spaces');
+    const pdHome = path.join(ISOLATED_HOME, '.pd');
+    const openclawHome = path.join(ISOLATED_HOME, '.openclaw');
+    actualFs.mkdirSync(workspaceDir, { recursive: true });
+    actualFs.mkdirSync(pdHome, { recursive: true });
+    actualFs.mkdirSync(openclawHome, { recursive: true });
+    actualFs.writeFileSync(path.join(pdHome, 'install.json'), JSON.stringify({
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: [],
+      workspaces: [workspaceDir],
+    }), 'utf8');
+    actualFs.writeFileSync(path.join(openclawHome, 'principles-disciple.json'), JSON.stringify({ workspace: workspaceDir }), 'utf8');
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
+
+    try {
+      const result = await install({
+        ...baseInstallOptions,
+        host: 'none',
+        workspaceDir: path.join(ISOLATED_HOME, 'neutral-workspace'),
+        serviceHost: { intent: 'enable', source: 'explicit_flag' },
+        stopGateway: false,
+      }, completeNpmBundlePluginDir(), { quiet: false, nonInteractive: true });
+
+      expect(result.success).toBe(false);
+      expect(result.reason).toMatch(/^gateway_running_aborted:/);
+      expect(result.components).toEqual({ plugin: 'skipped', cli: 'skipped', console: 'skipped' });
+      expect(checkOpenClawGateway).toHaveBeenCalledTimes(1);
+      expect(stopOpenClawGateway).not.toHaveBeenCalled();
+      expect(fs.renameSync).not.toHaveBeenCalled();
+    } finally {
+      actualFs.rmSync(workspaceDir, { recursive: true, force: true });
+      actualFs.rmSync(pdHome, { recursive: true, force: true });
+      actualFs.rmSync(openclawHome, { recursive: true, force: true });
+    }
+  });
+
+  it('hostless migration requires process-exit stop evidence; stop failure leaves the manifest byte-for-byte unchanged', async () => {
+    const actualFs = await vi.importActual<typeof import('fs')>('fs');
+    const workspaceDir = path.join(ISOLATED_HOME, 'migration workspace strict');
+    const pdHome = path.join(ISOLATED_HOME, '.pd');
+    const openclawHome = path.join(ISOLATED_HOME, '.openclaw');
+    const manifestPath = path.join(pdHome, 'install.json');
+    actualFs.mkdirSync(workspaceDir, { recursive: true });
+    actualFs.mkdirSync(pdHome, { recursive: true });
+    actualFs.mkdirSync(openclawHome, { recursive: true });
+    actualFs.writeFileSync(manifestPath, JSON.stringify({
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: [],
+      workspaces: [workspaceDir],
+    }, null, 2) + '\n', 'utf8');
+    actualFs.writeFileSync(path.join(openclawHome, 'principles-disciple.json'), JSON.stringify({ workspace: workspaceDir }), 'utf8');
+    const manifestBefore = actualFs.readFileSync(manifestPath, 'utf8');
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({
+      ok: false,
+      reason: 'stop_confirmation_timeout',
+      error: 'exit could not be confirmed',
+    });
+
+    try {
+      const result = await install({
+        ...baseInstallOptions,
+        host: 'none',
+        workspaceDir: path.join(ISOLATED_HOME, 'neutral-workspace'),
+        serviceHost: { intent: 'enable', source: 'explicit_flag' },
+        stopGateway: true,
+      }, completeNpmBundlePluginDir(), { quiet: false, nonInteractive: true });
+
+      expect(result.success).toBe(false);
+      expect(result.reason).toMatch(/^gateway_stop_failed:/);
+      expect(stopOpenClawGateway).toHaveBeenCalledWith(
+        { isRunning: true, port: 18789, pid: 33584 },
+        { requireProcessExit: true },
+      );
+      expect(actualFs.readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
+      expect(fs.renameSync).not.toHaveBeenCalled();
+    } finally {
+      actualFs.rmSync(workspaceDir, { recursive: true, force: true });
+      actualFs.rmSync(pdHome, { recursive: true, force: true });
+      actualFs.rmSync(openclawHome, { recursive: true, force: true });
+    }
   });
 
   // ERR-046 / rc-9: when install fails before a backup is created, the result

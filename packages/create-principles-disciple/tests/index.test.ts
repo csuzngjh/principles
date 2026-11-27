@@ -113,6 +113,7 @@ describe('shouldProvisionOnInstall — deferred provisioning never weakens upgra
     consentSource: 'explicit_flag',
     schedulerState: 'enabled',
     workspaceRegistered: true,
+    alreadyOwned: false,
   };
 
   it('a fresh install always records the attempt', () => {

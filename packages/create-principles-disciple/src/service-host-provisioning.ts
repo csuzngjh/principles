@@ -45,6 +45,12 @@ import {
 } from './service-host-bridge.js';
 import type { HostSelection } from './installers/index.js';
 
+
+/** Installer-scoped one-time proof that no pre-upgrade OpenClaw Gateway process remains active. */
+export type OpenClawGatewayQuiesce =
+  | { readonly ok: true; readonly evidence: 'not_running' | 'process_exited'; readonly pid?: number }
+  | { readonly ok: false; readonly reason: string };
+
 export type ProvisioningReadiness =
   | 'ready'
   | 'waiting_for_host_binding'
@@ -103,6 +109,9 @@ export interface ProvisioningInput {
    * binding; the refusal is recorded durably with an actionable next action.
    */
   readonly bindingVerification?: { readonly ok: false; readonly reason: string; readonly nextAction: string };
+  /** Upgrade installs must supply positive Gateway quiesce evidence for OpenClaw targets. */
+  readonly requireOpenClawGatewayQuiesce?: boolean;
+  readonly openClawGatewayQuiesce?: OpenClawGatewayQuiesce;
   /**
    * Upgrade one-time-switch evidence (upgrade installs only): the legacy
    * continuous-worker process scan the installer ran BEFORE the first
@@ -112,6 +121,8 @@ export interface ProvisioningInput {
    * Host. Undefined on fresh installs (no legacy PD existed to spawn one).
    */
   readonly legacyWorkerScan?: LegacyWorkerScan;
+  /** Re-scan at the CAS boundary so readiness work cannot make the evidence stale. */
+  readonly legacyWorkerScanFn?: () => LegacyWorkerScan;
 }
 
 const DEFAULT_FIRST_CYCLE_TIMEOUT_MS = 180_000;
@@ -170,7 +181,7 @@ export function matchLegacyWorkerCommandLine(commandLine: string): string | null
   return workspace?.[1] ?? workspace?.[2] ?? workspace?.[3] ?? null;
 }
 
-const LEGACY_WORKER_HOSTS = new Set(['codex', 'openclaw', 'workbuddy']);
+const LEGACY_WORKER_HOSTS = new Set(['codex', 'workbuddy']);
 
 /**
  * argv-token matcher for platforms that expose exact process arguments.
@@ -179,7 +190,9 @@ const LEGACY_WORKER_HOSTS = new Set(['codex', 'openclaw', 'workbuddy']);
  * `worker`, which keeps unrelated Node processes out of the match set.
  */
 export function matchLegacyWorkerArgv(argv: readonly string[]): string | null {
-  if (argv.includes('--once')) return null;
+  // `--once` is the new bounded mode. `--status`/`--readiness` are no-consume
+  // probes, not continuous consumers; OpenClaw never had a CLI continuous worker.
+  if (argv.includes('--once') || argv.includes('--status') || argv.includes('--readiness')) return null;
   const workerIndex = argv.findIndex((token) => token === 'worker');
   if (workerIndex <= 0 || !LEGACY_WORKER_HOSTS.has(argv[workerIndex - 1] ?? '')) return null;
   for (let index = workerIndex + 1; index < argv.length; index += 1) {
@@ -194,6 +207,95 @@ export function matchLegacyWorkerArgv(argv: readonly string[]): string | null {
     }
   }
   return null;
+}
+
+
+/**
+ * Parse the Darwin `KERN_PROCARGS2` payload. Layout: int32 argc, exec path,
+ * NUL padding, then exactly argc NUL-terminated argv entries followed by envp.
+ * Returning null is parse failure, never "no argv".
+ */
+export function parseDarwinProcArgs2(raw: Buffer): readonly string[] | null {
+  if (raw.length < 4) return null;
+  const argc = raw.readInt32LE(0);
+  if (!Number.isInteger(argc) || argc < 1 || argc > 4096) return null;
+  const chunks = raw.subarray(4).toString('utf8').split('\0');
+  if (chunks.length < 2) return null;
+  // chunks[0] is the executable path; empty chunks after it are alignment padding.
+  let index = 1;
+  while (index < chunks.length && chunks[index] === '') index += 1;
+  if (chunks.length - index < argc) return null;
+  return chunks.slice(index, index + argc);
+}
+
+/** One-shot Darwin argv reader. Ruby/Fiddle is a transient interpreter use, not a service. */
+const DARWIN_ARGV_READER = String.raw`
+require 'fiddle'
+require 'fiddle/import'
+module PdSysctl
+  extend Fiddle::Importer
+  dlload '/usr/lib/libSystem.B.dylib'
+  extern 'int sysctl(void*, unsigned int, void*, void*, void*, unsigned long)'
+end
+failed = []
+ARGV.each do |pid_text|
+  pid = pid_text.to_i
+  next if pid <= 1
+  mib = [1, 49, pid].pack('l<3')
+  size = [0].pack('Q<')
+  if PdSysctl.sysctl(mib, 3, nil, size, nil, 0) != 0
+    failed << pid
+    next
+  end
+  len = size.unpack1('Q<')
+  if len < 4 || len > 8 * 1024 * 1024
+    failed << pid
+    next
+  end
+  buf = "\0" * len
+  size = [len].pack('Q<')
+  if PdSysctl.sysctl(mib, 3, buf, size, nil, 0) != 0
+    failed << pid
+    next
+  end
+  raw = buf.byteslice(0, size.unpack1('Q<'))
+  argc = raw.byteslice(0, 4).unpack1('l<')
+  chunks = raw.byteslice(4, raw.bytesize - 4).split("\0", -1)
+  i = 1
+  i += 1 while i < chunks.length && chunks[i] == ''
+  if argc < 1 || chunks.length - i < argc
+    failed << pid
+    next
+  end
+  argv = chunks.slice(i, argc)
+  puts "#{pid}:#{argv.map { |arg| arg.unpack1('H*') }.join(',')}"
+end
+unless failed.empty?
+  warn "kern.procargs2 unreadable for pid(s) #{failed.first(5).join(',')}"
+  exit 2
+end
+`;
+
+function listDarwinProcessRows(): LegacyWorkerProcessRow[] {
+  const pidOutput = execFileSync('ps', ['-axo', 'pid='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  const pids = pidOutput.split(/\s+/).map((value) => Number.parseInt(value, 10)).filter((pid) => Number.isInteger(pid) && pid > 1);
+  if (pids.length === 0) return [];
+  const output = execFileSync('/usr/bin/ruby', ['-e', DARWIN_ARGV_READER, ...pids.map(String)], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    windowsHide: true,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  const rows: LegacyWorkerProcessRow[] = [];
+  for (const line of output.split('\n')) {
+    if (line.trim().length === 0) continue;
+    const separator = line.indexOf(':');
+    const pid = Number.parseInt(line.slice(0, separator), 10);
+    if (!(separator > 0 && Number.isInteger(pid))) throw new Error('darwin argv reader returned an unparseable row');
+    const argv = line.slice(separator + 1).split(',').filter((hex) => hex.length > 0).map((hex) => Buffer.from(hex, 'hex').toString('utf8'));
+    rows.push({ pid, commandLine: argv.join(' '), argv });
+  }
+  return rows;
 }
 
 /** Platform process table as (pid, commandLine/argv) rows — bounded, read-only. */
@@ -243,6 +345,7 @@ function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
     }
     return rows;
   }
+  if (platform === 'darwin') return listDarwinProcessRows();
   // Other POSIX process APIs do not expose a portable argv-boundary-safe table.
   // Returning a flat `ps args` parse would fabricate confidence; quiesce is
   // unverifiable instead (the caller's fail-closed gate stays pending).
@@ -729,12 +832,10 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     });
   }
 
-  // One-time switch evidence gate (upgrade installs only): the upgrade
-  // replaced the binaries and the Companion restart kills its continuous
-  // worker children — but a surviving child would become a second consumer
-  // beside the Service Host the moment ownership flips. A positive scan for
-  // THIS workspace, or a scan that could not verify quiesce at all, stays
-  // pending (fail-closed, truthful); the next install re-verifies.
+
+  // Static caller-supplied scan evidence is a pre-readiness gate. When a
+  // scan function is supplied, the same scan is refreshed again immediately
+  // before CAS below; positive/unverifiable evidence never reaches readiness.
   if (input.legacyWorkerScan !== undefined) {
     const scan = input.legacyWorkerScan;
     const identity = canonicalIdentity(input.workspaceDir);
@@ -751,6 +852,21 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     }
   }
 
+  // OpenClaw's legacy consumer was an in-process Gateway timer chain, so the
+  // continuous-worker argv scan cannot see it. An upgrade ownership transfer
+  // requires positive installer-scoped proof that the old Gateway is absent or
+  // the observed process exited; absence of evidence is fail-closed pending.
+  if (input.requireOpenClawGatewayQuiesce === true && (input.host === 'openclaw' || input.host === 'all')) {
+    const quiesce = input.openClawGatewayQuiesce;
+    if (quiesce?.ok !== true) {
+      return recordPending('openclaw_gateway_unproven', {
+        readiness: 'skipped',
+        firstCycle: notAttempted('openclaw_gateway_unproven'),
+        nextAction: `Ownership was NOT handed over because the pre-upgrade OpenClaw Gateway process could not be proven quiescent (${quiesce?.reason ?? 'no quiesce evidence'}). Stop the OpenClaw Gateway and re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      });
+    }
+  }
+
   const readiness = await probeReadiness(input);
   if (readiness.readiness === 'failed') {
     return recordPending('readiness_failed', {
@@ -759,6 +875,27 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
       firstCycle: notAttempted('readiness_failed'),
       nextAction: `The active-release Worker readiness probe failed (${readiness.detail ?? 'unknown'}), so workspace ownership was NOT handed over. Fix the host adapter/workspace readiness, then re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
     });
+  }
+
+
+  // Re-verify at the CAS boundary. The first scan may have selected this
+  // target, but readiness probing is asynchronous; ownership evidence must be
+  // fresh enough that no legacy worker appeared during that window.
+  const casBoundaryScan = input.legacyWorkerScanFn?.() ?? input.legacyWorkerScan;
+  if (casBoundaryScan !== undefined) {
+    const identity = canonicalIdentity(input.workspaceDir);
+    const matches = casBoundaryScan.workers.filter((worker) => canonicalIdentity(worker.workspaceDir) === identity);
+    if (!casBoundaryScan.ok || matches.length > 0) {
+      const detail = !casBoundaryScan.ok
+        ? `the legacy worker process scan could not verify quiesce (${casBoundaryScan.detail ?? 'scan failed'})`
+        : `legacy continuous worker process(es) still consume this workspace (pid ${matches.map((match) => match.pid).join(', ')})`;
+      return recordPending('legacy_worker_still_running', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('legacy_worker_still_running'),
+        nextAction: `Ownership was NOT handed over: ${detail}. Restart the machine first — or let the Companion update finish retiring its old worker processes — then re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      });
+    }
   }
 
   const operationId = `install-provision-${input.now?.().getTime() ?? Date.now()}-${process.pid}`;

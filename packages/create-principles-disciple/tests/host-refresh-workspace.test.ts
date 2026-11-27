@@ -10,7 +10,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  mergePendingProvisioningTargets,
   readHostWorkspaceBinding,
   resolveExistingHostWorkspaceForRefresh,
   resolveProvisioningTargets,
@@ -136,32 +135,6 @@ describe('resolveExistingHostWorkspaceForRefresh', () => {
       workspaceDir: path.join(home, '.workbuddy', 'pd-workspace'),
       source: 'workbuddy_governance_dir',
     });
-  });
-});
-
-describe('mergePendingProvisioningTargets — every deferred workspace is resumed', () => {
-  const openclawWs = path.resolve('/tmp/openclaw-ws');
-  const codexWs = path.resolve('/tmp/codex-ws');
-
-  it('appends pending workspaces this run did not target (plain --enable-service-host)', () => {
-    expect(mergePendingProvisioningTargets(
-      [{ host: 'none', workspaceDir: path.resolve('/tmp/neutral') }],
-      [
-        { workspaceDir: openclawWs, host: 'openclaw', recordedAt: '2026-11-24T00:00:00.000Z' },
-        { workspaceDir: codexWs, host: 'codex', recordedAt: '2026-11-24T00:00:00.000Z' },
-      ],
-    )).toEqual([
-      { host: 'none', workspaceDir: path.resolve('/tmp/neutral') },
-      { host: 'openclaw', workspaceDir: openclawWs },
-      { host: 'codex', workspaceDir: codexWs },
-    ]);
-  });
-
-  it('does not duplicate a workspace this run already targeted', () => {
-    expect(mergePendingProvisioningTargets(
-      [{ host: 'openclaw', workspaceDir: openclawWs }],
-      [{ workspaceDir: openclawWs, host: 'openclaw', recordedAt: '2026-11-24T00:00:00.000Z' }],
-    )).toEqual([{ host: 'openclaw', workspaceDir: openclawWs }]);
   });
 });
 

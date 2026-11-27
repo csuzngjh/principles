@@ -24,6 +24,7 @@ import { readWorkspaceBackgroundOwnership } from '@principles/install-layout';
 import {
   matchLegacyWorkerArgv,
   matchLegacyWorkerCommandLine,
+  parseDarwinProcArgs2,
   provisionFreshInstallWorkspace,
   readAllPendingProvisioning,
   readPendingProvisioningEvidence,
@@ -590,6 +591,9 @@ describe('scanRunningLegacyWorkerProcesses — real Linux argv scan', () => {
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'worker', '--workspace', workspace])).toBe(workspace);
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'worker', `--workspace=${workspace}`])).toBe(workspace);
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'worker', '--once', '--workspace', workspace])).toBeNull();
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'worker', '--status', '--workspace', workspace])).toBeNull();
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'openclaw', 'worker', '--readiness', '--workspace', workspace])).toBeNull();
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'openclaw', 'worker', '--workspace', workspace])).toBeNull();
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'unrelated', 'worker', '--workspace', workspace])).toBeNull();
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'not-worker', '--workspace', workspace])).toBeNull();
   });
@@ -601,5 +605,104 @@ describe('scanRunningLegacyWorkerProcesses — real Linux argv scan', () => {
     expect(scan.ok).toBe(false);
     expect(scan.workers).toEqual([]);
     expect(scan.detail).toContain('process table denied');
+  });
+});
+
+describe('OpenClaw Gateway quiescence evidence gate', () => {
+  it('unproven Gateway quiescence blocks before readiness, CAS, and first cycle', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    const manifestPath = seedManifest(pdHome, workspaceDir);
+    const manifestBefore = readFileSync(manifestPath, 'utf8');
+    const calls: string[][] = [];
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'openclaw',
+      scheduler: ENABLED_SCHEDULER,
+      requireOpenClawGatewayQuiesce: true,
+      warn: () => undefined,
+      probes: {
+        spawnFn: fakeSpawn({
+          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
+          'service run-once': { code: 0, stdout: '{"ok":true,"outcome":"completed","managed":{"executions":[]}}' },
+        }, calls),
+      },
+    });
+    expect(outcome.ownership).toBe('not_provisioned');
+    expect(outcome.readiness).toBe('skipped');
+    expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'openclaw_gateway_unproven' });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
+      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
+    expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
+    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'openclaw_gateway_unproven' });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('verified Gateway process exit evidence permits readiness, CAS, and first run-once', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    const manifestPath = seedManifest(pdHome, workspaceDir);
+    const calls: string[][] = [];
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'openclaw',
+      scheduler: ENABLED_SCHEDULER,
+      requireOpenClawGatewayQuiesce: true,
+      openClawGatewayQuiesce: { ok: true, evidence: 'process_exited', pid: 4242 },
+      warn: () => undefined,
+      probes: {
+        spawnFn: fakeSpawn({
+          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
+          'service run-once': { code: 0, stdout: '{"ok":true,"outcome":"completed","runId":"r","managed":{"executions":[]}}' },
+        }, calls),
+      },
+    });
+    expect(outcome.ownership).toBe('service_host_owned');
+    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir })).toMatchObject({ status: 'service_host_owned', generation: 1 });
+    expect(calls.some((args) => args.includes('--readiness'))).toBe(true);
+    expect(calls.some((args) => args.includes('run-once'))).toBe(true);
+  });
+});
+
+
+describe('Darwin KERN_PROCARGS2 argv parsing', () => {
+  it('preserves exact argv boundaries including workspaces with spaces', () => {
+    const argv = ['node', 'pd.js', 'codex', 'worker', '--workspace', '/tmp/pd legacy worker test/workspace'];
+    const execPath = '/usr/local/bin/node';
+    const payload = Buffer.concat([
+      (() => { const b = Buffer.alloc(4); b.writeInt32LE(argv.length, 0); return b; })(),
+      Buffer.from(`${execPath}\0\0\0${argv.join('\0')}\0HOME=/secret\0`, 'utf8'),
+    ]);
+    expect(parseDarwinProcArgs2(payload)).toEqual(argv);
+    expect(matchLegacyWorkerArgv(parseDarwinProcArgs2(payload) ?? [])).toBe('/tmp/pd legacy worker test/workspace');
+  });
+
+  it('returns null for malformed/truncated payloads rather than guessing', () => {
+    expect(parseDarwinProcArgs2(Buffer.alloc(2))).toBeNull();
+    const bad = Buffer.alloc(4);
+    bad.writeInt32LE(4, 0);
+    expect(parseDarwinProcArgs2(Buffer.concat([bad, Buffer.from('/bin/node\0node\0', 'utf8')]))).toBeNull();
+  });
+});
+
+describe.runIf(process.platform === 'darwin')('real Darwin legacy worker scan', () => {
+  it('finds a real child worker with a workspace containing spaces and excludes --once', async () => {
+    const workspace = path.join(os.tmpdir(), `pd darwin worker test ${process.pid}`);
+    mkdirSync(workspace, { recursive: true });
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--workspace', workspace], { stdio: 'ignore' });
+    const once = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--once', '--workspace', workspace], { stdio: 'ignore' });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const scan = scanRunningLegacyWorkerProcesses({ platform: 'darwin' });
+      expect(scan.ok).toBe(true);
+      expect(scan.workers).toContainEqual({ pid: child.pid, workspaceDir: workspace });
+      expect(scan.workers.some((worker) => worker.pid === once.pid)).toBe(false);
+    } finally {
+      child.kill('SIGKILL');
+      once.kill('SIGKILL');
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 });

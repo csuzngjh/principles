@@ -44,14 +44,14 @@ import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installe
 import { findForeignWorkspaceOwner } from './utils/host-workspace-ownership.js';
 import type { HostWorkspaceOwnershipOptions } from './utils/host-workspace-ownership.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, resolvePdHome } from '@principles/install-layout';
+import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, readWorkspaceBackgroundOwnership, resolvePdHome } from '@principles/install-layout';
 // Namespace import keeps the shared lock capability check explicit at the
 // write boundary; an incompatible older dependency cohort fails closed.
 import * as installLayoutModule from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
-import { reconcileServiceHostScheduler, type ServiceHostSchedulerOutcome } from './service-host-bridge.js';
-import { provisionFreshInstallWorkspace, readAllPendingProvisioning, readPendingProvisioningEvidence, scanRunningLegacyWorkerProcesses, type LegacyWorkerScan, type PendingProvisioningMarker, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
+import { reconcileServiceHostScheduler, type ServiceHostBridgeProbes, type ServiceHostSchedulerOutcome } from './service-host-bridge.js';
+import { provisionFreshInstallWorkspace, readAllPendingProvisioning, scanRunningLegacyWorkerProcesses, type LegacyWorkerScan, type OpenClawGatewayQuiesce, type PendingProvisioningMarker, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -256,12 +256,14 @@ export function shouldProvisionOnInstall(input: {
   consentSource: string;
   schedulerState: string;
   workspaceRegistered: boolean;
+  alreadyOwned: boolean;
 }): boolean {
   if (input.freshInstall) return true;
   return input.consentIntent === 'enable'
     && input.consentSource === 'explicit_flag'
     && input.schedulerState === 'enabled'
-    && input.workspaceRegistered;
+    && input.workspaceRegistered
+    && !input.alreadyOwned;
 }
 
 /** PRI-1278 Phase 5: one REAL host binding this install verified. */
@@ -325,28 +327,6 @@ export function resolveProvisioningTargets(options: {
     return true;
   });
 }
-
-/**
- * Merge THIS run's targets with the per-workspace pending records a previous
- * fresh install left behind. A plain `install --enable-service-host` (no
- * `--host`) must resume every deferred workspace, not only the neutral one.
- */
-export function mergePendingProvisioningTargets(
-  targets: readonly ProvisioningTarget[],
-  pending: readonly PendingProvisioningMarker[],
-): ProvisioningTarget[] {
-  const merged = [...targets];
-  const seen = new Set(targets.map((target) => workspaceKey(target.workspaceDir)));
-  for (const entry of pending) {
-    const key = workspaceKey(entry.workspaceDir);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push({ host: entry.host === 'all' ? 'none' : entry.host, workspaceDir: entry.workspaceDir });
-  }
-  return merged;
-}
-
-
 
 /**
  * Merge the authoritative install-manifest workspaces into an explicitly
@@ -517,16 +497,15 @@ export function planUpgradeHosts(
  */
 function mergeInstallManifestWorkspacesFor(
   current: ReturnType<typeof parseInstallManifest>['manifest'],
-  workspaceDir: string,
-  host?: HostSelection,
+  workspaceDirs: readonly string[],
 ): string[] {
-  let workspaces = mergeInstallManifestWorkspaces(current, path.resolve(workspaceDir));
-  if (host === 'workbuddy') {
+  let workspaces = [...(current?.workspaces ?? [])];
+  for (const workspaceDir of workspaceDirs) {
     // Set-union via the same authority helper — order of existing entries is
-    // preserved, the governance dir is appended when absent (idempotent).
+    // preserved, each real workspace is appended when absent (idempotent).
     workspaces = mergeInstallManifestWorkspaces(
       { layoutVersion: current?.layoutVersion ?? INSTALL_LAYOUT_VERSION, mode: current?.mode ?? 'canonical', hosts: current?.hosts ?? [], workspaces },
-      getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
+      path.resolve(workspaceDir),
     );
   }
   return workspaces;
@@ -2251,10 +2230,11 @@ type GatewayAction = 'stop' | 'proceed' | 'abort';
  */
 async function resolveGatewayAction(
   status: OpenClawGatewayStatus,
-  opts: { stopGateway: boolean; interactive: boolean },
+  opts: { stopGateway: boolean; interactive: boolean; allowProceed?: boolean },
 ): Promise<GatewayAction> {
   if (opts.stopGateway) return 'stop';
   if (!opts.interactive) return 'abort';
+  const allowProceed = opts.allowProceed !== false;
   const portInfo = status.port ? ` (port ${status.port})` : '';
   const pidInfo = status.pid ? `, PID ${status.pid}` : '';
   logger.warn(`${t('gateway_running')}${portInfo}${pidInfo}.`);
@@ -2263,11 +2243,13 @@ async function resolveGatewayAction(
     message: t('gateway_prompt_title'),
     choices: [
       { value: 'stop', name: t('gateway_choice_stop') },
-      { value: 'proceed', name: t('gateway_choice_proceed') },
+      ...(allowProceed ? [{ value: 'proceed' as const, name: t('gateway_choice_proceed') }] : []),
       { value: 'abort', name: t('gateway_choice_abort') },
     ],
   });
-  return choice;
+  // Accepting EPERM risk is not evidence that a legacy consumer is quiescent.
+  // Ownership migration removes that choice; treat any unexpected proceed as abort.
+  return choice === 'proceed' && !allowProceed ? 'abort' : choice;
 }
 
 /**
@@ -5499,6 +5481,107 @@ export function resolveResumeProvisioningHost(
   return { ok: true, host: bound[0] ?? 'none' };
 }
 
+
+export interface ServiceHostInstallProvisioningInput {
+  readonly pdHome: string;
+  readonly freshInstall: boolean;
+  readonly consentIntent: string;
+  readonly consentSource: string;
+  readonly scheduler: ServiceHostSchedulerOutcome;
+  readonly runTargets: readonly ProvisioningTarget[];
+  readonly pendingEntries: readonly PendingProvisioningMarker[];
+  readonly manifestWorkspaces: readonly string[];
+  readonly warn: (message: string) => void;
+  readonly info?: (message: string) => void;
+  /** Test seam for proving every install invocation performs a fresh scan. */
+  readonly scanFn?: () => LegacyWorkerScan;
+  /** Probe seam forwarded to the real provisioning pipeline. */
+  readonly probes?: ServiceHostBridgeProbes;
+  /** Installer-scoped proof collected before mutation for OpenClaw migration targets. */
+  readonly openClawGatewayQuiesce?: OpenClawGatewayQuiesce;
+}
+
+/**
+ * Production orchestration used by install() after the runtime transaction
+ * commits. Existing-install migration candidates come ONLY from authoritative
+ * install.json workspaces; pending entries supply per-workspace metadata but
+ * never create targets. The heavy safety work remains inside the existing
+ * provisioning pipeline (binding gate, scan gate, readiness, CAS, evidence,
+ * first run-once).
+ */
+export async function provisionServiceHostInstallTargets(
+  input: ServiceHostInstallProvisioningInput,
+): Promise<ServiceHostProvisioningReport | null> {
+  const targets = input.freshInstall
+    ? input.runTargets
+    : mergeManifestProvisioningTargets([], input.manifestWorkspaces);
+  const registeredKeys = new Set(input.manifestWorkspaces.map((workspaceDir) => workspaceKey(workspaceDir)));
+  const perTarget = [] as NonNullable<ServiceHostProvisioningReport['targets']>[number][];
+  const scanFn = input.scanFn ?? scanRunningLegacyWorkerProcesses;
+  let legacyWorkerScan: LegacyWorkerScan | undefined;
+  for (const target of targets) {
+    if (!existsSync(target.workspaceDir)) {
+      input.warn(`Service Host provisioning skipped for ${target.workspaceDir}: the directory does not exist.`);
+      continue;
+    }
+    const targetKey = workspaceKey(target.workspaceDir);
+    const marker = input.freshInstall
+      ? null
+      : input.pendingEntries.find((entry) => workspaceKey(entry.workspaceDir) === targetKey) ?? null;
+    const ownershipBefore = readWorkspaceBackgroundOwnership({
+      manifestPath: getInstallManifestPath(),
+      workspaceDir: target.workspaceDir,
+    });
+    const resume = shouldProvisionOnInstall({
+      freshInstall: input.freshInstall,
+      consentIntent: input.consentIntent,
+      consentSource: input.consentSource,
+      schedulerState: input.scheduler.state,
+      workspaceRegistered: registeredKeys.has(targetKey),
+      alreadyOwned: ownershipBefore.status === 'service_host_owned',
+    });
+    if (!resume) continue;
+    if (!input.freshInstall && legacyWorkerScan === undefined) {
+      legacyWorkerScan = scanFn();
+      if (!legacyWorkerScan.ok) {
+        input.warn(`The legacy worker process scan could not verify quiesce (${legacyWorkerScan.detail ?? 'scan failed'}); ownership hand-over stays pending for this run.`);
+      }
+    }
+    let host: HostSelection = target.host;
+    let bindingVerification: { ok: false; reason: string; nextAction: string } | undefined;
+    if (!input.freshInstall) {
+      const resolution = resolveResumeProvisioningHost(marker?.host ?? target.host, target.workspaceDir);
+      if (resolution.ok) {
+        ({ host } = resolution);
+      } else {
+        bindingVerification = { ok: false, reason: resolution.reason, nextAction: resolution.nextAction };
+      }
+    }
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome: input.pdHome,
+      workspaceDir: target.workspaceDir,
+      host,
+      scheduler: input.scheduler,
+      ...(bindingVerification !== undefined ? { bindingVerification } : {}),
+      ...(legacyWorkerScan !== undefined ? { legacyWorkerScan } : {}),
+      ...(!input.freshInstall ? { legacyWorkerScanFn: scanFn } : {}),
+      ...(input.probes !== undefined ? { probes: input.probes } : {}),
+      requireOpenClawGatewayQuiesce: !input.freshInstall,
+      ...(input.openClawGatewayQuiesce !== undefined ? { openClawGatewayQuiesce: input.openClawGatewayQuiesce } : {}),
+      warn: input.warn,
+      ...(input.info !== undefined ? { info: input.info } : {}),
+    });
+    perTarget.push({ host, workspaceDir: target.workspaceDir, outcome });
+  }
+  return perTarget.length > 0
+    ? {
+        targets: perTarget,
+        pending: perTarget.some((entry) => entry.outcome.pendingProvisioning === true),
+        nextAction: perTarget.map((entry) => entry.outcome.nextAction).join(' | '),
+      }
+    : null;
+}
+
 /**
  * Whether this run's explicit Service Host migration can affect the workspace
  * the OpenClaw declaration binds NOW. `--host` is not evidence on a deferred
@@ -6411,13 +6494,24 @@ export async function install(
   // that make the backup rename fail with EPERM. Decide stop/abort/proceed
   // BEFORE mutating anything (cli-5: abort/stop-failed paths must not mutate).
   let restartedGateway = false;
+  const explicitOwnershipMigration = options.serviceHost !== undefined
+    ? options.serviceHost.intent === 'enable' && options.serviceHost.source === 'explicit_flag'
+    : options.enableServiceHost === true;
+  let openClawGatewayQuiesce: OpenClawGatewayQuiesce = {
+    ok: false,
+    reason: 'OpenClaw Gateway quiescence was not evaluated before install',
+  };
   const gatewayStatus = openClawMigrationRequiresGatewayCheck(options)
     ? await checkOpenClawGateway()
     : { isRunning: false };
+  if (!gatewayStatus.isRunning) {
+    openClawGatewayQuiesce = { ok: true, evidence: 'not_running' };
+  }
   if (gatewayStatus.isRunning) {
     const action = await resolveGatewayAction(gatewayStatus, {
       stopGateway: options.stopGateway,
       interactive: !nonInteractive,
+      allowProceed: !explicitOwnershipMigration,
     });
     if (action === 'abort') {
       logger.warn(t('gateway_aborted_reason'));
@@ -6428,7 +6522,9 @@ export async function install(
     }
     if (action === 'stop') {
       if (!quiet) logger.info(t('gateway_stopping'));
-      const stopRes = await stopOpenClawGateway(gatewayStatus);
+      const stopRes = await stopOpenClawGateway(gatewayStatus, {
+        requireProcessExit: explicitOwnershipMigration,
+      });
       if (!stopRes.ok) {
         logger.error(`${t('gateway_stop_failed')} ${stopRes.error ?? ''}`);
         return buildGatewayRefusalResult(options, {
@@ -6445,6 +6541,11 @@ export async function install(
         });
       }
       if (!quiet) logger.success(t('gateway_stopped'));
+      openClawGatewayQuiesce = {
+        ok: true,
+        evidence: 'process_exited',
+        ...(gatewayStatus.pid !== undefined ? { pid: gatewayStatus.pid } : {}),
+      };
       restartedGateway = true; // restart after install, even on failure
     } else {
       // action === 'proceed': user accepted the risk of EPERM.
@@ -7004,6 +7105,7 @@ export async function install(
     // and a sibling refresh failure must not roll back the working runtime.
     const { refreshTargets } = hostPlan;
     const refreshedResults: HostInstallResult[] = [];
+    const refreshedWorkspaceDirs: string[] = [];
     for (const refreshTarget of refreshTargets) {
       if (spinner) updateProgress(spinner, stepIndex, `Refreshing ${refreshTarget} host binding...`);
       // PRI-1278 Phase 5 review: a refresh must re-use the host's RECORDED
@@ -7022,6 +7124,7 @@ export async function install(
           });
           continue;
         }
+        refreshedWorkspaceDirs.push(existing.workspaceDir);
         const refreshCtx: HostInstallContext = { ...hostInstallCtx, workspaceDir: existing.workspaceDir };
         const refreshResults = await runHostInstallers(refreshTarget, refreshCtx, { codexWorkspaceDir: existing.workspaceDir, codexWorkspaceError });
         refreshedResults.push(...refreshResults);
@@ -7070,9 +7173,22 @@ export async function install(
     // host's registration still points at it — the exact A3 hazard class
     // this fix exists to close. Real install state remains file-based truth
     // (checkInstallStatus / host detect()).
+    // The workspaces[] list is the migration authority, so it must name the
+    // ACTUAL host-bound directories this run serves — including a redirected
+    // Codex workspace, WorkBuddy governance, `--host all`, and every verified
+    // sibling-host refresh — not merely the caller's cwd-shaped workspace.
+    const runTargets = resolveProvisioningTargets({
+      host: options.host,
+      workspaceDir: options.workspaceDir,
+      ...(codexWorkspaceDir !== undefined ? { codexWorkspaceDir } : {}),
+    });
+    const servedWorkspaceDirs = [
+      ...runTargets.map((target) => target.workspaceDir),
+      ...refreshedWorkspaceDirs,
+    ];
     writeInstallManifest({
       hosts: installManifestHosts,
-      workspaces: (current) => mergeInstallManifestWorkspacesFor(current, options.workspaceDir, options.host),
+      workspaces: (current) => mergeInstallManifestWorkspacesFor(current, servedWorkspaceDirs),
     });
     // PRI-709 P0-1: persist the metadata source after the manifest write, so
     // the durable tier cannot be clobbered by the same install.
@@ -7219,15 +7335,10 @@ export async function install(
       // (`--host all` → OpenClaw + Codex), instead of the last one overwriting
       // the others.
       //
-      // An existing installation is resumed ONLY with explicit consent AND a
-      // matching pending marker from a previous fresh install. Historical
-      // workspaces never wrote that marker, so they can never be flipped
-      // implicitly by this run.
-      const runTargets = resolveProvisioningTargets({
-        host: options.host,
-        workspaceDir: options.workspaceDir,
-        ...(codexWorkspaceDir !== undefined ? { codexWorkspaceDir } : {}),
-      });
+      // An existing installation migrates ONLY with explicit consent for a
+      // workspace registered in the authoritative install manifest. Pending
+      // entries remain per-workspace metadata/host hints; they never create a
+      // migration target by themselves.
       const pending: { entries: readonly PendingProvisioningMarker[]; warning?: string } = freshInstall
         ? { entries: [] }
         : readAllPendingProvisioning(getPdDir());
@@ -7236,69 +7347,19 @@ export async function install(
         ? { workspaces: [] as readonly string[] }
         : readManifestWorkspacesForProvisioning();
       if (!freshInstall && manifest.warning !== undefined) logger.warn(manifest.warning);
-      const targets = mergeManifestProvisioningTargets(
-        mergePendingProvisioningTargets(runTargets, pending.entries),
-        manifest.workspaces,
-      );
-      const registeredKeys = new Set(manifest.workspaces.map((workspaceDir) => workspaceKey(workspaceDir)));
-      const perTarget = [] as NonNullable<ServiceHostProvisioningReport['targets']>[number][];
-      // One-time switch verification (upgrade installs only, never a fresh
-      // install): scanned lazily BEFORE the first provision write of this
-      // run — see scanRunningLegacyWorkerProcesses for the rationale. One
-      // scan covers every target of the run; no retry machinery, no daemon.
-      let legacyWorkerScan: LegacyWorkerScan | undefined;
-      for (const target of targets) {
-        if (!existsSync(target.workspaceDir)) {
-          logger.warn(`Service Host provisioning skipped for ${target.workspaceDir}: the directory does not exist.`);
-          continue;
-        }
-        const marker = freshInstall ? null : readPendingProvisioningEvidence(getPdDir(), target.workspaceDir);
-        const resume = shouldProvisionOnInstall({
-          freshInstall,
-          consentIntent: consent.intent,
-          consentSource: consent.source,
-          schedulerState: scheduler.state,
-          workspaceRegistered: registeredKeys.has(workspaceKey(target.workspaceDir)),
-        });
-        if (!resume) continue;
-        if (!freshInstall && legacyWorkerScan === undefined) {
-          legacyWorkerScan = scanRunningLegacyWorkerProcesses();
-          if (!legacyWorkerScan.ok) {
-            logger.warn(`The legacy worker process scan could not verify quiesce (${legacyWorkerScan.detail ?? 'scan failed'}); ownership hand-over stays pending for this run.`);
-          }
-        }
-        // A deferred resume must use the host binding that exists NOW: this
-        // run may have omitted --host, and the original pending record only
-        // named the host the first install intended.
-        let host: HostSelection = target.host;
-        let bindingVerification: { ok: false; reason: string; nextAction: string } | undefined;
-        if (!freshInstall) {
-          const resolution = resolveResumeProvisioningHost(marker?.host ?? target.host, target.workspaceDir);
-          if (resolution.ok) {
-            ({ host } = resolution);
-          } else {
-            bindingVerification = { ok: false, reason: resolution.reason, nextAction: resolution.nextAction };
-          }
-        }
-        const outcome = await provisionFreshInstallWorkspace({
-          pdHome: getPdDir(),
-          workspaceDir: target.workspaceDir,
-          host,
-          scheduler,
-          ...(bindingVerification !== undefined ? { bindingVerification } : {}),
-          ...(legacyWorkerScan !== undefined ? { legacyWorkerScan } : {}),
-          warn: (message) => logger.warn(message),
-          info: (message) => logger.info(message),
-        });
-        perTarget.push({ host, workspaceDir: target.workspaceDir, outcome });
-      }
-      const provisioning: ServiceHostProvisioningReport | null = perTarget.length > 0
-        ? {
-            targets: perTarget,
-            pending: perTarget.some((entry) => entry.outcome.pendingProvisioning === true),
-            nextAction: perTarget.map((entry) => entry.outcome.nextAction).join(' | '),
-          }
-        : null;
+      const provisioning = await provisionServiceHostInstallTargets({
+        pdHome: getPdDir(),
+        freshInstall,
+        consentIntent: consent.intent,
+        consentSource: consent.source,
+        scheduler,
+        runTargets,
+        pendingEntries: pending.entries,
+        manifestWorkspaces: manifest.workspaces,
+        warn: (message) => logger.warn(message),
+        info: (message) => logger.info(message),
+        openClawGatewayQuiesce,
+      });
       serviceHostOutcome = {
         freshInstall,
         scheduler,
