@@ -752,8 +752,9 @@ async function main() {
   };
 
   // The Marketplace installer must register its workspace too: the retired
-  // global-hook installer no longer reaches writeInstallManifest. Companion
-  // discovers workers only from this existing installer-owned manifest.
+  // global-hook installer no longer reaches writeInstallManifest. The PD
+  // Service Host discovers managed workspaces only from this existing
+  // installer-owned manifest.
   let workerRegistration;
   try {
     workerRegistration = await registerWorkspaceWorker(workspaceDir);
@@ -823,7 +824,7 @@ async function registerWorkspaceWorker(workspaceDir) {
   const layoutEntry = path.join(pdDir, 'runtime', 'install-layout', 'dist', 'index.js');
   const manual = (reason) => ({
     status: 'manual_action_required', reason,
-    nextAction: `Automatic processing requires the canonical PD runtime and a running PD Companion. Manual processing: pd codex worker --once --workspace "${workspaceDir}" --json`,
+    nextAction: `Automatic processing is managed by the PD Service Host (triggered by the OS scheduler) and requires the canonical PD runtime. Manual processing: pd codex worker --once --workspace "${workspaceDir}" --json`,
   });
   let current;
   try {
@@ -860,7 +861,7 @@ async function registerWorkspaceWorker(workspaceDir) {
   fs.writeFileSync(manifestPath, JSON.stringify({ ...current, hosts, workspaces }, null, 2) + '\n', 'utf8');
   return {
     status: 'registered', manifest: manifestPath,
-    nextAction: 'Start PD Companion and keep it running. Registration allows discovery; it does not prove a worker is running. Verify processing with pd codex worker --once --workspace "' + workspaceDir + '" --json.',
+    nextAction: 'Automatic processing is managed by the PD Service Host through the OS scheduler — inspect it with pd service status and arm it with pd service enable. Registration allows discovery; it does not prove the Service Host is cycling. Verify processing with pd codex worker --once --workspace "' + workspaceDir + '" --json.',
   };
 }
 

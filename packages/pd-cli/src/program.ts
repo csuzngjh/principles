@@ -781,28 +781,23 @@ codexIngestCmd
   });
 
 // ── pd codex worker — Workspace-scoped governance worker ─────────────────────
-// Codex Governance Closure Slice C (PRI-624, SPEC §13; ADR-0020 §11.1): the
-// one Owner-approved background worker (catch-up → reconciliation → one
-// Diagnostician execution → one bounded downstream consumer cycle). The
-// Companion spawns this per registered workspace; --once is the manual and
-// supervised-restart form.
+// The worker is bounded by design: --once runs one Service-Host-admitted cycle,
+// --status is read-only. There is no continuous mode; the PD Service Host is
+// the only background runtime and owns triggering.
 codexCmd
   .command('worker')
-  .description('Run the Codex workspace governance worker (catch-up, reconciliation, diagnostician, downstream)')
+  .description('Run one bounded Codex workspace governance worker cycle (Service-Host-owned workspaces only)')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--once', 'Run exactly one bounded cycle and exit')
-  .option('--interval <ms>', 'Cycle interval for continuous mode (default 120000, minimum 1000)')
-  .option('--status', 'Report the SPEC §15 worker mode without executing anything')
+  .option('--once', 'Run exactly one bounded cycle and exit (requires service_host_owned admission)')
+  .option('--status', 'Report Service Host ownership, readiness and liveness without executing anything')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     const { handleCodexWorker } = await import('./commands/codex-worker.js');
-    const intervalMs = typeof opts.interval === 'string' ? Number.parseInt(opts.interval, 10) : undefined;
     await handleCodexWorker({
       workspace: opts.workspace,
       json: opts.json === true,
       once: opts.once === true,
       status: opts.status === true,
-      ...(intervalMs !== undefined && Number.isInteger(intervalMs) ? { intervalMs } : {}),
     });
   });
 
@@ -837,21 +832,18 @@ workbuddyCmd
 
 workbuddyCmd
   .command('worker')
-  .description('Run the WorkBuddy governance worker (transcript catch-up, reconciliation, diagnostician, downstream)')
+  .description('Run one bounded WorkBuddy governance worker cycle (Service-Host-owned workspaces only)')
   .option('-w, --workspace <path>', 'Governance workspace directory (default: the WorkBuddy governance workspace)')
-  .option('--once', 'Run exactly one bounded cycle and exit')
-  .option('--interval <ms>', 'Cycle interval for continuous mode (default 120000, minimum 1000)')
-  .option('--status', 'Report the §15 worker mode without executing anything')
+  .option('--once', 'Run exactly one bounded cycle and exit (requires service_host_owned admission)')
+  .option('--status', 'Report Service Host ownership and readiness without executing anything')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     const { handleWorkbuddyWorker } = await import('./commands/workbuddy-worker.js');
-    const intervalMs = typeof opts.interval === 'string' ? Number.parseInt(opts.interval, 10) : undefined;
     await handleWorkbuddyWorker({
       workspace: opts.workspace,
       json: opts.json === true,
       once: opts.once === true,
       status: opts.status === true,
-      ...(intervalMs !== undefined && Number.isInteger(intervalMs) ? { intervalMs } : {}),
     });
   });
 
@@ -865,7 +857,7 @@ openclawCmd
   .description('Run the bounded OpenClaw workspace worker (one cycle per invocation — no continuous mode; the PD Service Host owns triggering)')
   .requiredOption('-w, --workspace <path>', 'Canonical workspace directory (required — never inferred)')
   .option('--once', 'Run exactly one bounded consumer cycle and exit')
-  .option('--readiness', 'Run the no-consume readiness self-check (handover prerequisite) and exit')
+  .option('--readiness', 'Run the no-consume readiness self-check and exit')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     const { handleOpenClawWorker } = await import('./commands/openclaw-worker.js');
@@ -897,30 +889,19 @@ consentCmd
     });
   });
 
-// ── pd service — PD Service Host (SPEC-PD-SERVICE-HOST-001 / ADR-0020 §11.6) ──
-// Phase 1: the read-only run-once coordinator (`--dry-run`). Discovers
-// manifest-authorized and claim-validated Workspaces, projects each
-// Workspace's read-only owner state, takes the install-level single-instance
-// lock and writes the versioned operational status. NO Worker is started and
-// NO consumer ownership changes in Phase 1.
-// Phase 2 (PRI-1280): `--shadow` drives ONE explicit, bounded, REAL worker
-// cycle per selected `--workspace` through the unified Worker Adapter —
-// default-off, never scheduled, never touches the owner marker.
-// Phase 3 (PRI-1281): the user-level OS scheduler lifecycle (install /
-// enable / disable / status / uninstall) and the managed execution — a bare
-// `run-once` executes ONLY effectiveOwner=service_host workspaces (§8.4);
-// zero such workspaces is a legal empty run.
+// ── pd service — PD Service Host ──
+// `run-once` has exactly two execution forms: the read-only discovery dry-run
+// and the managed execution. The managed form is the OS scheduler entry and
+// consumes only service_host_owned workspaces; zero such workspaces is a
+// legal empty run. There is no shadow mode and no ownership-transition CLI.
 const serviceCmd = program
   .command('service')
-  .description('PD Service Host operations (managed run-once, dry-run discovery, shadow cycles, OS scheduler lifecycle)');
+  .description('PD Service Host operations (managed run-once, dry-run discovery, OS scheduler lifecycle)');
 
 serviceCmd
   .command('run-once')
-  .description('Run one bounded Service Host coordinator execution: bare/managed (service_host_owned workspaces only — the OS scheduler entry), --dry-run (read-only discovery) or --shadow --workspace <dir>')
-  .option('--dry-run', 'Phase 1 mode: execute the read-only discovery dry-run (no worker, no ownership change)', false)
-  .option('--shadow', 'Phase 2 mode: run one explicit bounded REAL worker cycle per --workspace selection (business tasks may advance; not a dry-run)', false)
-  .option('-w, --workspace <path>', 'Shadow target workspace (repeatable; at least one required with --shadow)', (value: string, previous: string[]) => [...previous, value], [] as string[])
-  .option('--host <kind>', 'Restrict shadow to one host adapter: codex | workbuddy')
+  .description('Run one bounded Service Host coordinator execution: bare/managed (service_host_owned workspaces only — the OS scheduler entry) or --dry-run (read-only discovery)')
+  .option('--dry-run', 'Execute the read-only discovery dry-run (no worker, no ownership change)', false)
   .option('--trigger <source>', 'Self-declared trigger source for the status record: manual | scheduler | installer (default manual; a REPORTED flag, not verified OS evidence; login vs periodic is not distinguishable)')
   .option('--pd-home <dir>', 'Trusted PD home injection (used by the scheduler registration and the installer)')
   .option('--timeout-ms <ms>', 'Per-workspace bounded execution time in ms (default 2700000, minimum 1000)')
@@ -929,21 +910,14 @@ serviceCmd
     const { handleServiceRunOnce } = await import('./commands/service-run-once.js');
     await handleServiceRunOnce({
       dryRun: opts.dryRun === true,
-      shadow: opts.shadow === true,
-      workspaces: Array.isArray(opts.workspace) ? opts.workspace : [],
-      ...(typeof opts.host === 'string'
-        ? (opts.host === 'codex' || opts.host === 'workbuddy'
-            ? { host: opts.host as 'codex' | 'workbuddy' }
-            : { invalidHost: opts.host })
-        : {}),
       ...(typeof opts.trigger === 'string'
         ? (opts.trigger === 'manual' || opts.trigger === 'scheduler' || opts.trigger === 'installer'
             ? { trigger: opts.trigger as 'manual' | 'scheduler' | 'installer' }
             : { invalidTrigger: opts.trigger })
         : {}),
       ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}),
-      // F8: the RAW string reaches the handler for full-value validation —
-      // a partial parse here used to silently mis-bound a real worker.
+      // The RAW string reaches the handler for full-value validation — a
+      // partial parse must never silently mis-bound a real worker.
       ...(typeof opts.timeoutMs === 'string' ? { timeoutMsRaw: opts.timeoutMs } : {}),
       json: opts.json === true,
     });
@@ -1004,46 +978,6 @@ serviceCmd
   .action(async (opts) => {
     const { handleServiceStatus } = await import('./commands/service-lifecycle.js');
     await handleServiceStatus({ json: opts.json === true, ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}) });
-  });
-
-// ── Phase 4 (PRI-1282): per-Workspace §8.4 atomic ownership transitions. ──
-serviceCmd
-  .command('handover')
-  .description('Hand ONE workspace over to the PD Service Host (§8.4 atomic sequence: preparing → readiness → gateway quiesce ack → CAS → first worker cycle)')
-  .requiredOption('-w, --workspace <path>', 'Canonical workspace directory (required)')
-  .option('--pd-home <dir>', 'Trusted PD home injection')
-  .option('--ack-wait-ms <ms>', 'Quiesce-ack wait budget in ms (default 900000)')
-  .option('--abort', 'Abort an in-flight handover_preparing back to legacy ownership')
-  .option('--resume <operationId>', 'Resume a specific in-flight operation (default: the persisted operationId)')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    const { handleServiceHandover } = await import('./commands/service-handover.js');
-    const ackWaitMs = typeof opts.ackWaitMs === 'string' ? Number.parseInt(opts.ackWaitMs, 10) : undefined;
-    await handleServiceHandover({
-      workspace: opts.workspace,
-      json: opts.json === true,
-      ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}),
-      ...(ackWaitMs !== undefined && Number.isInteger(ackWaitMs) && ackWaitMs > 0 ? { ackWaitMs } : {}),
-      ...(opts.abort === true ? { abort: true } : {}),
-      ...(typeof opts.resume === 'string' ? { resumeOperationId: opts.resume } : {}),
-    });
-  });
-
-serviceCmd
-  .command('rollback')
-  .description('Roll ONE workspace back to the legacy consumer (stop Service Host cycles → CAS back to legacy → observe Gateway resumption)')
-  .requiredOption('-w, --workspace <path>', 'Canonical workspace directory (required)')
-  .option('--pd-home <dir>', 'Trusted PD home injection')
-  .option('--resume <operationId>', 'Resume a specific in-flight or committed-but-unevidenced rollback')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    const { handleServiceRollback } = await import('./commands/service-handover.js');
-    await handleServiceRollback({
-      workspace: opts.workspace,
-      json: opts.json === true,
-      ...(typeof opts.pdHome === 'string' ? { pdHome: opts.pdHome } : {}),
-      ...(typeof opts.resume === 'string' ? { resumeOperationId: opts.resume } : {}),
-    });
   });
 
 const internalizationCmd = runtimeCmd

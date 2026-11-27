@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 // PRI-686: the os mock must be registered before src/index is imported, so
 // this import + call sit above it. Command resolvers now prioritize PD
 // explicit sources; hiding the host machine's real
@@ -154,6 +157,106 @@ describe('/pd-help command', () => {
     expect(result.text).toContain('Principles Disciple Command Reference');
     expect(result.text).toContain('🚀 Quick Start');
     expect(result.text).toContain('🔧 Implementation Lifecycle (Semi-deprecated)');
+  });
+});
+
+/**
+ * PRI-1278 (service-host-only consolidation) — anti-reintroduction guard.
+ *
+ * The OpenClaw Gateway's in-process internalization consumer timer chain is
+ * DELETED (not gated): the PD Service Host is the only background runtime
+ * and drives bounded cycles through `pd openclaw worker --once`. The Gateway
+ * adapter survives as a pure capability adapter — hooks ingest evidence, the
+ * tool declaration persists, non-consuming services run. These assertions
+ * pin that shape so the consumer cannot silently grow back:
+ *
+ *  - behavior: plugin registration never hands a consuming service to the
+ *    host (the exact registered-service set is pinned);
+ *  - structure: the deleted consumer/lease/quiesce modules stay deleted, no
+ *    src module references them, and ONLY src/openclaw-worker.ts — the
+ *    Service-Host-invoked capability — may drive the shared consumer cycle.
+ */
+describe('PRI-1278 service-host-only anti-reintroduction guard', () => {
+  const thisDir = path.dirname(fileURLToPath(import.meta.url));
+  const packageRoot = path.resolve(thisDir, '..');
+  const srcRoot = path.join(packageRoot, 'src');
+
+  function collectTsFiles(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...collectTsFiles(full));
+      else if (entry.name.endsWith('.ts')) out.push(full);
+    }
+    return out;
+  }
+
+  it('plugin registration never registers a consuming service', () => {
+    const registeredServices: Array<{ id?: string }> = [];
+    const api: OpenClawPluginApi = {
+      rootDir: '/mock',
+      pluginConfig: { language: 'en' },
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      config: {},
+      registerCommand: () => {},
+      registerService: (service: { id?: string }) => { registeredServices.push(service); },
+      registerTool: () => {},
+      registerHttpRoute: () => {},
+      on: () => {},
+    };
+
+    plugin.register(api);
+
+    const ids = registeredServices.map((s) => s.id);
+    // The legacy consumer can never come back as a registered service…
+    expect(ids).not.toContain('principles-internalization-auto-consumer');
+    // …and no NEW consuming service may appear either: registration is a
+    // subset of the known non-consuming services. (guardService drops
+    // surfaces disabled by default — e.g. pd-task — so the runtime set is a
+    // subset, pinned to the allowlist either way.)
+    const nonConsumingAllowlist = new Set([
+      'principles-correction-observer',
+      'principles-disciple-trajectory',
+      'principles-disciple-task-manager',
+    ]);
+    expect(ids.every((id) => id !== undefined && nonConsumingAllowlist.has(id))).toBe(true);
+    expect(ids.some((id) => typeof id === 'string' && id.includes('consumer'))).toBe(false);
+  });
+
+  it('the deleted consumer, lease and quiesce-ack modules stay deleted', () => {
+    for (const deleted of [
+      'service/internalization-auto-consumer-service.ts',
+      'service/gateway-consumer-lease.ts',
+      'service/gateway-quiesce-ack.ts',
+    ]) {
+      expect(fs.existsSync(path.join(srcRoot, deleted)), `${deleted} must stay deleted`).toBe(false);
+    }
+    // No surviving module may import them (a re-added importer would fail
+    // compilation anyway; this scan makes the regression legible).
+    const offenders: string[] = [];
+    for (const file of collectTsFiles(srcRoot)) {
+      const text = fs.readFileSync(file, 'utf8');
+      if (/internalization-auto-consumer-service|gateway-consumer-lease|gateway-quiesce-ack/.test(text)) {
+        offenders.push(path.relative(srcRoot, file));
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('only the Service-Host-invoked worker may drive the shared consumer cycle', () => {
+    // Consumption requires the shared host-runtime cycle. Inside this
+    // package exactly ONE module may reference it: src/openclaw-worker.ts,
+    // which runs OUTSIDE the Gateway process under `pd openclaw worker
+    // --once` with the service_host_owned admission gate. Any other src
+    // module referencing it means the Gateway grew a consumer back.
+    const drivers: string[] = [];
+    for (const file of collectTsFiles(srcRoot)) {
+      const text = fs.readFileSync(file, 'utf8');
+      if (text.includes('runInternalizationConsumerCycle')) {
+        drivers.push(path.relative(srcRoot, file).replace(/\\/g, '/'));
+      }
+    }
+    expect(drivers).toEqual(['openclaw-worker.ts']);
   });
 });
 

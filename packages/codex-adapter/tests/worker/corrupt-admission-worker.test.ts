@@ -235,6 +235,14 @@ describe('review round-5: the healthy candidate really advances; the corrupt one
     expect(cycle2.mode).not.toBe('degraded');
     expect(runDownstream).toHaveBeenCalledTimes(2);
 
+    // PRI-1278 Phase 5 (owner-label attribution): the worker hands the shared
+    // downstream cycle the Service Host worker identity — the retired
+    // 'companion-worker' label is never written again (historical lease
+    // records keep it; they are not migrated).
+    for (const call of runDownstream.mock.calls) {
+      expect((call[1] as { owner?: string }).owner).toBe('service-host-worker');
+    }
+
     const verify = await createRuntimeStateHandle({ workspaceDir: root, readonly: true });
     try {
       // HEALTHY: an ADMITTED disposition is persisted on the real store.

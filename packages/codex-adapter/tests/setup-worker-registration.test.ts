@@ -61,7 +61,7 @@ function fixture(extraEnv: Record<string, string> = {}) {
   return { home, workspace, manifest, previous, pins, runtime, run };
 }
 
-describe('real plugin setup connects the existing Companion worker', () => {
+describe('real plugin setup registers the workspace for Service-Host-managed processing', () => {
   it('finds the installer-owned CLI without relying on npm global shims', () => {
     const { workspace } = fixture();
     const home = path.resolve(workspace, '..', '..');

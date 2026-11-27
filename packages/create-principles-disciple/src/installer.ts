@@ -51,7 +51,7 @@ import * as installLayoutModule from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { reconcileServiceHostScheduler, type ServiceHostSchedulerOutcome } from './service-host-bridge.js';
-import { provisionFreshInstallWorkspace, readAllPendingProvisioning, readPendingProvisioningEvidence, type PendingProvisioningMarker, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
+import { provisionFreshInstallWorkspace, readAllPendingProvisioning, readPendingProvisioningEvidence, scanRunningLegacyWorkerProcesses, type LegacyWorkerScan, type PendingProvisioningMarker, type ServiceHostProvisioningOutcome } from './service-host-provisioning.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -462,7 +462,8 @@ export function planUpgradeHosts(
 
 /**
  * PRI-624 Slice C: the install manifest records every Workspace this install
- * serves so the Companion can discover its per-Workspace workers (SPEC §13
+ * serves so the PD Service Host — the only background runtime — can discover
+ * the workspaces it owns and dispatches bounded worker cycles for (SPEC §13
  * "canonical install manifest"). Idempotent by canonical path.
  *
  * WorkBuddy (SPEC workbuddy-host-adapter §6): when the run targets workbuddy,
@@ -7099,15 +7100,17 @@ export async function install(
       }
     }
 
-    // PRI-1281 Phase 3 / PRI-1278 Phase 5: user-level OS scheduler
-    // reconciliation + fresh-install ownership provisioning.
-    // POST-COMMIT by design — the runtime transaction is already confirmed,
-    // so every bridge failure is a WARNING, never a reported install failure
-    // (ERR-197). The consent intent is resolved by the caller; the installer
-    // enforces the two hard rules itself:
+    // PRI-1281 Phase 3 / PRI-1278 consolidation: user-level OS scheduler
+    // reconciliation + ownership provisioning. POST-COMMIT by design — the
+    // runtime transaction is already confirmed, so every bridge failure is a
+    // WARNING, never a reported install failure (ERR-197). The consent intent
+    // is resolved by the caller; the installer enforces the hard rules itself:
     //  1. an upgrade NEVER enables implicitly (only an explicit flag may);
-    //  2. ownership is handed over ONLY on a fresh install whose scheduler is
-    //     verified enabled.
+    //  2. ownership is handed over ONLY when the scheduler is verified
+    //     enabled — there is no companion fallback;
+    //  3. an upgrade flips ownership ONLY after the one-time switch evidence
+    //     gate: no legacy continuous worker process may still consume the
+    //     workspace (process scan below, BEFORE the first provision write).
     let serviceHostOutcome: ServiceHostInstallOutcome;
     try {
       const freshInstall = freshInstallRun;
@@ -7150,7 +7153,7 @@ export async function install(
       // An existing installation is resumed ONLY with explicit consent AND a
       // matching pending marker from a previous fresh install. Historical
       // workspaces never wrote that marker, so they can never be flipped
-      // implicitly — they still require the quiescing handover.
+      // implicitly by this run.
       const runTargets = resolveProvisioningTargets({
         host: options.host,
         workspaceDir: options.workspaceDir,
@@ -7162,6 +7165,11 @@ export async function install(
       if (pending.warning !== undefined) logger.warn(pending.warning);
       const targets = mergePendingProvisioningTargets(runTargets, pending.entries);
       const perTarget = [] as NonNullable<ServiceHostProvisioningReport['targets']>[number][];
+      // One-time switch verification (upgrade installs only, never a fresh
+      // install): scanned lazily BEFORE the first provision write of this
+      // run — see scanRunningLegacyWorkerProcesses for the rationale. One
+      // scan covers every target of the run; no retry machinery, no daemon.
+      let legacyWorkerScan: LegacyWorkerScan | undefined;
       for (const target of targets) {
         if (!existsSync(target.workspaceDir)) {
           logger.warn(`Service Host provisioning skipped for ${target.workspaceDir}: the directory does not exist.`);
@@ -7176,6 +7184,12 @@ export async function install(
           hasPendingMarker: marker !== null,
         });
         if (!resume) continue;
+        if (!freshInstall && legacyWorkerScan === undefined) {
+          legacyWorkerScan = scanRunningLegacyWorkerProcesses();
+          if (!legacyWorkerScan.ok) {
+            logger.warn(`The legacy worker process scan could not verify quiesce (${legacyWorkerScan.detail ?? 'scan failed'}); ownership hand-over stays pending for this run.`);
+          }
+        }
         // A deferred resume must use the host binding that exists NOW: this
         // run may have omitted --host, and the original pending record only
         // named the host the first install intended.
@@ -7194,8 +7208,8 @@ export async function install(
           workspaceDir: target.workspaceDir,
           host,
           scheduler,
-          resume: marker !== null,
           ...(bindingVerification !== undefined ? { bindingVerification } : {}),
+          ...(legacyWorkerScan !== undefined ? { legacyWorkerScan } : {}),
           warn: (message) => logger.warn(message),
           info: (message) => logger.info(message),
         });

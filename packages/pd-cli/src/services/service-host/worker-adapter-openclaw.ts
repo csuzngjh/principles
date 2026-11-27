@@ -6,9 +6,9 @@
  * adapter only invokes and normalizes; every business behavior (ownership
  * gate, declaration refresh, diagnostician, downstream consumer cycle,
  * liveness) stays in the OpenClaw worker (the `principles-disciple` package
- * that also ships the Gateway plugin). MANAGED dispatch only — Phase 2
- * shadow keeps the codex|workbuddy host set (instruction §8.5: adding
- * openclaw to the global list would let shadow-run execute OpenClaw).
+ * that also ships the Gateway plugin). MANAGED dispatch only — the Service
+ * Host is the sole consumer runtime and this adapter exists exclusively for
+ * its bounded run-once dispatch.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';

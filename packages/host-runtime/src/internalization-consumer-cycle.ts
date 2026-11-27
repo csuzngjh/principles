@@ -3,9 +3,10 @@
  *
  * Extracted verbatim from openclaw-plugin's
  * `internalization-auto-consumer-service.ts` `runConsumerCycle` so that the
- * OpenClaw auto-consumer scheduler and the Companion workspace worker call
+ * OpenClaw auto-consumer scheduler and the Service-Host-spawned workspace
+ * workers call
  * ONE downstream execution implementation (SPEC §13: "reusing existing
- * downstream consumer logic" — the Companion must not copy it):
+ * downstream consumer logic" — no host worker may copy it):
  *
  *   flag gate → config/runtime config → state handle → orchestrator(dryRun)
  *   → queue read model → consumer decision → wakeOnce loop → adapter
@@ -14,7 +15,8 @@
  *
  * The lease is acquired INSIDE runner.run by the Runtime lease manager
  * (persisted in `<workspace>/.pd/state.db`, cross-process safe) — this cycle
- * never leases by itself, so two schedulers (OpenClaw + Companion) racing on
+ * never leases by itself, so two schedulers (OpenClaw + Service Host worker)
+ * racing on
  * one workspace converge to exactly-once execution via lease_conflict.
  *
  * Hosts inject: a logger, a structured-event sink, their tool catalog, and an
@@ -88,7 +90,13 @@ export interface ConsumerHostToolCatalog {
 }
 
 export interface InternalizationConsumerCyclePorts {
-  /** Runner-owner label recorded on leases ('auto-consumer' | 'companion-worker' | …). */
+  /**
+   * Runner-owner label recorded on leases ('auto-consumer' |
+   * 'service-host-worker' | …). PRI-1278 Phase 5: 'service-host-worker' is
+   * the current workspace-worker identity; leases persisted before the
+   * Companion-runtime removal may still carry the retired 'companion-worker'
+   * label — historical records are never migrated.
+   */
   readonly owner: string;
   readonly logger: ConsumerCycleLogger;
   /** Structured event sink (OpenClaw: SystemLogger.log; worker: its own log). */

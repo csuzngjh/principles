@@ -172,6 +172,12 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // JSON5/`$include` files read-only for the authorization gate; no domain
     // mutation or business policy beyond fail-closed transport compatibility.
     'openclaw-config-loader.ts',
+    // PRI-1278: OpenClaw host tool declaration persistence — plugin I/O
+    // boundary (writes .pd/host-tool-semantics/openclaw.json from code
+    // constants). Extracted verbatim from the deleted Gateway auto-consumer
+    // service; the declaration is a host fact the worker/pd-cli consume,
+    // not consumer behavior.
+    'openclaw-tool-declaration.ts',
   ] as const;
 
   // Category 6: Test files

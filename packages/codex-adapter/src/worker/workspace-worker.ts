@@ -134,7 +134,12 @@ export interface CodexWorkerCycleOptions {
   readonly stage2AggregateBudgetMs?: number;
 }
 
-const WORKER_OWNER = 'companion-worker';
+// PRI-1278 Phase 5 (Companion-runtime removal): the lease/consumer owner
+// label for NEW writes is the Service Host worker identity — the PD Service
+// Host is the only background runtime and spawns these bounded worker cycles.
+// Historical lease records keep the retired 'companion-worker' string; they
+// are durable facts and are deliberately NOT migrated.
+const WORKER_OWNER = 'service-host-worker';
 const DEFAULT_DIAG_CANDIDATE_LIMIT = 5;
 /** CR-05 §9.1: bounded per-cycle post-processing continuation budget. */
 const DEFAULT_POST_PROCESSING_LIMIT = 2;
@@ -155,12 +160,19 @@ const LIVENESS_STAGE_DEADLINE_MS = {
 /**
  * WHO drove this cycle (PRI-1264 attribution, Phase 2 extension). The
  * Service Host sets `PD_INVOCATION_SOURCE=service_host` on its Worker
- * children (shadow mode); without the third value the stall attribution
- * would misreport service-driven cycles as manual (TD §5.2).
+ * children; without the second value the stall attribution would misreport
+ * service-driven cycles as manual (TD §5.2).
+ *
+ * PRI-1278 Phase 5 (Companion-runtime removal): the companion worker driver
+ * is retired — there is no Companion runtime left that could legitimately
+ * produce it. A process still self-declaring `PD_INVOCATION_SOURCE=companion`
+ * (a legacy env leftover) is not authoritative: no resident supervisor backs
+ * it, so it is attributed as what it factually is — manual. Historical
+ * liveness records already persisted with `lastCycleDriver: 'companion'`
+ * stay readable as-is; they are durable facts and are never rewritten.
  */
-export function codexWorkerCycleDriver(): 'companion' | 'service_host' | 'manual' {
+export function codexWorkerCycleDriver(): 'service_host' | 'manual' {
   const source = process.env.PD_INVOCATION_SOURCE;
-  if (source === 'companion') return 'companion';
   if (source === 'service_host') return 'service_host';
   return 'manual';
 }
@@ -169,9 +181,9 @@ export function codexWorkerCycleDriver(): 'companion' | 'service_host' | 'manual
  * F13 (TD §5.2): the coordinator passes a unique invocation id; when
  * present it lands in the liveness record so the shared per-workspace file
  * can be correlated back to the exact Service Host invocation.
- * R5 review fix: a manual/companion cycle carries NO invocation id, so the
- * patch must CLEAR the field — otherwise a completed manual run would keep
- * masquerading under the previous shadow run's id.
+ * R5 review fix: a manual (non-Service-Host) cycle carries NO invocation
+ * id, so the patch must CLEAR the field — otherwise a completed manual run
+ * would keep masquerading under the previous shadow run's id.
  */
 function invocationIdLivenessPatch(): Record<string, unknown> {
   const invocationId = process.env.PD_INVOCATION_ID;
@@ -306,11 +318,13 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     // PRI-1264 review round (2026-11-18): an intentional CONFIG pause must
     // keep the liveness heartbeat alive — the worker process IS alive and
     // cycling, it is just deliberately idle. Without this heartbeat the
-    // Companion's stall detector (completion age > 2× interval) read the stale
-    // pre-pause record and raised a false `workspace_worker_stalled`
-    // notification whose "restart Companion" guidance could never fix the
-    // config pause. The workspace directory and config were already proven
-    // readable above (CR-08 ordering), so the write is legitimate.
+    // stall attribution reading this record (last-completed-cycle age —
+    // originally the retired Companion's detector, now the `pd codex worker
+    // --status` verdict and the Service Host health projection) read the
+    // stale pre-pause record and reported a deliberately idle worker as
+    // stalled — guidance no restart could ever fix, because the pause is
+    // config-intentional. The workspace directory and config were already
+    // proven readable above (CR-08 ordering), so the write is legitimate.
     writeLiveness(workspaceDir, {
       runningStage: 'paused',
       // Explicit null: a paused state has no in-flight stage, and the merge
@@ -330,9 +344,10 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     runningStage: 'catch_up',
     stageDeadline: new Date(cycleStartedAt.getTime() + LIVENESS_STAGE_DEADLINE_MS.catch_up).toISOString(),
     // PRI-1264: record WHO drove this cycle. `pd codex worker --status` reads
-    // the marker so the Owner can tell a companion-driven (resident, should
-    // keep cycling) worker from a manual one-shot — "registered" alone said
-    // nothing about whether a driver is actually alive.
+    // the marker so the Owner can tell a Service-Host-driven cycle (a bounded
+    // worker spawned by the OS-scheduled Service Host, expected to recur on
+    // its interval) from a manual one-shot — "registered" alone says nothing
+    // about whether a driver is actually alive.
     lastCycleDriver: codexWorkerCycleDriver(),
   });
 

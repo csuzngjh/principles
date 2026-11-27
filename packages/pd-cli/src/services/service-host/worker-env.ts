@@ -12,7 +12,7 @@
  *
  *  1. NEVER PASSED (dropped even when set): `PD_EXPERIMENT_ROOT`,
  *     `PD_WORKSPACE_DIR`, `OPENCLAW_STATE_DIR` / `OPENCLAW_HOME`,
- *     `PD_COMPANION_WORKER_IPC` (Companion-private IPC), `PD_INVOCATION_SOURCE`
+ *     `PD_COMPANION_WORKER_IPC` (retired legacy worker IPC), `PD_INVOCATION_SOURCE`
  *     (pinned to `service_host` below), and `HOME` / `USERPROFILE` /
  *     `CODEX_HOME` / `WORKBUDDY_CONFIG_DIR` (pinned from trusted identity).
  *  2. ALLOWLISTED passthrough: OS basics the Node runtime itself needs

@@ -2,13 +2,11 @@
  * @principles/service-host — the PD Service Host coordinator package
  * (SPEC-PD-SERVICE-HOST-001 / ADR-0020 §11.6 narrow scope).
  *
- * Phase 1 public surface: the read-only run-once coordinator and its
- * building blocks. Phase 2 adds the unified Worker Adapter contract and the
- * explicit, bounded shadow coordinator (PRI-1280). Phase 3 adds the managed
- * run (the OS scheduler entry), the Scheduler Adapter Contract with the
- * three user-level platform adapters, and the unified read-only status
- * contract (PRI-1281). No owner-marker writes, no handover — later phases
- * extend this package within the same boundary (TD §11).
+ * Public surface: the read-only discovery run, the unified Worker Adapter
+ * contract, the managed run (the OS scheduler entry), the Scheduler Adapter
+ * Contract with the three user-level platform adapters, and the unified
+ * read-only status contract. There are no owner-marker writes, no handover,
+ * no rollback, and no shadow coordinator in the Service-Host-only design.
  */
 export {
   resolveCoordinatorInstallIdentity,
@@ -59,18 +57,15 @@ export {
   type ServiceRunStatus,
   type ServiceRunStatusRead,
   type ServiceRunTriggerSource,
-  type ShadowExecutionRecord,
-  type ShadowRunStatusSection,
 } from './status/service-run-status.js';
 export {
   runServiceRunOnce,
   type RunOnceOptions,
   type RunOnceResult,
 } from './run-once.js';
-// ── Phase 2 (PRI-1280): Worker Adapter contract + shadow coordinator ──
+// ── Worker Adapter contract + bounded worker subprocess support ──
 export {
   WORKER_ADAPTER_CONTRACT_VERSION,
-  WORKER_HOST_KINDS,
   resolveActiveReleaseCliEntry,
   type AdapterCycleHealth,
   type AdapterCycleOutcome,
@@ -103,14 +98,7 @@ export {
   type TaskProgressRead,
   type TaskProgressSnapshot,
 } from './progress-evidence.js';
-export {
-  DEFAULT_SHADOW_WORKSPACE_TIMEOUT_MS,
-  runServiceShadowOnce,
-  type ShadowRunOptions,
-  type ShadowRunProbes,
-  type ShadowRunResult,
-} from './shadow-run.js';
-// ── Phase 3 (PRI-1281): shared dispatch core + managed run + OS scheduler ──
+// ── Shared dispatch core + managed run + OS scheduler ──
 export {
   carriedProgress,
   dispatchWorkspaceAdapters,

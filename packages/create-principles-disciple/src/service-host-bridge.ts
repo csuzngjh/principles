@@ -161,11 +161,6 @@ function spawnCli(entry: string, args: readonly string[], options: SpawnCliOptio
 /** Injectable spawn boundary (tests fake it; production spawns node). */
 export interface ServiceHostBridgeProbes {
   readonly spawnFn?: typeof spawn;
-  /**
-   * Test seam for the legacy-consumer check that gates a DEFERRED ownership
-   * hand-over. Production reads the live OpenClaw Gateway status.
-   */
-  readonly gatewayRunning?: () => boolean | Promise<boolean>;
 }
 
 export interface InstalledCliJsonResult {

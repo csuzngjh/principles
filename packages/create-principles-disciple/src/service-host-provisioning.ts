@@ -1,16 +1,19 @@
 /**
- * Fresh-install Service Host provisioning (PRI-1278 Phase 5).
+ * Service Host ownership provisioning (PRI-1278 consolidation).
  *
- * A brand-new PD install hands its NEW workspace to the PD-owned Service Host
- * in the same installer run:
+ * The PD Service Host is the ONLY background runtime: the Companion worker
+ * runtime and the Gateway auto-consumer are deleted repo-wide, so there is
+ * no legacy consumer left to quiesce. Provisioning hands a workspace to the
+ * Service Host in one atomic write from ANY prior ownership state — a
+ * pre-consolidation record (including interrupted handover/rollback residue)
+ * cannot prove a live consumer anymore:
  *
  *   1. the workspace is already registered in the canonical manifest;
  *   2. a no-consume Worker readiness probe runs through the ACTIVE RELEASE
  *      (`pd <host> worker --readiness` / `--status`), never through the
  *      installer's own code;
- *   3. the §8.4 CAS provision transition writes `service_host_owned`
- *      atomically (generation 1) — there is no legacy consumer to quiesce,
- *      and the marker itself blocks every legacy consumer from starting;
+ *   3. the provision CAS transition writes `service_host_owned` atomically
+ *      (the only surviving transition kind; flips any residue state);
  *   4. one bounded REAL managed cycle runs (`pd service run-once`);
  *   5. an auditable provisioning record is written under `<pdHome>/service/`.
  *
@@ -18,13 +21,16 @@
  *  - this module NEVER owns scheduler lifecycle or ownership semantics — both
  *    are delegated to their existing single implementations (`pd service …`
  *    and `@principles/install-layout`);
- *  - it only runs for a FRESH install whose scheduler was verified ENABLED;
- *    a failed/absent scheduler never flips ownership (no silent migration);
- *  - an upgrade never calls it — existing workspaces migrate through
- *    `pd service handover`;
+ *  - ownership is handed over ONLY when the scheduler is verified enabled —
+ *    a failed/absent scheduler leaves a fail-closed pending record instead
+ *    (there is no companion fallback);
+ *  - on an upgrade install the caller proves first that no legacy continuous
+ *    worker process still consumes the workspace (the one-time switch
+ *    evidence gate); a positive or unverifiable scan stays pending;
  *  - no credential, token or environment snapshot is written to argv, the
  *    evidence file or logs.
  */
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -37,7 +43,6 @@ import {
   type ServiceHostBridgeProbes,
   type ServiceHostSchedulerOutcome,
 } from './service-host-bridge.js';
-import { checkOpenClawGateway } from './utils/env.js';
 import type { HostSelection } from './installers/index.js';
 
 export type ProvisioningReadiness =
@@ -70,10 +75,10 @@ export interface ServiceHostProvisioningOutcome {
   readonly firstCycle: ProvisioningFirstCycle;
   readonly evidencePath?: string;
   /**
-   * TRUE when this fresh workspace is still legacy/no-record and the install
-   * committed without ownership (no consent, scheduler not enabled, readiness
-   * failed). The durable evidence record lets a LATER explicit install resume
-   * initialization without weakening the upgrade protection.
+   * TRUE when the install committed without Service Host ownership (scheduler
+   * not enabled, readiness failed, a legacy worker still running, CAS
+   * failure). The durable evidence record lets a LATER explicit install
+   * resume initialization of this workspace.
    */
   readonly pendingProvisioning?: boolean;
   readonly nextAction: string;
@@ -93,18 +98,20 @@ export interface ProvisioningInput {
   /** Test seam: real fs by default. */
   readonly now?: () => Date;
   /**
-   * TRUE when this call RESUMES a previously recorded pending provisioning.
-   * A deferred hand-over must prove the legacy consumer is not still running
-   * before it flips ownership (the marker only proves what the FIRST install
-   * did, not what ran afterwards).
-   */
-  readonly resume?: boolean;
-  /**
-   * Resume-only: the caller could not verify the host binding that the pending
-   * marker named. Ownership must NOT flip from an unverified binding; the
-   * refusal is recorded durably with an actionable next action.
+   * Deferred-resume only: the caller could not verify the host binding that
+   * the pending marker named. Ownership must NOT flip from an unverified
+   * binding; the refusal is recorded durably with an actionable next action.
    */
   readonly bindingVerification?: { readonly ok: false; readonly reason: string; readonly nextAction: string };
+  /**
+   * Upgrade one-time-switch evidence (upgrade installs only): the legacy
+   * continuous-worker process scan the installer ran BEFORE the first
+   * provision write of the run. When the scan names THIS workspace — or
+   * could not verify quiesce at all — ownership must NOT flip: a surviving
+   * pre-upgrade worker would become a second consumer beside the Service
+   * Host. Undefined on fresh installs (no legacy PD existed to spawn one).
+   */
+  readonly legacyWorkerScan?: LegacyWorkerScan;
 }
 
 const DEFAULT_FIRST_CYCLE_TIMEOUT_MS = 180_000;
@@ -131,6 +138,95 @@ function stableWorkspacePath(value: string): string {
 function canonicalIdentity(value: string): string {
   const form = stableWorkspacePath(value);
   return process.platform === 'win32' ? form.toLowerCase() : form;
+}
+
+// ─── One-time switch probe: legacy continuous worker processes ─────────────
+
+export interface LegacyWorkerProcessRow {
+  readonly pid: number;
+  readonly commandLine: string;
+}
+
+export interface LegacyWorkerScan {
+  /** FALSE when the process table itself could not be read — quiesce unverifiable. */
+  readonly ok: boolean;
+  readonly workers: readonly { readonly pid: number; readonly workspaceDir: string }[];
+  readonly detail?: string;
+}
+
+/**
+ * The legacy continuous-worker shape: `<host> worker --workspace <dir>`
+ * WITHOUT `--once`. Post-consolidation workers are always bounded `--once`
+ * cycles the Service Host spawns; a worker process without `--once` can only
+ * be a pre-upgrade continuous child the deleted Companion runtime spawned.
+ * Returns the `--workspace` value when the command line matches.
+ */
+export function matchLegacyWorkerCommandLine(commandLine: string): string | null {
+  if (/(^|\s)--once(?=\s|$)/.test(commandLine)) return null;
+  if (!/(^|\s)worker(?=\s|$)/.test(commandLine)) return null;
+  const workspace = /(?:^|\s)--workspace(?:\s+|=)(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(commandLine);
+  return workspace?.[1] ?? workspace?.[2] ?? workspace?.[3] ?? null;
+}
+
+/** Platform process table as (pid, commandLine) rows — bounded, read-only. */
+function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
+  const rows: LegacyWorkerProcessRow[] = [];
+  if (platform === 'win32') {
+    // powershell.exe is the project-allowlisted process-query host (wmic is
+    // gone since Windows 11 24H2). EncodedCommand because Node→PowerShell
+    // argv quoting corrupts embedded quotes in -Command strings.
+    const script = '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }';
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
+    for (const line of output.split('\n')) {
+      const tab = line.indexOf('\t');
+      const pid = Number.parseInt(line.slice(0, tab), 10);
+      if (tab > 0 && Number.isInteger(pid) && pid > 0) rows.push({ pid, commandLine: line.slice(tab + 1).trim() });
+    }
+    return rows;
+  }
+  const output = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 15_000 });
+  for (const line of output.split('\n')) {
+    const match = /^(\d+)\s+(.*)$/.exec(line.trim());
+    const pidText = match?.[1];
+    const commandLine = match?.[2];
+    if (pidText !== undefined && commandLine !== undefined) {
+      rows.push({ pid: Number.parseInt(pidText, 10), commandLine });
+    }
+  }
+  return rows;
+}
+
+/**
+ * One bounded scan of the process table for legacy continuous workers.
+ *
+ * Rationale (one-time switch, PRI-1278 consolidation): the upgrade replaced
+ * the binaries and the Companion restart kills its continuous worker
+ * children — but "the binary is new" is not evidence that no old child
+ * survived, and a surviving child becomes a second consumer the moment
+ * ownership flips. This probe is the evidence gate: it runs once per upgrade
+ * install before the first provision write — no retry machinery, no daemon.
+ * A positive or unverifiable scan keeps the workspace pending (fail-closed);
+ * the next install re-verifies.
+ */
+export function scanRunningLegacyWorkerProcesses(options: {
+  readonly platform?: string;
+  /** Test seam: replace the process-table read. */
+  readonly rows?: () => readonly LegacyWorkerProcessRow[];
+} = {}): LegacyWorkerScan {
+  let rows: readonly LegacyWorkerProcessRow[];
+  try {
+    rows = options.rows !== undefined ? options.rows() : listProcessRows(options.platform ?? process.platform);
+  } catch (error) {
+    return { ok: false, workers: [], detail: `process scan failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const workers: { pid: number; workspaceDir: string }[] = [];
+  for (const row of rows) {
+    if (row.pid === process.pid) continue;
+    const workspaceDir = matchLegacyWorkerCommandLine(row.commandLine);
+    if (workspaceDir !== null) workers.push({ pid: row.pid, workspaceDir });
+  }
+  return { ok: true, workers };
 }
 
 function readinessProbeArgs(host: Exclude<HostSelection, 'all' | 'none'>, workspaceDir: string): string[] {
@@ -453,7 +549,8 @@ function limitationsFor(host: HostSelection, readiness: ProvisioningReadiness): 
 }
 
 /**
- * Provision ONE fresh-install workspace into Service Host ownership.
+ * Provision ONE workspace into Service Host ownership — a fresh install's
+ * new workspace or a deferred/upgrade resume converging residue state.
  * Returns a structured outcome; never throws for expected refusals (rc-9).
  */
 export async function provisionFreshInstallWorkspace(input: ProvisioningInput): Promise<ServiceHostProvisioningOutcome> {
@@ -478,8 +575,8 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     };
   }
   if (before.status === 'service_host_owned') {
-    // The workspace reached ownership another way (e.g. `pd service handover`);
-    // its pending hint is stale and must not be resumed again.
+    // The workspace already converged (an earlier provisioning run or a
+    // replay); its pending hint is stale and must not be resumed again.
     clearPending(input.pdHome, input.workspaceDir, warn);
     return {
       ownership: 'already_owned',
@@ -492,22 +589,10 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
       warnings,
     };
   }
-  if (before.status !== 'legacy_owned' || before.source !== 'no_record') {
-    // Any recorded history (including legacy_owned) is an UPGRADE: it must go
-    // through the quiescing handover, never through fresh provisioning.
-    clearPending(input.pdHome, input.workspaceDir, warn);
-    return {
-      ownership: 'not_provisioned',
-      ownershipBefore: before.status,
-      ownershipAfter: before.status,
-      generation: before.generation,
-      readiness: 'skipped',
-      firstCycle: notAttempted('ownership_history_present'),
-      pendingProvisioning: false,
-      nextAction: 'This workspace already has an ownership record, so the installer did not change it. Move it explicitly with `pd service handover --workspace <dir>` (legacy consumer quiesce + readiness) or keep the legacy lifecycle.',
-      warnings,
-    };
-  }
+  // Every other persisted state — no record, an explicit legacy_owned record,
+  // or interrupted handover/rollback residue — is flippable residue in the
+  // Service-Host-only model: the legacy consumer implementation is deleted
+  // repo-wide, so no recorded history can prove a live consumer anymore.
 
   const recordPending = (
     reason: string,
@@ -580,44 +665,36 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
 
   // Guard: ownership is only handed over when the scheduler is VERIFIED
   // enabled. A registration that failed or stayed disabled must never flip
-  // the marker (no silent legacy retirement) — it records a PENDING
-  // provisioning fact instead so a later explicit install can resume.
+  // the marker — there is no companion fallback — so it records a PENDING
+  // provisioning fact instead, and a later explicit install can resume.
   if (input.scheduler.state !== 'enabled' || input.scheduler.enabled !== true) {
     return recordPending(`scheduler_${input.scheduler.state}`, {
       readiness: 'skipped',
       firstCycle: notAttempted(`scheduler_${input.scheduler.state}`),
-      nextAction: `${input.scheduler.nextAction} Workspace ownership was NOT handed over because the scheduler is not verified enabled. This new workspace is recorded as pending; after arming the scheduler, re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      nextAction: `${input.scheduler.nextAction} Workspace ownership was NOT handed over because the scheduler is not verified enabled. This workspace is recorded as pending; after arming the scheduler, re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
     });
   }
 
-  // A DEFERRED resume proves only that the first install did not hand over —
-  // not that no legacy consumer started afterwards. With a running OpenClaw
-  // Gateway, flipping ownership here would create a second consumer; the
-  // controlled handover (Gateway quiesce ack) is the only safe path.
-  if (input.resume === true && (input.host === 'openclaw' || input.host === 'all')) {
-    const gatewayRunning = input.probes?.gatewayRunning !== undefined
-      ? await input.probes.gatewayRunning()
-      : (await checkOpenClawGateway()).isRunning;
-    if (gatewayRunning) {
-      return recordPending('legacy_consumer_running', {
+  // One-time switch evidence gate (upgrade installs only): the upgrade
+  // replaced the binaries and the Companion restart kills its continuous
+  // worker children — but a surviving child would become a second consumer
+  // beside the Service Host the moment ownership flips. A positive scan for
+  // THIS workspace, or a scan that could not verify quiesce at all, stays
+  // pending (fail-closed, truthful); the next install re-verifies.
+  if (input.legacyWorkerScan !== undefined) {
+    const scan = input.legacyWorkerScan;
+    const identity = canonicalIdentity(input.workspaceDir);
+    const matches = scan.workers.filter((worker) => canonicalIdentity(worker.workspaceDir) === identity);
+    if (!scan.ok || matches.length > 0) {
+      const detail = !scan.ok
+        ? `the legacy worker process scan could not verify quiesce (${scan.detail ?? 'scan failed'})`
+        : `legacy continuous worker process(es) still consume this workspace (pid ${matches.map((match) => match.pid).join(', ')})`;
+      return recordPending('legacy_worker_still_running', {
         readiness: 'skipped',
-        firstCycle: notAttempted('legacy_consumer_running'),
-        nextAction: `A running OpenClaw Gateway may still consume this workspace, so ownership was NOT handed over. Quiesce it through the controlled handover: pd service handover --workspace "${input.workspaceDir}" — or stop the Gateway (openclaw gateway stop) and re-run this install.`,
+        firstCycle: notAttempted('legacy_worker_still_running'),
+        nextAction: `Ownership was NOT handed over: ${detail}. Restart the machine first — or let the Companion update finish retiring its old worker processes — then re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
       });
     }
-  }
-
-  const pendingHost = input.resume === true
-    ? findPendingEntry(input.pdHome, input.workspaceDir)?.host
-    : undefined;
-  const guardHosts = [input.host];
-  if (pendingHost !== undefined && pendingHost !== input.host) guardHosts.push(pendingHost);
-  if (input.resume === true && guardHosts.some((host) => host === 'codex' || host === 'workbuddy' || host === 'all')) {
-    return recordPending('legacy_consumer_unproven', {
-      readiness: 'skipped',
-      firstCycle: notAttempted('legacy_consumer_unproven'),
-      nextAction: `controlled_handover: this deferred resume cannot prove that every legacy Companion-managed consumer for host "${guardHosts.join('+')}" has quiesced, so ownership was NOT handed over. Use the controlled handover path once strict persisted quiesce evidence is available; process absence, a sent drain request, PID disappearance, memory events, and ordinary logs are not proof.`,
-    });
   }
 
   const readiness = await probeReadiness(input);
@@ -631,12 +708,14 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
   }
 
   const operationId = `install-provision-${input.now?.().getTime() ?? Date.now()}-${process.pid}`;
+  // provision_fresh_install is the only surviving transition kind, redefined
+  // as from-ANY-state → service_host_owned: residue records flip in the same
+  // atomic write as a no-record workspace (generation fencing still applies).
   const provisioned = transitionWorkspaceBackgroundExecution({
     manifestPath,
     workspaceDir: input.workspaceDir,
     kind: 'provision_fresh_install',
     operationId,
-    freshInstall: true,
     registerWorkspace: true,
     expectedGeneration: before.generation,
   });
@@ -750,9 +829,9 @@ export interface PendingProvisioningMarker {
  *
  * A multi-host install (`--host all`) records one entry per ACTUAL workspace
  * instead of overwriting a single document, so a later explicit enable can
- * resume all of them. This is a HINT, never an ownership authority: the caller
- * still requires explicit enable consent and an ownership record with no
- * history (`provision_fresh_install` enforces both).
+ * resume all of them. This is a HINT, never an ownership authority: the
+ * caller still requires explicit enable consent, and the provisioning CAS
+ * itself converges any residue ownership state in one atomic write.
  */
 export function readAllPendingProvisioning(pdHome: string): {
   entries: readonly PendingProvisioningMarker[];
@@ -775,7 +854,7 @@ export function readAllPendingProvisioning(pdHome: string): {
  * Read the pending hint for ONE workspace.
  *
  * Unreadable/foreign records are `null` (fail-closed, never a guess); the
- * caller then leaves the workspace in legacy ownership.
+ * caller then leaves the workspace un-provisioned.
  */
 export function readPendingProvisioningEvidence(pdHome: string, workspaceDir: string): PendingProvisioningMarker | null {
   const found = findPendingEntry(pdHome, workspaceDir);

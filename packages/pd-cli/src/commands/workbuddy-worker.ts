@@ -1,48 +1,33 @@
 /**
- * pd workbuddy worker command implementation (SPEC workbuddy-host-adapter
- * §5 Part 5; ADR-0020 third host).
+ * pd workbuddy worker command implementation.
  *
- * Runs the governance-workspace worker cycle — bounded WorkBuddy transcript
- * catch-up → reconciliation → one Diagnostician execution → one bounded
- * downstream consumer cycle — either once (manual / Companion-supervised
- * restart mode) or continuously. Catch-up drains lag left by a missed or
+ * The WorkBuddy worker is bounded by design: one cycle per `--once`
+ * invocation. There is no continuous mode — the PD Service Host is the only
+ * background runtime and owns triggering. A consuming cycle is admitted only
+ * for a `service_host_owned` workspace and holds the per-workspace Service
+ * Host mutex for the cycle duration. Catch-up drains lag left by a missed or
  * bounded Stop hook and is gated by the same flag AND v3 consent record the
- * hook reads; it is NOT the Codex catch-up (no Codex path, flag or transcript
- * is borrowed).
+ * hook reads; it is NOT the Codex catch-up.
  *
- * `status` answers the §15 worker-mode question without executing anything:
- * `manual_action_required` means no Companion-registered worker serves this
- * governance workspace and the manual commands are the recovery path.
- *
- * CLI gate compliance (mirrors the Codex worker command):
+ * CLI gate compliance:
  * - cli-1: --json is restricted to the single-output forms (--once / --status)
- *   so stdout is exactly one parseable JSON object; continuous mode streams
- *   human-readable reports instead.
+ *   so stdout is exactly one parseable JSON object.
  * - cli-2: exit paths stop execution.
  * - cli-6: paused/degraded modes carry reason + nextAction.
  */
 import fs from 'node:fs';
-import os from 'node:os';
-import { createWorkerDrain } from './worker-drain.js';
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { resolvePdHome } from '@principles/install-layout';
+import { resolvePdHome, parseInstallManifest } from '@principles/install-layout';
 import { runWorkbuddyWorkspaceWorkerCycle, type WorkbuddyWorkerCycleResult } from '@principles/workbuddy-adapter';
 import { computeWorkbuddyWorkerStatusMode, loadPdConfigForPlugin, retentionWarning, runTrajectoryRetention } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
-import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
+import { admitServiceWorkerCycle, readServiceWorkerOwnership } from './worker-service-host-gate.js';
 
-const DEFAULT_INTERVAL_MS = 120_000;
-
-/**
- * SPEC-PD-TR-001 §4.1: same rule as the Codex worker — retention runs after
- * the cycle, outside hooks, bounded, and never on stdout.
- */
+/** Retention runs after a consumed cycle, outside hooks, bounded, and never on stdout. */
 function runRetentionAfterCycle(workspaceDir: string): void {
   try {
     const report = runTrajectoryRetention({ workspaceDir, trigger: 'worker' });
-    // Long-lived failures (wrong journal mode, index DDL, clock anomalies) are
-    // logged once per distinct reason instead of every cycle.
     const warning = retentionWarning(report);
     if (warning !== null) {
       console.error(`[PD:WorkbuddyWorker] ${warning}`);
@@ -66,7 +51,6 @@ interface WorkbuddyWorkerOptions {
   workspace?: string;
   json?: boolean;
   once?: boolean;
-  intervalMs?: number;
   status?: boolean;
 }
 
@@ -74,33 +58,81 @@ export interface WorkbuddyWorkerStatusReport {
   generatedAt: string;
   host: 'workbuddy';
   workspace: string;
-  mode: 'ready' | 'manual_action_required' | 'paused' | 'degraded';
+  mode: 'ready' | 'paused' | 'degraded';
   registeredInInstallManifest: boolean;
+  serviceHostManaged: boolean;
+  ownership: {
+    state: string;
+    generation?: number;
+    source?: string;
+  };
   keywordPain: { enabled: boolean; mode: 'off' | 'keyword_only'; source: string };
   reason?: string;
   nextAction?: string;
 }
 
+function ownershipNextAction(): string {
+  return 'Provision or repair this workspace with the PD installer (npx create-principles-disciple) so it is marked service_host_owned, then verify pd service status. Manual worker invocation does not consume non-Service-Host-owned workspaces.';
+}
+
 async function printStatusReport(workspace: string, json: boolean): Promise<void> {
   const generatedAt = new Date().toISOString();
-  const paths = getInstallLayoutPaths(os.homedir());
+  const ownershipRead = readServiceWorkerOwnership(workspace);
   let registered = false;
   let manifestError: string | undefined;
-  try {
-    const raw = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
-    const parsed = parseInstallManifest(raw);
-    if (parsed.manifest !== undefined) {
-      registered = parsed.manifest.workspaces?.some((entry) => path.resolve(entry) === path.resolve(workspace)) ?? false;
-    } else {
-      manifestError = parsed.error;
+  if (ownershipRead.ok) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(ownershipRead.pdHome, 'install.json'), 'utf8')) as unknown;
+      const parsed = parseInstallManifest(raw);
+      if (parsed.manifest !== undefined) {
+        registered = parsed.manifest.workspaces?.some((entry) => path.resolve(entry) === path.resolve(workspace)) ?? false;
+      } else {
+        manifestError = parsed.error;
+      }
+    } catch {
+      manifestError = 'install_manifest_unreadable';
     }
-  } catch {
-    manifestError = 'install_manifest_unreadable';
+  } else {
+    manifestError = ownershipRead.result.reason;
   }
 
-  // The status scan runs the mode evaluation ONLY — a real cycle is NOT run
-  // (no execution, no lease, no LLM, no transcript I/O).
+  // The status scan runs the mode evaluation ONLY — no lease, no LLM, no
+  // transcript catch-up, no downstream consumption.
   const evaluation = computeWorkbuddyWorkerStatusMode({ workspaceDir: workspace, registeredInInstallManifest: registered });
+  const ownership = ownershipRead.ok ? ownershipRead.ownership : null;
+  const ownershipState = ownership === null ? 'unreadable' : ownership.status;
+  const serviceHostManaged = ownership?.status === 'service_host_owned';
+
+  let mode: WorkbuddyWorkerStatusReport['mode'];
+  let reason: string | undefined;
+  let nextAction: string | undefined;
+  if (!ownershipRead.ok) {
+    mode = 'degraded';
+    ({ reason, nextAction } = ownershipRead.result);
+  } else if (ownership?.status === 'manifest_unreadable') {
+    mode = 'degraded';
+    reason = `workbuddy_owner_marker_unreadable:${ownership.reason}`;
+    nextAction = ownership.nextAction;
+  } else if (evaluation.mode === 'degraded') {
+    mode = 'degraded';
+    reason = evaluation.reason;
+    nextAction = evaluation.nextAction;
+  } else if (!serviceHostManaged) {
+    mode = 'paused';
+    reason = `workbuddy_workspace_not_service_host_owned:${ownershipState}`;
+    nextAction = ownershipNextAction();
+  } else if (evaluation.mode === 'manual_action_required') {
+    mode = 'paused';
+    reason = 'workspace_not_in_install_manifest';
+    nextAction = 'Repair the install manifest/provisioning record with the PD installer; the Service Host can manage only manifest-registered workspaces.';
+  } else {
+    mode = evaluation.mode === 'ready' ? 'ready' : 'paused';
+    reason = evaluation.reason;
+    nextAction = evaluation.nextAction;
+  }
+  if (manifestError !== undefined && mode !== 'degraded' && reason === undefined) {
+    reason = manifestError;
+  }
 
   const keywordConfig = loadPdConfigForPlugin(workspace);
   const keywordFlags = keywordConfig.ok ? computeFeatureFlagsFromConfig(keywordConfig.effective).flags : null;
@@ -110,12 +142,17 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     generatedAt,
     host: 'workbuddy',
     workspace,
-    mode: evaluation.mode,
+    mode,
     registeredInInstallManifest: registered,
+    serviceHostManaged,
+    ownership: {
+      state: ownershipState,
+      ...(ownership !== null && 'generation' in ownership ? { generation: ownership.generation } : {}),
+      ...(ownership !== null && 'source' in ownership && typeof ownership.source === 'string' ? { source: ownership.source } : {}),
+    },
     keywordPain: { enabled: keywordEnabled, mode: keywordEnabled ? 'keyword_only' : 'off', source: keywordFlag?.source ?? 'unknown' },
-    ...(evaluation.reason !== undefined ? { reason: evaluation.reason } : {}),
-    ...(evaluation.nextAction !== undefined ? { nextAction: evaluation.nextAction } : {}),
-    ...(manifestError !== undefined ? { reason: `${evaluation.reason ?? manifestError}` } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+    ...(nextAction !== undefined ? { nextAction } : {}),
   };
   if (json) {
     console.log(JSON.stringify(report));
@@ -125,6 +162,8 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     `WorkBuddy governance worker status (${workspace})`,
     `  mode: ${report.mode}`,
     `  registered in install manifest: ${registered}`,
+    `  Service Host managed: ${serviceHostManaged}`,
+    `  ownership: ${ownershipState}`,
     '  automatic Pain detection: NOT AVAILABLE in WorkBuddy — record pain with the explicit "PD记录痛苦：" prefix',
     `  keyword flag: ${report.keywordPain.mode} (source=${report.keywordPain.source}; has no effect in WorkBuddy)`,
   ];
@@ -161,76 +200,71 @@ function printCycleReport(result: WorkbuddyWorkerCycleResult, json: boolean): vo
   console.log(lines.join('\n'));
 }
 
+function printModeError(options: WorkbuddyWorkerOptions, reason: string, nextAction: string): void {
+  const error = {
+    generatedAt: new Date().toISOString(),
+    host: 'workbuddy',
+    error: 'cli_contract',
+    reason,
+    nextAction,
+  };
+  if (options.json === true) console.log(JSON.stringify(error));
+  else console.error(`[PD:WorkbuddyWorker] ${reason}: ${nextAction}`);
+  process.exitCode = 1;
+}
+
 export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Promise<void> {
-  // cli-1: continuous mode streams one report per cycle — that is NOT one
-  // parseable JSON document. --json is only valid for the single-output
-  // forms (--once / --status), enforced here.
-  if (options.json === true && options.once !== true && options.status !== true) {
-    const error = {
-      generatedAt: new Date().toISOString(),
-      host: 'workbuddy',
-      error: 'cli_contract',
-      reason: 'json_without_once_or_status',
-      nextAction: 'Use --json with --once (single cycle) or --status (no-op scan); continuous mode streams human-readable reports instead.',
-    };
-    console.log(JSON.stringify(error));
-    process.exitCode = 1;
+  if (options.once === true && options.status === true) {
+    printModeError(options, 'once_and_status_mutually_exclusive', 'Choose --once (one bounded consuming cycle) or --status (no-op scan), not both.');
+    return;
+  }
+  if (options.once !== true && options.status !== true) {
+    printModeError(options, 'mode_required', 'The WorkBuddy worker is bounded by design: pass --once for one cycle or --status for the no-op scan. There is no continuous mode — the PD Service Host owns triggering.');
     return;
   }
 
-  // SPEC §4.1: the WorkBuddy worker's default workspace is the OD-07
-  // governance workspace — NEVER the generic config default. Resolve it
-  // through the same fail-closed PD Home authority as the host hook.
-  const pdHome = resolvePdHome();
-  if (!pdHome.ok) {
-    const error = {
-      generatedAt: new Date().toISOString(),
-      host: 'workbuddy',
-      error: 'pd_home_resolution_failed',
-      reason: pdHome.reason,
-      nextAction: pdHome.nextAction,
-    };
-    if (options.json === true) console.log(JSON.stringify(error));
-    else console.error(`[PD:WorkbuddyWorker] ${pdHome.reason}: ${pdHome.message}\n  next action: ${pdHome.nextAction}`);
-    process.exitCode = 1;
-    return;
+  // SPEC §4.1: the default workspace is the OD-07 governance workspace —
+  // NEVER the generic config default. Resolve it through the same fail-closed
+  // PD Home authority as the host hook. Explicit workspaces do not need this
+  // resolution because their ownership gate resolves its own pinned PD home.
+  let workspace: string;
+  if (options.workspace !== undefined && options.workspace.trim().length > 0) {
+    workspace = resolveWorkspaceDir(options.workspace);
+  } else {
+    const pdHome = resolvePdHome();
+    if (!pdHome.ok) {
+      const error = {
+        generatedAt: new Date().toISOString(),
+        host: 'workbuddy',
+        error: 'pd_home_resolution_failed',
+        reason: pdHome.reason,
+        nextAction: pdHome.nextAction,
+      };
+      if (options.json === true) console.log(JSON.stringify(error));
+      else console.error(`[PD:WorkbuddyWorker] ${pdHome.reason}: ${pdHome.message}\n  next action: ${pdHome.nextAction}`);
+      process.exitCode = 1;
+      return;
+    }
+    workspace = pdHome.workbuddyWorkspaceDir;
   }
-  const workspace = options.workspace !== undefined && options.workspace.trim().length > 0
-    ? resolveWorkspaceDir(options.workspace)
-    : pdHome.workbuddyWorkspaceDir;
 
   if (options.status === true) {
     await printStatusReport(workspace, options.json === true);
     return;
   }
 
-  if (options.once === true) {
+  const gate = admitServiceWorkerCycle('workbuddy', workspace);
+  if (!gate.admitted) {
+    printCycleReport(gate.result as WorkbuddyWorkerCycleResult, options.json === true);
+    if (gate.result.mode === 'degraded') process.exitCode = 1;
+    return;
+  }
+  try {
     const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace, emitEvent: (event, payloadJson) => console.error(`[PD:WorkbuddyWorker] ${event}: ${payloadJson}`) });
     runRetentionAfterCycle(workspace);
     printCycleReport(result, options.json === true);
     if (result.mode === 'degraded') process.exitCode = 1;
-    return;
-  }
-
-  const interval = typeof options.intervalMs === 'number' && options.intervalMs >= 1000 ? options.intervalMs : DEFAULT_INTERVAL_MS;
-  const drain = createWorkerDrain();
-  try {
-    while (!drain.stopped) {
-      // One escaping cycle exception must not kill the daemon (same
-      // PRI-655 discipline as the Codex worker): report, keep looping.
-      try {
-        const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace, emitEvent: (event, payloadJson) => console.error(`[PD:WorkbuddyWorker] ${event}: ${payloadJson}`) });
-        runRetentionAfterCycle(workspace);
-        printCycleReport(result, false);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`[PD:WorkbuddyWorker] cycle failed: ${message}`);
-        console.error(`  continuing in ${interval}ms. Investigate: pd workbuddy worker --status --workspace "${workspace}"`);
-      }
-      if (drain.stopped) break;
-      await drain.wait(interval);
-    }
   } finally {
-    drain.dispose();
+    gate.release();
   }
 }

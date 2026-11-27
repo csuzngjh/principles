@@ -1,6 +1,5 @@
 /**
- * PRI-1282 Phase 4 — CLI wiring for `pd openclaw worker` and
- * `pd service handover|rollback` (cli-1/cli-2/cli-6/cli-7: REAL Commander
+ * CLI wiring for `pd openclaw worker` (cli-1/cli-2/cli-6/cli-7: REAL Commander
  * registration, single-JSON contract, fail-closed argument validation).
  *
  * The worker command lazy-imports the plugin subpath; the mock intercepts
@@ -29,11 +28,6 @@ vi.mock('principles-disciple/openclaw-worker', () => ({
     workspaceDir: '/mock/openclaw-ws',
     checks: { workspaceDirectory: true, ownership: true, declaration: true, evidencePort: true, credentials: true },
   })),
-}));
-
-vi.mock('../../src/services/service-host/workspace-handover.js', () => ({
-  runWorkspaceHandover: vi.fn(async () => ({ ok: true, outcome: 'completed', operationId: 'op-handover', generation: 1, workspaceDir: '/mock/ws', readiness: 'ready', quiesceAck: {}, workerCycle: {}, evidencePath: '/mock/ws/.pd/evidence' })),
-  runWorkspaceRollback: vi.fn(async () => ({ ok: true, outcome: 'completed', operationId: 'op-rollback', generation: 1, workspaceDir: '/mock/ws', gatewayResumption: 'observed', workerHandback: {}, evidencePath: '/mock/ws/.pd/evidence' })),
 }));
 
 let logs: string[];
@@ -146,29 +140,3 @@ describe('pd openclaw worker — registration + contract', () => {
   });
 });
 
-describe('pd service handover / rollback — registration', () => {
-  it('are registered under the service command group with the expected options', () => {
-    const handover = findCommand(findCommand(program, 'service'), 'handover');
-    const rollback = findCommand(findCommand(program, 'service'), 'rollback');
-    expect(handover.options.map((option) => option.long)).toEqual(expect.arrayContaining(['--workspace', '--pd-home', '--ack-wait-ms', '--abort', '--resume', '--json']));
-    expect(rollback.options.map((option) => option.long)).toEqual(expect.arrayContaining(['--workspace', '--pd-home', '--resume', '--json']));
-  });
-
-  it('cli-7: `service rollback --resume <op>` parses through Commander and the operation id reaches the resume logic', async () => {
-    const { runWorkspaceRollback } = await import('../../src/services/service-host/workspace-handover.js');
-    await run(['service', 'rollback', '--workspace', '/mock/ws', '--resume', 'op-2026-11-23-abc', '--json']);
-    expect(vi.mocked(runWorkspaceRollback)).toHaveBeenCalledWith(
-      '/mock/ws',
-      expect.objectContaining({ resumeOperationId: 'op-2026-11-23-abc' }),
-    );
-  });
-
-  it('cli-7: `service handover --resume <op>` delivers the operation id to the handover resume path', async () => {
-    const { runWorkspaceHandover } = await import('../../src/services/service-host/workspace-handover.js');
-    await run(['service', 'handover', '--workspace', '/mock/ws', '--resume', 'op-2026-11-23-def', '--json']);
-    expect(vi.mocked(runWorkspaceHandover)).toHaveBeenCalledWith(
-      '/mock/ws',
-      expect.objectContaining({ resumeOperationId: 'op-2026-11-23-def' }),
-    );
-  });
-});

@@ -34,7 +34,7 @@ import { entryFileVerdict, errnoCode } from '../lib/entry-verdict.js';
 import { ConsoleSupervisor, ENTRY_PENDING_REASON_PREFIX } from '../lib/supervisor.js';
 import { judgeVersionChangeLaunch, killManagedServerAndWait, ownedManagedHandle, realProcessOps, type ManagedServerHandle } from '../lib/version-handover.js';
 import { judgeReleaseWatch, readActiveRelease, type ActiveReleaseRead, type ReleaseIdentity } from '../lib/release-watch.js';
-import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, buildStalledWorkersTrayView, buildSyncUnavailableTrayView, describeDegraded, describeWorkspaceWorkerDegraded, describeWorkspaceSyncUnavailable } from '../lib/degraded.js';
+import { buildDegradedPageHtml, describeDegraded } from '../lib/degraded.js';
 import {
   defaultCompanionState,
   markApprovalsNotified,
@@ -48,8 +48,6 @@ import {
   parseUpdateCheckResponse,
   shouldNotifyUpdate,
 } from '../lib/poller.js';
-import { WorkspaceWorkerRegistry, classifyWorkspacePath, type WorkerChild, type WorkspaceManifestSource } from '../lib/workspace-workers.js';
-import { parseInstallManifest } from '@principles/install-layout';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_USER_MODEL_ID = 'party.principles.disciple.companion';
@@ -71,7 +69,6 @@ let installedPluginDir: string | undefined;
 let activeRecordPath: string | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let updateTimer: ReturnType<typeof setInterval> | undefined;
-let workspaceWorkerTimer: ReturnType<typeof setInterval> | undefined;
 /** The single pending restart retry (see scheduleRestartRetry). */
 let restartRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let quitting = false;
@@ -368,81 +365,9 @@ function startSupervision(): void {
   spawnCli();
 }
 
-// ─── Workspace worker supervision (PRI-624 Slice C) ──────────────────────────
-// The Companion schedules ONE `pd codex worker` child per canonical workspace
-// listed in the install manifest. Lifecycle only — execution correctness is
-// owned by the durable Runtime task lease inside the worker.
+// ─── Install manifest warnings ───────────────────────────────────────────────
 
-const WORKSPACE_WORKER_SYNC_INTERVAL_MS = 60_000;
-const WORKSPACE_WORKER_CYCLE_INTERVAL_MS = 120_000;
-let workspaceWorkers: WorkspaceWorkerRegistry | undefined;
-// WorkBuddy third host (SPEC workbuddy-host-adapter §5): the Companion
-// schedules ONE `pd workbuddy worker` child for the WorkBuddy governance
-// workspace, supervised by the same registry lifecycle. Execution
-// correctness stays owned by the durable Runtime task lease, so a
-// workspace theoretically listed for both hosts can never double-execute a
-// task — worst case is benign lease contention.
-let workbuddyWorkspaceWorkers: WorkspaceWorkerRegistry | undefined;
-let workbuddyWorkspaceWorkerTimer: ReturnType<typeof setInterval> | undefined;
-
-/**
- * Read the install manifest for one host's workspaces as an EXPLICIT outcome
- * (2026-10-16): a manifest that cannot be read or parsed is
- * { kind: 'unavailable' } — NEVER an empty workspace list. Conflating the two
- * mass-stopped every running worker as removed_from_manifest when the bundled
- * parser could not understand a newer manifest.
- *
- * PRI-993: an `ok` manifest passes its workspace list through UNFILTERED.
- * The manifest list is authorization evidence; whether a listed path can
- * actually host a worker is judged by the registry per tick with a
- * confirmation window (classifyWorkspacePath → statWorkspace). Folding a
- * transient stat failure into "not in the desired set" here is exactly the
- * mass-stop bug class one level deeper: undecidable ≠ deleted.
- */
-function readManifestWorkspacesForHost(host: 'codex' | 'workbuddy'): WorkspaceManifestSource {
-  const paths = getInstallLayoutPaths(app.getPath('home'));
-  let raw: string;
-  try {
-    raw = fs.readFileSync(paths.manifest, 'utf8');
-  } catch (err) {
-    return { kind: 'unavailable', reason: `install_manifest_read_failed: ${errnoCode(err)}` };
-  }
-  let parsedManifest: unknown;
-  try {
-    parsedManifest = JSON.parse(raw) as unknown;
-  } catch (err) {
-    return { kind: 'unavailable', reason: `install_manifest_unparsable: ${err instanceof Error ? err.message : String(err)}` };
-  }
-  const result = parseInstallManifest(parsedManifest);
-  if (result.manifest === undefined) {
-    return { kind: 'unavailable', reason: `install_manifest_invalid: ${result.error ?? 'unknown'}` };
-  }
-  logManifestWarnings(result.warnings);
-  if (!result.manifest.hosts.includes(host)) return { kind: 'ok', workspaces: [] };
-  return {
-    kind: 'ok',
-    workspaces: [...(result.manifest.workspaces ?? [])],
-    ...(result.manifest.backgroundExecutions !== undefined
-      ? { backgroundExecutions: result.manifest.backgroundExecutions }
-      : {}),
-  };
-}
-
-function manifestCodexWorkspacesSource(): WorkspaceManifestSource {
-  return readManifestWorkspacesForHost('codex');
-}
-
-function manifestWorkbuddyWorkspacesSource(): WorkspaceManifestSource {
-  return readManifestWorkspacesForHost('workbuddy');
-}
-
-/** Codex workspaces for liveness checks only (a read failure yields none — liveness is read-only). */
-function manifestCodexWorkspaces(): string[] {
-  const source = manifestCodexWorkspacesSource();
-  return source.kind === 'ok' ? [...source.workspaces] : [];
-}
-
-/** Forward-compatibility warnings are structured events, deduped per signature so the 60s sync loop does not spam. */
+/** Forward-compatibility warnings are structured events, deduped per signature so repeated manifest reads cannot spam. */
 const loggedManifestWarningSignatures = new Set<string>();
 function logManifestWarnings(warnings: readonly InstallManifestWarning[] | undefined): void {
   if (warnings === undefined) return;
@@ -452,273 +377,6 @@ function logManifestWarnings(warnings: readonly InstallManifestWarning[] | undef
     loggedManifestWarningSignatures.add(signature);
     log('install_manifest_warning', { code: warning.code, host: warning.host });
   }
-}
-
-function spawnWorkspaceWorkerFor(workerCommand: 'codex' | 'workbuddy'): (canonicalWorkspaceDir: string) => WorkerChild {
-  return (canonicalWorkspaceDir: string): WorkerChild => {
-    // Same system-node discipline as the console server: better-sqlite3 is
-    // built for the SYSTEM Node ABI, never Electron's bundled Node.
-    const entry = extDir !== undefined ? resolvePdCliEntry(extDir) : undefined;
-    if (entry === undefined || !entryFileVerdict(entry).ok) {
-      throw new Error('pd-cli entry unavailable');
-    }
-    const child = spawn('node', [
-      entry,
-      workerCommand, 'worker',
-      '--workspace', canonicalWorkspaceDir,
-      '--interval', String(WORKSPACE_WORKER_CYCLE_INTERVAL_MS),
-    ], {
-      env: { ...process.env, PD_COMPANION_WORKER_IPC: '1', PD_INVOCATION_SOURCE: 'companion' },
-      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-      // Companion is a GUI-subsystem process (no console). Every console
-      // program it starts without this gets a NEW, visible terminal window.
-      windowsHide: true,
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      // Bounded stderr tail into the companion log — the worker's own
-      // human-readable cycle reports go to stdout (companion does not consume
-      // them; Slice D health surface adds the structured health API).
-      log('workspace_worker_stderr', { workspace: canonicalWorkspaceDir, tail: chunk.toString('utf8').slice(-400) });
-    });
-    return child;
-  };
-}
-
-function spawnWorkspaceWorker(canonicalWorkspaceDir: string): WorkerChild {
-  return spawnWorkspaceWorkerFor('codex')(canonicalWorkspaceDir);
-}
-
-function startWorkspaceWorkerSupervision(): void {
-  workspaceWorkers = new WorkspaceWorkerRegistry({
-    spawnWorker: spawnWorkspaceWorker,
-    readRelease: readActiveRecord,
-    // PRI-993: path existence is judged here per tick — a transient stat
-    // failure keeps the worker running instead of stopping it as removed.
-    statWorkspace: classifyWorkspacePath,
-    // The degraded fact already exists in the registry (PRI-624); PRI-715 only
-    // connects it to the Owner-visible surfaces — one-shot notification on the
-    // degradation transition plus the persistent tray section (rebuilt below).
-    log: (event, fields) => {
-      log(event, fields ?? {});
-      if (event === 'workspace_worker_handover_degraded' || event === 'workspace_worker_handover_recovered') {
-        rebuildTrayMenu();
-      } else if (event === 'workspace_worker_degraded') {
-        // rc-1/rc-2: log fields are untrusted runtime values — guard before use.
-        const workspace = fields?.workspace;
-        if (typeof workspace !== 'string' || workspace.length === 0) {
-          log('workspace_worker_degraded_notify_skipped', { reason: 'workspace_field_invalid' });
-          return;
-        }
-        notifyWorkspaceDegraded(workspace);
-        rebuildTrayMenu();
-      } else if (event === 'workspace_worker_stopped') {
-        // Manifest removal of a (possibly degraded) workspace must retire its
-        // tray section immediately — nothing else rebuilds the tray on removal
-        // (review P1, PRI-715 §7F). The rebuild re-reads the registry, so the
-        // ghost display dies with the entry.
-        rebuildTrayMenu();
-      } else if (event === 'workspace_worker_sync_unavailable_persistent') {
-        // 2026-10-16: an unreadable manifest holds worker state and escalates
-        // Owner-visibly instead of mass-stopping — one-shot per episode.
-        notifyWorkspaceSyncUnavailable(fields ?? {});
-        rebuildTrayMenu();
-      } else if (event === 'workspace_worker_sync_recovered') {
-        // RF-04: healed manifest → drop the stale tray warning immediately.
-        // Pure display refresh; sync already reconciled the workers.
-        rebuildTrayMenu();
-      }
-    },
-  });
-  workspaceWorkers.syncFromManifest(manifestCodexWorkspacesSource());
-  workspaceWorkerTimer = setInterval(() => {
-    if (quitting) return;
-    workspaceWorkers?.syncFromManifest(manifestCodexWorkspacesSource());
-    // SPEC-CODEX-PAIN-CLOSURE-001 CR-08 (§9.3): supervision also reads the
-    // worker's persisted liveness facts — a spawned process with no recent
-    // cycle evidence is NOT alive progress. Meaningful transitions only
-    // (one-shot per workspace while stalled) so the Owner is not spammed
-    // every sync tick.
-    checkWorkspaceWorkerLiveness();
-  }, WORKSPACE_WORKER_SYNC_INTERVAL_MS);
-  workspaceWorkerTimer.unref();
-
-  // WorkBuddy governance worker — same supervision, own registry and timer;
-  // the worker command itself (pd workbuddy worker) owns the host.workbuddy
-  // flag semantics, so an unenabled governance workspace just reports paused.
-  workbuddyWorkspaceWorkers = new WorkspaceWorkerRegistry({
-    spawnWorker: spawnWorkspaceWorkerFor('workbuddy'),
-    readRelease: readActiveRecord,
-    // PRI-993: same path-verdict discipline as the codex registry above.
-    statWorkspace: classifyWorkspacePath,
-    log: (event, fields) => {
-      log(event, fields ?? {});
-      if (event === 'workspace_worker_handover_degraded' || event === 'workspace_worker_handover_recovered') {
-        rebuildTrayMenu();
-      } else if (event === 'workspace_worker_degraded') {
-        const workspace = fields?.workspace;
-        if (typeof workspace !== 'string' || workspace.length === 0) {
-          log('workspace_worker_degraded_notify_skipped', { reason: 'workspace_field_invalid' });
-          return;
-        }
-        notifyWorkspaceDegraded(workspace);
-        rebuildTrayMenu();
-      } else if (event === 'workspace_worker_stopped') {
-        rebuildTrayMenu();
-      } else if (event === 'workspace_worker_sync_unavailable_persistent') {
-        notifyWorkspaceSyncUnavailable(fields ?? {});
-        rebuildTrayMenu();
-      } else if (event === 'workspace_worker_sync_recovered') {
-        rebuildTrayMenu();
-      }
-    },
-  });
-  workbuddyWorkspaceWorkers.syncFromManifest(manifestWorkbuddyWorkspacesSource());
-  workbuddyWorkspaceWorkerTimer = setInterval(() => {
-    if (quitting) return;
-    workbuddyWorkspaceWorkers?.syncFromManifest(manifestWorkbuddyWorkspacesSource());
-  }, WORKSPACE_WORKER_SYNC_INTERVAL_MS);
-  workbuddyWorkspaceWorkerTimer.unref();
-}
-
-const livenessStallNotified = new Set<string>();
-
-/**
- * CR-08/A20: a worker process being alive is not progress. When the persisted
- * liveness record shows no completed cycle within two poll windows (240s) and
- * no running stage within its deadline, surface one workspace_worker_stalled
- * event — readiness/registration alone never counts as liveness.
- */
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function checkWorkspaceWorkerLiveness(): void {
-  const manifestWorkspaces = manifestCodexWorkspaces();
-  // A workspace dropped from the manifest while stalled can never be cleared
-  // below (the loop only visits manifest workspaces): drop the residue or the
-  // tray keeps reporting a stall on a workspace that no longer exists.
-  let residueCleared = false;
-  for (const workspace of [...livenessStallNotified]) {
-    if (!manifestWorkspaces.includes(workspace)) {
-      livenessStallNotified.delete(workspace);
-      residueCleared = true;
-    }
-  }
-  if (residueCleared) rebuildTrayMenu();
-  for (const workspace of manifestWorkspaces) {
-    let record: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = JSON.parse(fs.readFileSync(path.join(workspace, '.state', 'codex-worker-liveness.json'), 'utf8'));
-      if (isPlainRecord(parsed)) record = parsed;
-    } catch {
-      continue;
-    }
-    if (Object.keys(record).length === 0) continue;
-    const lastCompleted = typeof record.lastCycleCompletedAt === 'string' ? Date.parse(record.lastCycleCompletedAt) : NaN;
-    const runningStage = typeof record.runningStage === 'string' ? record.runningStage : null;
-    const stageDeadline = typeof record.stageDeadline === 'string' ? Date.parse(record.stageDeadline) : NaN;
-    const withinStage = runningStage !== null && Number.isFinite(stageDeadline) && Date.now() <= stageDeadline;
-    // PRI-1264 review round: `runningStage: 'paused'` with a FRESH heartbeat
-    // is an intentional CONFIG pause (host.codex disabled), not a stall — the
-    // worker process is alive and cycling, deliberately idle. Staleness of
-    // the heartbeat itself still stalls (a killed worker stops heartbeating).
-    const lastStarted = typeof record.lastCycleStartedAt === 'string' ? Date.parse(record.lastCycleStartedAt) : NaN;
-    const pausedRecently = runningStage === 'paused'
-      && Number.isFinite(lastStarted)
-      && Date.now() - lastStarted <= WORKSPACE_WORKER_CYCLE_INTERVAL_MS * 2;
-    const stalled = (Number.isNaN(lastCompleted) || Date.now() - lastCompleted > WORKSPACE_WORKER_CYCLE_INTERVAL_MS * 2) && !withinStage && !pausedRecently;
-    if (stalled && !livenessStallNotified.has(workspace)) {
-      livenessStallNotified.add(workspace);
-      log('workspace_worker_stalled', {
-        workspace,
-        lastCycleCompletedAt: Number.isFinite(lastCompleted) ? record.lastCycleCompletedAt : null,
-        runningStage,
-        // PRI-1264: name the driver so the event says WHO stopped driving.
-        lastCycleDriver: typeof record.lastCycleDriver === 'string' ? record.lastCycleDriver : 'unknown',
-      });
-      // PRI-1264: a stalled workspace worker is Owner-visible, not log-only —
-      // a one-shot notification on the transition plus the PERSISTENT tray
-      // projection (rebuildTrayMenu reads livenessStallNotified via
-      // buildStalledWorkersTrayView; review round 2026-11-18 closed the gap
-      // where the tray showed nothing after the toast disappeared).
-      notifyWorkspaceWorkerStalled(
-        workspace,
-        Number.isFinite(lastCompleted) && typeof record.lastCycleCompletedAt === 'string' ? record.lastCycleCompletedAt : null,
-      );
-      rebuildTrayMenu();
-    } else if (!stalled && livenessStallNotified.has(workspace)) {
-      livenessStallNotified.delete(workspace);
-      log('workspace_worker_stall_recovered', { workspace });
-      rebuildTrayMenu();
-    }
-  }
-}
-
-/**
- * PRI-1264: the Owner-facing stall notification. Registration said "ready"
- * while no cycle had completed for two poll windows — the Owner must SEE that
- * the workspace stopped making progress and how to restart the driver.
- */
-function notifyWorkspaceWorkerStalled(canonicalWorkspace: string, lastCycleCompletedAt: string | null): void {
-  if (!Notification.isSupported()) {
-    log('notification_unsupported', { event: 'workspace_worker_stalled', workspace: canonicalWorkspace });
-    return;
-  }
-  const notification = new Notification({
-    title: 'PD workspace worker stalled',
-    body: lastCycleCompletedAt === null
-      ? `${canonicalWorkspace}: no completed worker cycle on record. Start PD Companion so its worker driver resumes cycling, then verify with: pd codex worker --status`
-      : `${canonicalWorkspace}: last completed cycle ${lastCycleCompletedAt}. Worker cycles run only while the PD Companion driver is alive — restart PD Companion, then verify with: pd codex worker --status`,
-  });
-  notification.show();
-}
-
-/** Owner-facing surface for a permanently degraded workspace worker (PRI-715). */
-function notifyWorkspaceDegraded(canonicalWorkspace: string): void {
-  if (!Notification.isSupported()) {
-    log('notification_unsupported', { event: 'workspace_worker_degraded', workspace: canonicalWorkspace });
-    return;
-  }
-  const info = describeWorkspaceWorkerDegraded(canonicalWorkspace);
-  const notification = new Notification({
-    title: info.title,
-    body: info.body,
-    icon: nativeImage.createFromPath(iconPath()),
-  });
-  notification.on('click', () => showWindow());
-  notification.show();
-  log('notified_workspace_degraded', { workspace: canonicalWorkspace });
-}
-
-/**
- * Owner-facing surface for the persistent unreadable-manifest escalation
- * (2026-10-16): the notification itself is one-shot per episode because the
- * registry fires the persistent event exactly once; fields are untrusted log
- * payload and guarded before use (rc-1/rc-2).
- */
-function notifyWorkspaceSyncUnavailable(fields: Record<string, unknown>): void {
-  const reason = typeof fields.reason === 'string' && fields.reason.length > 0 ? fields.reason : 'unknown';
-  const consecutive = typeof fields.consecutiveUnavailableReads === 'number' ? fields.consecutiveUnavailableReads : 0;
-  if (!Notification.isSupported()) {
-    log('notification_unsupported', { event: 'workspace_worker_sync_unavailable_persistent', reason });
-    return;
-  }
-  const info = describeWorkspaceSyncUnavailable({ reason, consecutiveUnavailableReads: consecutive });
-  const notification = new Notification({
-    title: info.title,
-    body: info.body,
-    icon: nativeImage.createFromPath(iconPath()),
-  });
-  notification.on('click', () => showWindow());
-  notification.show();
-  log('notified_workspace_sync_unavailable', { reason, consecutiveUnavailableReads: consecutive });
-}
-
-function stopWorkspaceWorkerSupervision(): void {
-  if (workspaceWorkerTimer !== undefined) clearInterval(workspaceWorkerTimer);
-  workspaceWorkers?.stopAll();
-  if (workbuddyWorkspaceWorkerTimer !== undefined) clearInterval(workbuddyWorkspaceWorkerTimer);
-  workbuddyWorkspaceWorkers?.stopAll();
 }
 
 type RestartRetryReason = 'server_exit' | 'attached_server_lost' | 'version_change' | 'entry_wait';
@@ -815,8 +473,8 @@ function spawnCli(): void {
     child = spawn('node', args, {
       env: { ...process.env, PD_INVOCATION_SOURCE: 'companion' },
       stdio: ['ignore', 'pipe', 'pipe'],
-      // Same reason as the workers above: a console-less GUI parent must hide
-      // the console of every program it starts.
+      // Companion is a console-less GUI parent and must hide the console of
+      // every program it starts.
       windowsHide: true,
     });
   } catch (err) {
@@ -1206,40 +864,6 @@ async function updateCheckTick(): Promise<void> {
 function rebuildTrayMenu(): void {
   if (tray === undefined) return;
   const s = supervisor.getState();
-  // Pure reads of the existing degraded/unavailable state (PRI-715 +
-  // 2026-10-16) — querying must never reset degradation, restart a worker or
-  // touch the manifest.
-  const degradedView = buildDegradedWorkspacesTrayView([
-    ...(workspaceWorkers?.degradedWorkspaces() ?? []),
-    ...(workbuddyWorkspaceWorkers?.degradedWorkspaces() ?? []),
-  ]);
-  // PRI-1264 review round: stalled (process alive, cycle evidence stale)
-  // workspaces get their OWN persistent tray section — the one-shot
-  // notification disappears, and the state must not be disguised as
-  // restart-exhaustion (the recovery guidance differs). Deduped against the
-  // registry-degraded list: a workspace already shown there needs no second line.
-  const registryDegraded = new Set([
-    ...(workspaceWorkers?.degradedWorkspaces() ?? []),
-    ...(workbuddyWorkspaceWorkers?.degradedWorkspaces() ?? []),
-  ]);
-  const stalledView = buildStalledWorkersTrayView(
-    [...livenessStallNotified].filter((workspace) => !registryDegraded.has(workspace)),
-  );
-  const syncUnavailableView = buildSyncUnavailableTrayView(
-    [
-      workspaceWorkers?.syncUnavailable(),
-      workbuddyWorkspaceWorkers?.syncUnavailable(),
-    ].filter((episode): episode is NonNullable<typeof episode> => episode !== undefined),
-  );
-  const handoverIssues = [
-    ...(workspaceWorkers?.handoverIssues() ?? []),
-    ...(workbuddyWorkspaceWorkers?.handoverIssues() ?? []),
-  ];
-  const handoverLabels = handoverIssues.length === 0 ? [] : [
-    '⚠ 工作区更新交接未完成（现有任务未被强制中断）',
-    ...handoverIssues.map(issue => `・${issue.workspace}：${issue.reason}`),
-    '恢复：待当前任务结束后安全重启 Companion；先检查安装发布权威与 worker IPC。',
-  ];
   const supervisorLabel =
     s.kind === 'running'
       ? s.mode === 'managed' ? `控制台运行中（端口 ${s.port}）` : `控制台已连接·外部实例（端口 ${s.port}）`
@@ -1250,24 +874,11 @@ function rebuildTrayMenu(): void {
         : s.kind === 'starting' || s.kind === 'restarting'
           ? '控制台启动中…'
           : '控制台未运行';
-  const statusLabel = supervisorLabel + degradedView.statusSuffix + stalledView.statusSuffix + syncUnavailableView.statusSuffix + (handoverIssues.length > 0 ? '；⚠ 工作区更新交接未完成' : '');
-  tray.setToolTip(`PD Companion — ${statusLabel}`);
+  tray.setToolTip(`PD Companion — ${supervisorLabel}`);
   const autoStart = app.getLoginItemSettings().openAtLogin;
-  const degradedSection: MenuItemConstructorOptions[] = [
-    ...degradedView.menuLabels,
-    ...stalledView.menuLabels,
-    ...syncUnavailableView.menuLabels,
-    ...handoverLabels,
-  ].length > 0
-    ? [
-        { type: 'separator' },
-        ...[...degradedView.menuLabels, ...stalledView.menuLabels, ...syncUnavailableView.menuLabels, ...handoverLabels].map((label) => ({ label, enabled: false })),
-      ]
-    : [];
   const template: MenuItemConstructorOptions[] = [
     { label: '打开控制台', click: () => showWindow() },
     { label: '重启控制台服务', enabled: supervisor.canRestart(), click: () => restartFromTray() },
-    ...degradedSection,
     { type: 'separator' },
     {
       label: '开机自启',
@@ -1316,12 +927,6 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     createTray();
     startSupervision();
-    // Workspace workers need the installed pd-cli entry; when the runtime is
-    // missing the console supervisor already surfaces the degraded state, and
-    // spawning worker children would only produce a restart-error loop.
-    if (extDir !== undefined && entryFileVerdict(resolvePdCliEntry(extDir)).ok) {
-      startWorkspaceWorkerSupervision();
-    }
 
     log('companion_started', { version: app.getVersion() });
   });
@@ -1329,7 +934,6 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
     stopServer();
-    stopWorkspaceWorkerSupervision();
     if (pollTimer !== undefined) clearInterval(pollTimer);
     if (updateTimer !== undefined) clearInterval(updateTimer);
     saveState();

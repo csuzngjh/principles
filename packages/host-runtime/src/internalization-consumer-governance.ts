@@ -2,8 +2,8 @@
  * Internalization consumer governance wiring (host-neutral, PRI-624).
  *
  * Ported verbatim from openclaw-plugin `auto-consumer-governance-wiring.ts`
- * (P0-D/E/F 生产接线) so the OpenClaw auto-consumer and the Companion
- * workspace worker share ONE wiring implementation instead of copying it:
+ * (P0-D/E/F 生产接线) so the OpenClaw auto-consumer and the Service-Host-spawned
+ * workspace workers share ONE wiring implementation instead of copying it:
  *   - evaluator: isRepairLoopEnabled + seedArtificerRepairTask (bounded repair)
  *   - rollout_reviewer: dispatchActivation (approve_rollout → ActivationDispatcher;
  *     PRI-811 Phase B: 一律入 approvals.pending，Owner 批准后才激活) +

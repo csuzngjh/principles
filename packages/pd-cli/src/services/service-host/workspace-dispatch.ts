@@ -1,8 +1,6 @@
 /**
  * Shared per-workspace Worker Adapter dispatch — the ONE implementation of
- * the bounded adapter loop used by BOTH the Phase 2 shadow coordinator and
- * the Phase 3 managed run (PRI-1281). Extracted from shadow-run so the
- * deadline / abort / admission sequencing cannot drift between modes:
+ * the bounded adapter loop used by the managed Service Host run:
  *
  *  - one MONOTONIC per-workspace budget shared by serially bound adapters;
  *  - an abort check before EVERY dispatch (an interrupt stops the queue, not
@@ -18,7 +16,7 @@ import type {
   WorkspaceDescriptor,
  resolveActiveReleaseCliEntry} from './worker-adapter.js';
 import { sanitizeWorkerText } from './worker-adapter.js';
-import type { ActiveReleaseFacts, ShadowExecutionRecord } from './status/service-run-status.js';
+import type { ActiveReleaseFacts, ManagedExecutionRecord } from './status/service-run-status.js';
 import type { InstallIdentity } from './install-identity.js';
 import type { WorkerProcessOptions, WorkerProcessResult } from './worker-process.js';
 
@@ -41,10 +39,8 @@ export interface DispatchWorkspaceAdaptersArgs {
   /** Whole-workspace budget in ms (serial adapters share it). */
   readonly timeoutMs: number;
   /**
-   * Adapters by host kind. PARTIAL on purpose (PRI-1282 Phase 4): the shadow
-   * coordinator supplies only the codex|workbuddy pair while managed mode
-   * supplies all three — a dispatched kind without a registered adapter is a
-   * truthful `unsupported` entry, never a crash.
+   * Adapters by host kind. PARTIAL on purpose: a dispatched kind without a
+   * registered adapter is a truthful `unsupported` entry, never a crash.
    */
   readonly adapters: Readonly<Partial<Record<WorkerHostKind, WorkerAdapter>>>;
   readonly activeRelease: ActiveReleaseFacts;
@@ -115,7 +111,7 @@ export async function dispatchWorkspaceAdapters(args: DispatchWorkspaceAdaptersA
 }
 
 /** Map an adapter cycle outcome to the shared workspace-state vocabulary. */
-export function workspaceStateFor(outcome: AdapterCycleResult['cycleOutcome']): ShadowExecutionRecord['workspaceState'] {
+export function workspaceStateFor(outcome: AdapterCycleResult['cycleOutcome']): ManagedExecutionRecord['workspaceState'] {
   switch (outcome) {
     case 'cycle_completed':
     case 'cycle_completed_without_business_progress':
@@ -142,7 +138,7 @@ export function workspaceStateFor(outcome: AdapterCycleResult['cycleOutcome']): 
 export function carriedProgress(
   result: AdapterCycleResult,
   previous: string | undefined,
-): Pick<ShadowExecutionRecord, 'lastProgressAt' | 'lastProgressSource'> {
+): Pick<ManagedExecutionRecord, 'lastProgressAt' | 'lastProgressSource'> {
   if (result.businessProgress.taskStateChanged && result.lastProgressAt !== null) {
     return { lastProgressAt: result.lastProgressAt, lastProgressSource: 'task_state_change' };
   }

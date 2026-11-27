@@ -1,12 +1,17 @@
 /**
- * PRI-1278 Phase 5: fresh-install ownership provisioning.
+ * PRI-1278 consolidation: Service Host ownership provisioning.
  *
  * Contract under test (against REAL manifests in a temp PD home, fake CLI
  * replies for the two bounded probes):
- *  - ownership is handed over ONLY when the scheduler is verified enabled;
+ *  - ownership is handed over ONLY when the scheduler is verified enabled
+ *    (fail-closed, no companion fallback);
  *  - a Service-Host-only install owns the workspace and truthfully reports
  *    `waiting_for_host_binding` (no fabricated worker);
- *  - an existing ownership record is NEVER overwritten (upgrades use handover);
+ *  - ANY prior ownership state — including an explicit legacy_owned record —
+ *    is flippable residue: the legacy consumer implementation is deleted
+ *    repo-wide, so the provision CAS converges it in one atomic write;
+ *  - an upgrade run does NOT flip while the legacy-worker scan names the
+ *    workspace or cannot verify quiesce (the one-time switch evidence gate);
  *  - a failed readiness probe leaves ownership untouched;
  *  - the auditable provisioning record is written.
  */
@@ -16,7 +21,13 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChildProcess } from 'node:child_process';
 import { readWorkspaceBackgroundOwnership } from '@principles/install-layout';
-import { provisionFreshInstallWorkspace, readAllPendingProvisioning, readPendingProvisioningEvidence } from '../src/service-host-provisioning.js';
+import {
+  matchLegacyWorkerCommandLine,
+  provisionFreshInstallWorkspace,
+  readAllPendingProvisioning,
+  readPendingProvisioningEvidence,
+  scanRunningLegacyWorkerProcesses,
+} from '../src/service-host-provisioning.js';
 import type { ServiceHostSchedulerOutcome } from '../src/service-host-bridge.js';
 
 const dirs: string[] = [];
@@ -162,7 +173,7 @@ describe('provisionFreshInstallWorkspace', () => {
     expect(readPendingProvisioningEvidence(pdHome, path.join(pdHome, 'other-ws'))).toBeNull();
   });
 
-  it('refuses an upgrade workspace that already carries an ownership record', async () => {
+  it('flips an upgrade workspace whose explicit legacy_owned record is residue (new CAS semantics)', async () => {
     const { pdHome, workspaceDir } = tempPdHome();
     fakeInstalledCli(pdHome);
     const manifestPath = path.join(pdHome, 'install.json');
@@ -182,11 +193,53 @@ describe('provisionFreshInstallWorkspace', () => {
       host: 'none',
       scheduler: ENABLED_SCHEDULER,
       warn: () => undefined,
-      probes: { spawnFn: fakeSpawn({}, []) },
+      probes: {
+        spawnFn: fakeSpawn({
+          'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'r', managed: { executions: [] } }) },
+        }, []),
+      },
     });
-    expect(outcome.ownership).toBe('not_provisioned');
+    // The legacy consumer implementation is deleted repo-wide: the record
+    // cannot prove a live consumer, so provisioning converges it atomically
+    // (generation 2 → 3) instead of refusing.
+    expect(outcome.ownership).toBe('service_host_owned');
+    expect(outcome.ownershipBefore).toBe('legacy_owned');
+    expect(outcome.generation).toBe(3);
     expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
-      .toMatchObject({ status: 'legacy_owned', source: 'record', generation: 2 });
+      .toMatchObject({ status: 'service_host_owned', generation: 3 });
+  });
+
+  it('an idempotent re-install on an already-owned workspace writes nothing new', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    const manifestPath = seedManifest(pdHome, workspaceDir);
+    const spawnFn = fakeSpawn({
+      'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'r', managed: { executions: [] } }) },
+    }, []);
+    const first = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'none',
+      scheduler: ENABLED_SCHEDULER,
+      warn: () => undefined,
+      probes: { spawnFn },
+    });
+    expect(first.ownership).toBe('service_host_owned');
+    expect(first.generation).toBe(1);
+
+    const second = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'none',
+      scheduler: ENABLED_SCHEDULER,
+      warn: () => undefined,
+      probes: { spawnFn },
+    });
+    expect(second.ownership).toBe('already_owned');
+    expect(second.generation).toBe(1);
+    expect(second.pendingProvisioning).not.toBe(true);
+    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
+      .toMatchObject({ status: 'service_host_owned', generation: 1 });
   });
 
   it('a failed readiness probe leaves ownership untouched (no consumer, no silent flip)', async () => {

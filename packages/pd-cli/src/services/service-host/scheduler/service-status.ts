@@ -78,7 +78,7 @@ export interface ServiceHostStatusDocument {
   readonly lastRun: {
     readonly runId: string;
     readonly outcome: ServiceRunStatus['outcome'];
-    readonly mode: 'dry-run' | 'shadow' | 'managed' | 'unknown';
+    readonly mode: 'dry-run' | 'managed' | 'unknown';
     readonly triggerSource: ServiceRunStatus['triggerSource'];
     /** 'scheduler'/'manual' is the run's SELF-DECLARED flag (task §11 review) —
      *  written by the run-once process itself, not verified OS evidence. */
@@ -121,10 +121,9 @@ export function toServiceHostStatusWorkspace(entry: WorkspaceDiscoveryEntry): Se
   };
 }
 
-function lastRunModeOf(status: ServiceRunStatus): 'dry-run' | 'shadow' | 'managed' | 'unknown' {
+function lastRunModeOf(status: ServiceRunStatus): 'dry-run' | 'managed' | 'unknown' {
   if (status.dryRun) return 'dry-run';
   if (status.managed !== undefined) return 'managed';
-  if (status.shadow !== undefined) return 'shadow';
   return 'unknown';
 }
 

@@ -2817,7 +2817,8 @@ export interface ReconcileGovernanceContinuationResult {
  *    while conversation-ingestion consent is enabled;
  *  - Case D: promotion started → pending tail → retry completion once; stale
  *    tails are reported (never silently dropped).
- * Not a background worker — Slice C's Companion worker and the CLI call this.
+ * Not a background worker — the Service-Host-spawned workspace workers and
+ * the CLI call this.
  */
 export async function reconcileGovernanceContinuation(input: ReconcileGovernanceContinuationInput): Promise<ReconcileGovernanceContinuationResult> {
   const workspaceDir = path.resolve(input.workspaceDir);

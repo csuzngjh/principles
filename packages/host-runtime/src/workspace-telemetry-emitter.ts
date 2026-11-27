@@ -53,7 +53,7 @@ import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime
  * 事件，含完整 TelemetryEvent）。同步 append：事件量小（allowlist 限流），
  * 换取 crash 前落盘的 durable 语义。写失败绝不影响 runner —— 降级为
  * `onPersistFailure` 回调（宿主注入的结构化告警口；OpenClaw 是
- * SystemLogger，Companion worker 是自己的事件口）。
+ * SystemLogger，Service-Host 派生的 workspace worker 是自己的事件口）。
  */
 const CRITICAL_EVENT_ALLOWLIST: ReadonlySet<string> = new Set([
   'evaluator_adversarial_replay_skipped',

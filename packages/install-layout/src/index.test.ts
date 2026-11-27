@@ -480,7 +480,7 @@ describe('per-Workspace backgroundExecutions ownership records (SPEC-PD-SERVICE-
     updatedAt: '2026-11-20T00:00:00.000Z',
   };
 
-  it('absent map parses (legacy default per Workspace); multiple records round-trip', () => {
+  it('absent map parses as not-yet-provisioned; multiple records round-trip', () => {
     expect(parseInstallManifest(base).manifest?.backgroundExecutions).toBeUndefined();
     const parsed = parseInstallManifest({
       ...base,
@@ -503,11 +503,11 @@ describe('per-Workspace backgroundExecutions ownership records (SPEC-PD-SERVICE-
     const combination = /illegal effectiveOwner\/previousOwner\/targetOwner\/operationId\/generation combination/;
     for (const bad of [
       {...shOwned, effectiveOwner: 'legacy'},                       // SERVICE_HOST_OWNED with legacy effectiveOwner
-      {...handover, effectiveOwner: 'service_host'},               // preparing: old consumer must still own
-      {...handover, previousOwner: null},                          // preparing must name the source
-      {...handover, targetOwner: 'legacy'},                        // preparing must name the SH target
-      {...handover, operationId: null},                            // in-flight transition needs an operation identity
-      {...handover, generation: 0},                                // a transition implies >=1 accepted transition
+      {...handover, effectiveOwner: 'service_host'},               // historical preparing shape requires legacy effectiveOwner
+      {...handover, previousOwner: null},                          // historical preparing shape must name the source
+      {...handover, targetOwner: 'legacy'},                        // historical preparing shape must name the SH target
+      {...handover, operationId: null},                            // historical in-flight shape needs an operation identity
+      {...handover, generation: 0},                                // a historical transition implies >=1 accepted write
       {...shOwned, generation: 0},
       {state: 'rollback_pending', effectiveOwner: 'service_host', generation: 4,
         operationId: 'op-9', previousOwner: 'service_host', targetOwner: 'service_host',

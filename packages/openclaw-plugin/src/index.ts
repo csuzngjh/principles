@@ -50,7 +50,7 @@ import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js
 import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
 import { CorrectionObserverService } from './service/correction-observer-service.js';
-import { InternalizationAutoConsumerService, persistOpenClawToolDeclaration } from './service/internalization-auto-consumer-service.js';
+import { persistOpenClawToolDeclaration } from './core/openclaw-tool-declaration.js';
 import { TrajectoryService } from './service/trajectory-service.js';
 import { PDTaskService } from './core/pd-task-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
@@ -123,30 +123,6 @@ export function shouldStartCorrectionObserver(
     nextAction: 'set features.correction_observer.enabled=true in .pd/config.yaml to enable',
     featureFlag: 'correction_observer',
     boundedContext: 'correction_observer_service',
-    flagSource: flag.source,
-  });
-  return { shouldStart: false, flagSource: flag.source, disabledInfo };
-}
-
-export interface InternalizationAutoConsumerGateResult {
-  shouldStart: boolean;
-  flagSource: string;
-  disabledInfo: string | null;
-}
-
-export function shouldStartInternalizationAutoConsumer(
-  workspaceDir: string,
-  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
-): InternalizationAutoConsumerGateResult {
-  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'internalization_auto_consumer', logger);
-  if (flag.enabled) {
-    return { shouldStart: true, flagSource: flag.source, disabledInfo: null };
-  }
-  const disabledInfo = JSON.stringify({
-    reason: 'internalization_auto_consumer_disabled',
-    nextAction: `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`,
-    featureFlag: 'internalization_auto_consumer',
-    boundedContext: 'internalization_auto_consumer',
     flagSource: flag.source,
   });
   return { shouldStart: false, flagSource: flag.source, disabledInfo };
@@ -601,27 +577,17 @@ const plugin = {
               SystemLogger.log(workspaceDir, 'CORRECTION_OBSERVER_DISABLED', corrGate.disabledInfo ?? '');
             }
 
-            // ── Start InternalizationAutoConsumer for THIS workspace ──
-            // PRI-381: Bounded auto-consumer for dreamer ready tasks.
-            // Default ON for dogfood; kill switch via features.internalization_auto_consumer.enabled=false.
-            // PRI-741 (review round): the tool declaration persists UNCONDITIONALLY
-            // (before the consumer gate) — it is a host fact, and a flag-off
-            // workspace must not keep a stale declaration that defeats the
+            // ── Persist the OpenClaw host tool declaration for THIS workspace ──
+            // PRI-1278 (service-host-only consolidation): the Gateway's
+            // in-process internalization consumer timer chain is DELETED —
+            // the PD Service Host is the only background runtime and drives
+            // bounded cycles through `pd openclaw worker --once`. What
+            // survives here is the host FACT: the tool declaration persists
+            // UNCONDITIONALLY on gateway start, so host-neutral consumers
+            // (the worker, pd-cli activation / run-once) load the same
+            // registry and a stale declaration can never defeat the
             // activation gate's hasHostTool check.
             persistOpenClawToolDeclaration(workspaceDir, api.logger);
-            const autoConsGate = shouldStartInternalizationAutoConsumer(workspaceDir, api.logger);
-            if (autoConsGate.shouldStart) {
-              InternalizationAutoConsumerService.start({
-                config: api.config,
-                workspaceDir,
-                stateDir: path.join(workspaceDir, '.state'),
-                logger: api.logger,
-              });
-              api.logger.info(`[PD] InternalizationAutoConsumer started for workspace: ${workspaceDir} (flag source: ${autoConsGate.flagSource})`);
-            } else {
-              api.logger.info(`[PD] InternalizationAutoConsumer NOT started for workspace: ${workspaceDir}. ${autoConsGate.disabledInfo}`);
-              SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_DISABLED', autoConsGate.disabledInfo ?? '');
-            }
 
             // ── Schedule anonymous product telemetry export (fire-and-forget) ──
             // PRI-595~603: opt-in (default OFF), one bounded attempt per
@@ -963,6 +929,13 @@ const plugin = {
     // Legacy EvolutionWorker service registration removed (PRI-294 started it
     // via the before_prompt_build hook gate; the whole worker chain retired in
     // PRI-737).
+    // PRI-1278 (service-host-only consolidation): the internalization
+    // auto-consumer service is DELETED, not gated — the Gateway never consumes
+    // internalization tasks. The PD Service Host is the only background
+    // runtime; it drives bounded cycles through `pd openclaw worker --once`
+    // (src/openclaw-worker.ts), which refuses to consume unless the install
+    // manifest says service_host_owned. This adapter keeps evidence-ingestion
+    // hooks, the host tool declaration and the non-consuming services below.
     try {
       const guardedCorrectionObserver = guardService('service:correction-observer', CorrectionObserverService, api.logger);
       if (guardedCorrectionObserver) api.registerService(guardedCorrectionObserver);
@@ -970,8 +943,6 @@ const plugin = {
       if (guardedTrajectory) api.registerService(guardedTrajectory);
       const guardedPdTask = guardService('service:pd-task', PDTaskService, api.logger);
       if (guardedPdTask) api.registerService(guardedPdTask);
-      const guardedAutoConsumer = guardService('service:internalization-auto-consumer', InternalizationAutoConsumerService, api.logger);
-      if (guardedAutoConsumer) api.registerService(guardedAutoConsumer);
     } catch (err) {
       api.logger.error(`[PD] Failed to register services: ${String(err)}`);
     }
