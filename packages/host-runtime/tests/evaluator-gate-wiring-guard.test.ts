@@ -8,11 +8,12 @@
  * 48371236 事故以「装配回退」形式复发）。
  *
  * PRI-624 Slice C 把 EvaluatorRunner 的生产构造点从 openclaw-plugin 的
- * auto-consumer service 搬进了 host-runtime 的
- * `internalization-consumer-cycle.ts`（OpenClaw shell 与 Codex worker 都
- * 调用它）——因此 guard 迁移到新的 canonical 构造点，并额外锁定：
+ * auto-consumer service 搬进了 host-runtime（OpenClaw shell 与 Codex worker
+ * 都调用它）——因此 guard 迁移到新的 canonical 构造点，并额外锁定：
  * 两个宿主侧都不得重新出现自己的 EvaluatorRunner 构造（第二套 gate
- * authority 是禁止项）。
+ * authority 是禁止项）。PRI-1301: canonical 构造点从 consumer cycle 纯移动
+ * 独立为 internalization-task-executor.ts — 本 guard 的 executor 侧断言
+ * 随之指向执行器模块 (cycle 输入装配断言仍守 cycle)。
  *
  * 采用源码特征化断言（本仓库既有先例：UI 逻辑无法挂载时以源码字符串
  * 断言锁定），因为装配函数需要完整 service 环境（runtime config /
@@ -23,6 +24,10 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const CYCLE_SRC = fileURLToPath(new URL('../src/internalization-consumer-cycle.ts', import.meta.url));
+// PRI-1301: 六种 Peer Runner 的构造本体 (共享单步执行器) 已独立成模块 —
+// executor 侧断言 (构造/gateDeps 透传/治理注入) 读本模块; cycle 侧断言
+// (输入装配/emitter 选择) 仍读 consumer cycle。
+const EXECUTOR_SRC = fileURLToPath(new URL('../src/internalization-task-executor.ts', import.meta.url));
 const RUN_ONCE_SRC = fileURLToPath(new URL('../../pd-cli/src/commands/runtime-internalization-run-once.ts', import.meta.url));
 const PIPELINE_RUNNER_SRC = fileURLToPath(new URL('../../pd-cli/src/services/rulehost-pipeline-runner.ts', import.meta.url));
 const OPENCLAW_SERVICE_SRC = fileURLToPath(new URL('../../openclaw-plugin/src/service/internalization-auto-consumer-service.ts', import.meta.url));
@@ -32,9 +37,9 @@ function readSrc(p: string): string {
   return fs.readFileSync(p, 'utf8');
 }
 
-/** 执行器的 evaluator case 切片 (PRI-1293 Phase 2B 后 Runner 构造在此, 文件首个 `case 'evaluator':`)。 */
+/** 执行器的 evaluator case 切片 (PRI-1301 后 Runner 构造在独立 executor 模块, 文件内唯一 `case 'evaluator':`)。 */
 function executorEvaluatorCase(): string {
-  const source = readSrc(CYCLE_SRC);
+  const source = readSrc(EXECUTOR_SRC);
   const start = source.indexOf("case 'evaluator':");
   const end = source.indexOf("case '", start + "case 'evaluator':".length);
   if (start < 0 || end < 0) return '';
@@ -82,13 +87,14 @@ describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction 
     expect(depsBlock).not.toContain('gateDeps:');
   });
 
-  it('Guard D: 守卫定位的是 shared host-runtime cycle（canonical 构造点），不是 OpenClaw lifecycle shell', () => {
+  it('Guard D: 守卫定位的是 shared host-runtime 执行器模块（canonical 构造点），不是 OpenClaw lifecycle shell', () => {
     // OpenClaw service 已是 thin shell —— 它不得再包含 EvaluatorRunner 构造。
     const shell = readSrc(OPENCLAW_SERVICE_SRC);
     expect(shell).not.toContain('new EvaluatorRunner');
-    // 守卫对象本身必须仍是 shared cycle 源文件。
-    expect(CYCLE_SRC).toContain('internalization-consumer-cycle.ts');
+    // PRI-1301: 守卫对象必须是独立 executor 模块 (canonical 构造点); cycle
+    // 只做输入装配, 不得重新出现 Runner 构造。
     expect(executorEvaluatorCase()).toContain('new EvaluatorRunner');
+    expect(readSrc(CYCLE_SRC)).not.toContain('new EvaluatorRunner');
   });
 
   it('AC-2: Codex worker 也不得另建 EvaluatorRunner（gate wiring 由 shared cycle 统一提供）', () => {
@@ -156,8 +162,8 @@ describe('PRI-661 pd-cli evaluator entries (host-neutral runtime context)', () =
 
 describe('PRI-708 rollout revision routing wiring guard', () => {
   /**
-   * cycle 的 rollout 输入装配切片：PRI-1293 Phase 2B 后文件内有两个
-   * `case 'rollout_reviewer':` (执行器在前, cycle dispatch 在后) — 取后者。
+   * cycle 的 rollout 输入装配切片：PRI-1301 后执行器迁出, cycle 内只剩
+   * dispatch 装配一处 `case 'rollout_reviewer':` — lastIndexOf 锚定它。
    */
   function cycleRolloutCase(): string {
     const source = readSrc(CYCLE_SRC);
@@ -182,8 +188,8 @@ describe('PRI-708 rollout revision routing wiring guard', () => {
   it('Guard R1: shared cycle rollout 输入注入 canonical createRolloutGovernanceDeps（生产构造点）', () => {
     const slice = cycleRolloutCase();
     expect(slice).toContain('governanceDeps: createRolloutGovernanceDeps(workspaceDir, orchestrator');
-    // 构造本体在共享执行器 (同一文件内)。
-    expect(readSrc(CYCLE_SRC)).toContain('new RolloutReviewerRunner');
+    // 构造本体在共享执行器模块 (PRI-1301 独立模块)。
+    expect(readSrc(EXECUTOR_SRC)).toContain('new RolloutReviewerRunner');
   });
 
   it('Guard R2: run-once rollout 分支从同一 canonical 工厂接线治理 deps，不得内联第二套 reopen', () => {
@@ -197,6 +203,6 @@ describe('PRI-708 rollout revision routing wiring guard', () => {
     // 出现直接调用 = 第二套实现（漂移复发信号）。
     expect(slice).not.toContain('reopenTaskForRevision(');
     // 执行器把工厂产物的 reopenRevisionTarget 注入 RolloutReviewerRunner。
-    expect(readSrc(CYCLE_SRC)).toContain('reopenRevisionTarget: input.governanceDeps.reopenRevisionTarget');
+    expect(readSrc(EXECUTOR_SRC)).toContain('reopenRevisionTarget: input.governanceDeps.reopenRevisionTarget');
   });
 });

@@ -752,6 +752,68 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     }
   });
 
+  // ── PRI-1301 固化: Owner revise_once 路由 (rollout 任务) 端到端 — 目标解析
+  // 经 owner-resolution-service.resolveReviseTarget → 共享
+  // resolveRolloutRevisionTarget; rollout→evaluator→artificer 链 +
+  // code_tool_hook channel 必须 reopen artificer (与自动 needs_revision 路由
+  // 同一目标, 两路由统一同源的行为证据)。去重收编不得改变该行为。
+  // 注意: setupRolloutCandidateUnresolved 共用 fixture 的 artificer 携带
+  // repairIteration=0 (hydration 校验域 [1,2] 之外 — 既有 accept/reject 测试
+  // 从不 hydrate 它故无影响); revise_once 会真实 reopen 目标, 必须使用
+  // hydration 有效的 repairIteration=1 fixture, 否则 reopen 按设计以
+  // invalid_task_metadata 拒绝 ( fail-closed, 与路由正确性无关 )。 ──
+  it('N-3 e2e: revise_once on candidate-unresolved rollout reopens the artificer target (code_tool_hook chain)', async () => {
+    const artifacts = makeRolloutArtifactStore();
+    const task = rolloutCandidateUnresolvedTask();
+    const evaluator = evaluatorNhrTask({ status: 'succeeded', meta: baseMeta({
+      channel: 'code_tool_hook',
+      runnerDecision: 'approved',
+      humanReviewContext: undefined,
+      dependencyTaskIds: [ARTIFER_ID],
+    }) });
+    const sm = makeInMemoryStateManager([task, evaluator, artificerTaskWithPayload(1)], artifacts);
+    const factStore: OwnerDecisionFactStore = {
+      getTask: (id) => sm.getTask(id),
+      listArtifactsBySourceTask: async (id) => (await artifacts.listBySourceTaskId(id)).map((a) => ({
+        artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
+      })),
+    };
+    const facts = await collectOwnerDecisionFacts(factStore, ROLLOUT_ID);
+    const cap = deriveOwnerDecisionCapability(facts!);
+    expect(cap.eligible).toBe(true);
+    const hash = facts!.decisionArtifact!.contentHash;
+    const outcome = await applyOwnerResolution(
+      { stateManager: sm as never, now: () => '2026-09-05T10:00:00.000Z' },
+      {
+        taskId: ROLLOUT_ID,
+        request: {
+          action: 'revise_once',
+          reviewKey: cap.reviewKey!,
+          expectedRevisionEpoch: 0,
+          expectedSourceRunId: RUN_ID,
+          expectedSourceArtifactId: ARTIFACT_ID,
+          expectedSourceArtifactHash: hash,
+        },
+        identity,
+      },
+    );
+    expect(outcome.status).toBe('resolved');
+    if (outcome.status === 'resolved') {
+      expect(outcome.applied).toBe(true);
+      expect(outcome.targetTaskId).toBe(ARTIFER_ID);
+    }
+    // artificer 被 reopen: revisionCount+1、owner-res causeId、状态回 pending
+    const artPi = hydratePITaskRecord((await sm.getTask(ARTIFER_ID))!);
+    expect(artPi?.revisionCount).toBe(1);
+    expect(artPi?.revisionCauseId).toMatch(/^owner-res-ores_/);
+    expect((await sm.getTask(ARTIFER_ID))?.status).toBe('pending');
+    // rollout 任务留 NHR,resolution applied
+    const rolloutPi = hydratePITaskRecord((await sm.getTask(ROLLOUT_ID))!);
+    expect(rolloutPi?.status).toBe('needs_human_review');
+    expect(rolloutPi?.ownerResolutions?.[0]?.status).toBe('applied');
+    expect(rolloutPi?.ownerResolutions?.[0]?.targetTaskId).toBe(ARTIFER_ID);
+  });
+
   it('same reviewKey/action with changed lineage evidence digest is not an idempotent replay', async () => {
     const { sm, deps, req } = await setup();
     const decision = await sm.piArtifactStore.getArtifactById(ARTIFACT_ID);
