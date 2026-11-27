@@ -10,6 +10,7 @@ import type { TaskRecord } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { PeerRunnerResult } from './peer-runner-types.js';
+import type { RunRecord } from '../runtime-protocol.js';
 
 export type SucceededRunnerRecovery<TOutput> =
   | { readonly outcome: 'recovered'; readonly result: PeerRunnerResult<TOutput> }
@@ -22,6 +23,19 @@ export interface RecoverSucceededResultInput<TOutput> {
   readonly stateManager: Pick<RuntimeStateManager, 'getRunsByTask'>;
   readonly artifactStore: Pick<PIArtifactStore, 'getArtifactById' | 'listBySourceTaskId'>;
   readonly validateOutput: (output: unknown, taskId: string) => Promise<{ valid: boolean; errors: readonly string[] }>;
+  /**
+   * Runner-specific validation for an authoritative output run that is not
+   * itself the clean terminal row. Evaluator completion-intent recovery can
+   * legitimately persist output on run N and write terminal success on a later
+   * resume run N+1 while resultRef still selects run N. This hook must verify
+   * that separate completion evidence; returning null means valid. When absent,
+   * an incomplete authoritative run is always invalid.
+   */
+  readonly validateIncompleteAuthoritativeRun?: (input: {
+    readonly task: TaskRecord;
+    readonly authoritativeRun: RunRecord;
+    readonly runs: readonly RunRecord[];
+  }) => string | null;
   /** Additional persisted-evidence consistency rule. Return null when valid. */
   readonly verifyRecoveredEvidence?: (input: {
     readonly task: TaskRecord;
@@ -42,6 +56,13 @@ function parseJsonObject(raw: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function terminalRunError(run: RunRecord): string | null {
+  if (run.executionStatus !== 'succeeded') return `authoritative_run_not_succeeded:${run.executionStatus}`;
+  if (run.reason !== 'task_completed') return `authoritative_run_not_terminal:${run.reason ?? 'missing_reason'}`;
+  if (run.errorCategory !== undefined) return `authoritative_run_has_error:${run.errorCategory}`;
+  return null;
 }
 
 /**
@@ -73,9 +94,17 @@ export async function recoverSucceededPeerRunnerResult<TOutput>(
   const run = runs.find((candidate) => candidate.runId === runId);
   if (!run) return invalid(`authoritative_run_missing:${runId}`);
   if (run.taskId !== task.taskId) return invalid('authoritative_run_task_mismatch');
-  if (run.executionStatus !== 'succeeded') return invalid(`authoritative_run_not_succeeded:${run.executionStatus}`);
-  if (run.reason !== 'task_completed') return invalid(`authoritative_run_not_terminal:${run.reason ?? 'missing_reason'}`);
-  if (run.errorCategory !== undefined) return invalid(`authoritative_run_has_error:${run.errorCategory}`);
+  const authoritativeTerminalError = terminalRunError(run);
+  if (authoritativeTerminalError !== null) {
+    const completionEvidenceError = input.validateIncompleteAuthoritativeRun === undefined
+      ? authoritativeTerminalError
+      : input.validateIncompleteAuthoritativeRun({
+        task,
+        authoritativeRun: run,
+        runs,
+      });
+    if (completionEvidenceError !== null) return invalid(completionEvidenceError);
+  }
   if (typeof run.outputPayload !== 'string' || run.outputPayload.length === 0) {
     return invalid('successor_result_unavailable:output_payload_missing');
   }

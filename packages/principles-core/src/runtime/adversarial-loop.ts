@@ -31,6 +31,7 @@ import type { createPITaskDiagnosticJson } from './internalization/pitask-metada
 import { hydratePITaskRecord } from './internalization/pitask-metadata.js';
 import { createLogicalSuccessorTask } from './internalization/successor-create.js';
 import type { TaskRecord } from './task-status.js';
+import type { PITaskRecord } from './internalization/peer-runner-contracts.js';
 import type { PeerRunnerResult } from './runner/peer-runner-types.js';
 import type { SucceededRunnerRecovery } from './runner/succeeded-result-recovery.js';
 import type { CommitNextTaskResult } from './internalization/internalization-orchestrator.js';
@@ -54,11 +55,12 @@ export interface AdversarialLoopInput {
   /** Channel for created tasks (default 'prompt'). */
   readonly channel?: 'prompt' | 'code_tool_hook' | 'defer_archive';
   /**
-   * Formal transition authority for repair artificer completion. Production
-   * hosts must inject InternalizationOrchestrator.commitNextTaskProposal.
-   * The loop deliberately has no fallback that creates a second evaluator.
+   * Formal completion-transition authority. Production hosts must inject
+   * InternalizationOrchestrator.commitNextTaskProposal. Repair completion and
+   * upstream-revision cascades both go through this single authority; the loop
+   * deliberately has no fallback that creates a parallel evaluator chain.
    */
-  readonly commitRepairTransition?: (repairArtificerTaskId: string) => Promise<CommitNextTaskResult>;
+  readonly commitTaskTransition?: (taskId: string) => Promise<CommitNextTaskResult>;
 }
 
 export interface AdversarialLoopResult {
@@ -81,7 +83,7 @@ export interface AdversarialLoopResult {
 type LoopSuccessorPlan =
   | { readonly action: 'execute'; readonly task: TaskRecord; readonly creationOutcome: 'created' | 'existing' }
   | { readonly action: 'recover'; readonly task: TaskRecord; readonly creationOutcome: 'existing' }
-  | { readonly action: 'blocked'; readonly reason: string };
+  | { readonly action: 'blocked'; readonly reason: string; readonly task?: TaskRecord };
 
 interface RecoverableRunner<TOutput> {
   run(taskId: string): Promise<PeerRunnerResult<TOutput>>;
@@ -241,11 +243,11 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
         // Formal repair completion has exactly one transition authority. A
         // synchronous loop may drive the reopened evaluator, but must never
         // materialize a parallel evaluator successor chain.
-        if (!input.commitRepairTransition) {
+        if (!input.commitTaskTransition) {
           return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
             'repair_transition_authority_missing');
         }
-        const commit = await input.commitRepairTransition(resolvedArtificerTaskId);
+        const commit = await input.commitTaskTransition(resolvedArtificerTaskId);
         if (commit.decision !== 'revision_reopened' && commit.decision !== 'revision_reopen_noop') {
           const reasonValue: unknown = Reflect.get(commit, 'reason');
           const detail = typeof reasonValue === 'string' && reasonValue !== '' ? `:${reasonValue}` : '';
@@ -275,6 +277,19 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
           return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
             'repair_transition_not_materialized_for_current_repair');
         }
+        const repairRound = await enforceEvaluatorRevisionRound({
+          stateManager: input.stateManager,
+          evaluatorPi,
+          currentRound: round,
+          maxRounds,
+          willExecute: evaluatorTask.status === 'pending' || evaluatorTask.status === 'retry_wait',
+        });
+        if (repairRound.kind === 'invalid') {
+          return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            repairRound.reason);
+        }
+        const { round: enforcedRepairRound } = repairRound;
+        round = enforcedRepairRound;
         lastEvaluatorTaskId = resolvedEvaluatorTaskId;
         const planned = await recoverOrRunTask({
           runner: input.evaluatorRunner,
@@ -292,8 +307,49 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
         // Ordinary adversarial feedback rounds still use a same-round evaluator
         // successor. The formal repair branch above is the only exception.
         const evaluatorTaskId = `${correlation}-evaluator-r${round}-${Date.now().toString(36)}`;
-        const evaluatorPlan = await createEvaluatorTask(input.stateManager, evaluatorTaskId, resolvedArtificerTaskId, channel);
-        resolvedEvaluatorTaskId = evaluatorPlan.action === 'blocked' ? evaluatorTaskId : evaluatorPlan.task.taskId;
+        let evaluatorPlan = await createEvaluatorTask(input.stateManager, evaluatorTaskId, resolvedArtificerTaskId, channel);
+        // A terminal evaluator may belong to an older upstream artifact epoch.
+        // When the ordinary artificer itself was reopened and completed a new
+        // revision, the formal completion transition owns the cascade reopen;
+        // recovery before that transition would reuse a stale verdict.
+        const cascadeCandidate = evaluatorPlan.action === 'recover'
+          || (evaluatorPlan.action === 'blocked' && evaluatorPlan.task?.status === 'needs_human_review');
+        if (cascadeCandidate && (artificerPi.revisionCount ?? 0) > 0) {
+          const successorBeforeCascade = evaluatorPlan.task;
+          if (!successorBeforeCascade) {
+            return rejected(round, evaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+              'evaluator_cascade_successor_snapshot_missing');
+          }
+          evaluatorPlan = await applyFormalSuccessorCascade({
+            stateManager: input.stateManager,
+            commitTaskTransition: input.commitTaskTransition,
+            sourceTaskId: resolvedArtificerTaskId,
+            successorTask: successorBeforeCascade,
+          });
+        }
+        if (evaluatorPlan.action === 'blocked') {
+          return rejected(round, evaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            evaluatorPlan.reason);
+        }
+        resolvedEvaluatorTaskId = evaluatorPlan.task.taskId;
+        const evaluatorPi = hydratePITaskRecord(evaluatorPlan.task);
+        if (!evaluatorPi) {
+          return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            'evaluator_successor_metadata_malformed');
+        }
+        const revisionRound = await enforceEvaluatorRevisionRound({
+          stateManager: input.stateManager,
+          evaluatorPi,
+          currentRound: round,
+          maxRounds,
+          willExecute: evaluatorPlan.action === 'execute',
+        });
+        if (revisionRound.kind === 'invalid') {
+          return rejected(round, resolvedEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            revisionRound.reason);
+        }
+        const { round: enforcedRevisionRound } = revisionRound;
+        round = enforcedRevisionRound;
         lastEvaluatorTaskId = resolvedEvaluatorTaskId;
         const planned = await runPlannedSuccessor({
           plan: evaluatorPlan,
@@ -416,6 +472,134 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+function planExistingSuccessorTask(
+  task: TaskRecord,
+  taskKind: 'artificer' | 'evaluator',
+): LoopSuccessorPlan {
+  const { status } = task;
+  if (status === 'succeeded') return { action: 'recover', task, creationOutcome: 'existing' };
+  if (status === 'pending' || status === 'retry_wait') {
+    return { action: 'execute', task, creationOutcome: 'existing' };
+  }
+  if (status === 'leased') return { action: 'blocked', reason: `${taskKind}_successor_leased_active`, task };
+  if (status === 'failed') return { action: 'blocked', reason: `${taskKind}_successor_failed_terminal`, task };
+  if (status === 'needs_human_review') return { action: 'blocked', reason: `${taskKind}_successor_needs_human_review`, task };
+  return { action: 'blocked', reason: `${taskKind}_successor_unknown_status:${status}`, task };
+}
+
+function commitTransitionDetail(commit: CommitNextTaskResult): string {
+  const reasonValue: unknown = Reflect.get(commit, 'reason');
+  if (typeof reasonValue === 'string' && reasonValue !== '') return `:${reasonValue}`;
+  const detailValue: unknown = Reflect.get(commit, 'detail');
+  return typeof detailValue === 'string' && detailValue !== '' ? `:${detailValue}` : '';
+}
+
+type EvaluatorRevisionRoundResolution =
+  | { readonly kind: 'plain' }
+  | { readonly kind: 'revision'; readonly round: number }
+  | { readonly kind: 'invalid'; readonly reason: string };
+
+/**
+ * Resolve the logical adversarial round of a reopened evaluator from durable
+ * repair lineage. The reopen path intentionally preserves the original
+ * evaluator task id and parent, so positional lookup alone cannot tell a
+ * first evaluation from a repair revision resumption.
+ */
+async function resolveEvaluatorRevisionRound(
+  stateManager: RuntimeStateManager,
+  evaluatorPi: PITaskRecord,
+): Promise<EvaluatorRevisionRoundResolution> {
+  let artificerDependencyCount = 0;
+  let malformedArtificerMetadata = false;
+  let repairPayload: PITaskRecord['repairPayload'] | undefined;
+  for (const dependencyTaskId of evaluatorPi.dependencyTaskIds) {
+    const dependency = await stateManager.getTask(dependencyTaskId);
+    if (!dependency || dependency.taskKind !== 'artificer') continue;
+    artificerDependencyCount += 1;
+    const dependencyPi = hydratePITaskRecord(dependency);
+    if (!dependencyPi) malformedArtificerMetadata = true;
+    if (dependencyPi) {
+      const { repairPayload: dependencyRepairPayload } = dependencyPi;
+      if (dependencyRepairPayload) repairPayload = dependencyRepairPayload;
+    }
+  }
+  if (malformedArtificerMetadata) {
+    return { kind: 'invalid', reason: 'evaluator_revision_round_artificer_metadata_malformed' };
+  }
+  if (artificerDependencyCount === 0) return { kind: 'plain' };
+  if (artificerDependencyCount !== 1) {
+    return { kind: 'invalid', reason: 'evaluator_revision_round_ambiguous_artificer_dependencies' };
+  }
+  if (!repairPayload) return { kind: 'plain' };
+  if (repairPayload.sourceEvaluatorTaskId !== evaluatorPi.taskId) {
+    return { kind: 'invalid', reason: 'evaluator_revision_round_repair_source_mismatch' };
+  }
+  return { kind: 'revision', round: repairPayload.repairIteration + 1 };
+}
+
+async function enforceEvaluatorRevisionRound(input: {
+  readonly stateManager: RuntimeStateManager;
+  readonly evaluatorPi: PITaskRecord;
+  readonly currentRound: number;
+  readonly maxRounds: number;
+  readonly willExecute: boolean;
+}): Promise<{ readonly kind: 'ok'; readonly round: number } | { readonly kind: 'invalid'; readonly reason: string }> {
+  const revisionRound = await resolveEvaluatorRevisionRound(input.stateManager, input.evaluatorPi);
+  if (revisionRound.kind === 'invalid') return revisionRound;
+  if (revisionRound.kind === 'plain') return { kind: 'ok', round: input.currentRound };
+  if (input.willExecute && revisionRound.round > input.maxRounds) {
+    return {
+      kind: 'invalid',
+      reason: `max_rounds_exhausted_before_revision_round_${revisionRound.round}`,
+    };
+  }
+  // The reopened evaluator keeps its original task id and parent. Its durable
+  // repair dependency is therefore the only truthful carrier of the logical
+  // adversarial round after a restart; positional loop lookup alone would
+  // restart that second evaluation as "round 1".
+  return { kind: 'ok', round: Math.max(input.currentRound, revisionRound.round) };
+}
+
+async function applyFormalSuccessorCascade(input: {
+  readonly stateManager: RuntimeStateManager;
+  readonly commitTaskTransition: ((taskId: string) => Promise<CommitNextTaskResult>) | undefined;
+  readonly sourceTaskId: string;
+  readonly successorTask: TaskRecord;
+}): Promise<LoopSuccessorPlan> {
+  if (!input.commitTaskTransition) {
+    return { action: 'blocked', reason: 'evaluator_cascade_transition_authority_missing' };
+  }
+  const commit = await input.commitTaskTransition(input.sourceTaskId);
+  const commitSourceTaskId: unknown = Reflect.get(commit, 'sourceTaskId');
+  if (commitSourceTaskId === undefined) {
+    return {
+      action: 'blocked',
+      reason: `evaluator_cascade_transition_${commit.decision}${commitTransitionDetail(commit)}`,
+    };
+  }
+  if (commitSourceTaskId !== input.sourceTaskId) {
+    return { action: 'blocked', reason: 'evaluator_cascade_transition_source_task_mismatch' };
+  }
+
+  let cascadeTargetTaskId: string;
+  if (commit.decision === 'successor_reopened' || commit.decision === 'revision_reopen_noop') {
+    cascadeTargetTaskId = commit.reopenedTaskId;
+  } else {
+    return {
+      action: 'blocked',
+      reason: `evaluator_cascade_transition_${commit.decision}${commitTransitionDetail(commit)}`,
+    };
+  }
+  if (cascadeTargetTaskId !== input.successorTask.taskId) {
+    return { action: 'blocked', reason: 'evaluator_cascade_transition_target_mismatch' };
+  }
+  const currentSuccessor = await input.stateManager.getTask(cascadeTargetTaskId);
+  if (!currentSuccessor) {
+    return { action: 'blocked', reason: 'evaluator_cascade_transition_target_missing' };
+  }
+  return planExistingSuccessorTask(currentSuccessor, 'evaluator');
+}
+
 async function createLoopSuccessorTask(
   stateManager: RuntimeStateManager,
   input: {
@@ -438,15 +622,7 @@ async function createLoopSuccessorTask(
     return { action: 'execute', task: creation.task, creationOutcome: 'created' };
   }
   if (creation.outcome === 'existing') {
-    const { status } = creation.task;
-    if (status === 'succeeded') return { action: 'recover', task: creation.task, creationOutcome: 'existing' };
-    if (status === 'pending' || status === 'retry_wait') {
-      return { action: 'execute', task: creation.task, creationOutcome: 'existing' };
-    }
-    if (status === 'leased') return { action: 'blocked', reason: `${input.taskKind}_successor_leased_active` };
-    if (status === 'failed') return { action: 'blocked', reason: `${input.taskKind}_successor_failed_terminal` };
-    if (status === 'needs_human_review') return { action: 'blocked', reason: `${input.taskKind}_successor_needs_human_review` };
-    return { action: 'blocked', reason: `${input.taskKind}_successor_unknown_status:${status}` };
+    return planExistingSuccessorTask(creation.task, input.taskKind);
   }
   if (creation.outcome === 'lookup') {
     return { action: 'blocked', reason: `${input.taskKind}_successor_lookup_${creation.lookup.decision}:${creation.lookup.detail}` };

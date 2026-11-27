@@ -607,7 +607,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       maxRounds,
       correlationId: correlation,
       channel,
-      commitRepairTransition: (repairArtificerTaskId) =>
+      commitTaskTransition: (repairArtificerTaskId) =>
         repairTransitionOrchestrator.commitNextTaskProposal(repairArtificerTaskId),
     });
 

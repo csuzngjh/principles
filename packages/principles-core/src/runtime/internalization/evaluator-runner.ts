@@ -946,6 +946,25 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       stateManager: this.stateManager,
       artifactStore: this.artifactStore,
       validateOutput: (output, taskId) => this.validator.validate(output, taskId),
+      validateIncompleteAuthoritativeRun: ({ task: terminalTask, authoritativeRun, runs }) => {
+        const piTask = hydratePITaskRecord(terminalTask);
+        const intent = piTask?.completionIntent;
+        if (!piTask || !intent) return 'authoritative_run_incomplete_without_completion_intent';
+        if (intent.sourceRunId !== authoritativeRun.runId) return 'completion_intent_run_mismatch';
+        if (intent.status !== 'applied') return `completion_intent_not_applied:${intent.status}`;
+        if (intent.revisionEpoch !== (piTask.revisionCount ?? 0)) {
+          return `completion_intent_epoch_mismatch:${intent.revisionEpoch}!=${piTask.revisionCount ?? 0}`;
+        }
+        const completionRun = runs.find((candidate) => (
+          candidate.taskId === terminalTask.taskId
+          && candidate.attemptNumber > authoritativeRun.attemptNumber
+          && candidate.executionStatus === 'succeeded'
+          && candidate.reason === 'task_completed'
+          && candidate.errorCategory === undefined
+        ));
+        if (!completionRun) return 'completion_run_missing_or_not_terminal';
+        return null;
+      },
       verifyRecoveredEvidence: ({ task: terminalTask, output, artifactOutput, runId }) => {
         if (output.taskId !== terminalTask.taskId) return 'output_task_id_mismatch';
         if (output.evaluation.decision !== artifactOutput.evaluation.decision) {
@@ -967,6 +986,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           }
           if (piTask.completionIntent !== undefined) {
             if (piTask.completionIntent.sourceRunId !== runId) return 'completion_intent_run_mismatch';
+            if (piTask.completionIntent.status !== 'applied') {
+              return `completion_intent_not_applied:${piTask.completionIntent.status}`;
+            }
+            if (piTask.completionIntent.revisionEpoch !== (piTask.revisionCount ?? 0)) {
+              return `completion_intent_epoch_mismatch:${piTask.completionIntent.revisionEpoch}!=${piTask.revisionCount ?? 0}`;
+            }
             if (piTask.completionIntent.decision !== rawDecision) {
               return `completion_intent_decision_mismatch:${piTask.completionIntent.decision}!=${rawDecision}`;
             }
