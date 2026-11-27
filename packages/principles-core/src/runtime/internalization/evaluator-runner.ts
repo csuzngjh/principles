@@ -1003,6 +1003,23 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     return output.sourceArtificerArtifactId === currentInput.artifactId;
   }
 
+  /** Prove that durable nonterminal review evidence already belongs to the current input artifact. */
+  async hasCurrentInputEvidence(task: TaskRecord): Promise<boolean> {
+    try {
+      const piTask = hydratePITaskRecord(task);
+      const sourceRunId = piTask?.completionIntent?.sourceRunId;
+      if (!piTask || !sourceRunId) return false;
+      const currentInput = await this.resolveCurrentArtificerInput(task);
+      const run = (await this.stateManager.getRunsByTask(task.taskId)).find((candidate) => candidate.runId === sourceRunId);
+      if (!run?.outputPayload) return false;
+      const parsed: unknown = JSON.parse(run.outputPayload);
+      const validation = await this.validator.validate(parsed, task.taskId, currentInput.artifactId);
+      return validation.valid;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Recover an already-succeeded evaluator execution from durable evidence.
    * The run output is authoritative for execution-time replay evidence; the
@@ -2299,6 +2316,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
     // 恢复裁决时的 durable output — decision 必须与 resolution 记录的机器判定一致
     const output = await this.recoverIntentOutput(taskId, resolution.sourceRunId, resolution.machineDecision);
+    const currentInput = await this.resolveCurrentArtificerInput(leasedTask);
+    if (output.sourceArtificerArtifactId !== currentInput.artifactId) {
+      this.emitEvent('owner_resolution_stale_input', taskId, {
+        resolutionId: resolution.resolutionId,
+        sourceRunId: resolution.sourceRunId,
+        resolutionArtifactId: output.sourceArtificerArtifactId,
+        currentArtifactId: currentInput.artifactId,
+        nextAction: 'formal_upstream_revision_required_before_owner_resolution',
+      });
+      throw new PDRuntimeError('input_invalid', 'owner_resolution_input_stale');
+    }
 
     // SPEC §20 纵深防御: 确定性对抗门失败不允许 approved override (capability
     // 层已挡一道;此处防事实漂移窗口)。

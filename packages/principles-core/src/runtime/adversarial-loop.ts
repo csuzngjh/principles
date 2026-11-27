@@ -197,6 +197,22 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
       return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
         `artificer_task_create_failed: ${createErr instanceof Error ? createErr.message : String(createErr)}`);
     }
+    if (artificerPlan.action === 'recover') {
+      const recoveryProbe = await input.artificerRunner.recoverSucceededResult(artificerPlan.task);
+      if (recoveryProbe.outcome !== 'recovered') {
+        const scribeTask = await input.stateManager.getTask(input.scribeTaskId);
+        const scribeRevisionCount = scribeTask ? hydratePITaskRecord(scribeTask)?.revisionCount ?? 0 : 0;
+        if (scribeRevisionCount > 0) {
+          artificerPlan = await applyFormalSuccessorCascade({
+            stateManager: input.stateManager,
+            commitTaskTransition: input.commitTaskTransition,
+            sourceTaskId: input.scribeTaskId,
+            successorTask: artificerPlan.task,
+            successorKind: 'artificer',
+          });
+        }
+      }
+    }
     const resolvedArtificerTaskId = artificerPlan.action === 'blocked' ? artificerTaskId : artificerPlan.task.taskId;
 
     let artificerResult;
@@ -328,6 +344,8 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
           if (evaluatorPlan.action === 'recover') {
             const recoveryProbe = await input.evaluatorRunner.recoverSucceededResult(successorBeforeCascade);
             currentEvidenceReusable = recoveryProbe.outcome === 'recovered';
+          } else if (evaluatorPlan.action === 'blocked' && successorBeforeCascade.status === 'needs_human_review') {
+            currentEvidenceReusable = await input.evaluatorRunner.hasCurrentInputEvidence(successorBeforeCascade);
           }
           if (!currentEvidenceReusable) {
             evaluatorPlan = await applyFormalSuccessorCascade({
@@ -335,6 +353,7 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
               commitTaskTransition: input.commitTaskTransition,
               sourceTaskId: resolvedArtificerTaskId,
               successorTask: successorBeforeCascade,
+              successorKind: 'evaluator',
             });
           }
         }
@@ -576,20 +595,22 @@ async function applyFormalSuccessorCascade(input: {
   readonly commitTaskTransition: ((taskId: string) => Promise<CommitNextTaskResult>) | undefined;
   readonly sourceTaskId: string;
   readonly successorTask: TaskRecord;
+  readonly successorKind: 'artificer' | 'evaluator';
 }): Promise<LoopSuccessorPlan> {
+  const reasonPrefix = `${input.successorKind}_cascade_transition`;
   if (!input.commitTaskTransition) {
-    return { action: 'blocked', reason: 'evaluator_cascade_transition_authority_missing' };
+    return { action: 'blocked', reason: `${reasonPrefix}_authority_missing` };
   }
   const commit = await input.commitTaskTransition(input.sourceTaskId);
   const commitSourceTaskId: unknown = Reflect.get(commit, 'sourceTaskId');
   if (commitSourceTaskId === undefined) {
     return {
       action: 'blocked',
-      reason: `evaluator_cascade_transition_${commit.decision}${commitTransitionDetail(commit)}`,
+      reason: `${reasonPrefix}_${commit.decision}${commitTransitionDetail(commit)}`,
     };
   }
   if (commitSourceTaskId !== input.sourceTaskId) {
-    return { action: 'blocked', reason: 'evaluator_cascade_transition_source_task_mismatch' };
+    return { action: 'blocked', reason: `${reasonPrefix}_source_task_mismatch` };
   }
 
   let cascadeTargetTaskId: string;
@@ -598,17 +619,17 @@ async function applyFormalSuccessorCascade(input: {
   } else {
     return {
       action: 'blocked',
-      reason: `evaluator_cascade_transition_${commit.decision}${commitTransitionDetail(commit)}`,
+      reason: `${reasonPrefix}_${commit.decision}${commitTransitionDetail(commit)}`,
     };
   }
   if (cascadeTargetTaskId !== input.successorTask.taskId) {
-    return { action: 'blocked', reason: 'evaluator_cascade_transition_target_mismatch' };
+    return { action: 'blocked', reason: `${reasonPrefix}_target_mismatch` };
   }
   const currentSuccessor = await input.stateManager.getTask(cascadeTargetTaskId);
   if (!currentSuccessor) {
-    return { action: 'blocked', reason: 'evaluator_cascade_transition_target_missing' };
+    return { action: 'blocked', reason: `${reasonPrefix}_target_missing` };
   }
-  return planExistingSuccessorTask(currentSuccessor, 'evaluator');
+  return planExistingSuccessorTask(currentSuccessor, input.successorKind);
 }
 
 async function createLoopSuccessorTask(

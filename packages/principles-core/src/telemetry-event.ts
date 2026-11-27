@@ -409,6 +409,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_completion_intent_read_failed'),
   Type.Literal('evaluator_completion_intent_resumed'),
   Type.Literal('evaluator_completion_intent_stale_epoch'),
+  Type.Literal('evaluator_completion_intent_stale_input'),
   Type.Literal('evaluator_completion_mark_applied_failed'),
   Type.Literal('evaluator_completion_record_failed'),
   Type.Literal('evaluator_diag_llm_rate_limit_degraded'),
@@ -434,6 +435,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_no_principle_bearer_found'),
   Type.Literal('evaluator_owner_resolution_applying'),
   Type.Literal('evaluator_owner_resolution_rejected_by_policy'),
+  Type.Literal('evaluator_owner_resolution_stale_input'),
   // PRI-861: the painReasonSummary echo degrades observably at rule assembly
   // (no dreamer lineage / no resolvable diagnosis summary) — the approval card
   // keeps its generic trigger reason (rc-9, never silent).
