@@ -71,6 +71,7 @@ Initial router: **HIGH EP-04** (real-entry evidence), **HIGH EP-02 / EP-03** (CL
 ## 9. Residual risks
 
 1. Gate-check → cycle-start is not atomic with the handover CAS (cooperative check); the hard guarantees remain lease fencing + quiesce protocol. Worst case is one in-flight cycle overlapping, exactly the drain protocol's existing semantics.
+1a. **Behavioral delta found by CI (T13 shadow concurrency)**: two parallel real-CLI cycles on the same workspace no longer race inside the lease-claim window — the mutex loser never consumes and reports `paused` (`<host>_worker_run_in_progress`). Strictly stronger exclusion; the lease invariant itself is unchanged and still asserted. Test contract updated in the follow-up commit with the invariant assertions untouched. Production note: a mutex-contention `paused` outcome is transient and correct — it means a overlapping consumer existed, which is exactly what the mutex is for.
 2. A continuous legacy worker blocked by the gate prints a paused report per interval until Companion supervision stops it (companion-side lifecycle is out of scope here).
 3. Test isolation required the `PD_SERVICE_PD_HOME` pin in harnesses; production resolution order unchanged.
 4. Real-built-CLI child tests cannot be validated in this WSL environment (pre-existing); CI must confirm.
