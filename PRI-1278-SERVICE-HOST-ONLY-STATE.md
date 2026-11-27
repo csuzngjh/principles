@@ -2,6 +2,17 @@
 
 > Continuity document. Update as work progresses. Read this first after any compaction.
 
+## LATEST STATUS (2026-11-27 ~23:00 local) — READ THIS FIRST
+
+Branch HEAD: `54e70e185` (pushed). All 6 implementation agents' work is integrated, committed, and pushed. Local build zero-error; local lint/typecheck clean.
+
+CI round for `6c6d693f6` had 3 real failures, ALL FIXED in `54e70e185`:
+1. Verify Merge Gate — prefer-destructuring error in `worker-service-host-gate.ts` line 111 → fixed.
+2. Test pd-cli — `codex-worker-daemon.test.ts` still tested the deleted continuous daemon loop (PRI-655 semantics) → test file deleted.
+3. Test shared runtime & adapters — `scripts/check-runtime-writers.mjs` allowlist still contained deleted `workspace-handover.ts` → entry removed. NOTE: the `[satellite-purity] FAIL` lines in CI logs are EXPECTED console noise from negative-path tests, NOT real failures. Local production esbuild passes purity+budget cleanly.
+
+NEXT: watch CI for `54e70e185`. If green: update final report + PR body with CI evidence, answer the Service-Host-Only verdict, recommend closing #2811. Remaining honest residual: real-machine operational acceptance (fresh install, scheduler fires, bounded run-once) — documented as residual, never falsely claimed.
+
 ## Directive (Owner, authoritative)
 
 PD Service Host becomes the ONLY background runtime. Companion loses ALL background execution capability (worker start/supervision/scheduling/polling/consumer mgmt/respawn/retry/recovery/lease), keeps only UI/Control Plane. BREAKING CHANGE — single user, no legacy compat, no migration framework, no companion fallback. Host adapters (openclaw/codex/workbuddy) survive as Service-Host-called adapters only. OS Scheduler + bounded run-once model continues. Implement in **PR #2810** (branch `ai/PRI-1278-phase5-p0-deferred-provisioning-guard`). Do NOT pause for approval; execute end-to-end autonomously: audit → design → implement → test → build → real-run → accept → PR. Final report must answer "is PD彻底 Service Host Only?" — no PASS_WITH_LIMITATIONS.

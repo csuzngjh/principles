@@ -131,6 +131,21 @@ Single row — that is the point. There is no second consumer to tabulate.
 
 ## 6. Verification evidence
 
+**CI matrix — ALL GREEN at HEAD `54e70e185`** (authoritative gate, run 46019457258):
+- Verify Merge Gate: PASS (4m7s) — incl. canonical build, lint-by-package
+  (13/13), all typechecks, guard contracts, release-intent check
+- Test pd-cli (Linux): PASS (4m42s) / Test pd-cli (Windows): PASS (4m46s)
+- Test shared runtime & adapters: PASS (12m21s) — incl. runtime-writers SSoT
+  baseline and satellite-purity guard
+- Test create-principles-disciple: PASS (2m55s) — incl. rewritten
+  provisioning tests and child-process windowsHide scan
+- Test OpenClaw Plugin (unit+integration+coverage): PASS (1m51s)
+- Test packaged install smoke: PASS (3m37s)
+- Test principles-core: PASS (2m56s) / Test pd-console: PASS / Test
+  pd-mcp-server: PASS / Test workbuddy-adapter (Windows fixtures): PASS
+- e2e: PASS (4m47s) / CodeQL: PASS / Codex plugin delivery contract: PASS
+- Devin Review: PASS (completed analysis)
+
 Build/compile:
 - Full monorepo `npm run build`: zero TypeScript errors, all dist artifacts
 - pd-cli `tsc --noEmit`: clean (after dead shadow-schema excision)
@@ -184,12 +199,14 @@ tests, real transition-CAS tests, Companion negative AST guard.
 
 ## 7. End-to-end acceptance
 
-Authoritative E2E evidence deferred to CI with honest scoping:
-- `Test packaged install smoke` (CI) performs a real packaged install —
-  the consolidation's install-path validation gate
-- Local real-run E2E (fresh install + scheduler + real task) was not
-  executable in the WSL dev environment within this session; this is a
-  real residual risk, not a hidden one — see §9
+- `Test packaged install smoke` (CI): **PASS** at HEAD — performs a real
+  packaged install of the consolidated layout, validating install-path
+  provisioning end-to-end on a clean machine
+- `e2e` (CI): **PASS** at HEAD
+- Local real-run E2E (fresh install + scheduler fires + real task executed
+  through the bounded run-once path) was not executable in the WSL dev
+  environment within this session; this is a real residual risk, not a
+  hidden one — see §9
 
 ## 8. Evidence that old consumers cannot restart
 
