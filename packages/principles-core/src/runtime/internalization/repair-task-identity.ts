@@ -18,10 +18,9 @@
  */
 
 import type { TaskRecord } from '../task-status.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { artificerRepairTaskId } from './pitask-metadata.js';
-import { planLegacyLineageResolution } from './correlation-lineage.js';
+import { planLegacyLineageResolution, type CorrelationLineageTaskStore } from './correlation-lineage.js';
 
 export type RepairIdentityVerification =
   | {
@@ -52,7 +51,7 @@ export async function verifyRepairTaskIdentity(
   existing: TaskRecord,
   expectedSourceEvaluatorTaskId: string,
   expectedRepairIteration: number,
-  stateManager: RuntimeStateManager,
+  stateManager: CorrelationLineageTaskStore,
 ): Promise<RepairIdentityVerification> {
   // 1. 类型
   if (existing.taskKind !== 'artificer') {

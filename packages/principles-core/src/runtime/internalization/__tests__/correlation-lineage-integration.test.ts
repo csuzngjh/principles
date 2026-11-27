@@ -385,6 +385,75 @@ describe('§3.6.3 (6) — repair → 来源 evaluator reopen 继承同一 correl
     expect(reopened?.dependencyTaskIds).toContain('artificer-repair-evaluator-repair-src-r1');
     expect(reopened?.dependencyTaskIds).not.toContain('artificer-original');
   });
+
+  it('repair 缺血缘回填 CAS 落败: commit 映射 concurrent_modification 且 evaluator/repair 零写入', async () => {
+    // 与上一测试同一生产方向, 但 repair 行自身缺 parentTaskId/correlationId —
+    // commit 必须先经 Core backfill。这里强制第一次 CAS 返回 null, 直接验证
+    // orchestrator 的薄映射: concurrent_modification 不得继续 reopen evaluator。
+    const dreamer = await mkTask('dreamer-repair-cas-prompt', 'dreamer', 'succeeded', { correlationId: CAND_A, topCandidateId: CAND_A });
+    const scribe = await mkTask('scribe-repair-cas', 'scribe', 'succeeded', { parentTaskId: dreamer, correlationId: CAND_A });
+    const originalArtificer = await mkTask('artificer-original-cas', 'artificer', 'succeeded', {
+      parentTaskId: scribe,
+      correlationId: CAND_A,
+      runnerDecision: 'approved',
+    });
+    const evaluator = await mkTask('evaluator-repair-cas', 'evaluator', 'succeeded', {
+      parentTaskId: originalArtificer,
+      correlationId: CAND_A,
+      runnerDecision: 'needs_revision',
+      dependencyTaskIds: [originalArtificer],
+    });
+    const repairId = 'artificer-repair-evaluator-repair-cas-r1';
+    await mkTask(repairId, 'artificer', 'succeeded', {
+      runnerDecision: 'approved',
+      dependencyTaskIds: [evaluator],
+    });
+    const repairRaw = need(await stateManager.getTask(repairId), 'repair artificer before CAS conflict');
+    const repairPi = hydratePITaskRecord(repairRaw);
+    await stateManager.updateTask(repairId, {
+      diagnosticJson: createPITaskDiagnosticJson({
+        ...need(repairPi, 'repair artificer metadata'),
+        repairPayload: {
+          requiredChanges: ['fix x'],
+          concerns: [],
+          previousScore: 0.5,
+          repairIteration: 1,
+          sourceArtificerArtifactId: 'pi-art-a',
+          sourceEvaluatorTaskId: evaluator,
+          sourceEvaluatorRunId: 'run-1',
+        },
+      }),
+    });
+
+    const evaluatorBefore = need(await stateManager.getTask(evaluator), 'evaluator before CAS conflict');
+    const repairBefore = need(await stateManager.getTask(repairId), 'repair before CAS conflict');
+    const originalCas = stateManager.updateTaskIfDiagnosticJsonUnchanged.bind(stateManager);
+    let forcedCasLosses = 0;
+    stateManager.updateTaskIfDiagnosticJsonUnchanged = (async (
+      ...args: Parameters<RuntimeStateManager['updateTaskIfDiagnosticJsonUnchanged']>
+    ) => {
+      if (args[0] === repairId && forcedCasLosses === 0) {
+        forcedCasLosses += 1;
+        return null;
+      }
+      return originalCas(...args);
+    });
+
+    const result = await orchestrator.commitNextTaskProposal(repairId);
+    expect(result).toEqual({
+      decision: 'concurrent_modification',
+      sourceTaskId: repairId,
+      reopenedTaskId: evaluator,
+      detail: `repair_identity_backfill_cas_conflict:${repairId} — evaluator NOT reopened, safe to retry`,
+    });
+    expect(forcedCasLosses).toBe(1);
+
+    const evaluatorAfter = need(await stateManager.getTask(evaluator), 'evaluator after CAS conflict');
+    const repairAfter = need(await stateManager.getTask(repairId), 'repair after CAS conflict');
+    expect(evaluatorAfter.status).toBe('succeeded');
+    expect(evaluatorAfter.diagnosticJson).toBe(evaluatorBefore.diagnosticJson);
+    expect(repairAfter.diagnosticJson).toBe(repairBefore.diagnosticJson);
+  });
 });
 
 describe('PRI-1293 review fix — 修订重开复用历史终态后继, 不派生重复后继 (finding 2)', () => {

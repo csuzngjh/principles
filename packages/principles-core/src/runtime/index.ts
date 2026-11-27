@@ -1607,6 +1607,9 @@ export type {
 } from './internalization/owner-resolution-service.js';
 export { deriveSuccessorTaskId } from './internalization/internalization-state-machine.js';
 export { verifyRepairTaskIdentity } from './internalization/repair-task-identity.js';
+// PRI-1300: repair 血缘校验 + 六项快照前提 CAS 回填的单一写侧实现 —
+// host-runtime / pd-cli 两个 seeder 复用路径共享, 禁止各自演化 hydrate+merge+CAS。
+export { validateAndBackfillRepairLineage } from './internalization/repair-lineage-backfill.js';
 export { planLegacyLineageResolution } from './internalization/correlation-lineage.js';
 export type { LegacyLineagePlan } from './internalization/correlation-lineage.js';
 export type { RepairIdentityVerification } from './internalization/repair-task-identity.js';

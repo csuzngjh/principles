@@ -43,13 +43,10 @@ import {
   // authority — spine successors (philosopher/scribe) are created/reused
   // through it, never through direct stateManager.createTask timestamp rows.
   createLogicalSuccessorTask,
-  mergePITaskMetadata,
-  hydratePITaskRecord,
   parsePITaskMetadata,
   parseSeedSourcePainId,
   artificerRepairTaskId,
-  verifyRepairTaskIdentity,
-  type RepairIdentityVerification,
+  validateAndBackfillRepairLineage,
   runAdversarialLoop,
   evaluateInRefinerSandbox,
   DEFAULT_MAX_ROUNDS,
@@ -1026,45 +1023,27 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
             `repair task ${repairTaskId} already reached terminal status ${existing.status}; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)`,
           );
         }
-        // PRI-1293 R7 (P1-1): 复用前完整身份验证 — 共享 core 唯一实现
-        // (verifyRepairTaskIdentity), 与 host-runtime seeder / orchestrator
-        // 完成路径同一规则, 禁止两份实现各自演化。
-        const identity: RepairIdentityVerification = await verifyRepairTaskIdentity(
-          existing,
-          params.repairPayload.sourceEvaluatorTaskId,
-          params.repairPayload.repairIteration,
+        // PRI-1293 R7 (P1-1) + PRI-1300: 复用前完整身份验证 + 缺失亲缘字段
+        // CAS 回填 — 唯一实现上收 core (validateAndBackfillRepairLineage),
+        // 与 host-runtime seeder / orchestrator 完成路径同一规则, 禁止两份
+        // 实现各自演化。宿主层只负责把结构化结果逐字映射为既有 throw
+        // 字符串 (错误语义不变; 本宿主原本无对应日志, 不新增)。
+        const lineage = await validateAndBackfillRepairLineage(
+          {
+            repairTaskId,
+            existing,
+            sourceEvaluatorTaskId: params.repairPayload.sourceEvaluatorTaskId,
+            repairIteration: params.repairPayload.repairIteration,
+          },
           stateManager,
         );
-        if (!identity.ok) {
-          throw new Error(`evaluator_repair_seed_lineage_refused:${identity.reason}:${identity.detail}`);
-        }
-        const existingPi = hydratePITaskRecord(existing);
-        if (!existingPi) {
-          throw new Error(`evaluator_repair_seed_lineage_refused:invalid_task_metadata:repair task ${repairTaskId} diagnosticJson unreadable`);
-        }
-        if (identity.needsLineageBackfill) {
-          const merged = mergePITaskMetadata(existingPi, {
-            parentTaskId: params.repairPayload.sourceEvaluatorTaskId,
-            correlationId: identity.authoritativeCorrelationId,
-          });
-          const casResult = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
-            repairTaskId,
-            existing.diagnosticJson ?? null,
-            { diagnosticJson: createPITaskDiagnosticJson(merged) },
-            {
-              expectedStatus: existing.status,
-              expectedAttemptCount: existing.attemptCount,
-              expectedMaxAttempts: existing.maxAttempts,
-              expectedLeaseOwner: existing.leaseOwner ?? null,
-              expectedLeaseExpiresAt: existing.leaseExpiresAt ?? null,
-              expectedLeaseGeneration: existing.leaseGeneration ?? 0,
-            },
-          );
-          if (casResult === null) {
+        if (!lineage.ok) {
+          if (lineage.reason === 'concurrent_modification') {
             throw new Error(
               `evaluator_repair_seed_concurrent_modification: repair task ${repairTaskId} changed during lineage backfill — seed NOT applied, safe to retry`,
             );
           }
+          throw new Error(`evaluator_repair_seed_lineage_refused:${lineage.reason}:${lineage.detail}`);
         }
         return repairTaskId;
       }
