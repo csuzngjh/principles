@@ -211,15 +211,29 @@ export async function lookupSuccessorByParent(
     }
   }
 
-  if (matches.length === 0 && malformedCandidates.length === 0) {
-    for (const task of legacyCandidates) {
-      if (task.taskKind !== query.successorKind) continue;
-      const piTask = hydratePITaskRecord(task);
-      if (!piTask || piTask.parentTaskId || piTask.channel !== query.channel) continue;
-      const inferred = await inferLegacyParentTaskId(task, piTask, stateManager);
-      if (inferred.ok && inferred.parentTaskId === query.parentTaskId) {
-        matches.push(task);
-      }
+  // Legacy inference is unconditional: an exact valid successor must never
+  // hide a second legacy successor whose parent edge was never persisted but
+  // whose producer-specific lineage proof resolves to the same parent — that
+  // pair is one logical successor duplicated, i.e. an integrity conflict, not
+  // a clean chain. The proof standard is unchanged: only
+  // inferLegacyParentTaskId evidence counts (dependencyTaskIds alone are
+  // never generic parentage proof), a persisted parent edge is never
+  // second-guessed, and malformed rows cannot fully hydrate so they never
+  // reach inference. Rows already exact-matched — by the first read or by the
+  // second-read race reclassification — are skipped, and the taskId set keeps
+  // one entry per row no matter how many scan paths can reach it, so the
+  // final uniqueness/conflict adjudication below sees the complete,
+  // duplicate-free match set.
+  const matchedTaskIds = new Set(matches.map((task) => task.taskId));
+  for (const task of legacyCandidates) {
+    if (task.taskKind !== query.successorKind) continue;
+    if (matchedTaskIds.has(task.taskId)) continue;
+    const piTask = hydratePITaskRecord(task);
+    if (!piTask || piTask.parentTaskId || piTask.channel !== query.channel) continue;
+    const inferred = await inferLegacyParentTaskId(task, piTask, stateManager);
+    if (inferred.ok && inferred.parentTaskId === query.parentTaskId) {
+      matches.push(task);
+      matchedTaskIds.add(task.taskId);
     }
   }
 

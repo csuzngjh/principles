@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2077,
+  "count": 2078,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1694,6 +1694,7 @@
     "createGoldenTraceFixture",
     "createIntentTemplate",
     "createInternalizationQueueReadModel",
+    "createLogicalSuccessorTask",
     "createMinimalPITaskRecord",
     "createNextTaskProposal",
     "createOwnerEvidenceScopeError",

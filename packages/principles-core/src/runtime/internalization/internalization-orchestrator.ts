@@ -20,7 +20,7 @@ import type { InternalizationChannel, RunnerKind } from './peer-runner-contracts
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
 import { deriveSuccessorTaskId } from './internalization-state-machine.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, hasConsumedRevisionCause } from './pitask-metadata.js';
-import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition } from './revision-reopen.js';
+import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition, planRevisionReopenInitialState } from './revision-reopen.js';
 import { verifyRepairTaskIdentity } from './repair-task-identity.js';
 import { lookupSuccessorByParent, type SuccessorLookupResult } from './successor-lookup.js';
 import { createLogicalSuccessorTask } from './successor-create.js';
@@ -735,40 +735,49 @@ export class InternalizationOrchestrator {
       }
     }
 
-    if (!srcRaw) {
-      return {
-        decision: 'revision_reopen_failed',
-        sourceTaskId: taskId,
-        reopenedTaskId: payload.sourceEvaluatorTaskId,
-        reason: 'task_not_found',
-      };
+    // PRI-1299 P2 (preview/confirm parity): 初始状态分类必须经共享纯规划器 —
+    // confirm (reopenTaskForRevision 第一快照门) 对初始 leased 的业务拒绝是
+    // task_in_flight_leased (映射 revision_reopen_failed); 预览此前误报
+    // concurrent_modification, 但单次快照的只读预览不存在竞争窗口 —
+    // concurrent_modification 只属于 confirm 的血缘校验漂移/CAS 并发落败。
+    const initialPlan = planRevisionReopenInitialState(srcRaw, causeId);
+    switch (initialPlan.plan) {
+      case 'task_not_found':
+        return {
+          decision: 'revision_reopen_failed',
+          sourceTaskId: taskId,
+          reopenedTaskId: payload.sourceEvaluatorTaskId,
+          reason: 'task_not_found',
+        };
+      case 'invalid_task_metadata':
+        return {
+          decision: 'invalid_task_metadata',
+          taskId: payload.sourceEvaluatorTaskId,
+          reason: 'repair_evaluator_reopen_invalid_task_metadata',
+        };
+      case 'idempotent_replay_same_revision':
+        // 前置 consumed 检查 (上方) 通常先命中; 此处兜底保持同一业务类别
+        // (valid metadata 时不可达 — 顺序与 confirm 一致所需)。
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: payload.sourceEvaluatorTaskId,
+          reason: 'revision_cause_already_materialized',
+        };
+      case 'refused_in_flight':
+        return {
+          decision: 'revision_reopen_failed',
+          sourceTaskId: taskId,
+          reopenedTaskId: payload.sourceEvaluatorTaskId,
+          reason: initialPlan.reason,
+        };
+      case 'proceed':
+        break;
     }
-    if (!srcPi) {
-      return {
-        decision: 'invalid_task_metadata',
-        taskId: payload.sourceEvaluatorTaskId,
-        reason: 'repair_evaluator_reopen_invalid_task_metadata',
-      };
-    }
-    if (srcRaw.status === 'leased') {
-      return {
-        decision: 'concurrent_modification',
-        sourceTaskId: taskId,
-        reopenedTaskId: payload.sourceEvaluatorTaskId,
-        detail: `task_leased_during_lineage_validation:${payload.sourceEvaluatorTaskId}:owner=${srcRaw.leaseOwner ?? 'unknown'} — reopen NOT applied, concurrent lease untouched`,
-      };
-    }
-    if (srcRaw.status !== 'pending' && srcRaw.status !== 'retry_wait'
-      && srcRaw.status !== 'succeeded' && srcRaw.status !== 'needs_human_review') {
-      return {
-        decision: 'revision_reopen_failed',
-        sourceTaskId: taskId,
-        reopenedTaskId: payload.sourceEvaluatorTaskId,
-        reason: `task_in_flight_${srcRaw.status}`,
-      };
-    }
-    if (isPeerRunnerKind(srcRaw.taskKind)) {
-      const lineage = await planLegacyLineageResolution(srcRaw, this.stateManager);
+    // proceed 蕴含行存在且 metadata 可解析 — 经规划器携带的窄化快照继续。
+    const proceedRaw = initialPlan.rawTask;
+    if (isPeerRunnerKind(proceedRaw.taskKind)) {
+      const lineage = await planLegacyLineageResolution(proceedRaw, this.stateManager);
       if (!lineage.ok) {
         return {
           decision: 'lineage_refused',

@@ -48,6 +48,48 @@ async function lookup(parentTaskId = 'parent-a', successorKind: 'evaluator' | 's
   return lookupSuccessorByParent(stateManager, { parentTaskId, successorKind, channel });
 }
 
+/**
+ * Legacy pre-parent-edge row: fully valid PI hydration, matching channel, but
+ * no persisted parentTaskId. Parentage is only provable through the
+ * producer-specific task-id shapes inferLegacyParentTaskId recognizes.
+ */
+async function mkLegacyRow(taskId: string, taskKind: string, dependencyTaskIds: readonly string[]): Promise<void> {
+  await stateManager.createTask({
+    taskId,
+    taskKind,
+    status: 'pending',
+    attemptCount: 0,
+    maxAttempts: 3,
+    diagnosticJson: JSON.stringify({
+      [PI_METADATA_KEY]: {
+        dependencyTaskIds: [...dependencyTaskIds],
+        channel: 'prompt',
+        timeoutMs: 300000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+      },
+    }),
+  });
+}
+
+/**
+ * Old AdversarialLoop lineage chain: `<correlation>-artificer-r<round>-<suffix>`
+ * parent with `<correlation>-evaluator-r<round>-<suffix>` successors whose sole
+ * dependency is that artificer — the exact shape inferLegacyParentTaskId proves.
+ */
+async function mkLegacyEvaluatorChain(correlation: string, evaluatorSuffixes: readonly string[]): Promise<string> {
+  const artificerTaskId = correlation + '-artificer-r1-aaaa';
+  await mkTask(artificerTaskId, 'artificer');
+  for (const suffix of evaluatorSuffixes) {
+    await mkLegacyRow(correlation + '-evaluator-r1-' + suffix, 'evaluator', [artificerTaskId]);
+  }
+  return artificerTaskId;
+}
+
+function lookupParent(parentTaskId: string) {
+  return lookupSuccessorByParent(stateManager, { parentTaskId, successorKind: 'evaluator', channel: 'prompt' });
+}
+
 describe('lookupSuccessorByParent', () => {
   it('returns none when no successor matches', async () => {
     await mkTask('parent-a', 'artificer');
@@ -227,6 +269,143 @@ describe('malformed successor metadata fail-closed behavior', () => {
     const result = await lookup();
     expect(result.outcome).toBe('malformed');
     if (result.outcome === 'malformed') expect(result.malformedCandidateTaskIds).toEqual(['eval-corrupt-nonidentity-mixed']);
+  });
+});
+
+describe('legacy inference combined with exact matches (P1-2)', () => {
+  it('exact valid successor plus legacy-inferred same-parent successor is a complete conflict', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', ['bbbb']);
+    await mkTask('exact-evaluator-of-a', 'evaluator', parentTaskId);
+    const result = await lookupParent(parentTaskId);
+    expect(result.outcome).toBe('conflict');
+    if (result.outcome === 'conflict') {
+      expect(result.conflictingSuccessorTaskIds).toEqual(['corr1-evaluator-r1-bbbb', 'exact-evaluator-of-a']);
+      expect(result.conflictingSuccessors).toHaveLength(2);
+      expect(result.detail).toBe('parentTaskId=' + parentTaskId + ';successorKind=evaluator;channel=prompt;taskIds=[corr1-evaluator-r1-bbbb,exact-evaluator-of-a]');
+    }
+  });
+
+  it('exact valid successor plus legacy successor of a different parent stays unique', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', []);
+    await mkTask('exact-evaluator-of-a', 'evaluator', parentTaskId);
+    await mkLegacyEvaluatorChain('corr2', ['dddd']);
+    const result = await lookupParent(parentTaskId);
+    expect(result.outcome).toBe('unique');
+    if (result.outcome === 'unique') expect(result.successor.taskId).toBe('exact-evaluator-of-a');
+  });
+
+  it('two legacy successors inferred for the same parent form one complete conflict', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', ['bbbb', 'cccc']);
+    const result = await lookupParent(parentTaskId);
+    expect(result.outcome).toBe('conflict');
+    if (result.outcome === 'conflict') {
+      expect(result.conflictingSuccessorTaskIds).toEqual(['corr1-evaluator-r1-bbbb', 'corr1-evaluator-r1-cccc']);
+      expect(result.conflictingSuccessors).toHaveLength(2);
+    }
+  });
+
+  it('malformed candidate keeps priority over exact and legacy-inferred matches', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', ['bbbb']);
+    await mkTask('exact-evaluator-of-a', 'evaluator', parentTaskId);
+    await stateManager.createTask({
+      taskId: 'eval-malformed-relevant', taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        [PI_METADATA_KEY]: {
+          dependencyTaskIds: 'broken', channel: 'prompt', timeoutMs: 300000,
+          inputArtifactRefs: [], outputArtifactRefs: [],
+        },
+      }),
+    });
+    const result = await lookupParent(parentTaskId);
+    expect(result.outcome).toBe('malformed');
+    if (result.outcome === 'malformed') {
+      expect(result.malformedCandidateTaskIds).toEqual(['eval-malformed-relevant']);
+      expect(result.nextAction).toBe('repair_malformed_successor_metadata_before_retry');
+    }
+  });
+
+  it('exact successor plus unrelated legacy rows that cannot prove this parent stays unique', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', []);
+    await mkTask('exact-evaluator-of-a', 'evaluator', parentTaskId);
+    // recognized legacy shape, but the depended-on artificer does not exist — proof refused
+    await mkLegacyRow('corr9-evaluator-r1-zzzz', 'evaluator', ['corr9-artificer-r1-missing']);
+    // unrecognized producer shape — no inference is even attempted beyond shape refusal
+    await mkLegacyRow('plain-evaluator-x1', 'evaluator', []);
+    const result = await lookupParent(parentTaskId);
+    expect(result.outcome).toBe('unique');
+    if (result.outcome === 'unique') expect(result.successor.taskId).toBe('exact-evaluator-of-a');
+  });
+
+  it('dependencyTaskIds pointing at the parent are never generic parentage proof', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', []);
+    // sole dependency IS the query parent, but the task-id shape matches no
+    // supported legacy producer — inference must refuse, so this row is not a successor
+    await mkLegacyRow('freeform-evaluator-x1', 'evaluator', [parentTaskId]);
+    const result = await lookupParent(parentTaskId);
+    expect(result.outcome).toBe('none');
+  });
+
+  it('legacy row backfilled between the exact and broad reads is reclassified exact, not missed', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', []);
+    // no legacy-provable shape: if the second-read exact reclassification is
+    // lost, neither the exact read nor inference can ever surface this row
+    await mkLegacyRow('backfilled-evaluator-x1', 'evaluator', [parentTaskId]);
+    const originalListTasks = stateManager.listTasks.bind(stateManager);
+    let backfilled = false;
+    stateManager.listTasks = async (filter?: Parameters<RuntimeStateManager['listTasks']>[0]) => {
+      const rows = await originalListTasks(filter);
+      if (!backfilled && filter !== undefined && (filter as { piParentTaskId?: string }).piParentTaskId !== undefined) {
+        backfilled = true;
+        // reconciliation writer lands the parent edge after the exact-read
+        // snapshot but before the broad second read
+        await stateManager.updateTaskDiagnosticJson('backfilled-evaluator-x1', JSON.stringify({
+          [PI_METADATA_KEY]: {
+            dependencyTaskIds: [parentTaskId], channel: 'prompt', timeoutMs: 300000,
+            inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId,
+          },
+        }));
+      }
+      return rows;
+    };
+    try {
+      const result = await lookupParent(parentTaskId);
+      expect(result.outcome).toBe('unique');
+      if (result.outcome === 'unique') expect(result.successor.taskId).toBe('backfilled-evaluator-x1');
+    } finally {
+      stateManager.listTasks = originalListTasks;
+    }
+    expect(backfilled).toBe(true);
+  });
+
+  it('exact successor visible to both the exact read and the broad read is counted once', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', []);
+    await mkTask('exact-evaluator-of-a', 'evaluator', parentTaskId);
+    const result = await lookupParent(parentTaskId);
+    // any double-count through the overlapping scan paths would surface as a self-conflict
+    expect(result.outcome).toBe('unique');
+    if (result.outcome === 'unique') expect(result.successor.taskId).toBe('exact-evaluator-of-a');
+  });
+
+  it('single legacy-inferred successor is added exactly once and resolves unique', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', ['bbbb']);
+    const result = await lookupParent(parentTaskId);
+    expect(result.outcome).toBe('unique');
+    if (result.outcome === 'unique') expect(result.successor.taskId).toBe('corr1-evaluator-r1-bbbb');
+  });
+
+  it('exact valid successor plus two legacy same-parent successors exposes all three ids', async () => {
+    const parentTaskId = await mkLegacyEvaluatorChain('corr1', ['bbbb', 'cccc']);
+    await mkTask('exact-evaluator-of-a', 'evaluator', parentTaskId);
+    const result = await lookupParent(parentTaskId);
+    expect(result.outcome).toBe('conflict');
+    if (result.outcome === 'conflict') {
+      expect(result.conflictingSuccessorTaskIds).toEqual([
+        'corr1-evaluator-r1-bbbb',
+        'corr1-evaluator-r1-cccc',
+        'exact-evaluator-of-a',
+      ]);
+      expect(new Set(result.conflictingSuccessorTaskIds).size).toBe(result.conflictingSuccessorTaskIds.length);
+    }
   });
 });
 

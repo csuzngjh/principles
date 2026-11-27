@@ -39,6 +39,10 @@ import {
   DefaultEvaluatorValidator,
   InternalizationOrchestrator,
   createPITaskDiagnosticJson,
+  // PRI-1299 review fix (P1-1): the ONE core logical-successor creation
+  // authority — spine successors (philosopher/scribe) are created/reused
+  // through it, never through direct stateManager.createTask timestamp rows.
+  createLogicalSuccessorTask,
   mergePITaskMetadata,
   hydratePITaskRecord,
   parsePITaskMetadata,
@@ -354,53 +358,111 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     onProgress('dreamer', 'succeeded');
 
     // ── Stage: philosopher ──
+    // PRI-1299 review fix (P1-1): philosopher/scribe are logical successors in
+    // the pipeline spine, so their creation goes through the ONE core
+    // successor authority (createLogicalSuccessorTask) — identity is
+    // (parentTaskId, taskKind, channel), never the timestamp id shape. The
+    // historical timestamp preferredTaskId is preserved for actual creations;
+    // reruns converge on the persisted successor instead of duplicating it
+    // under a fresh timestamp (no new random ids to bypass uniqueness).
     onProgress('philosopher', 'start');
-    const philosopherTaskId = `${correlation}-philosopher-${Date.now().toString(36)}`;
-    await createInternalizationTask(stateManager, philosopherTaskId, 'philosopher', [dreamerSeedTaskId], channel, timeoutMs, dreamerSeedTaskId);
-    const philosopherRunner = new PhilosopherRunner(
-      { stateManager, runtimeAdapter: agentAdapters.philosopher, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore },
-      runnerOptsFor(agentAdapters.philosopher),
-    );
-    const philosopherResult = await runStage(philosopherRunner, philosopherTaskId, { maxStageRetries, pollIntervalMs });
-    stages.push(stageFromResult('philosopher', philosopherTaskId, philosopherResult));
-    if (philosopherResult.status !== 'succeeded') {
-      onProgress('philosopher', 'failed', philosopherResult.failureReason);
-      return rejectedResult(opts.painId, stages, `philosopher_failed: ${philosopherResult.failureReason ?? philosopherResult.status}`);
+    const philosopherResolution = await resolveRuleHostSuccessor(stateManager, {
+      preferredTaskId: `${correlation}-philosopher-${Date.now().toString(36)}`,
+      successorKind: 'philosopher',
+      parentTaskId: dreamerSeedTaskId,
+      channel,
+      dependencyTaskIds: [dreamerSeedTaskId],
+      timeoutMs,
+    });
+    if (philosopherResolution.action === 'blocked') {
+      stages.push({
+        name: 'philosopher',
+        status: philosopherResolution.stageStatus,
+        ...(philosopherResolution.taskId !== null ? { taskId: philosopherResolution.taskId } : {}),
+        reason: philosopherResolution.reason,
+      });
+      onProgress('philosopher', philosopherResolution.stageStatus, philosopherResolution.reason);
+      return rejectedResult(opts.painId, stages, `philosopher_failed: ${philosopherResolution.reason}`);
+    }
+    const philosopherTaskId = philosopherResolution.taskId;
+    if (philosopherResolution.action === 'reuse') {
+      // Succeeded logical successor — reuse the persisted result without
+      // re-executing (mirrors the dreamer-seed reuse precedent above).
+      stages.push({ name: 'philosopher', taskId: philosopherTaskId, status: 'succeeded', reason: 'successor_reused_succeeded: persisted result reused, not re-executed' });
+    } else {
+      const philosopherRunner = new PhilosopherRunner(
+        { stateManager, runtimeAdapter: agentAdapters.philosopher, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore },
+        runnerOptsFor(agentAdapters.philosopher),
+      );
+      const philosopherResult = await runStage(philosopherRunner, philosopherTaskId, { maxStageRetries, pollIntervalMs });
+      stages.push(stageFromResult('philosopher', philosopherTaskId, philosopherResult));
+      if (philosopherResult.status !== 'succeeded') {
+        onProgress('philosopher', 'failed', philosopherResult.failureReason);
+        return rejectedResult(opts.painId, stages, `philosopher_failed: ${philosopherResult.failureReason ?? philosopherResult.status}`);
+      }
     }
     onProgress('philosopher', 'succeeded');
 
     // ── Stage: scribe ──
+    // PRI-1299 review fix (P1-1): same logical-successor authority as the
+    // philosopher stage. Parentage/dependency anchor on the RESOLVED
+    // philosopher task id — under reuse that is the persisted successor, not
+    // this run's unused timestamp preferred id.
     onProgress('scribe', 'start');
-    const scribeTaskId = `${correlation}-scribe-${Date.now().toString(36)}`;
-    await createInternalizationTask(stateManager, scribeTaskId, 'scribe', [philosopherTaskId], channel, timeoutMs, philosopherTaskId);
-    const scribeRunner = new ScribeRunner(
-      {
-        stateManager, runtimeAdapter: agentAdapters.scribe, eventEmitter, validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }), artifactStore,
-        // I2 — CHAIN STAMPING: stamp the ledger principle UUID at write time
-        // so the artifact reaches the dispatcher gate with a resolvable
-        // identity. backfillScribeIdentity below stays authoritative for the
-        // structured binding outcome (a stamped artifact resolves to
-        // already_bound there).
-        ledgerIdentity: {
-              resolveForCandidate: async (candidateId: string) => {
-                const candidate = await stateManager.getCandidate(candidateId);
-                return new PrincipleTreeLedgerAdapter({ stateDir: `${opts.workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
-              },
-          // PRI-915: availability first — an unreadable ledger must not read
-          // as an unresolved chain.
-          isAvailable: (): boolean =>
-            new PrincipleTreeLedgerAdapter({ stateDir: path.join(opts.workspaceDir, '.state') }).isAvailable(),
-          listForCandidate: (candidateId: string) =>
-            new PrincipleTreeLedgerAdapter({ stateDir: path.join(opts.workspaceDir, '.state') }).listForCandidate(candidateId),
+    const scribeResolution = await resolveRuleHostSuccessor(stateManager, {
+      preferredTaskId: `${correlation}-scribe-${Date.now().toString(36)}`,
+      successorKind: 'scribe',
+      parentTaskId: philosopherTaskId,
+      channel,
+      dependencyTaskIds: [philosopherTaskId],
+      timeoutMs,
+    });
+    if (scribeResolution.action === 'blocked') {
+      stages.push({
+        name: 'scribe',
+        status: scribeResolution.stageStatus,
+        ...(scribeResolution.taskId !== null ? { taskId: scribeResolution.taskId } : {}),
+        reason: scribeResolution.reason,
+      });
+      onProgress('scribe', scribeResolution.stageStatus, scribeResolution.reason);
+      return rejectedResult(opts.painId, stages, `scribe_failed: ${scribeResolution.reason}`);
+    }
+    const scribeTaskId = scribeResolution.taskId;
+    if (scribeResolution.action === 'reuse') {
+      // Succeeded logical successor — reuse the persisted result without
+      // re-executing. Downstream reads (identity binding, ownerRequirementGaps,
+      // adversarial loop input) all resolve artifacts by this scribe task id.
+      stages.push({ name: 'scribe', taskId: scribeTaskId, status: 'succeeded', reason: 'successor_reused_succeeded: persisted result reused, not re-executed' });
+    } else {
+      const scribeRunner = new ScribeRunner(
+        {
+          stateManager, runtimeAdapter: agentAdapters.scribe, eventEmitter, validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }), artifactStore,
+          // I2 — CHAIN STAMPING: stamp the ledger principle UUID at write time
+          // so the artifact reaches the dispatcher gate with a resolvable
+          // identity. backfillScribeIdentity below stays authoritative for the
+          // structured binding outcome (a stamped artifact resolves to
+          // already_bound there).
+          ledgerIdentity: {
+                resolveForCandidate: async (candidateId: string) => {
+                  const candidate = await stateManager.getCandidate(candidateId);
+                  return new PrincipleTreeLedgerAdapter({ stateDir: `${opts.workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
+                },
+            // PRI-915: availability first — an unreadable ledger must not read
+            // as an unresolved chain.
+            isAvailable: (): boolean =>
+              new PrincipleTreeLedgerAdapter({ stateDir: path.join(opts.workspaceDir, '.state') }).isAvailable(),
+            listForCandidate: (candidateId: string) =>
+              new PrincipleTreeLedgerAdapter({ stateDir: path.join(opts.workspaceDir, '.state') }).listForCandidate(candidateId),
+          },
         },
-      },
-      runnerOptsFor(agentAdapters.scribe),
-    );
-    const scribeResult = await runStage(scribeRunner, scribeTaskId, { maxStageRetries, pollIntervalMs });
-    stages.push(stageFromResult('scribe', scribeTaskId, scribeResult));
-    if (scribeResult.status !== 'succeeded') {
-      onProgress('scribe', 'failed', scribeResult.failureReason);
-      return rejectedResult(opts.painId, stages, `scribe_failed: ${scribeResult.failureReason ?? scribeResult.status}`);
+        runnerOptsFor(agentAdapters.scribe),
+      );
+      const scribeResult = await runStage(scribeRunner, scribeTaskId, { maxStageRetries, pollIntervalMs });
+      stages.push(stageFromResult('scribe', scribeTaskId, scribeResult));
+      if (scribeResult.status !== 'succeeded') {
+        onProgress('scribe', 'failed', scribeResult.failureReason);
+        return rejectedResult(opts.painId, stages, `scribe_failed: ${scribeResult.failureReason ?? scribeResult.status}`);
+      }
     }
     onProgress('scribe', 'succeeded');
 
@@ -564,9 +626,11 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // verified stable ledger identity. When the chain's candidate could not be
     // bound to exactly one existing ledger principle, the rule artifact must
     // NOT enter the approvable set, even though the artifact itself (and every
-    // intermediate artifact) is preserved. Recovery is replay: after the
-    // ledger/identity repair, re-running the pipeline re-attempts the binding
-    // idempotently and then publishes.
+    // intermediate artifact) is preserved. Recovery depends on the immutable
+    // artifact: when it already carries the repaired binding, replay publishes
+    // idempotently; when it does not, a controlled Scribe revision must create
+    // the new epoch before re-running — a naive rerun reuses the succeeded
+    // logical successor and never rewrites history.
     let approvalId: string | null = null;
     if (pipelineDecision === 'candidate_ready_for_owner_review' && loopResult.ruleArtifactId) {
       const ruleIdentity = await resolveRuleArtifactIdentity(loopResult.ruleArtifactId, identityBinding, { artifactStore, stateManager, workspaceDir: opts.workspaceDir });
@@ -581,7 +645,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
           ruleArtifactId: loopResult.ruleArtifactId,
           principleArtifactId: loopResult.principleArtifactId,
           approvalId: null,
-          degradationReason: `identity_binding_unverified: ${reasonCode}. Rule artifact NOT enqueued for Owner approval (governance publication boundary). Artifacts preserved; repair the ledger identity and re-run this pipeline to publish.`,
+          degradationReason: `identity_binding_unverified: ${reasonCode}. Rule artifact NOT enqueued for Owner approval (governance publication boundary). Artifacts preserved; repair the ledger identity. If the preserved artifact already carries that binding, re-run this pipeline to publish; otherwise create a controlled Scribe revision first — a naive rerun reuses the immutable artifact.`,
           ...(scribeOwnerRequirementGaps.length > 0 ? { ownerRequirementGaps: scribeOwnerRequirementGaps } : {}),
         };
       }
@@ -735,35 +799,132 @@ async function findDreamerTaskForPain(
   return { status: 'found', taskId: match.taskId, taskStatus: match.status };
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params
-async function createInternalizationTask(
+// ── PRI-1299 review fix (P1-1): logical-successor resolution for the spine ──
+//
+// The synchronous pipeline previously created philosopher/scribe tasks with
+// fresh timestamp ids straight through stateManager.createTask, so every
+// rerun duplicated the logical successor (same parent/kind/channel, new row).
+// All spine successor creation now goes through the ONE core authority
+// (createLogicalSuccessorTask): lookup-first identity on
+// (parentTaskId, successorKind, channel), atomic insert inside the store write
+// transaction, and explicit conflict/malformed/id-conflict outcomes. The
+// timestamp preferredTaskId shape is preserved for real creations — it is the
+// producer's chosen id shape, never the identity evidence.
+
+/**
+ * What the pipeline may do with the resolved logical successor:
+ * - `execute`: created now, or already pending/retry_wait — run it through the
+ *   stage runner under the existing execution semantics (the runner leases
+ *   fresh state per attempt; retry_wait is leasable per the task machine).
+ * - `reuse`: already succeeded — reuse the persisted result without
+ *   re-executing (same precedent as the succeeded dreamer seed).
+ * - `blocked`: the pipeline must not proceed past this successor in this run.
+ */
+type RuleHostSuccessorResolution =
+  | { readonly action: 'execute'; readonly taskId: string }
+  | { readonly action: 'reuse'; readonly taskId: string }
+  | {
+      readonly action: 'blocked';
+      readonly taskId: string | null;
+      readonly stageStatus: 'failed' | 'degraded';
+      readonly reason: string;
+    };
+
+interface ResolveRuleHostSuccessorInput {
+  readonly preferredTaskId: string;
+  readonly successorKind: 'philosopher' | 'scribe';
+  readonly parentTaskId: string;
+  readonly channel: 'prompt' | 'code_tool_hook' | 'defer_archive';
+  readonly dependencyTaskIds: string[];
+  readonly timeoutMs: number;
+}
+
+async function resolveRuleHostSuccessor(
   stateManager: RuntimeStateManager,
-  taskId: string,
-  taskKind: string,
-  dependencyTaskIds: string[],
-  channel: 'prompt' | 'code_tool_hook' | 'defer_archive',
-  timeoutMs: number,
-  parentTaskId?: string,
-): Promise<void> {
-  await stateManager.createTask({
-    taskId,
-    taskKind,
-    status: 'pending',
-    attemptCount: 0,
-    maxAttempts: 3,
-    diagnosticJson: createPITaskDiagnosticJson({
-      dependencyTaskIds,
-      channel,
-      timeoutMs,
+  input: ResolveRuleHostSuccessorInput,
+): Promise<RuleHostSuccessorResolution> {
+  const creation = await createLogicalSuccessorTask({
+    stateManager,
+    parentTaskId: input.parentTaskId,
+    successorKind: input.successorKind,
+    channel: input.channel,
+    preferredTaskId: input.preferredTaskId,
+    metadata: {
+      dependencyTaskIds: input.dependencyTaskIds,
+      channel: input.channel,
+      timeoutMs: input.timeoutMs,
       inputArtifactRefs: [],
       outputArtifactRefs: [],
       // PRI-1293 review fix: the synchronous path must persist the REAL
       // producing parent chain — the lineage gate (correlation-lineage.ts)
       // walks parentTaskId only, so a dependency-only chain is unprovable and
       // the evaluator repair seeder fails closed on legitimate tasks.
-      ...(parentTaskId !== undefined ? { parentTaskId } : {}),
-    }),
+      parentTaskId: input.parentTaskId,
+    },
   });
+  if (creation.outcome === 'created') {
+    return { action: 'execute', taskId: creation.task.taskId };
+  }
+  if (creation.outcome === 'lookup') {
+    // Integrity conflict (multiple successors) or fail-closed malformed
+    // metadata — never silently pick one, never create another row.
+    return {
+      action: 'blocked',
+      taskId: null,
+      stageStatus: 'failed',
+      reason: `${creation.lookup.decision}: ${creation.lookup.detail}`,
+    };
+  }
+  if (creation.outcome === 'id_conflict') {
+    return {
+      action: 'blocked',
+      taskId: null,
+      stageStatus: 'failed',
+      reason: `successor_id_conflict:${creation.allocation.reason}: ${creation.allocation.detail}`,
+    };
+  }
+  // outcome === 'existing' — state semantics per the unified successor contract:
+  const existing = creation.task;
+  switch (existing.status) {
+    case 'succeeded':
+      // Terminal success: the persisted artifacts are the result. Re-executing
+      // would duplicate LLM work and rewrite history — reuse, never re-run.
+      return { action: 'reuse', taskId: existing.taskId };
+    case 'pending':
+    case 'retry_wait':
+      // In-flight-capable states: continue under the existing execution
+      // semantics — the runner leases the task fresh and executes it now.
+      return { action: 'execute', taskId: existing.taskId };
+    case 'leased':
+      // Another executor holds the lease. The synchronous pipeline must NOT
+      // start a second executor (exactly-once execution boundary) and must not
+      // block waiting on a foreign lease — degrade observably; a later run may
+      // proceed once the lease completes or lease-expiry recovery re-queues it.
+      return {
+        action: 'blocked',
+        taskId: existing.taskId,
+        stageStatus: 'degraded',
+        reason: `successor_leased_active: task ${existing.taskId} is leased${typeof existing.leaseOwner === 'string' && existing.leaseOwner.length > 0 ? ` by ${existing.leaseOwner}` : ''} — refusing to start a second executor; retry after the active execution finishes or lease-expiry recovery re-queues the task`,
+      };
+    case 'failed':
+      // Terminal failure is explicit — never silently re-executed (the task
+      // machine does not lease failed rows) and never treated as reusable.
+      return {
+        action: 'blocked',
+        taskId: existing.taskId,
+        stageStatus: 'failed',
+        reason: `successor_failed_terminal: task ${existing.taskId} already reached terminal status failed — the chain cannot advance on a failed successor; revise or repair through the controlled revision path instead of re-running the pipeline`,
+      };
+    case 'needs_human_review':
+      // Owner-attention state: no automatic bypass — not re-executed, not
+      // treated as succeeded. The chain resumes only after human adjudication.
+      return {
+        action: 'blocked',
+        taskId: existing.taskId,
+        stageStatus: 'failed',
+        reason: `successor_needs_human_review: task ${existing.taskId} awaits human review — the pipeline does not bypass owner-attention states automatically; resolve the review first, then re-run`,
+      };
+  }
 }
 
 // ── PRI-510 (DEFECT-004): EvaluatorRunner repair-loop CLI wiring ────────────
@@ -1290,16 +1451,18 @@ async function textPrincipleOnlyResult(
     // Phase A governance publication boundary: an enqueue is only allowed when
     // the artifact's ledger identity binding is VERIFIED. Unverified bindings
     // keep the artifact (and its validation status) but must not create an
-    // Owner approval subject; recovery is a replay after identity repair.
+    // Owner approval subject; recovery is replay only when the preserved
+    // artifact already carries the repaired binding, otherwise a controlled
+    // Scribe revision (never an in-place rewrite of the immutable artifact).
     let approvalId: string | null = null;
     let enqueueNote = '';
     if (!principleArt) {
       enqueueNote = '; approval_enqueue_skipped: no principle artifact from scribe';
     } else if (!isIdentityBindingVerified(identityBinding)) {
       const reasonCode = scribeIdentityReasonCode(identityBinding);
-      enqueueNote = `; approval_enqueue_skipped: identity_binding_unverified (${reasonCode}). Principle artifact preserved; repair the ledger identity and re-run this pipeline to publish.`;
+      enqueueNote = `; approval_enqueue_skipped: identity_binding_unverified (${reasonCode}). Principle artifact preserved; repair the ledger identity. If the artifact already carries that binding, re-run this pipeline to publish; otherwise create a controlled Scribe revision first.`;
     } else if (identityBinding.principleId !== principleArt.sourcePrincipleId) {
-      enqueueNote = `; approval_enqueue_skipped: identity_binding_unverified (identity_conflict: chain resolves to ${identityBinding.principleId}, artifact carries ${principleArt.sourcePrincipleId ?? 'no binding'}). Principle artifact preserved; repair the ledger identity and re-run this pipeline to publish.`;
+      enqueueNote = `; approval_enqueue_skipped: identity_binding_unverified (identity_conflict: chain resolves to ${identityBinding.principleId}, artifact carries ${principleArt.sourcePrincipleId ?? 'no binding'}). Principle artifact preserved; repair the ledger identity. If the artifact already carries that binding, re-run this pipeline to publish; otherwise create a controlled Scribe revision first.`;
     } else {
       try {
         const current = await resolveLedgerActivationId(principleArt, {

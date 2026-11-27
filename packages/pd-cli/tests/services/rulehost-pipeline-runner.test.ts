@@ -21,7 +21,7 @@ import { runRuleHostPipeline, backfillScribeIdentity, readScribeOwnerRequirement
 import { handleRuntimeInternalizationEnqueueSuccessors } from '../../src/commands/runtime-internalization-enqueue-successors.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime';
-import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId, hydratePITaskRecord } from '@principles/core/runtime';
+import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId, hydratePITaskRecord, reopenTaskForRevision } from '@principles/core/runtime';
 import { addPrincipleToLedger, updatePrinciple, appendReuseEvidence } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
@@ -1328,7 +1328,7 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
     }
   }, 60_000);
 
-  it('replay after identity repair publishes: seed ledger mid-flight is unnecessary — repair-then-rerun enqueues (§9.1.8)', async () => {
+  it('replay after identity repair publishes through a CONTROLLED scribe revision — naive rerun reuses the succeeded successor (§9.1.8 + PRI-1299 P1-1)', async () => {
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
     await sm.initialize();
@@ -1342,22 +1342,74 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
       onStoreReady: (store) => { adapter1.artifactStore = store; },
     });
     expect(refused.approvalId).toBeNull();
+    expect(refused.scribeTaskId).not.toBeNull();
+    const run1PhilosopherTaskId = refused.stages.find((s) => s.name === 'philosopher')?.taskId;
+    expect(run1PhilosopherTaskId).toBeTruthy();
 
     // Identity repair: the ledger entry for the candidate appears (e.g. intake
-    // completed or the ledger was restored). Replay publishes.
+    // completed or the ledger was restored).
     seedLedger(tmpDir, '10420000-0000-4000-8000-000000000902', 'cand-repair');
+
+    // PRI-1299 (P1-1): a NAIVE rerun no longer republishes — the succeeded
+    // scribe is the logical successor for (parent, kind, channel) and is
+    // reused without re-execution, so the immutable unstamped artifact stays
+    // unpublished. The artifact's own nextAction names the designed recovery:
+    // a new controlled Scribe revision.
+    const naiveAdapter = makeAdapter();
+    const naiveRerun = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-repair', runtimeAdapter: naiveAdapter,
+      channel: 'prompt', pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { naiveAdapter.artifactStore = store; },
+    });
+    expect(naiveRerun.approvalId).toBeNull();
+    expect(naiveRerun.degradationReason ?? '').toContain('identity_receipt_missing');
+    // Nothing re-executed in the naive rerun: dreamer/philosopher/scribe all
+    // converged on the succeeded persisted successors.
+    expect(naiveAdapter.startRunCalls).toEqual([]);
+    expect(naiveRerun.principleArtifactId).toBe(refused.principleArtifactId);
+
+    // Controlled recovery: reopen the scribe for revision through the ONE core
+    // revision authority (the same function the production revision paths use).
+    // The reopened successor returns to pending — executable again, same task
+    // identity, zero duplication.
+    const sm2 = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm2.initialize();
+    try {
+      const reopened = await reopenTaskForRevision(sm2, refused.scribeTaskId!, { revisionCauseId: 'owner-identity-repair-test' });
+      expect(reopened.ok, JSON.stringify(reopened)).toBe(true);
+    } finally {
+      await sm2.close();
+    }
+
     const adapter2 = makeAdapter();
-    // Run 2 RESUMES run 1's succeeded dreamer seed (no new dreamer startRun) —
-    // pre-register that call so the scripted philosopher can resolve its
-    // sourceDreamerArtifactId lineage from the shared store.
+    // Run 2 RESUMES run 1's succeeded dreamer seed and REUSES the succeeded
+    // philosopher successor (no new startRun for either) — pre-register both
+    // calls so the scripted scribe resolves its artifact lineage from the
+    // shared store.
     adapter2.startRunCalls.push({ taskId: 'dreamer-repair' });
+    adapter2.startRunCalls.push({ taskId: run1PhilosopherTaskId! });
     const published = await runRuleHostPipeline({
       workspaceDir: tmpDir, painId: 'pain-repair', runtimeAdapter: adapter2,
       channel: 'prompt', pollIntervalMs: 5, timeoutMs: 1000,
       onStoreReady: (store) => { adapter2.artifactStore = store; },
     });
     expect(published.approvalId, JSON.stringify(published, null, 1)).not.toBeNull();
-    expect(published.principleArtifactId).not.toBe(refused.principleArtifactId);
+    // The philosopher was reused (no re-execution); the scribe re-executed
+    // exactly once — the controlled revision, not a duplicate successor.
+    expect(adapter2.startRunCalls.filter((c) => c.taskId === run1PhilosopherTaskId)).toHaveLength(1); // pre-registration only
+    expect(adapter2.startRunCalls.filter((c) => c.taskId === refused.scribeTaskId)).toHaveLength(1);
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const tasks = await verify.listTasks();
+      expect(tasks.filter((t) => t.taskKind === 'philosopher')).toHaveLength(1);
+      expect(tasks.filter((t) => t.taskKind === 'scribe')).toHaveLength(1);
+      // The republished artifact carries the repaired ledger identity.
+      const artifact = await verify.piArtifactStore.getArtifactById(published.principleArtifactId!);
+      expect(artifact?.sourcePrincipleId).toBe('10420000-0000-4000-8000-000000000902');
+    } finally {
+      await verify.close();
+    }
     // Exactly one ledger principle exists — the pipeline never creates one.
     expect(await ledgerPrincipleCount(tmpDir)).toBe(1);
   }, 60_000);

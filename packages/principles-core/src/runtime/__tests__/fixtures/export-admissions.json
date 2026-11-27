@@ -714,6 +714,18 @@
     },
     {
       "entry": "./runtime",
+      "symbol": "createLogicalSuccessorTask",
+      "kind": "value",
+      "addedIn": "PRI-1299",
+      "expiresAt": "2027-11-26",
+      "consumers": [
+        "packages/pd-cli/src/services/rulehost-pipeline-runner.ts"
+      ],
+      "whyNotInternal": "RuleHost is a production creator of logical successor tasks. The final PRI-1299 review requires its Philosopher/Scribe creation path to use the same atomic lookup-plus-insert authority as Orchestrator and adversarial-loop creation; keeping the function core-internal would force pd-cli either to bypass the authority or duplicate successor identity arbitration.",
+      "alternativeConsidered": "A narrower orchestrator convenience wrapper was rejected because RuleHost already owns RuntimeStateManager and must supply producer-specific preferred timestamp ids and metadata; exporting only ID allocation or lookup would still leave the read-check-write sequence non-atomic in pd-cli. Duplicating the algorithm in pd-cli is precisely the second successor system this PR forbids."
+    },
+    {
+      "entry": "./runtime",
       "symbol": "planSuccessorIdAllocation",
       "kind": "value",
       "addedIn": "PRI-1299",
@@ -722,7 +734,7 @@
         "packages/pd-cli/src/commands/runtime-internalization-enqueue-successors.ts"
       ],
       "whyNotInternal": "The enqueue-successors dry-run preview must classify preferred/fallback successor id occupancy with exactly the same fail-closed rules as atomic confirm creation. Keeping this classifier core-internal would force pd-cli to duplicate identity-occupancy adjudication and recreate the dry-run/confirm drift this PR eliminates.",
-      "alternativeConsidered": "Leaving the classifier unexported and duplicating occupant inspection in pd-cli was rejected; exporting the whole creation authority was narrowed to this read-only planning seam."
+      "alternativeConsidered": "Leaving the classifier unexported and duplicating occupant inspection in pd-cli was rejected. The separately exported creation authority cannot substitute for this seam in dry-run because creation performs writes; preview needs the same occupancy classification as a read-only planner."
     }
   ],
   "removals": [
