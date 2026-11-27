@@ -435,6 +435,12 @@ function clearPending(
   }
 }
 
+function findPendingEntry(pdHome: string, workspaceDir: string): PendingRegistryEntry | undefined {
+  const { entries } = readPendingRegistry(pdHome);
+  const identity = canonicalIdentity(workspaceDir);
+  return entries.find((entry) => canonicalIdentity(entry.workspaceDir) === identity);
+}
+
 function limitationsFor(host: HostSelection, readiness: ProvisioningReadiness): string[] {
   const limitations: string[] = [];
   if (host === 'none') {
@@ -601,6 +607,19 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     }
   }
 
+  const pendingHost = input.resume === true
+    ? findPendingEntry(input.pdHome, input.workspaceDir)?.host
+    : undefined;
+  const guardHosts = [input.host];
+  if (pendingHost !== undefined && pendingHost !== input.host) guardHosts.push(pendingHost);
+  if (input.resume === true && guardHosts.some((host) => host === 'codex' || host === 'workbuddy' || host === 'all')) {
+    return recordPending('legacy_consumer_unproven', {
+      readiness: 'skipped',
+      firstCycle: notAttempted('legacy_consumer_unproven'),
+      nextAction: `controlled_handover: this deferred resume cannot prove that every legacy Companion-managed consumer for host "${guardHosts.join('+')}" has quiesced, so ownership was NOT handed over. Use the controlled handover path once strict persisted quiesce evidence is available; process absence, a sent drain request, PID disappearance, memory events, and ordinary logs are not proof.`,
+    });
+  }
+
   const readiness = await probeReadiness(input);
   if (readiness.readiness === 'failed') {
     return recordPending('readiness_failed', {
@@ -759,9 +778,7 @@ export function readAllPendingProvisioning(pdHome: string): {
  * caller then leaves the workspace in legacy ownership.
  */
 export function readPendingProvisioningEvidence(pdHome: string, workspaceDir: string): PendingProvisioningMarker | null {
-  const { entries } = readPendingRegistry(pdHome);
-  const identity = canonicalIdentity(workspaceDir);
-  const found = entries.find((entry) => canonicalIdentity(entry.workspaceDir) === identity);
+  const found = findPendingEntry(pdHome, workspaceDir);
   return found === undefined
     ? null
     : {
