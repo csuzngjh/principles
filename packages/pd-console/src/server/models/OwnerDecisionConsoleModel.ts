@@ -14,11 +14,12 @@ import {
   SqliteConnection,
   SqlitePIArtifactStore,
   SqliteApprovalQueueStore,
+  SqliteTaskStore,
   collectOwnerDecisionFacts,
   deriveOwnerDecisionCapability,
   buildOwnerDecisionReview,
 } from '@principles/core/runtime';
-import type { OwnerDecisionReviewSnapshot, TaskRecord } from '@principles/core/runtime';
+import type { OwnerDecisionReviewSnapshot, TaskRecord, TaskStoreFilter } from '@principles/core/runtime';
 import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import type { PIArtifactStore } from '@principles/core/runtime';
 import { ActivationsConsoleModel } from './ActivationsConsoleModel.js';
@@ -176,6 +177,7 @@ function makeRowReader(db: { prepare: (sql: string) => { get: (id: string) => un
 interface TaskDecisionItemDependencies {
   readonly artifactStore: PIArtifactStore;
   readonly readTaskRow: (taskId: string) => TaskRecord | null;
+  readonly listTaskRows: (filter?: TaskStoreFilter) => Promise<TaskRecord[]>;
 }
 
 /** 单任务 capability → 决策条目（不 eligible → null，INV-01）。 */
@@ -191,6 +193,13 @@ async function deriveTaskDecisionItem(
         return dependencies.readTaskRow(taskId);
       } catch {
         return null;
+      }
+    },
+    listTasks: async (filter?: TaskStoreFilter): Promise<TaskRecord[]> => {
+      try {
+        return await dependencies.listTaskRows(filter);
+      } catch {
+        return [];
       }
     },
     listArtifactsBySourceTask: async (taskId: string) => {
@@ -322,6 +331,7 @@ export class OwnerDecisionConsoleModel {
     try {
       const db = conn.getDb();
       const artifactStore: PIArtifactStore = new SqlitePIArtifactStore(conn);
+      const taskStore = new SqliteTaskStore(conn);
       const items: OwnerDecisionItem[] = [];
       // rc-9：被跳过/读取失败的条目必须可计数、可归因，不能只体现在"条数变少"。
       const issueByReason = new Map<OwnerDecisionReadIssue['reason'], MutableOwnerDecisionReadIssue>();
@@ -367,6 +377,7 @@ export class OwnerDecisionConsoleModel {
           {
             artifactStore,
             readTaskRow: makeRowReader(db),
+            listTaskRows: (filter) => taskStore.listTasks(filter),
           },
         );
         if (item) items.push(item);
@@ -493,6 +504,7 @@ export class OwnerDecisionConsoleModel {
     try {
       const db = conn.getDb();
       const artifactStore: PIArtifactStore = new SqlitePIArtifactStore(conn);
+      const taskStore = new SqliteTaskStore(conn);
       const ids = new Set<string>();
       let rows: Record<string, unknown>[] = [];
       try {
@@ -505,7 +517,11 @@ export class OwnerDecisionConsoleModel {
       for (const row of rows) {
         const task = rowToTaskRecord(row);
         if (!task) continue;
-        const item = await deriveTaskDecisionItem(task, { artifactStore, readTaskRow: makeRowReader(db) });
+        const item = await deriveTaskDecisionItem(task, {
+          artifactStore,
+          readTaskRow: makeRowReader(db),
+          listTaskRows: (filter) => taskStore.listTasks(filter),
+        });
         if (item) ids.add(task.taskId);
       }
       return ids;
