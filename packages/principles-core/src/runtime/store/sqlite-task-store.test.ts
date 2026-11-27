@@ -202,4 +202,70 @@ describe('SqliteTaskStore', () => {
       expect(deleted).toBe(false);
     });
   });
+
+  describe('write transaction admission', () => {
+    async function runIndependentWriteAcrossOuterRollback(write: () => Promise<unknown>): Promise<void> {
+      let markStarted!: () => void;
+      let releaseTx!: () => void;
+      const started = new Promise<void>((resolve) => { markStarted = resolve; });
+      const release = new Promise<void>((resolve) => { releaseTx = resolve; });
+      const tx = store.withWriteTransaction(async () => {
+        markStarted();
+        await release;
+        throw new Error('force outer rollback');
+      });
+      const txFailure = expect(tx).rejects.toThrow('force outer rollback');
+      await started;
+      const observedWrite = write().then(
+        () => 'fulfilled' as const,
+        () => 'rejected' as const,
+      );
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+      releaseTx();
+      await txFailure;
+      expect(await observedWrite).toBe('fulfilled');
+    }
+
+    it('does not roll back an independent updateTask invoked during a failed transaction', async () => {
+      await store.createTask(makeTaskInput({ taskId: 'independent-update' }));
+      await runIndependentWriteAcrossOuterRollback(() => store.updateTask('independent-update', { attemptCount: 7 }));
+      expect((await store.getTask('independent-update'))?.attemptCount).toBe(7);
+    });
+
+    it('does not roll back independent create/delete/CAS writes invoked during a failed transaction', async () => {
+      await store.createTask(makeTaskInput({ taskId: 'independent-delete' }));
+      await store.createTask(makeTaskInput({ taskId: 'independent-cas' }));
+
+      await runIndependentWriteAcrossOuterRollback(async () => {
+        await store.createTask(makeTaskInput({ taskId: 'independent-created' }));
+      });
+      expect(await store.getTask('independent-created')).not.toBeNull();
+
+      await runIndependentWriteAcrossOuterRollback(async () => {
+        await store.deleteTask('independent-delete');
+      });
+      expect(await store.getTask('independent-delete')).toBeNull();
+
+      await runIndependentWriteAcrossOuterRollback(async () => {
+        await store.updateTaskIfDiagnosticJsonUnchanged('independent-cas', null, { diagnosticJson: '{"v":1}' });
+      });
+      expect((await store.getTask('independent-cas'))?.diagnosticJson).toBe('{"v":1}');
+    });
+
+    it('nested same-owner writes join the outer transaction and roll back with it', async () => {
+      await store.createTask(makeTaskInput({ taskId: 'owner-outer' }));
+      await store.createTask(makeTaskInput({ taskId: 'owner-inner' }));
+
+      await expect(store.withWriteTransaction(async () => {
+        await store.updateTask('owner-outer', { attemptCount: 1 });
+        await store.withWriteTransaction(async () => {
+          await store.updateTask('owner-inner', { attemptCount: 1 });
+        });
+        throw new Error('force owner rollback');
+      })).rejects.toThrow('force owner rollback');
+
+      expect((await store.getTask('owner-outer'))?.attemptCount).toBe(0);
+      expect((await store.getTask('owner-inner'))?.attemptCount).toBe(0);
+    });
+  });
 });

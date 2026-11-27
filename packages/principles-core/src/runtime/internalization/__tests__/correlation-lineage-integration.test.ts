@@ -437,7 +437,7 @@ describe('§3.6.3 (6) — repair → 来源 evaluator reopen 继承同一 correl
         return null;
       }
       return originalCas(...args);
-    }) as RuntimeStateManager['updateTaskIfDiagnosticJsonUnchanged'];
+    });
 
     const result = await orchestrator.commitNextTaskProposal(repairId);
     expect(result).toEqual({

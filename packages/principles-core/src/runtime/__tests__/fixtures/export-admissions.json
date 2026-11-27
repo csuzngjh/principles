@@ -4,19 +4,6 @@
   "admissions": [
     {
       "entry": "./runtime",
-      "symbol": "validateAndBackfillRepairLineage",
-      "kind": "value",
-      "addedIn": "PRI-1300",
-      "expiresAt": "2027-11-26",
-      "consumers": [
-        "packages/host-runtime/src/internalization-consumer-governance.ts",
-        "packages/pd-cli/src/services/rulehost-pipeline-runner.ts"
-      ],
-      "whyNotInternal": "PRI-1300: the two repair seeders (host-runtime + pd-cli) must share the ONE write-side lineage validation + six-precondition CAS backfill implementation; the pre-PRI-1300 copies of hydrate+merge+CAS in each host were the exact collaborator-drift class this uplift removes, and a core-internal symbol cannot be reached across the package boundary without a deep-import bypass.",
-      "alternativeConsidered": "Keeping per-host hydrate+merge+CAS copies around a shared verifyRepairTaskIdentity was rejected (the write side is where the copies drifted); a narrow subpath export was rejected because the capability already travels with the ./runtime repair-lineage symbols its consumers import."
-    },
-    {
-      "entry": "./runtime",
       "symbol": "createDiagnosticianRunnerBundle",
       "kind": "value",
       "addedIn": "PRI-1292",
@@ -665,6 +652,18 @@
     },
     {
       "entry": "./runtime",
+      "symbol": "lookupSuccessorByParent",
+      "kind": "value",
+      "addedIn": "PRI-1299",
+      "expiresAt": "2027-11-26",
+      "consumers": [
+        "packages/pd-cli/src/commands/runtime-internalization-enqueue-successors.ts"
+      ],
+      "whyNotInternal": "The enqueue-successors dry-run preview must consume the exact same successor identity and multi-successor integrity adjudication as commitNextTaskProposal; keeping the lookup core-internal forces pd-cli to retain a second parent/kind/channel matcher, the precise drift class PRI-1299 removes.",
+      "alternativeConsidered": "A read-only orchestrator convenience method was rejected as redundant surface: the lookup is a pure read-only query over RuntimeStateManager and pd-cli already holds that manager, so a free function is the narrower cross-package seam. Returning only commit results was rejected because dry-run must not perform writes."
+    },
+    {
+      "entry": "./runtime",
       "symbol": "planLegacyLineageResolution",
       "kind": "value",
       "addedIn": "PRI-1293",
@@ -686,6 +685,43 @@
       ],
       "whyNotInternal": "The plan shape crosses the package boundary with planLegacyLineageResolution; consumers branch on backfillEdges/parentEdgeCount without re-declaring the union.",
       "alternativeConsidered": "Structural copies in pd-cli would drift when the plan gains fields."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "createLogicalSuccessorTask",
+      "kind": "value",
+      "addedIn": "PRI-1299",
+      "expiresAt": "2027-11-26",
+      "consumers": [
+        "packages/pd-cli/src/services/rulehost-pipeline-runner.ts"
+      ],
+      "whyNotInternal": "RuleHost is a production creator of logical successor tasks. The final PRI-1299 review requires its Philosopher/Scribe creation path to use the same atomic lookup-plus-insert authority as Orchestrator and adversarial-loop creation; keeping the function core-internal would force pd-cli either to bypass the authority or duplicate successor identity arbitration.",
+      "alternativeConsidered": "A narrower orchestrator convenience wrapper was rejected because RuleHost already owns RuntimeStateManager and must supply producer-specific preferred timestamp ids and metadata; exporting only ID allocation or lookup would still leave the read-check-write sequence non-atomic in pd-cli. Duplicating the algorithm in pd-cli is precisely the second successor system this PR forbids."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "planSuccessorIdAllocation",
+      "kind": "value",
+      "addedIn": "PRI-1299",
+      "expiresAt": "2027-11-26",
+      "consumers": [
+        "packages/pd-cli/src/commands/runtime-internalization-enqueue-successors.ts"
+      ],
+      "whyNotInternal": "The enqueue-successors dry-run preview must classify preferred/fallback successor id occupancy with exactly the same fail-closed rules as atomic confirm creation. Keeping this classifier core-internal would force pd-cli to duplicate identity-occupancy adjudication and recreate the dry-run/confirm drift this PR eliminates.",
+      "alternativeConsidered": "Leaving the classifier unexported and duplicating occupant inspection in pd-cli was rejected. The separately exported creation authority cannot substitute for this seam in dry-run because creation performs writes; preview needs the same occupancy classification as a read-only planner."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "validateAndBackfillRepairLineage",
+      "kind": "value",
+      "addedIn": "PRI-1300",
+      "expiresAt": "2027-11-26",
+      "consumers": [
+        "packages/host-runtime/src/internalization-consumer-governance.ts",
+        "packages/pd-cli/src/services/rulehost-pipeline-runner.ts"
+      ],
+      "whyNotInternal": "PRI-1300: the two repair seeders (host-runtime + pd-cli) must share the ONE write-side lineage validation + six-precondition CAS backfill implementation; the pre-PRI-1300 copies of hydrate+merge+CAS in each host were the exact collaborator-drift class this uplift removes, and a core-internal symbol cannot be reached across the package boundary without a deep-import bypass.",
+      "alternativeConsidered": "Keeping per-host hydrate+merge+CAS copies around a shared verifyRepairTaskIdentity was rejected (the write side is where the copies drifted); a narrow subpath export was rejected because the capability already travels with the ./runtime repair-lineage symbols its consumers import."
     }
   ],
   "removals": [

@@ -173,6 +173,7 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
       listTasks: vi.fn().mockResolvedValue([]),
       getTask: vi.fn().mockResolvedValue(null),
       acquireLease: vi.fn(),
+      withWriteTransaction: vi.fn().mockImplementation(async (fn: () => Promise<unknown>) => fn()),
       createTask: vi.fn().mockImplementation(async (input: { taskId: string; taskKind: string; status?: string; diagnosticJson?: string }) => makeTask({
         taskId: input.taskId, taskKind: input.taskKind, status: 'pending',
       })),

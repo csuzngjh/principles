@@ -336,7 +336,7 @@ export function describePublicationOutcome(result: RuleHostPipelineResult): {
   if (identityBlocked) {
     return {
       blocked: true,
-      nextAction: 'Identity binding could not be verified, so the artifact was NOT enqueued for Owner review. Artifacts are preserved; repair the ledger identity for this candidate and re-run this pipeline to publish.',
+      nextAction: 'Identity binding could not be verified, so the artifact was NOT enqueued for Owner review. Artifacts are preserved; repair the ledger identity for this candidate. If the preserved artifact already carries that binding, re-run this pipeline to publish; otherwise create a controlled Scribe revision first.',
     };
   }
   return { blocked: false, nextAction: '' };

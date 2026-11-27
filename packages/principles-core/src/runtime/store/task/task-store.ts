@@ -49,6 +49,16 @@ export interface TaskStoreFilter {
    * a host-scoped bounded scan only spends its window on its own candidates.
    */
   diagnosticHostKind?: string;
+  /**
+   * Exact PI metadata parent task id filter (`$.pi_metadata.parentTaskId`).
+   * Missing/null values never match, including when the filter is an empty string.
+   */
+  piParentTaskId?: string;
+  /**
+   * Exact PI metadata channel filter (`$.pi_metadata.channel`).
+   * Missing/null values never match, including when the filter is an empty string.
+   */
+  piChannel?: string;
 }
 
 /** Narrow patch type — only the fields that are mutable in practice.
@@ -122,6 +132,14 @@ export interface TaskStore {
 
   /** List tasks with optional filter. */
   listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]>;
+
+  /**
+   * Run a logical read-check-write unit inside the store's write-serializing
+   * transaction boundary. SQLite implementations use BEGIN IMMEDIATE so
+   * independent connections cannot interleave lookup and insert. Nested calls
+   * join the already-active unit; implementations serialize top-level units.
+   */
+  withWriteTransaction<T>(fn: () => Promise<T>): Promise<T>;
 
   /** Delete a task by ID. Returns true if a row was deleted. */
   deleteTask(taskId: string): Promise<boolean>;

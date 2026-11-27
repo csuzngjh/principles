@@ -190,7 +190,7 @@ export interface HumanReviewContext {
  */
 export type OwnerResolutionAction = 'accept_current' | 'revise_once' | 'reject_current';
 
-export type OwnerResolutionStatus = 'pending' | 'applied';
+export type OwnerResolutionStatus = 'pending' | 'applied' | 'superseded';
 
 /**
  * task-scoped Owner authority log (PRI-629)。不是第二状态源: 它只记录 Owner
@@ -209,6 +209,9 @@ export interface OwnerResolutionRecord {
   readonly credentialId?: string;
   readonly decidedAt: string;
   readonly appliedAt?: string;
+  /** Present when a pending resolution was retired because its input artifact was superseded before application. */
+  readonly supersededAt?: string;
+  readonly supersededReason?: string;
   readonly sourceRunId: string;
   readonly sourceArtifactId: string;
   readonly sourceArtifactHash: string;
@@ -1074,11 +1077,13 @@ function isValidOwnerResolutions(value: unknown): value is readonly OwnerResolut
     const r = item as Record<string, unknown>;
     if (!isNonEmptyString(r.resolutionId) || !isNonEmptyString(r.reviewKey)) return false;
     if (typeof r.action !== 'string' || !OWNER_RESOLUTION_ACTIONS.has(r.action)) return false;
-    if (r.status !== 'pending' && r.status !== 'applied') return false;
+    if (r.status !== 'pending' && r.status !== 'applied' && r.status !== 'superseded') return false;
     if (!isNonEmptyString(r.ownerId)) return false;
     if (r.credentialId !== undefined && !isNonEmptyString(r.credentialId)) return false;
     if (!isNonEmptyString(r.decidedAt)) return false;
     if (r.appliedAt !== undefined && !isNonEmptyString(r.appliedAt)) return false;
+    if (r.supersededAt !== undefined && !isNonEmptyString(r.supersededAt)) return false;
+    if (r.supersededReason !== undefined && !isNonEmptyString(r.supersededReason)) return false;
     if (!isNonEmptyString(r.sourceRunId)) return false;
     if (!isNonEmptyString(r.sourceArtifactId)) return false;
     if (!isNonEmptyString(r.sourceArtifactHash)) return false;
