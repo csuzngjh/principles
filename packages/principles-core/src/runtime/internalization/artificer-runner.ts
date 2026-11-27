@@ -1168,19 +1168,49 @@ ${context.revisionFeedback}
     };
   }
 
+  /** Resolve the current scribe input using the same revision authority as fresh execution. */
+  private async resolveCurrentScribeInputArtifactId(task: TaskRecord): Promise<string> {
+    const piTask = hydratePITaskRecord(task);
+    if (!piTask) throw new PDRuntimeError('input_invalid', `artificer task ${task.taskId} metadata is malformed`);
+    let scribeDependencyCount = 0;
+    let artifactId: string | null = null;
+    for (const dependencyTaskId of piTask.dependencyTaskIds) {
+      const dependency = await this.stateManager.getTask(dependencyTaskId);
+      if (!dependency || dependency.taskKind !== 'scribe') continue;
+      scribeDependencyCount += 1;
+      if (dependency.status !== 'succeeded') {
+        throw new PDRuntimeError('input_invalid', `scribe dependency ${dependencyTaskId} is not succeeded (status: ${dependency.status})`);
+      }
+      const artifacts = await this.artifactStore.listBySourceTaskId(dependencyTaskId);
+      const artifact = selectTaskRevisionArtifact(dependency, artifacts, hydratePITaskRecord(dependency)?.revisionCount ?? 0);
+      if (!artifact) throw new PDRuntimeError('input_invalid', `current scribe artifact missing for ${dependencyTaskId}`);
+      ({ artifactId } = artifact);
+    }
+    if (scribeDependencyCount !== 1 || !artifactId) {
+      throw new PDRuntimeError('input_invalid', `artificer task ${task.taskId} must have exactly one scribe dependency (found ${scribeDependencyCount})`);
+    }
+    return artifactId;
+  }
+
   /**
    * Recover an already-succeeded execution from durable evidence. This is the
    * terminal-task counterpart of run(): it never invokes the runtime and is
    * fail-closed when the persisted run/output/artifact evidence is incomplete.
    */
   async recoverSucceededResult(task: TaskRecord): Promise<SucceededRunnerRecovery<ArtificerRuleOutput>> {
+    let currentScribeArtifactId: string;
+    try {
+      currentScribeArtifactId = await this.resolveCurrentScribeInputArtifactId(task);
+    } catch (err) {
+      return { outcome: 'invalid', reason: `current_input_unavailable:${err instanceof Error ? err.message : String(err)}` };
+    }
     return recoverSucceededPeerRunnerResult<ArtificerRuleOutput>({
       task,
       expectedTaskKind: 'artificer',
       resultRefPrefix: this.config.resultRefPrefix,
       stateManager: this.stateManager,
       artifactStore: this.artifactStore,
-      validateOutput: (output, taskId) => this.validator.validate(output, taskId),
+      validateOutput: (output, taskId) => this.validator.validate(output, taskId, currentScribeArtifactId),
       verifyRecoveredEvidence: ({ output, artifactOutput }) => (
         JSON.stringify(output) === JSON.stringify(artifactOutput)
           ? null

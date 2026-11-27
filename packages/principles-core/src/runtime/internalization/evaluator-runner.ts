@@ -46,7 +46,7 @@ import { canonicalLedgerPrincipleId } from '../activation/low-risk-writers.js';
 import { assessArtificerCodeBearing } from './artificer-code-bearing.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, artificerRepairTaskId, parseLastValidatorErrors, isFreshForNextAttempt, type RepairPayload, type PITaskMetadata, type RunnerDecision, type HumanReviewContext, type LastValidatorErrors } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, artificerRepairTaskId, parseLastValidatorErrors, isFreshForNextAttempt, type RepairPayload, type PITaskMetadata, type RunnerDecision, type RunnerCompletionIntent, type HumanReviewContext, type LastValidatorErrors } from './pitask-metadata.js';
 import {
   HUMAN_REVIEW_REASON,
   planOwnerVerdictOverrideResume,
@@ -932,6 +932,78 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   /**
+   * Resolve the current input artifact an evaluator would read if it were
+   * built now. Recovery and completion-intent resume must use the same input
+   * authority as fresh execution; internally consistent stale output is not
+   * evidence for the current artifact epoch.
+   */
+  private async resolveCurrentArtificerInput(task: TaskRecord): Promise<{
+    readonly artifactId: string;
+    readonly contentJson: string;
+    readonly repairPayload?: RepairPayload;
+  }> {
+    const piTask = hydratePITaskRecord(task);
+    if (!piTask) {
+      throw new PDRuntimeError('input_invalid', `evaluator task ${task.taskId} metadata is malformed`);
+    }
+    let selected: {
+      artifactId: string;
+      contentJson: string;
+      repairPayload?: RepairPayload;
+    } | null = null;
+    let artificerDependencyCount = 0;
+    for (const dependencyTaskId of piTask.dependencyTaskIds) {
+      const dependency = await this.stateManager.getTask(dependencyTaskId);
+      if (!dependency || dependency.taskKind !== 'artificer') continue;
+      artificerDependencyCount += 1;
+      const dependencyPi = hydratePITaskRecord(dependency);
+      if (!dependencyPi) {
+        throw new PDRuntimeError('input_invalid', `artificer dependency ${dependencyTaskId} metadata is malformed`);
+      }
+      if (dependency.status !== 'succeeded') {
+        throw new PDRuntimeError('input_invalid', `artificer dependency ${dependencyTaskId} is not succeeded (status: ${dependency.status})`);
+      }
+      const artifacts = await this.artifactStore.listBySourceTaskId(dependencyTaskId);
+      let artifact;
+      try {
+        artifact = selectTaskRevisionArtifact(dependency, artifacts, dependencyPi.revisionCount ?? 0);
+      } catch (err) {
+        throw new PDRuntimeError('input_invalid', `current artificer revision artifact unavailable for ${dependencyTaskId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (!artifact) {
+        throw new PDRuntimeError('input_invalid', `current artificer artifact missing for ${dependencyTaskId}`);
+      }
+      selected = {
+        artifactId: artifact.artifactId,
+        contentJson: artifact.contentJson,
+        ...(dependencyPi.repairPayload !== undefined ? { repairPayload: dependencyPi.repairPayload } : {}),
+      };
+    }
+    if (artificerDependencyCount !== 1 || !selected) {
+      throw new PDRuntimeError('input_invalid', `evaluator task ${task.taskId} must have exactly one artificer dependency (found ${artificerDependencyCount})`);
+    }
+    return selected;
+  }
+
+  /**
+   * A completion intent is recovery authority only for the input artifact it
+   * actually evaluated. If an upstream revision advanced before the terminal
+   * write completed, the incomplete evaluation must not be finalized as a
+   * verdict for the new artifact; returning false lets the normal execution
+   * path build fresh context and overwrite the nonterminal intent.
+   */
+  private async completionIntentMatchesCurrentInput(
+    taskId: string,
+    intent: RunnerCompletionIntent,
+  ): Promise<boolean> {
+    const task = await this.stateManager.getTask(taskId);
+    if (!task) throw new PDRuntimeError('storage_unavailable', `task ${taskId} missing during completion-intent input validation`);
+    const currentInput = await this.resolveCurrentArtificerInput(task);
+    const output = await this.recoverIntentOutput(taskId, intent.sourceRunId, intent.decision);
+    return output.sourceArtificerArtifactId === currentInput.artifactId;
+  }
+
+  /**
    * Recover an already-succeeded evaluator execution from durable evidence.
    * The run output is authoritative for execution-time replay evidence; the
    * principle artifact may legitimately lack a late best-effort replay update,
@@ -939,13 +1011,27 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * requiring byte equality.
    */
   async recoverSucceededResult(task: TaskRecord): Promise<SucceededRunnerRecovery<EvaluatorOutputV1>> {
+    let currentInput: Awaited<ReturnType<EvaluatorRunner['resolveCurrentArtificerInput']>>;
+    try {
+      currentInput = await this.resolveCurrentArtificerInput(task);
+    } catch (err) {
+      return { outcome: 'invalid', reason: `current_input_unavailable:${err instanceof Error ? err.message : String(err)}` };
+    }
+    let convergence: Parameters<EvaluatorValidator['validate']>[3];
+    if (currentInput.repairPayload) {
+      const previousEvaluation = await this.resolvePreviousEvaluation(task.taskId, currentInput.repairPayload, currentInput.contentJson);
+      if (!previousEvaluation) {
+        return { outcome: 'invalid', reason: 'repair_convergence_context_unavailable' };
+      }
+      convergence = { expectedRequirements: previousEvaluation.requirements.map((requirement) => ({ id: requirement.id, statement: requirement.statement })) };
+    }
     return recoverSucceededPeerRunnerResult<EvaluatorOutputV1>({
       task,
       expectedTaskKind: 'evaluator',
       resultRefPrefix: this.config.resultRefPrefix,
       stateManager: this.stateManager,
       artifactStore: this.artifactStore,
-      validateOutput: (output, taskId) => this.validator.validate(output, taskId),
+      validateOutput: (output, taskId) => this.validator.validate(output, taskId, currentInput.artifactId, convergence),
       validateIncompleteAuthoritativeRun: ({ task: terminalTask, authoritativeRun, runs }) => {
         const piTask = hydratePITaskRecord(terminalTask);
         const intent = piTask?.completionIntent;
@@ -955,14 +1041,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         if (intent.revisionEpoch !== (piTask.revisionCount ?? 0)) {
           return `completion_intent_epoch_mismatch:${intent.revisionEpoch}!=${piTask.revisionCount ?? 0}`;
         }
-        const completionRun = runs.find((candidate) => (
+        const completionRuns = runs.filter((candidate) => (
           candidate.taskId === terminalTask.taskId
           && candidate.attemptNumber > authoritativeRun.attemptNumber
           && candidate.executionStatus === 'succeeded'
           && candidate.reason === 'task_completed'
           && candidate.errorCategory === undefined
         ));
-        if (!completionRun) return 'completion_run_missing_or_not_terminal';
+        if (completionRuns.length !== 1) return `completion_run_not_unique:${completionRuns.length}`;
+        if (typeof completionRuns[0]?.outputPayload === 'string' && completionRuns[0].outputPayload.length > 0) {
+          return 'completion_run_carries_independent_output';
+        }
         return null;
       },
       verifyRecoveredEvidence: ({ task: terminalTask, output, artifactOutput, runId }) => {
@@ -2000,6 +2089,13 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       if (piTask && intent && intent.status === 'applied'
         && intent.revisionEpoch === (piTask.revisionCount ?? 0)
         && leasedTask.status !== 'needs_human_review') {
+        if (!await this.completionIntentMatchesCurrentInput(taskId, intent)) {
+          this.emitEvent('completion_intent_stale_input', taskId, {
+            sourceRunId: intent.sourceRunId,
+            nextAction: 'discard_incomplete_intent_and_evaluate_current_input',
+          });
+          return null;
+        }
         return await this.finalizeAppliedIntentTerminal({ taskId, decision: intent.decision, sourceRunId: intent.sourceRunId, leasedTask });
       }
       return null;
@@ -2009,6 +2105,13 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         intentEpoch: intent.revisionEpoch,
         currentEpoch: piTask.revisionCount ?? 0,
         nextAction: 'reopen should have cleared intent; verify reopenTaskForRevision path',
+      });
+      return null;
+    }
+    if (!await this.completionIntentMatchesCurrentInput(taskId, intent)) {
+      this.emitEvent('completion_intent_stale_input', taskId, {
+        sourceRunId: intent.sourceRunId,
+        nextAction: 'discard_incomplete_intent_and_evaluate_current_input',
       });
       return null;
     }

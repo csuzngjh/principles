@@ -320,12 +320,23 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
             return rejected(round, evaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
               'evaluator_cascade_successor_snapshot_missing');
           }
-          evaluatorPlan = await applyFormalSuccessorCascade({
-            stateManager: input.stateManager,
-            commitTaskTransition: input.commitTaskTransition,
-            sourceTaskId: resolvedArtificerTaskId,
-            successorTask: successorBeforeCascade,
-          });
+          // A successor first created after the upstream revision already
+          // evaluates the current artifact even though no cascade cause was
+          // consumed. Recovery validation is input-current; use it as the
+          // reuse proof and reserve formal reopen for stale/invalid evidence.
+          let currentEvidenceReusable = false;
+          if (evaluatorPlan.action === 'recover') {
+            const recoveryProbe = await input.evaluatorRunner.recoverSucceededResult(successorBeforeCascade);
+            currentEvidenceReusable = recoveryProbe.outcome === 'recovered';
+          }
+          if (!currentEvidenceReusable) {
+            evaluatorPlan = await applyFormalSuccessorCascade({
+              stateManager: input.stateManager,
+              commitTaskTransition: input.commitTaskTransition,
+              sourceTaskId: resolvedArtificerTaskId,
+              successorTask: successorBeforeCascade,
+            });
+          }
         }
         if (evaluatorPlan.action === 'blocked') {
           return rejected(round, evaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,

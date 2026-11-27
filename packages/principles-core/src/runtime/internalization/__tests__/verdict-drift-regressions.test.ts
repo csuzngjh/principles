@@ -344,6 +344,15 @@ describe('P0 verdict drift — completion intent 是 recovery authority', () => 
 
   it('T4 evaluator validation drift: bearer 已 validated 后 LLM 返回 needs_revision 也不得漂移', async () => {
     await seedLineage();
+    const inputConn = new SqliteConnection(workspaceDir);
+    const inputArtifactStore = new SqlitePIArtifactStore(inputConn);
+    await inputArtifactStore.upsertArtifact({
+      artifactId: ARTIFICER_ART, artifactKind: 'principle', sourceTaskId: ARTIFICER_ID,
+      lineageArtifactIds: [], validationStatus: 'validated',
+      contentJson: JSON.stringify({ plan: 'p' }),
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    inputConn.close();
     await craftEvaluatorCrashState('approved');
 
     const spy = { llmCalls: 0 };
