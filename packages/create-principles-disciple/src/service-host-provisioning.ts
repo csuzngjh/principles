@@ -145,6 +145,8 @@ function canonicalIdentity(value: string): string {
 export interface LegacyWorkerProcessRow {
   readonly pid: number;
   readonly commandLine: string;
+  /** argv with exact token boundaries when the platform exposes it (Linux /proc). */
+  readonly argv?: readonly string[];
 }
 
 export interface LegacyWorkerScan {
@@ -168,7 +170,33 @@ export function matchLegacyWorkerCommandLine(commandLine: string): string | null
   return workspace?.[1] ?? workspace?.[2] ?? workspace?.[3] ?? null;
 }
 
-/** Platform process table as (pid, commandLine) rows — bounded, read-only. */
+const LEGACY_WORKER_HOSTS = new Set(['codex', 'openclaw', 'workbuddy']);
+
+/**
+ * argv-token matcher for platforms that expose exact process arguments.
+ * Unlike command-line scraping, a workspace containing spaces is one token
+ * here and can never be truncated. The host token must immediately precede
+ * `worker`, which keeps unrelated Node processes out of the match set.
+ */
+export function matchLegacyWorkerArgv(argv: readonly string[]): string | null {
+  if (argv.includes('--once')) return null;
+  const workerIndex = argv.findIndex((token) => token === 'worker');
+  if (workerIndex <= 0 || !LEGACY_WORKER_HOSTS.has(argv[workerIndex - 1] ?? '')) return null;
+  for (let index = workerIndex + 1; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === '--workspace') {
+      const value = argv[index + 1];
+      return typeof value === 'string' && value.length > 0 ? value : null;
+    }
+    if (token?.startsWith('--workspace=') === true) {
+      const value = token.slice('--workspace='.length);
+      return value.length > 0 ? value : null;
+    }
+  }
+  return null;
+}
+
+/** Platform process table as (pid, commandLine/argv) rows — bounded, read-only. */
 function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
   const rows: LegacyWorkerProcessRow[] = [];
   if (platform === 'win32') {
@@ -185,16 +213,40 @@ function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
     }
     return rows;
   }
-  const output = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
-  for (const line of output.split('\n')) {
-    const match = /^(\d+)\s+(.*)$/.exec(line.trim());
-    const pidText = match?.[1];
-    const commandLine = match?.[2];
-    if (pidText !== undefined && commandLine !== undefined) {
-      rows.push({ pid: Number.parseInt(pidText, 10), commandLine });
+  if (platform === 'linux') {
+    // `/proc/<pid>/cmdline` preserves exact argv boundaries with NUL separators.
+    // Flattening Linux argv through `ps ... args` is ownership-unsafe because a
+    // workspace such as `/tmp/pd legacy worker/workspace` is indistinguishable
+    // from multiple independent arguments.
+    const procEntries = fs.readdirSync('/proc', { withFileTypes: true });
+    const unreadable: string[] = [];
+    for (const entry of procEntries) {
+      if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+      const pid = Number.parseInt(entry.name, 10);
+      const cmdlinePath = path.join('/proc', entry.name, 'cmdline');
+      let raw: Buffer;
+      try {
+        raw = fs.readFileSync(cmdlinePath);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        // ENOENT/ESRCH means the process exited between directory enumeration
+        // and the read; an exited process cannot still consume the workspace.
+        if (code !== 'ENOENT' && code !== 'ESRCH') unreadable.push(`${entry.name}:${code ?? 'read_failed'}`);
+        continue;
+      }
+      const argv = raw.toString('utf8').split('\0').filter((token) => token.length > 0);
+      if (argv.length === 0) continue; // kernel threads and zombies carry no argv
+      rows.push({ pid, commandLine: argv.join(' '), argv });
     }
+    if (unreadable.length > 0) {
+      throw new Error(`/proc cmdline unreadable for pid(s) ${unreadable.slice(0, 5).join(',')}${unreadable.length > 5 ? '…' : ''}`);
+    }
+    return rows;
   }
-  return rows;
+  // Other POSIX process APIs do not expose a portable argv-boundary-safe table.
+  // Returning a flat `ps args` parse would fabricate confidence; quiesce is
+  // unverifiable instead (the caller's fail-closed gate stays pending).
+  throw new Error(`legacy worker scan unsupported on platform ${platform}: argv boundaries cannot be verified`);
 }
 
 /**
@@ -223,7 +275,9 @@ export function scanRunningLegacyWorkerProcesses(options: {
   const workers: { pid: number; workspaceDir: string }[] = [];
   for (const row of rows) {
     if (row.pid === process.pid) continue;
-    const workspaceDir = matchLegacyWorkerCommandLine(row.commandLine);
+    const workspaceDir = row.argv !== undefined
+      ? matchLegacyWorkerArgv(row.argv)
+      : matchLegacyWorkerCommandLine(row.commandLine);
     if (workspaceDir !== null) workers.push({ pid: row.pid, workspaceDir });
   }
   return { ok: true, workers };

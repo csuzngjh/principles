@@ -19,9 +19,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { readWorkspaceBackgroundOwnership } from '@principles/install-layout';
 import {
+  matchLegacyWorkerArgv,
   matchLegacyWorkerCommandLine,
   provisionFreshInstallWorkspace,
   readAllPendingProvisioning,
@@ -546,5 +547,59 @@ describe('provisionFreshInstallWorkspace', () => {
     }
     expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
     expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_worker_still_running' });
+  });
+});
+
+describe('scanRunningLegacyWorkerProcesses — real Linux argv scan', () => {
+  it.runIf(process.platform === 'linux')('finds a real legacy worker whose workspace path contains spaces, without once/unrelated false positives', async () => {
+    const base = mkdtempSync(path.join(os.tmpdir(), 'pd-real-worker-scan-'));
+    dirs.push(base);
+    const workspaceDir = path.join(base, 'pd legacy worker test', 'workspace');
+    mkdirSync(workspaceDir, { recursive: true });
+    const script = path.join(base, 'legacy-worker-fixture.cjs');
+    writeFileSync(script, 'setInterval(() => {}, 1000);\n', 'utf8');
+    const children: ChildProcess[] = [];
+    const start = (args: readonly string[]): ChildProcess => {
+      const child = spawn(process.execPath, [script, ...args], { stdio: 'ignore', windowsHide: true });
+      children.push(child);
+      return child;
+    };
+    const legacy = start(['codex', 'worker', '--workspace', workspaceDir]);
+    const once = start(['codex', 'worker', '--once', '--workspace', workspaceDir]);
+    const unrelated = start(['unrelated', 'worker', '--workspace', workspaceDir]);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      const scan = scanRunningLegacyWorkerProcesses();
+      expect(scan).toMatchObject({ ok: true });
+      const found = scan.workers.find((worker) => worker.pid === legacy.pid);
+      expect(found?.workspaceDir).toBe(workspaceDir);
+      expect(scan.workers.some((worker) => worker.pid === once.pid)).toBe(false);
+      expect(scan.workers.some((worker) => worker.pid === unrelated.pid)).toBe(false);
+    } finally {
+      for (const child of children) child.kill('SIGKILL');
+      await Promise.all(children.map((child) => new Promise((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) resolve(undefined);
+        else child.once('close', () => resolve(undefined));
+        setTimeout(() => resolve(undefined), 1000);
+      })));
+    }
+  });
+
+  it('argv matching preserves exact workspace boundaries and requires host + worker shape', () => {
+    const workspace = '/tmp/pd legacy worker test/workspace';
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'worker', '--workspace', workspace])).toBe(workspace);
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'worker', `--workspace=${workspace}`])).toBe(workspace);
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'worker', '--once', '--workspace', workspace])).toBeNull();
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'unrelated', 'worker', '--workspace', workspace])).toBeNull();
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'not-worker', '--workspace', workspace])).toBeNull();
+  });
+
+  it('a process-table read failure is fail-closed, never an empty scan', () => {
+    const scan = scanRunningLegacyWorkerProcesses({
+      rows: () => { throw new Error('process table denied'); },
+    });
+    expect(scan.ok).toBe(false);
+    expect(scan.workers).toEqual([]);
+    expect(scan.detail).toContain('process table denied');
   });
 });
