@@ -185,7 +185,7 @@ function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
     }
     return rows;
   }
-  const output = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 15_000 });
+  const output = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
   for (const line of output.split('\n')) {
     const match = /^(\d+)\s+(.*)$/.exec(line.trim());
     const pidText = match?.[1];

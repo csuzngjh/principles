@@ -112,11 +112,10 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
   } else if (ownership?.status === 'manifest_unreadable') {
     mode = 'degraded';
     reason = `workbuddy_owner_marker_unreadable:${ownership.reason}`;
-    nextAction = ownership.nextAction;
+    ({ nextAction } = ownership);
   } else if (evaluation.mode === 'degraded') {
     mode = 'degraded';
-    reason = evaluation.reason;
-    nextAction = evaluation.nextAction;
+    ({ reason, nextAction } = evaluation);
   } else if (!serviceHostManaged) {
     mode = 'paused';
     reason = `workbuddy_workspace_not_service_host_owned:${ownershipState}`;
@@ -127,8 +126,7 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     nextAction = 'Repair the install manifest/provisioning record with the PD installer; the Service Host can manage only manifest-registered workspaces.';
   } else {
     mode = evaluation.mode === 'ready' ? 'ready' : 'paused';
-    reason = evaluation.reason;
-    nextAction = evaluation.nextAction;
+    ({ reason, nextAction } = evaluation);
   }
   if (manifestError !== undefined && mode !== 'degraded' && reason === undefined) {
     reason = manifestError;
@@ -255,7 +253,7 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
 
   const gate = admitServiceWorkerCycle('workbuddy', workspace);
   if (!gate.admitted) {
-    printCycleReport(gate.result as WorkbuddyWorkerCycleResult, options.json === true);
+    printCycleReport(gate.result, options.json === true);
     if (gate.result.mode === 'degraded') process.exitCode = 1;
     return;
   }
