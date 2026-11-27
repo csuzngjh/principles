@@ -154,7 +154,7 @@
 | [ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md) | Proposed | Intervention Evidence 与 Delivery Contract |
 | [ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md) | Proposed | Owner Principle Assets 与版本演进 |
 | [ADR-0029](../adr/0029-openclaw-subagent-runtime-retired.md) | Accepted（Owner 2026-10-23） | OpenClaw 子代理运行时后端退役；pi-ai 为内置代理唯一后端（取代 ADR-0016 §2.3） |
-| [ADR-0031](../adr/0031-pri-1299-lifecycle-unification.md) | Proposed — PENDING_OWNER_DECISION | PRI-1299 lifecycle identity、repair creation authority、evidence validity 与 transaction boundary freeze |
+| [ADR-0031](../adr/0031-pri-1299-lifecycle-unification.md) | Accepted — OWNER_APPROVED | PRI-1299 lifecycle identity、repair creation authority、evidence validity 与 transaction boundary freeze；Phase 1 authorized |
 
 > 本次登记 PD v2 所需相关 ADR，其他历史遗漏未在本次批量修复。状态与 Amendment 以对应 ADR 原文为准。
 

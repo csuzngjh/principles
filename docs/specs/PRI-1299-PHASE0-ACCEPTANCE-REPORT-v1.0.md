@@ -1,6 +1,6 @@
 # PRI-1299 Phase 0 Acceptance Report v1.0
 
-**Status：** Phase 0 documentation completed — **PASS_WITH_LIMITATIONS / PENDING_OWNER_DECISION**
+**Status：** Phase 0 documentation completed — **PASS_WITH_LIMITATIONS / OWNER_DECISION_FROZEN**
 **Date：** 2026-11-27
 **Branch：** `ai/PRI-1299-phase0-architecture-decisions`
 **Latest `origin/main` baseline：** `e3ddf901d0be93b10713beff8165c7008e64d2d6`
@@ -55,39 +55,39 @@
 
 | 决策 | 状态 | 核心证据 |
 |---|---|---|
-| D1 Logical Identity Contract | PENDING_OWNER_DECISION | `successor-lookup.ts:1-25`、`repair-task-identity.ts:50-140`、`pitask-metadata.ts:155-157`、`sqlite-connection.ts:306-325` |
-| D2 Repair Round Policy | PENDING_OWNER_DECISION | `pitask-metadata.ts:947-1002`、`evaluator-runner.ts:2770-2783` |
-| D3 Task Identity Classes | PENDING_OWNER_DECISION | SPEC v1.1 §5 的 14类创建入口与直接源码调用链 |
-| D4 Memory Store Contract | PENDING_OWNER_DECISION | `memory-task-store.ts:67-190`、`sqlite-task-store.ts:63-113` |
-| D5 Transaction Architecture | PENDING_OWNER_DECISION | TaskStore scoped FIFO/ALS、raw connection escape hatch、direct writer inventory、better-sqlite3 13.0.3 capture probe |
-| D6 Owner Stale Resolution | PENDING_OWNER_DECISION | `owner-resolution-service.ts:323-445`、`evaluator-runner.ts:1006-1059,2155-2166` |
+| D1 Logical Identity Contract | OWNER_APPROVED via OD-1 | `successor-lookup.ts:1-25`、`repair-task-identity.ts:50-140`、`pitask-metadata.ts:155-157`、`sqlite-connection.ts:306-325` |
+| D2 Repair Round Policy | OWNER_APPROVED via OD-2 | `pitask-metadata.ts:947-1002`、`evaluator-runner.ts:2770-2783` |
+| D3 Task Identity Classes | OWNER_APPROVED via OD-3 | SPEC v1.1 §5 的 14类创建入口与直接源码调用链 |
+| D4 Memory Store Contract | OWNER_APPROVED via OD-4 | `memory-task-store.ts:67-190`、`sqlite-task-store.ts:63-113` |
+| D5 Transaction Architecture | OWNER_APPROVED via OD-5 | TaskStore scoped FIFO/ALS、raw connection escape hatch、direct writer inventory、better-sqlite3 13.0.3 capture probe |
+| D6 Owner Stale Resolution | OWNER_APPROVED via OD-6 | `owner-resolution-service.ts:323-445`、`evaluator-runner.ts:1006-1059,2155-2166` |
 
 重要细化：channel 被保留在书面 `RepairSuccessorIdentity` 中，但不是独立 uniqueness degree of freedom；它是 mandatory consistency dimension。channel mismatch 必须 fail closed，不得产生第二行 repair。
 
 ---
 
-## 5. D. 仍需 Owner 确认的决策
+## 5. D. Owner 决策（已冻结）
 
-| ID | Owner decision | 推荐 |
+| ID | Owner decision | Status |
 |---|---|---|
-| OD-1 | 批准 logical identity contract（含 channel clarification） | approve |
-| OD-2 | 保留当前两轮自动 repair 作为近期产品治理策略 | approve；不写成永久 identity invariant |
-| OD-3 | 批准五类 task identity classes | approve |
-| OD-4 | 批准 Memory store = Non-Transactional Test Double | approve |
-| OD-5 | 批准 Phase 4 独立 transaction architecture | approve |
-| OD-6 | 批准 Phase 3 关闭 Owner submission-time exact-input gap | approve |
-| OD-7 | 批准启动 Phase 1 | only after OD-1/OD-3/OD-8 |
-| OD-8 | 显式确认 synchronous RuleHost dual-role repair 兼容语义 | recommend preserve + explicit contract |
+| OD-1 | 批准 logical identity contract（含 channel clarification） | OWNER_APPROVED |
+| OD-2 | 保留当前两轮自动 repair 作为近期产品治理策略 | OWNER_APPROVED；不写成永久 identity invariant |
+| OD-3 | 批准五类 task identity classes | OWNER_APPROVED；“Manual Repair Task”按 SPEC 的 operator-remediation provenance 解释 |
+| OD-4 | 批准 Memory store = Non-Transactional Test Double | OWNER_APPROVED |
+| OD-5 | 批准 Phase 4 独立 transaction architecture | OWNER_APPROVED |
+| OD-6 | 批准 Phase 3 关闭 Owner submission-time exact-input gap | OWNER_APPROVED |
+| OD-7 | 批准启动 Phase 1 | OWNER_APPROVED |
+| OD-8 | 显式确认 synchronous RuleHost dual-role repair 兼容语义 | OWNER_APPROVED；保留但显式化 |
 
-Owner 尚未批准任何一项；文档没有伪造批准状态。
+Owner 已批准全部八项；Phase 1 获得授权，Phase 2-7 仍按独立验收 gate 执行。
 
 ---
 
 ## 6. E. Phase 1 是否具备实施条件
 
-**CONDITIONALLY READY。**
+**READY。**
 
-技术调查和边界冻结已经足够支持 Phase 1 设计/实施，但必须等待 Owner 批准 OD-1、OD-3、OD-7、OD-8，并显式确认 repair-aware lookup / synchronous dual-role semantics。未批准前不应修改生产代码。
+技术调查、边界冻结和 Owner 授权已齐备。Phase 1 可实施 repair-aware lookup / unified `RepairCreationAuthority` / synchronous dual-role explicitization，但仍不得越过 §21 的禁止范围。
 
 ---
 
@@ -175,7 +175,7 @@ Memory store 可用于非事务业务分支，但不能作为 SQLite correctness
 8. 未发现把 PR #2805 错误描述为当前 OPEN 的陈述；唯一“open/work-in-progress”字样是 Change Log 对历史状态的说明；
 9. 未发现把 `aaccb6b4` 描述为当前 main 的陈述；
 10. `npm run check:docs-structure` 在 Windows shell 下通过；
-11. 未发现虚构 Owner approval；所有六项决策均为 `PENDING_OWNER_DECISION`。
+11. Owner approval 已如实记录；OD-1..OD-8 均为 `OWNER_APPROVED`，无虚构批准。
 
 限制：仓库未发现专门 Markdown lint/link checker脚本；已运行现有 `check:docs-structure`。行号检查是静态范围检查加人工/子代理抽查，不是语义级 AST 验证。
 
@@ -187,11 +187,13 @@ Memory store 可用于非事务业务分支，但不能作为 SQLite correctness
 npm run error:context -- --base e3ddf901d0be93b10713beff8165c7008e64d2d6
 ```
 
-结果：EP-05 HIGH，EP-02/EP-03/EP-14 MEDIUM，EP-01/EP-04/EP-06/EP-07/EP-10/EP-12 LOW。
+结果：EP-14/EP-02/EP-05 HIGH，EP-03/EP-01/EP-04/EP-10 MEDIUM，EP-06/EP-07/EP-12 LOW。
 
 解释与处置：
 
-- 本 diff 是文档-only，不包含生产实现、测试实现、重试逻辑或错误处理逻辑；
+- 本 diff 是文档-only，不包含生产实现、测试实现、重试逻辑、错误处理逻辑、packaging 或 publish 变更；
+- EP-14 的 packaging/publish/dependency 证据要求不适用；
+- EP-02 的 production wiring/cross-package consumer 证据要求不适用；
 - EP-05 HIGH 是由文档中 `attempt/retry/repair/iteration` 等术语触发的语义路由，不代表已存在代码回归；
 - SPEC v1.1 已把 EP-05 类风险转化为 Phase 1/3/6 测试要求：R1/R2、乱序 completion、crash recovery、stale intent/resolution、真实 SQLite/multi-process evidence；
 - 文档没有宣称这些动态测试已经通过，因此不需要虚构 per-iteration runtime evidence；
@@ -208,6 +210,7 @@ npm run error:context -- --base e3ddf901d0be93b10713beff8165c7008e64d2d6
 - 文档交付、merge audit、子代理交叉整合、决策证据和边界冻结完成；
 - 没有修改生产/测试代码；
 - v1.0历史快照保留；
-- 但 Owner 决策未完成，动态并发/故障验证未完成，因此不能给无限制 PASS，也不能宣称 Phase 1 已获授权。
+- 但动态并发/故障验证尚未完成，因此 Phase 0 仍保留 `PASS_WITH_LIMITATIONS`，不能把这些未执行测试写成已通过；
+- Owner 决策已完成，Phase 1 已获得实施授权。
 
-**Phase 1 是否可以启动：CONDITIONALLY YES — 仅在 Owner 批准 OD-1/OD-3/OD-7/OD-8 后。**
+**Phase 1 是否可以启动：YES — 仅限 Logical Identity & Repair Creation Authority 范围。**

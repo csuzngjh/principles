@@ -2,13 +2,13 @@
 
 | Field | Value |
 | --- | --- |
-| Status | **Proposed — PENDING_OWNER_DECISION** |
+| Status | **Accepted — OWNER_APPROVED; Phase 1 authorized** |
 | Date | 2026-11-27 |
 | Supersedes | 无 |
 | Superseded by | 无 |
 | Related | PR #2805（merged as `e3ddf901d0be93b10713beff8165c7008e64d2d6`）、PR #2803、`docs/specs/PRI-1299-ROOT-CAUSE-ANALYSIS-LIFECYCLE-UNIFICATION-SPEC-v1.1.md`、ADR-0012、ADR-0024 |
 | Decision evidence | Phase 0 read-only investigation of `origin/main` `e3ddf901d0be93b10713beff8165c7008e64d2d6`; four independent evidence reports A-D; limited repository-pinned better-sqlite3 13.0.3 in-memory transaction probe |
-| Approval state | **Owner has not approved these decisions.** Every decision in §14 is `PENDING_OWNER_DECISION` unless explicitly marked as a restatement of existing code fact. |
+| Approval state | **Owner Decision Freeze approved OD-1 through OD-8 on 2026-11-27.** Phase 1 is authorized. Phases 2-7 remain separately gated by their own implementation/acceptance boundaries. |
 
 ---
 
@@ -24,6 +24,8 @@ PRI-1299 began as a successor-lookup correctness effort. PR #2805 fixed importan
 - legacy rows require proof-bound lineage recovery rather than inference-by-guessing.
 
 PR #2803 already tightened single-step execution and parent-chain lineage. PR #2805 merged the successor-lookup authority work. Neither closed the repair identity/creation-authority or connection-level transaction questions.
+
+On 2026-11-27 the Owner froze the Phase 0 decisions through OD-1..OD-8. The freeze authorizes Phase 1 only; it does not authorize Phase 2-7 implementation, schema/transaction redesign, or unrelated Service Host migration work.
 
 ## 2. Problem Statement
 
@@ -102,13 +104,16 @@ The formal evaluator path already has strong exact-input defenses (`evaluator-ru
 5. Do not use Memory store results as evidence for SQLite transaction correctness.
 6. Do not infer parentage from `dependencyTaskIds` as a general rule.
 7. Do not rename existing repair task ids without a separately approved migration.
-8. Do not claim Owner approval until explicitly granted.
+8. Treat PD Service Host Only as the sole target architecture for PD background services; PD Companion must not retain background execution, an independent scheduler, an independent worker, or legacy-runtime compatibility shims.
+9. Do not mix PRI-1278 Service Host migration into PRI-1299 Phase 1; Phase 1 is limited to Repair lifecycle identity and creation authority.
+10. Name Phase 5 **Historical Repair Data & Lineage Remediation**; it addresses historical repair data/lineage only and does not support legacy Companion runtime.
+11. Do not claim Owner approval until explicitly granted; this ADR now records that OD-1..OD-8 were explicitly granted on 2026-11-27.
 
 ## 6. Identity Contract
 
 ### Terms
 
-These are proposed ADR-local contract terms. They must not be treated as additions to the repository's locked ontology unless and until the Owner approves the corresponding decisions.
+These are accepted ADR-0031 contract terms. They are authoritative for PRI-1299 implementation, but this ADR does not by itself amend the repository's separate LOCKED-ONTOLOGY glossary.
 
 ```text
 TaskRecordId = tasks.task_id
@@ -302,9 +307,11 @@ Rules:
 
 ## 14. Architecture Decisions
 
-### D1 — Logical Identity Contract — PENDING_OWNER_DECISION
+### D1 — Logical Identity Contract — OWNER_APPROVED
 
-**Recommendation:** adopt the identity contract in §6, including the channel clarification.
+**Owner decision:** adopt the identity contract in §6 exactly, including the channel clarification.
+
+**Rationale:** it preserves the proven ordinary successor key, gives R1/R2 distinct logical identity, keeps deterministic repair ids stable, and prevents channel drift from becoming a second valid repair identity.
 
 Evidence: `successor-lookup.ts:1-25`, `repair-task-identity.ts:50-140`, `pitask-metadata.ts:155-157`, `sqlite-connection.ts:306-325`.
 
@@ -314,11 +321,13 @@ Consequences:
 - channel mismatch is conflict, not a new valid identity;
 - deterministic repair id remains unchanged for compatibility.
 
-Confidence: High. Open Owner decision: approve this exact written contract.
+Confidence: High. Owner interpretation: channel is mandatory consistency evidence, not an independent uniqueness dimension.
 
-### D2 — Repair Round Policy — PENDING_OWNER_DECISION
+### D2 — Repair Round Policy — OWNER_APPROVED
 
-**Recommendation:** keep the current two-automatic-repair-round product policy for now, but do not encode “2” as a permanent identity-model invariant.
+**Owner decision:** keep the current R1/R2 two-automatic-repair-round product policy. Do not encode “2” as a permanent identity-model invariant and do not use this approval to add R3 or unlimited automatic repair.
+
+**Rationale:** it preserves current product governance and historical R1/R2 data while keeping the identity model semantically extensible if a separate future Owner decision ever changes the product limit.
 
 Evidence:
 
@@ -333,29 +342,35 @@ Important distinction:
 
 Future R3+ path, only if Owner approves: change the governance policy and validator/seed budget together, add R3 lifecycle tests, preserve existing R1/R2 ids and rows unchanged, and do not rename or rewrite history.
 
-Confidence: High for retaining two rounds now; Medium for the future extension shape until Owner chooses product policy.
+Confidence: High for the approved two-round policy. Any future R3+ change remains outside this decision and would require a new Owner decision.
 
-### D3 — Task Identity Classes — PENDING_OWNER_DECISION
+### D3 — Task Identity Classes — OWNER_APPROVED
 
-**Recommendation:** freeze five creation/identity classes: root/intake, fixed diagnostician subtask, ordinary logical successor, repair logical successor, and operator remediation/backfill provenance. Do not force root or fixed-subtask identity into `OrdinarySuccessorIdentity`.
+**Owner decision:** freeze five task creation/identity classes: Root Task, Fixed Child Task, Ordinary Successor, Repair Task, and Manual Repair / operator-remediation task. Do not force root or fixed-child identity into `OrdinarySuccessorIdentity`.
+
+**Rationale:** `parentTaskId` denotes causal lineage only where the producer contract proves it; `dependencyTaskIds` denotes execution ordering/input dependencies. These meanings are not interchangeable across task classes.
+
+**Owner wording interpretation:** the Owner phrase “Manual Repair Task” is interpreted as the SPEC’s operator remediation/backfill provenance class, not as a sixth logical identity and not as automatic Repair Task identity. A manually seeded repair/remediation row must still satisfy the identity class of the object it creates and must not bypass `RepairCreationAuthority` when it is an automatic repair successor.
 
 Evidence: creation inventory in SPEC v1.1 §5 and direct production call sites.
 
-Reason: `parentTaskId` denotes causal lineage only where the producer contract proves it; `dependencyTaskIds` denotes execution ordering/input dependencies. These meanings are not interchangeable across all task classes.
-
 Confidence: High.
 
-### D4 — Memory Store Contract — PENDING_OWNER_DECISION
+### D4 — Memory Store Contract — OWNER_APPROVED
 
-**Recommendation:** formally classify Memory store as a non-transactional test double and prohibit using it as SQLite transaction evidence.
+**Owner decision:** formally classify Memory store as a **Non-Transactional Test Double** and prohibit using it as SQLite transaction evidence.
+
+**Rationale:** a faithful in-memory transaction engine would add speculative complexity while still failing to prove real SQLite locking, rollback, visibility, and multi-process behavior.
 
 Evidence: `memory-task-store.ts:67-190`, `sqlite-task-store.ts:63-113`, artifact-store epoch differences, Agent C/D test audits.
 
 Confidence: High.
 
-### D5 — Transaction Architecture — PENDING_OWNER_DECISION
+### D5 — Transaction Architecture — OWNER_APPROVED
 
-**Recommendation:** defer all connection-level transaction redesign to Phase 4. Phase 4 must first produce an architecture covering transaction owner, write admission, nesting, cross-instance behavior, rollback failure, dirty reads, raw connection access, and multi-process behavior.
+**Owner decision:** defer all connection-level transaction redesign to Phase 4. Phase 4 must first produce an architecture covering transaction owner, write admission, nesting, cross-instance behavior, rollback failure, dirty reads, raw connection access, and multi-process behavior.
+
+**Rationale:** capture is a connection-ownership problem, not a TaskStore-local problem. Mixing it into Phase 1 would blur the repair identity boundary and create an unsafe partial transaction redesign.
 
 Evidence: Agent C report; `sqlite-task-store.ts:63-113`; `runtime-state-manager.ts:181-184,232-235`; direct writer inventory in SPEC v1.1 §7.1.
 
@@ -363,9 +378,11 @@ Explicitly rejected for Phase 1: copying the TaskStore FIFO into every store or 
 
 Confidence: High.
 
-### D6 — Owner Stale Resolution — PENDING_OWNER_DECISION
+### D6 — Owner Stale Resolution — OWNER_APPROVED
 
-**Recommendation:** adopt the current two-layer defense as the baseline and close the remaining submission-time exact-input gap in Phase 3.
+**Owner decision:** adopt the current two-layer defense as the baseline and close the remaining submission-time exact-input gap in Phase 3. Stale evidence must be explicitly rejected or require reconfirmation; it must not be silently consumed.
+
+**Rationale:** submission-time freshness belongs to the evidence-validity contract, while Phase 1 must remain scoped to repair identity and creation authority. Reusing evaluator current-input validation avoids a second stale-check implementation.
 
 Evidence:
 
@@ -418,7 +435,7 @@ Forbidden in Phase 1:
 
 ### Phases 2-7
 
-See SPEC v1.1 §21. The critical freeze is: transaction work stays in Phase 4; evidence/Owner stale work stays in Phase 3; no production implementation begins before Owner ratifies the required decisions.
+See SPEC v1.1 §21. The critical freeze is: Phase 1 is authorized now; transaction work stays in Phase 4; evidence/Owner stale work stays in Phase 3; Phase 2-7 still require phase-level implementation and acceptance gates.
 
 ## 17. Migration Strategy
 
@@ -433,7 +450,7 @@ Allowed future approach:
 5. preserve original evidence;
 6. add operator remediation rather than silent deletion or merging.
 
-Valid existing R1/R2 rows require no rename or rewrite if the recommended identity contract is approved.
+Valid existing R1/R2 rows require no rename or rewrite under the approved identity contract.
 
 ## 18. Test Strategy
 
@@ -450,7 +467,7 @@ Phase-specific requirements are in SPEC v1.1 §20. Minimum principles:
 
 | Risk | Status | Mitigation |
 | --- | --- | --- |
-| Owner rejects or modifies D1 | PENDING_OWNER_DECISION | keep Phase 1 blocked until decision |
+| Owner decision wording diverges from SPEC identity semantics | OWNER_APPROVED with interpretation recorded | SPEC v1.1 remains the precise contract; “Manual Repair Task” is operator-remediation provenance, not a new logical identity |
 | R1/R2 synchronous dual-role semantics complicate unified lookup | CONFIRMED design tension | decide explicit repair lookup/dual-role binding in Phase 1 design |
 | Global repair candidate scan exposes malformed historical rows | PARTIALLY_CONFIRMED operational risk | audit + strict error classification + operator remediation |
 | pd-cli `pipelineMode` inheritance gap | CONFIRMED code gap | include in Phase 1 repair creation authority tests/fix |
@@ -461,29 +478,29 @@ Phase-specific requirements are in SPEC v1.1 §20. Minimum principles:
 
 ## 20. Acceptance Criteria
 
-This ADR is ready for Owner review when:
+The Owner decision freeze is accepted when:
 
-1. all six decisions have evidence and explicit status;
-2. no decision claims Owner approval;
-3. Phase 1 boundary excludes transaction redesign;
+1. OD-1 through OD-8 are recorded with decision, rationale, and consequences;
+2. Phase 1 is explicitly authorized and bounded to repair identity/creation authority;
+3. Phase 2-7 remain separately gated;
 4. SPEC v1.1 and this ADR use the same identity terminology;
 5. v1.0 SPEC remains unchanged as historical snapshot;
-6. no production or test files are modified in Phase 0.
+6. Service Host Only and Phase 5 Historical Repair Data & Lineage Remediation are recorded without expanding this PR into PRI-1278 work.
 
 Future implementation acceptance is defined in SPEC v1.1 §24.
 
-## 21. Unresolved Owner Decisions
+## 21. Owner Decisions — Frozen
 
-| ID | Decision needed | Recommendation |
-| --- | --- | --- |
-| OD-1 | Approve exact logical identity contract and channel interpretation? | Approve §6 as written |
-| OD-2 | Keep two automatic repair rounds as product policy for now? | Yes; do not make “2” an identity invariant |
-| OD-3 | Approve five task identity classes? | Yes |
-| OD-4 | Approve Memory store as non-transactional test double? | Yes |
-| OD-5 | Approve deferring transaction architecture to Phase 4 with the listed design inputs? | Yes |
-| OD-6 | Approve Phase 3 owner stale-resolution direction? | Yes, with reused exact-input validation |
-| OD-7 | Approve start of Phase 1 implementation after these decisions? | Yes only if OD-1/OD-3/OD-8 are approved |
-| OD-8 | Preserve but explicitly contract the synchronous RuleHost dual-role repair compatibility semantics? | Yes; do not keep it as an implicit lookup exception |
+| ID | Decision | Status | Consequence / interpretation |
+| --- | --- | --- | --- |
+| OD-1 | Approve exact logical identity contract and channel interpretation. | OWNER_APPROVED | Phase 1 must implement §6 as written. |
+| OD-2 | Keep two automatic repair rounds as product policy. | OWNER_APPROVED | R1/R2 are distinct; no duplicate same-round repair; no R3 expansion. |
+| OD-3 | Approve five task identity classes. | OWNER_APPROVED | “Manual Repair Task” means operator-remediation/backfill provenance, not a new logical identity and not a bypass around `RepairCreationAuthority`. |
+| OD-4 | Approve Memory store as non-transactional test double. | OWNER_APPROVED | SQLite correctness claims require real SQLite evidence. |
+| OD-5 | Defer transaction architecture to Phase 4. | OWNER_APPROVED | Phase 1 must not change schema, migrations, connection ownership, transaction ownership, or run/artifact/approval/candidate stores. |
+| OD-6 | Approve Owner stale-resolution evidence validation direction. | OWNER_APPROVED for Phase 3 scope | Submission-time stale evidence must be rejected or require reconfirmation; implementation remains Phase 3, not Phase 1. |
+| OD-7 | Authorize Phase 1 implementation. | OWNER_APPROVED | `Logical Identity & Repair Creation Authority` may start now. |
+| OD-8 | Preserve and explicitize RuleHost dual-role repair semantics. | OWNER_APPROVED | evaluator-seeded R1 may retain its existing legal round-2 Artificer role, but role conversion must be explicit and covered by tests. |
 
 ## 22. References
 

@@ -1,6 +1,6 @@
 # PRI-1299 Root Cause Analysis & Lifecycle Unification SPEC v1.1
 
-**Status：** Architecture-decision-ready — **PENDING_OWNER_DECISION**
+**Status：** Owner-decision frozen — **OWNER_APPROVED；Phase 1 authorized**
 **Version：** v1.1
 **Created：** 2026-11-27
 **Author：** AI Engineering Agent（v1.0 五调查面 + Phase 0 四只读子代理 + 主代理整合；本轮不修改生产/测试代码）
@@ -89,6 +89,7 @@ PD 内部化任务的创建、修复、恢复、失效和持久化依赖一组�
 13. 修正 v1.0 中两个 `5.3` 小节编号问题；本版采用 `5.3/5.4/5.5` 不重复编号。
 14. 更新 `pitask-metadata.ts` repair validation 引用为更精确的 `947-1002` 范围。
 15. 新增 Owner stale-resolution submission-time gap 与 activation 端到端测试要求。
+16. Owner 已于 2026-11-28 批准 OD-1..OD-8；v1.1 语义保持不变，本版记录批准状态、Phase 1 授权、PD Service Host Only 边界与 Phase 5 正式名称。
 
 ---
 
@@ -325,7 +326,7 @@ ActivationRecord
 
 ### 9.1 正式术语
 
-以下术语是 ADR-0031/SPEC v1.1 的 proposed contract vocabulary。它们尚未进入仓库 LOCKED-ONTOLOGY；只有 Owner 批准对应决策后，才应评估是否同步 `docs/architecture/GLOSSARY.md` / `DOMAIN_MODEL.md`。
+以下术语是 ADR-0031/SPEC v1.1 的 approved PRI-1299 contract vocabulary。它们获得本次 PRI-1299 实施授权，但不等于已经修改仓库 LOCKED-ONTOLOGY；是否同步 `docs/architecture/GLOSSARY.md` / `DOMAIN_MODEL.md` 仍按独立 ontology 变更流程处理。
 
 ```text
 OrdinarySuccessorIdentity = (parentTaskId, taskKind, channel)
@@ -762,7 +763,7 @@ Which exact artifact/input/epoch/run is this evidence valid for?
 **禁止修改：** 所有 production/test/schema/config。
 **前置条件：** 当前文档审查完成。
 **交付物：** ADR-0031、SPEC v1.1、调查汇总、验收报告。
-**验收标准：** Owner 明确批准/修改/拒绝 OD-1..OD-8。
+**验收标准：** OD-1..OD-8 已全部记录为 `OWNER_APPROVED`；Phase 1 授权已明确。
 **回滚策略：** 文档分支不合并即可。
 **真实 SQLite：** 否。
 **真实宿主/公网：** 否。
@@ -790,7 +791,7 @@ Which exact artifact/input/epoch/run is this evidence valid for?
 - repair round policy expansion；
 - channel topology/product routing。
 
-**前置条件：** Owner 批准 OD-1、OD-3、OD-7、OD-8，并明确 dual-role repair lookup semantics。
+**前置条件：** OD-1、OD-3、OD-7、OD-8 已批准；dual-role repair lookup semantics 必须显式化。
 **交付物：** unified repair creation authority、host/pd parity、structured outcomes、repair-aware identity tests。
 **必需测试：** 场景 B-E、N-P 的 repair部分、channel mismatch、pipelineMode inheritance、terminal valid repair classification、UNIQUE race adopt。
 **验收标准：** 同 identity 重复创建不产生 generic seed failure；R1/R2合法共存；malformed fail closed；host/pd行为一致。
@@ -834,11 +835,11 @@ Which exact artifact/input/epoch/run is this evidence valid for?
 **真实 SQLite：** 必须。
 **真实宿主/公网：** host integration必须；公网不要求。
 
-### Phase 5 — Historical Compatibility / Legacy Recovery
+### Phase 5 — Historical Repair Data & Lineage Remediation
 
-**目标：** legacy audit、proof-bound backfill、operator remediation。
+**目标：** legacy repair data audit、proof-bound lineage backfill、operator remediation。
 **允许：** lineage audit tooling、repair metadata classification、operator CLI/docs。
-**禁止：** silent delete/merge/rename、blanket migration。
+**禁止：** silent delete/merge/rename、blanket migration、保留或恢复旧 PD Companion runtime。
 **前置：** Phase 1-4合同稳定。
 **交付物：** audit report、migration/backfill plan、strict remediation tools。
 **必需测试：** N-Q、malformed matrix、UUID-shaped legacy audit fixture。
@@ -878,8 +879,9 @@ Which exact artifact/input/epoch/run is this evidence valid for?
 4. SQLite-only correctness claims 必须附真实 SQLite evidence；
 5. multi-process claims 必须使用真实 OS process；
 6. malformed/legacy rows fail closed；
-7. Owner 未批准事项不得写成已批准；
-8. PR review 检查是否绕开 authority 或新增第二套 truth。
+7. Owner-approved decisions必须逐项落档，不得把未批准事项写成已批准；
+8. PD Service Host Only 是 PD 后台服务唯一目标架构；PD Companion 不保留后台执行/Scheduler/Worker/旧 runtime compatibility，但 PRI-1278 迁移工作不混入本 SPEC 的 Phase 1 PR；
+9. PR review 检查是否绕开 authority 或新增第二套 truth。
 
 ---
 
@@ -917,9 +919,9 @@ Which exact artifact/input/epoch/run is this evidence valid for?
 - [x] v1.0 preserved unchanged；
 - [x] five PRC revalidated；
 - [x] six architecture decisions written with evidence；
-- [x] unresolved Owner decisions explicit；
+- [x] Owner decisions explicit；
 - [x] no production/test code modified；
-- [ ] Owner approves/modifies/rejects OD-1..OD-8。
+- [x] OD-1..OD-8 approved and recorded。
 
 ### 24.2 Future implementation acceptance
 
@@ -935,18 +937,18 @@ Which exact artifact/input/epoch/run is this evidence valid for?
 
 ---
 
-## 25. 未解决的 Owner 问题与 PENDING 决策
+## 25. Owner 决策记录（已冻结）
 
-| ID | 问题 | 推荐 |
-|---|---|---|
-| OD-1 | 是否批准 §9 logical identity contract（含 channel clarification）？ | 批准 |
-| OD-2 | 是否保留当前两轮自动 repair 作为近期产品治理策略？ | 是；但不要把2写成永久身份不变量 |
-| OD-3 | 是否批准五类 task identity classes？ | 是 |
-| OD-4 | 是否批准 Memory store = Non-Transactional Test Double？ | 是 |
-| OD-5 | 是否批准 Phase 4 独立进行 transaction architecture？ | 是 |
-| OD-6 | 是否批准 Phase 3 关闭 Owner submission-time exact-input gap？ | 是 |
-| OD-7 | 在 OD-1/OD-3/OD-8 批准后是否允许启动 Phase 1？ | 是 |
-| OD-8 | synchronous RuleHost replay 中 evaluator-seeded R1 是否仍可作为 round-2 artificer 的双重角色契约？ | 建议保留兼容但显式化，不隐式依赖 |
+| ID | Decision | Status | Rationale | Consequences |
+|---|---|---|---|---|
+| OD-1 | 批准 §9 logical identity contract（含 channel clarification） | OWNER_APPROVED | channel 是 mandatory consistency dimension，不是独立 uniqueness degree of freedom | Phase 1 必须 fail closed on channel mismatch，不得用 channel 变异制造第二条 repair |
+| OD-2 | 保留当前两轮自动 repair 策略 | OWNER_APPROVED | R1/R2 是当前产品治理边界；“2”不是永久身份不变量 | R1/R2 必须拥有不同 identity；不允许同轮 duplicate；不新增 R3+ |
+| OD-3 | 批准五类 task identity classes | OWNER_APPROVED | 每类需要明确身份合同而非模糊通用身份系统 | “Manual Repair Task”按本 SPEC 的 operator-remediation/backfill provenance 解释，不创造绕过 authority 的新 logical identity |
+| OD-4 | Memory store = Non-Transactional Test Double | OWNER_APPROVED | 不为测试替身建设第二套事务架构 | 关键持久化/原子性测试必须跑真实 SQLite |
+| OD-5 | Phase 4 独立处理 transaction architecture | OWNER_APPROVED | 先冻结 transaction ownership/write-admission合同，再统一实现 | Phase 1 禁止 schema/migrations/connection/store transaction architecture 变更 |
+| OD-6 | Owner submission-time exact-input validation | OWNER_APPROVED | stale evidence 不得静默提交为有效决策 | Phase 3 范围内实现；Phase 1 不修改 owner-resolution service |
+| OD-7 | 启动 Phase 1 | OWNER_APPROVED | Phase 0 证据已足够收敛 identity/create authority | Phase 1 = Logical Identity & Repair Creation Authority，范围以 §21 为准 |
+| OD-8 | synchronous RuleHost dual-role repair semantics | OWNER_APPROVED | 保留现有必要业务兼容，但不能依赖隐式类型判断 | evaluator-seeded R1 的 round-2 artificer role transition 必须显式并有测试覆盖 |
 
 ---
 
@@ -1005,7 +1007,7 @@ Which exact artifact/input/epoch/run is this evidence valid for?
 
 ## 最终结论
 
-**Phase 0 documentation/architecture work：PASS_WITH_LIMITATIONS，等待 Owner decision。**
-**Phase 1 implementation：CONDITIONALLY READY — 仅在 Owner 批准 OD-1/OD-3/OD-7/OD-8 后启动。**
+**Phase 0 documentation/architecture work：PASS_WITH_LIMITATIONS — OWNER_DECISION_FROZEN。**
+**Phase 1 implementation：READY — OD-1/OD-3/OD-7/OD-8 已批准，授权范围仅限 Logical Identity & Repair Creation Authority。**
 
-当前最大 blocker 不是源码调查不足，而是 identity contract 尚未获得 Owner 批准。若在未批准合同上直接实现，后续 Phase 1 可能在错误的 repair/channel/dual-role 语义上固化新债务。
+剩余实现风险不再是身份合同未决，而是 Phase 1 必须证明 host-runtime 与 pd-cli 都收敛到同一 `RepairCreationAuthority`，并用真实 SQLite、并发、channel/payload mismatch、dual-role transition 与 crash-adjacent 失败场景验证不会生成第二条不确定 repair。

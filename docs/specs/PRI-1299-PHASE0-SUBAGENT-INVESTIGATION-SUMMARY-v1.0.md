@@ -174,4 +174,4 @@ Agent D 的测试场景已映射为 SPEC v1.1 §20.2 的 A-U 矩阵。该矩阵�
 1. 子代理没有修改或运行动态生产系统。
 2. 主代理只执行有限 in-memory probe；未执行多进程/fault injection。
 3. 部分测试覆盖判断依赖静态搜索；不能替代动态覆盖率报告。
-4. Owner 尚未批准任何 D1-D6/OD-1..OD-8 决策。
+4. 本汇总保留调查时点证据；后续 Owner freeze 已将 D1-D6/OD-1..OD-8 记录为 `OWNER_APPROVED`，最终以 ADR-0031 §21 和 SPEC v1.1 §25 为准。
