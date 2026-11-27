@@ -82,7 +82,7 @@ npm test --workspace=create-principles-disciple -- --run tests/service-host-prov
 npm test --workspace=create-principles-disciple -- --run tests/service-host-provisioning.test.ts
 ```
 
-结果：`19 passed / 0 failed`。
+结果：`20 passed / 0 failed`。
 
 覆盖矩阵：
 
@@ -141,6 +141,7 @@ npx eslint packages/create-principles-disciple/src/service-host-provisioning.ts
 - 本 PR 在 readiness/CAS 前 fail-closed，因此 Codex/WorkBuddy/all deferred resume 的并发调用不会到达 ownership CAS。
 - 既有 ownership CAS 原语仍有 generation fencing；本 PR 未改变该机制。
 - pending registry/evidence 沿用既有 atomic temp-file/rename 写入；重复 resume 测试证明语义幂等且不会意外翻转 ownership。
+- 新增 `concurrent blocked deferred resumes never race into an ownership write`：两个并发 resume 均阻断，manifest bytes 不变，ownership 仍为 no-record。
 - 未新增跨进程锁；这是有意排除，因为本 PR 不建立新 pending/lease 基础设施。
 
 ## 8. Error Context 路由
