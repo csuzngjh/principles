@@ -84,11 +84,13 @@ export * from './internalization-consumer-governance.js';
 // of the input union, and callers construct them structurally.
 // SelectedInternalizationTaskRunnerOptions IS public — pd-cli run-once
 // constructs it directly (verified cross-package consumer).
+// PRI-1301: the executor entries re-export from the executor module
+// (pure move — identical symbol names/types; the cycle entries stay
+// sourced from the consumer cycle module).
 export {
   INTERNALIZATION_AUTO_CONSUMER_FLAG_ID,
   orderKindsByOldestReadyStage,
   oldestReadyAgeMs,
-  executeSelectedInternalizationTask,
   runInternalizationConsumerCycle,
 } from './internalization-consumer-cycle.js';
 export type {
@@ -97,10 +99,15 @@ export type {
   InternalizationConsumerCyclePorts,
   InternalizationConsumerCycleOutcome,
   InternalizationConsumerCycleSignals,
+} from './internalization-consumer-cycle.js';
+export {
+  executeSelectedInternalizationTask,
+} from './internalization-task-executor.js';
+export type {
   ExecuteSelectedInternalizationTaskInput,
   SelectedInternalizationTaskRunResult,
   SelectedInternalizationTaskRunnerOptions,
-} from './internalization-consumer-cycle.js';
+} from './internalization-task-executor.js';
 // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: pure adaptive schedule
 // policy for the existing consumer timer chain (no new background service).
 export * from './adaptive-consumer-schedule.js';
