@@ -1,0 +1,103 @@
+
+> principles-disciple-monorepo@2.8.12 error:context
+> node scripts/error-context.mjs --base origin/main
+
+Error Context
+
+Basis: diff origin/main...HEAD (committed + staged + unstaged)
+
+Triggered patterns:
+
+EP-09 — HIGH (score 5)
+Matched:
+- path: packages/create-principles-disciple/tests/service-host-provisioning.test.ts ← tests/
+- diff: toContain(
+- diff: readFileSync
+- diff: skip
+Required evidence:
+1. A positive assertion uniquely identifies the intended execution path; indirect signals (undefined return, absence of error, zero count) are not the only proof.
+2. Regression tests for a fix include the negative control that fails against the pre-fix state.
+3. Tests exercise the production boundary (real parser/registration/route), not source-string scans.
+4. Every completeness claim in a deletion/cleanup/audit PR cites the FULL untruncated output of a re-runnable command; the owning lifecycle doc's state machine is followed as binding removal semantics; every DoD command was executed once with its real output in the PR (ERR-127).
+5. A test asserting a declared bound (cap/budget/limit) drives the input to the boundary — maximal every contributing field — and asserts the bound on the FINAL returned value; a fixture that cannot approach the bound is not a guard (ERR-134).
+6. A validation guard's enforced rule is pinned to its authority: every identifier in a hand-written field list is proven to EXIST by round-tripping it through the owning validator (dropping any one entry must make that validator reject), and every predicate whose message asserts a format/unit/bound ships a negative case that the weaker reading would accept (non-existent calendar date, non-ISO format, boundary equality) (ERR-146).
+7. A newly added fail-closed gate must not turn an existing downstream-path test green: the test positively asserts the intended predecessor stage(s) succeeded, and the pre-gate fixture remains a negative control (ERR-178).
+8. A paste-ready copy assertion parses the EMITTED string (not the source constant) through the real parser: any transform on the way to the user — whitespace collapse, length clamping, redaction — can invalidate the snippet while substring assertions stay green (ERR-180).
+9. A local build/test pass is evidence only for the physical artifact it RESOLVED: prove the resolution target of every workspace dependency (`fs.realpathSync('node_modules/@principles/<pkg>')`) lives inside the tree under test, and prove a freshly-built dependency (no pre-existing dist/) is what the pass consumed, before using "it is green here" to argue a CI failure is spurious (ERR-200).
+10. A timer-based test advances by the delay the scheduler actually announced, never by a magic constant chosen to cover a jittered/policy-derived backoff; the jitter source is pinned in a max-boundary regression case whose pre-fix state fails (ERR-203).
+
+EP-12 — HIGH (score 5)
+Matched:
+- path: packages/create-principles-disciple/src/service-host-provisioning.ts ← create-principles-disciple
+- path: packages/create-principles-disciple/tests/service-host-provisioning.test.ts ← create-principles-disciple
+- diff: manifest
+Required evidence:
+1. Every write into host-managed paths/keys cites the host rule that interprets it (discovery scan, publication uniqueness, allowlist gate).
+2. PD-owned data lives outside discovery roots; shared host collections stay append-only.
+3. A sandboxed host install proves the injected home actually decides the written directory: every env override that outranks it (WORKBUDDY_CONFIG_DIR, CODEX_HOME, HOME-derived roots) points at the sandbox, and the real host config's sha256 is asserted unchanged (ERR-208).
+4. Every child process started by code that may run without a console (a detached child, a GUI parent, or a long-lived server they launch) is started with windowsHide: true; the package's child-process-windows-hide guard is green, and a package that newly starts child processes is added to the guard's coverage. Running it by hand in a terminal proves nothing — that path never shows the window (ERR-210).
+
+EP-14 — HIGH (score 5)
+Matched:
+- path: packages/create-principles-disciple/src/service-host-provisioning.ts ← create-principles-disciple
+- path: packages/create-principles-disciple/tests/service-host-provisioning.test.ts ← create-principles-disciple
+- diff: include
+Required evidence:
+1. Compiled/published/installed output (dist, npm tarball, installer payload) is asserted free of non-production content (compiled tests, snapshots, fixtures, stale orphan outputs) by a mechanized check that fails the build - not by inspection or audit.
+2. When the production build excludes tests from compilation, test-file typechecking is carried by an explicit gate (e.g. tsc --noEmit wired into verify:merge) so gate strength does not silently drop.
+3. Production-owned modules whose names resemble test assets (e.g. golden-dogfood-fixtures.ts imported by a production barrel) are explicitly distinguished from test artifacts in the assertion patterns.
+4. A NEW workspace dependency is added to the bundler's staged-manifest rewrite list in the same change, so the self-contained build resolves it as `file:../<sibling>` instead of a registry range that may be absent or divergent (ERR-196).
+5. A marketplace or secondary-channel publish consumes the immutable artifact the canonical channel published (`npm pack <name>@<version>`), never a working-tree source directory whose build output is gitignored; the declared runtime entries are asserted inside that artifact before upload, and a non-blocking failure states which channels did and did not update (ERR-201).
+6. Any diff under plugins/principles-disciple/ (skill docs and scripts included) strictly increments .codex-plugin/plugin.json version; verify with sync-codex-runtime-pins.mjs --check-base <base-sha> before pushing (ERR-202).
+7. A cross-package runtime contract change (removed/renamed CLI flags, command output fields, spawn args, inter-process protocol) enumerates every production consumer AND its independent release channel; the consumer's compatible version must already be published, or the PR carries the consumer release-prep / references an explicit follow-up ticket; consumer compatibility is verified against installed artifact combinations, never repo main (ERR-207).
+
+EP-06 — HIGH (score 4)
+Matched:
+- path: packages/create-principles-disciple/src/service-host-provisioning.ts ← create-principles-disciple
+- path: packages/create-principles-disciple/tests/service-host-provisioning.test.ts ← create-principles-disciple
+Required evidence:
+1. The source of truth was edited and the generator/artifact rebuilt, not the generated copy patched.
+2. A SCOPE change (host count, default value, gate threshold) edits each stale fact line in the spec/design doc; a blanket "this section is superseded by revision N" disclaimer is NOT synchronization — the old line is still what an operator reads (ERR-199).
+3. The lockfile CI consumes is the one updated; smoke installs run from packed output.
+4. Dependency-bump PRs state which package test/typecheck jobs CI path-filters skip and attach local evidence covering them: targeted vitest/tsc in consumer packages, default-import scan, npm ls single-copy check (ERR-131).
+5. New/changed entry points exist in ALL build paths (tsc, esbuild) that reference them.
+6. Before adding a NEW import of a shared utility (formatting/validation/logging/hashing), sibling implementations of the same purpose were searched (rg) and the one whose contract documents the needed guardrails was reused — two live implementations are a retirement signal, not a third-consumer license (ERR-126).
+7. Serving or executing from a repo build artifact proves freshness first — rebuild immediately before launch or use the canonical installed runtime path; servable packages stay covered by the root build authority so repo-wide builds refresh them (ERR-166).
+8. An artifact installed into a location shared by several checkouts (git common dir, core.hooksPath, global config) contains no environment-specific absolute path or per-checkout name; every install/bootstrap re-establishes it from the tracked template, and the shared entry resolves its toolchain from the CALLING worktree and fails loud when it is missing instead of falling back to PATH or exiting 0 (ERR-185).
+9. a frozen evidence package that hashes its producer's own source is rebound with the sanctioned rebinder in the same PR as the source edit, and the rebind proves the reviewed outcomes did not move (executionsHash/report rows/gold hashes); the drift gate stays blocking and names the drifted files plus the exact command (ERR-186)
+10. A code comment or architecture doc may only assert `X caused Y` when THIS round produced direct evidence for it, and the write-up lists the observations that contradict the claim; a remedy whose causality is unproven is labelled a mitigation with the experiment that would confirm it (ERR-205)
+
+EP-03 — MEDIUM (score 3)
+Matched:
+- diff: nextAction
+- diff: reason
+- diff: persist
+Required evidence:
+1. Persistence/failure cannot become success: every refusal or degradation carries a structured reason + nextAction (rc-9).
+2. A cleanup/retirement pass that runs AFTER the primary side effect (the install is already committed) isolates each item's failure into a warning; one unreadable entry never turns a successful install into a reported failure (ERR-197).
+3. No empty catch blocks and no assertions hidden behind truthy conditionals.
+4. Failed stages do not report success or partial results as complete.
+5. A package-manager/installer exit code is never the evidence that the build needs are present — between `npm ci` and the first exec of a platform-specific tool, prove runnability by executing it (ERR-150).
+6. A status line describing N gates/checks derives each clause from its own witness field and is tested in the DISAGREEING combinations, not only all-on and all-off (ERR-182).
+7. A completeness claim over a date-partitioned log derives its candidate files from the producer's actual flush/naming behavior, counts every extra candidate file against the same file/byte budget, and degrades to partial + omitted files + a lower bound when a candidate is dropped (ERR-187).
+8. A duration computed from a monotonic clock (performance.now() arithmetic) that crosses into a runtime API with an integer/range contract (AbortSignal.timeout, setTimeout minimums, TTL windows) is clamped to the API's domain at the producer, and the contract is proven under the PRODUCTION default parameters — not only under an explicitly oversized test budget (ERR-191).
+9. A failure the code deliberately re-interprets as an acceptable state (an optional probe's 5xx read as "nothing new") must still surface that decision on the SUCCESS path as a returned field / event / structured log, and the assertion must be mutation-proven — otherwise a permanently broken dependency silently freezes a security-relevant decision with zero trace (ERR-204).
+10. Every diagnostic branch split by input shape gets its own test, and transport-class inputs assert that the underlying error code (ECONNREFUSED / ENOTFOUND / ETIMEDOUT) survives into the final message — Node/undici and most SDKs put the actionable text in `error.cause`, one level below `error.message` (ERR-206).
+
+EP-05 — MEDIUM (score 2)
+Matched:
+- diff: attempt
+- diff: for (
+Required evidence:
+1. Each iteration reads fresh errors/current state, not a stale prior-iteration result (rc-7).
+2. Records are written with current-iteration data; next-attempt state is not stored as current evidence.
+3. Tests cover two distinct failing attempts with per-attempt assertions.
+
+EP-11 — LOW (score 1)
+Matched:
+- diff: t('
+Required evidence:
+1. Every new user-facing string in an i18n-enabled component routes through t() with a key present in all locale files.
+2. Owner-visible text is shortened by code points (Array.from / truncateByCodePoints), never by UTF-16 units — a split surrogate pair renders as U+FFFD.
+
+Router supplements semantic selection; it does not replace ERROR_PATTERN_INDEX.md.

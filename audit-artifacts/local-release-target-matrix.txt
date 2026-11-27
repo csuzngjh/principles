@@ -1,0 +1,16 @@
+
+> create-principles-disciple@1.156.2 test
+> vitest run --run tests/release-target-matrix.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.1.0 [39m[90m/mnt/d/Code/_worktrees/principles/PRI-1278-phase5-p0-guard-20261127/packages/create-principles-disciple[39m
+
+[temp-lifecycle] test-runs: kept 17
+[temp-lifecycle] TMPDIR -> /mnt/d/Code/.pd-tmp/principles/test-runs/vitest-20261127-122652-8f1b95
+ [32m✓[39m tests/release-target-matrix.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+[2m   Start at [22m 12:26:52
+[2m   Duration [22m 818ms[2m (setup 38%, transform 33%, tests 13%, worker 8%, import 7%)[22m
+

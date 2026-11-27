@@ -1,0 +1,6 @@
+
+/mnt/d/Code/_worktrees/principles/PRI-1278-phase5-p0-guard-20261127/packages/create-principles-disciple/src/service-host-provisioning.ts
+  605:7  error  'readPendingProvisioningEvidence' was used before it was defined  @typescript-eslint/no-use-before-define
+
+✖ 1 problem (1 error, 0 warnings)
+

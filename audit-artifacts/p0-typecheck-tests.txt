@@ -1,0 +1,4 @@
+
+> create-principles-disciple@1.156.2 typecheck:tests
+> tsc -p tsconfig.tests.json
+

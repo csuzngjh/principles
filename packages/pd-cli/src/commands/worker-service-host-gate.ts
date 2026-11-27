@@ -108,7 +108,7 @@ export function admitServiceWorkerCycle(host: ServiceWorkerHostKind, workspaceDi
     if (workspaceLock !== null) releaseServiceRunLock(workspaceLock.handle satisfies ServiceRunLockHandle);
   };
 
-  const ownership = ownershipRead.ownership;
+  const { ownership } = ownershipRead;
   if (ownership.status === 'manifest_unreadable') {
     release();
     return {
