@@ -661,7 +661,9 @@ export async function stopOpenClawGateway(
   deps?: GatewayStopConfirmationDeps,
 ): Promise<GatewayControlResult> {
   const command = runGatewayServiceCommand('stop');
-  if (command.ok) return command;
+  // A successful stop command is only a request, not evidence that the legacy
+  // consumer exited. Ownership transfer may proceed only after the observed
+  // listener/process pair is verified quiescent.
   return confirmGatewayStopped(command, observed, deps);
 }
 

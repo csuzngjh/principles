@@ -381,9 +381,18 @@ describe('environment detection utilities', () => {
   });
 
   describe('gateway service control (stopOpenClawGateway / restartOpenClawGateway)', () => {
-    it('stopOpenClawGateway returns ok:true and invokes "openclaw gateway stop --force"', async () => {
+    it('stopOpenClawGateway verifies the stopped effect and invokes "openclaw gateway stop --force"', async () => {
       mockExecFileSync.mockImplementation(() => '');
-      const res = await stopOpenClawGateway();
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (typeof address !== 'object' || address === null) throw new Error('listen failed');
+      const port = address.port;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port },
+        { processAlive: () => false, confirmTimeoutMs: 20 },
+      );
       expect(res.ok).toBe(true);
       expect(mockExecFileSync).toHaveBeenCalledTimes(1);
       expect(joinedCall(mockExecFileSync.mock.calls[0])).toContain('openclaw gateway stop');
@@ -554,15 +563,27 @@ describe('environment detection utilities', () => {
       expect(res.error).toContain('verification itself failed');
     });
 
-    it('never runs the effect check on the success path (no new wait on healthy hosts)', async () => {
+    it('a successful stop command is not ownership evidence until the observed gateway is verified stopped', async () => {
       const gw = await openListener();
       mockExecFileSync.mockImplementation(() => '');
+      try {
+        const running = await stopOpenClawGateway(
+          { isRunning: true, port: gw.port, pid: 4242 },
+          { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20 },
+        );
+        expect(running.ok).toBe(false);
+        expect(running.reason).toBe('gateway_still_running');
+      } finally {
+        await gw.close();
+      }
 
-      const res = await stopOpenClawGateway({ isRunning: true, port: gw.port, pid: 4242 });
-
-      expect(res).toEqual({ ok: true });
+      mockExecFileSync.mockClear();
+      const stopped = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port, pid: 4242 },
+        { sleep: noWait, processAlive: () => false, confirmTimeoutMs: 20 },
+      );
+      expect(stopped).toEqual({ ok: true });
       expect(mockExecFileSync).toHaveBeenCalledTimes(1);
-      await gw.close();
     });
   });
 
@@ -696,7 +717,16 @@ describe('environment detection utilities', () => {
     it('routes gateway service commands through cmd.exe on win32', async () => {
       await loadWin32Env();
       win32ExecFileSync.mockImplementation(() => '');
-      const res = await win32Env.stopOpenClawGateway();
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (typeof address !== 'object' || address === null) throw new Error('listen failed');
+      const port = address.port;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      const res = await win32Env.stopOpenClawGateway(
+        { isRunning: true, port },
+        { processAlive: () => false, confirmTimeoutMs: 20 },
+      );
       expect(res.ok).toBe(true);
       expect(win32ExecFileSync).toHaveBeenCalledTimes(1);
       expect(joinedCall(win32ExecFileSync.mock.calls[0])).toContain('cmd.exe /c openclaw gateway stop');

@@ -244,22 +244,24 @@ function installsWorkbuddy(host: HostSelection): boolean {
  * PRI-1278 Phase 5 review: when may THIS run (re)initialize ownership?
  *
  *  - a fresh install always records the attempt (a pending marker on failure);
- *  - an existing install resumes ONLY with explicit enable consent AND a
- *    matching pending marker from a previous fresh install. Historical
- *    workspaces never wrote that marker → they can never be flipped here.
+ *  - an existing install resumes ONLY with explicit enable consent for a
+ *    workspace registered in the authoritative install manifest. A pending
+ *    marker is resume evidence, not migration eligibility: historical
+ *    workspaces never wrote that marker and must still migrate when the Owner
+ *    explicitly authorizes it.
  */
 export function shouldProvisionOnInstall(input: {
   freshInstall: boolean;
   consentIntent: string;
   consentSource: string;
   schedulerState: string;
-  hasPendingMarker: boolean;
+  workspaceRegistered: boolean;
 }): boolean {
   if (input.freshInstall) return true;
   return input.consentIntent === 'enable'
     && input.consentSource === 'explicit_flag'
     && input.schedulerState === 'enabled'
-    && input.hasPendingMarker;
+    && input.workspaceRegistered;
 }
 
 /** PRI-1278 Phase 5: one REAL host binding this install verified. */
@@ -342,6 +344,72 @@ export function mergePendingProvisioningTargets(
     merged.push({ host: entry.host === 'all' ? 'none' : entry.host, workspaceDir: entry.workspaceDir });
   }
   return merged;
+}
+
+
+
+/**
+ * Whether this run's explicit Service Host migration can affect the workspace
+ * the OpenClaw declaration binds NOW. `--host` is not evidence on a deferred
+ * resume: it may be omitted while install.json still authoritatively names
+ * that bound workspace. This predicate is intentionally conservative and only
+ * widens the existing gateway pre-flight; it never creates a migration target.
+ */
+export function openClawMigrationRequiresGatewayCheck(options: {
+  readonly host: HostSelection;
+  readonly workspaceDir: string;
+  readonly enableServiceHost?: boolean;
+  readonly serviceHost?: { readonly intent: string; readonly source: string };
+}): boolean {
+  if (installsOpenClaw(options.host)) return true;
+  const explicitEnable = options.serviceHost !== undefined
+    ? options.serviceHost.intent === 'enable' && options.serviceHost.source === 'explicit_flag'
+    : options.enableServiceHost === true;
+  if (!explicitEnable) return false;
+  let binding: HostWorkspaceBinding;
+  try {
+    binding = readHostWorkspaceBinding('openclaw');
+  } catch {
+    return false; // unverifiable is handled fail-closed by provisioning itself
+  }
+  if (binding.state !== 'bound') return false;
+  const candidates = new Set([workspaceKey(options.workspaceDir)]);
+  const manifest = readManifestWorkspacesForProvisioning();
+  for (const workspaceDir of manifest.workspaces) candidates.add(workspaceKey(workspaceDir));
+  return candidates.has(workspaceKey(binding.workspaceDir));
+}
+
+/**
+ * Merge the authoritative install-manifest workspaces into an explicitly
+ * authorized existing-install migration. Manifest entries carry no host bias:
+ * the per-target binding resolver below proves which host (if any) owns the
+ * workspace NOW. This deliberately does not infer targets from cwd or HOME.
+ */
+export function mergeManifestProvisioningTargets(
+  targets: readonly ProvisioningTarget[],
+  manifestWorkspaces: readonly string[],
+): ProvisioningTarget[] {
+  const merged = [...targets];
+  const seen = new Set(targets.map((target) => workspaceKey(target.workspaceDir)));
+  for (const workspaceDir of manifestWorkspaces) {
+    const key = workspaceKey(workspaceDir);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ host: 'none', workspaceDir });
+  }
+  return merged;
+}
+
+/** Read authoritative workspace registrations for explicit migration; malformed means none are eligible. */
+function readManifestWorkspacesForProvisioning(): { workspaces: readonly string[]; warning?: string } {
+  const manifestPath = getInstallManifestPath();
+  try {
+    const parsed = parseInstallManifest(readInstallJsonRecord(manifestPath));
+    if (!parsed.manifest) return { workspaces: [], warning: `install manifest could not be validated (${parsed.error ?? 'unknown'}); historical workspace migration is fail-closed.` };
+    return { workspaces: parsed.manifest.workspaces ?? [] };
+  } catch (error) {
+    return { workspaces: [], warning: `install manifest could not be read (${error instanceof Error ? error.message : String(error)}); historical workspace migration is fail-closed.` };
+  }
 }
 
 /**
@@ -6342,7 +6410,7 @@ export async function install(
   // that make the backup rename fail with EPERM. Decide stop/abort/proceed
   // BEFORE mutating anything (cli-5: abort/stop-failed paths must not mutate).
   let restartedGateway = false;
-  const gatewayStatus = installsOpenClaw(options.host)
+  const gatewayStatus = openClawMigrationRequiresGatewayCheck(options)
     ? await checkOpenClawGateway()
     : { isRunning: false };
   if (gatewayStatus.isRunning) {
@@ -7163,7 +7231,15 @@ export async function install(
         ? { entries: [] }
         : readAllPendingProvisioning(getPdDir());
       if (pending.warning !== undefined) logger.warn(pending.warning);
-      const targets = mergePendingProvisioningTargets(runTargets, pending.entries);
+      const manifest = freshInstall
+        ? { workspaces: [] as readonly string[] }
+        : readManifestWorkspacesForProvisioning();
+      if (!freshInstall && manifest.warning !== undefined) logger.warn(manifest.warning);
+      const targets = mergeManifestProvisioningTargets(
+        mergePendingProvisioningTargets(runTargets, pending.entries),
+        manifest.workspaces,
+      );
+      const registeredKeys = new Set(manifest.workspaces.map((workspaceDir) => workspaceKey(workspaceDir)));
       const perTarget = [] as NonNullable<ServiceHostProvisioningReport['targets']>[number][];
       // One-time switch verification (upgrade installs only, never a fresh
       // install): scanned lazily BEFORE the first provision write of this
@@ -7181,7 +7257,7 @@ export async function install(
           consentIntent: consent.intent,
           consentSource: consent.source,
           schedulerState: scheduler.state,
-          hasPendingMarker: marker !== null,
+          workspaceRegistered: registeredKeys.has(workspaceKey(target.workspaceDir)),
         });
         if (!resume) continue;
         if (!freshInstall && legacyWorkerScan === undefined) {
@@ -7195,8 +7271,8 @@ export async function install(
         // named the host the first install intended.
         let host: HostSelection = target.host;
         let bindingVerification: { ok: false; reason: string; nextAction: string } | undefined;
-        if (marker !== null) {
-          const resolution = resolveResumeProvisioningHost(marker.host, target.workspaceDir);
+        if (!freshInstall) {
+          const resolution = resolveResumeProvisioningHost(marker?.host ?? target.host, target.workspaceDir);
           if (resolution.ok) {
             ({ host } = resolution);
           } else {
