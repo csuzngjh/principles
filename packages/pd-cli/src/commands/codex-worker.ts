@@ -23,7 +23,8 @@ import { createWorkerDrain } from './worker-drain.js';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { runCodexWorkspaceWorkerCycle, type CodexWorkerCycleResult } from '@principles/codex-adapter';
+import { codexWorkerCycleDriver, runCodexWorkspaceWorkerCycle, type CodexWorkerCycleResult } from '@principles/codex-adapter';
+import { beginWorkerConsumptionCycle, endWorkerConsumptionCycle } from '../services/service-host/worker-consumption-gate.js';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
 import { retentionWarning, runTrajectoryRetention } from '@principles/host-runtime';
 
@@ -215,6 +216,37 @@ function printCycleReport(result: CodexWorkerCycleResult, json: boolean): void {
   console.log(lines.join('\n'));
 }
 
+/**
+ * PRI-1278 Phase 5: one ownership-gated, mutex-protected consuming cycle.
+ * The gate re-evaluates ownership EVERY cycle (a handover can land while a
+ * continuous worker is resident); the per-workspace run mutex is held only
+ * for the single cycle — a drained worker holds no lock between cycles, so
+ * handover/rollback can prove quiescence (OpenClaw worker precedent).
+ * `consumed` tells the caller whether retention may run (retention is
+ * post-cycle maintenance, never a refusal side effect).
+ */
+async function runOneGuardedCodexCycle(workspace: string): Promise<{ result: CodexWorkerCycleResult; consumed: boolean }> {
+  const consumption = beginWorkerConsumptionCycle({ hostKind: 'codex', workspaceDir: workspace, driver: codexWorkerCycleDriver() });
+  if (consumption.verdict.kind !== 'consume') {
+    const { verdict } = consumption;
+    return {
+      consumed: false,
+      result: {
+        workspaceDir: workspace,
+        mode: verdict.kind,
+        reason: verdict.reason,
+        nextAction: verdict.nextAction,
+      },
+    };
+  }
+  try {
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME }, emitEvent: (event, payloadJson) => console.error(`[PD:CodexWorker] ${event}: ${payloadJson}`) });
+    return { result, consumed: true };
+  } finally {
+    endWorkerConsumptionCycle(consumption);
+  }
+}
+
 export async function handleCodexWorker(options: CodexWorkerOptions): Promise<void> {
   // cli-1: continuous mode streams one report per cycle — that is NOT one
   // parseable JSON document. --json is only valid for the single-output
@@ -240,8 +272,8 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
   }
 
   if (options.once === true) {
-    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME }, emitEvent: (event, payloadJson) => console.error(`[PD:CodexWorker] ${event}: ${payloadJson}`) });
-    runRetentionAfterCycle(workspace);
+    const { result, consumed } = await runOneGuardedCodexCycle(workspace);
+    if (consumed) runRetentionAfterCycle(workspace);
     printCycleReport(result, options.json === true);
     if (result.mode === 'degraded') process.exitCode = 1;
     return;
@@ -257,8 +289,8 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
       // handler (commander's sync parse does not catch action rejections) and
       // crash the process. Log with a next action and keep the loop alive.
       try {
-        const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME }, emitEvent: (event, payloadJson) => console.error(`[PD:CodexWorker] ${event}: ${payloadJson}`) });
-        runRetentionAfterCycle(workspace);
+        const { result, consumed } = await runOneGuardedCodexCycle(workspace);
+        if (consumed) runRetentionAfterCycle(workspace);
         printCycleReport(result, false);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

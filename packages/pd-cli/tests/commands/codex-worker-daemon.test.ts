@@ -34,14 +34,23 @@ vi.mock('../../src/resolve-workspace.js', () => ({
 }));
 
 import { handleCodexWorker } from '../../src/commands/codex-worker.js';
+import { makeIsolatedPdHome } from '../helpers/isolated-pd-home.js';
 
 describe('codex worker daemon loop resilience (PRI-655)', () => {
   let workspaceDir: string;
+  let pdHome: string;
+  let savedPdHomePin: string | undefined;
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-daemon-'));
+    // PRI-1278 Phase 5: seed a valid isolated install manifest so the
+    // consumption gate projects legacy_owned instead of failing closed on a
+    // missing owner marker (see helpers/isolated-pd-home.ts).
+    pdHome = makeIsolatedPdHome('pd-codex-daemon-home-');
+    savedPdHomePin = process.env.PD_SERVICE_PD_HOME;
+    process.env.PD_SERVICE_PD_HOME = pdHome;
     resolveWorkspaceDir.mockReturnValue(workspaceDir);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -50,7 +59,10 @@ describe('codex worker daemon loop resilience (PRI-655)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    if (savedPdHomePin === undefined) delete process.env.PD_SERVICE_PD_HOME;
+    else process.env.PD_SERVICE_PD_HOME = savedPdHomePin;
     fs.rmSync(workspaceDir, { recursive: true, force: true });
+    fs.rmSync(pdHome, { recursive: true, force: true });
   });
 
   async function waitForCalls(count: number, timeoutMs = 8000): Promise<void> {

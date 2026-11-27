@@ -17,6 +17,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { getDefaultPdConfig } from '@principles/core/runtime';
 import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
+import { makeIsolatedPdHome } from '../helpers/isolated-pd-home.js';
 
 function runPdHelp(args: string[]): string {
   try {
@@ -48,10 +49,17 @@ describe('workbuddy worker command registration (cli-7, real built CLI)', () => 
 
 describe('workbuddy worker handler (functional)', () => {
   let workspaceDir: string;
+  let pdHome: string;
+  let savedPdHomePin: string | undefined;
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-wb-worker-'));
+    // PRI-1278 Phase 5: seed a valid isolated install manifest so the
+    // consumption gate projects legacy_owned (see helpers/isolated-pd-home.ts).
+    pdHome = makeIsolatedPdHome('pd-cli-wb-worker-home-');
+    savedPdHomePin = process.env.PD_SERVICE_PD_HOME;
+    process.env.PD_SERVICE_PD_HOME = pdHome;
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
     const config = getDefaultPdConfig();
@@ -64,7 +72,10 @@ describe('workbuddy worker handler (functional)', () => {
   afterEach(() => {
     logSpy.mockRestore();
     process.exitCode = 0;
+    if (savedPdHomePin === undefined) delete process.env.PD_SERVICE_PD_HOME;
+    else process.env.PD_SERVICE_PD_HOME = savedPdHomePin;
     fs.rmSync(workspaceDir, { recursive: true, force: true });
+    fs.rmSync(pdHome, { recursive: true, force: true });
   });
 
   // P2-01: this fixture's workspace has a config but no trajectory.db, so the

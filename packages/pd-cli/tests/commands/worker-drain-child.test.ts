@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { getDefaultPdConfig } from '@principles/core/runtime';
 import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
+import { seedIsolatedPdHome } from '../helpers/isolated-pd-home.js';
 
 for (const host of ['codex', 'workbuddy']) {
   describe(`${host} real CLI parser and IPC`, () => {
@@ -15,6 +16,11 @@ for (const host of ['codex', 'workbuddy']) {
       config.features['host.codex'].enabled = false;
       config.features['host.workbuddy'].enabled = false;
       fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
+      // PRI-1278 Phase 5: HOME is redirected into root, so the production
+      // pdHome resolution lands in <root>/.pd — the consuming child evaluates
+      // the §8.4 ownership projection from install.json there. Seed a valid
+      // manifest (no record for this workspace = legacy_owned default).
+      seedIsolatedPdHome(path.join(root, '.pd'));
       const child = spawn(process.execPath, [getBuiltPdCliPath(), host, 'worker', '--workspace', root, '--interval', '120000'], {
         env: { ...process.env, HOME: root, USERPROFILE: root, CODEX_HOME: path.join(root, 'codex-home'), PD_COMPANION_WORKER_IPC: '1' },
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],

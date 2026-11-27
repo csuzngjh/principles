@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Command } from 'commander';
 import { getDefaultPdConfig } from '@principles/core/runtime';
+import { makeIsolatedPdHome } from '../helpers/isolated-pd-home.js';
 
 function buildTestProgram(): Command {
   const program = new Command();
@@ -133,10 +134,19 @@ describe('codex ingest catch-up handler (functional)', () => {
 
 describe('codex worker handler (functional)', () => {
   let workspaceDir: string;
+  let pdHome: string;
+  let savedPdHomePin: string | undefined;
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-worker-'));
+    // PRI-1278 Phase 5: consuming cycles evaluate the §8.4 ownership
+    // projection — seed a valid isolated install manifest (no ownership
+    // record for the temp workspace = legacy_owned pre-service-host default)
+    // instead of letting the gate hit the real or absent production home.
+    pdHome = makeIsolatedPdHome('pd-cli-worker-home-');
+    savedPdHomePin = process.env.PD_SERVICE_PD_HOME;
+    process.env.PD_SERVICE_PD_HOME = pdHome;
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, '.state', 'trajectory.db'), '');
@@ -150,7 +160,10 @@ describe('codex worker handler (functional)', () => {
   afterEach(() => {
     logSpy.mockRestore();
     process.exitCode = 0;
+    if (savedPdHomePin === undefined) delete process.env.PD_SERVICE_PD_HOME;
+    else process.env.PD_SERVICE_PD_HOME = savedPdHomePin;
     fs.rmSync(workspaceDir, { recursive: true, force: true });
+    fs.rmSync(pdHome, { recursive: true, force: true });
   });
 
   it('--once reports paused with reason+nextAction when the consumer flag is off', { timeout: 20_000 }, async () => {

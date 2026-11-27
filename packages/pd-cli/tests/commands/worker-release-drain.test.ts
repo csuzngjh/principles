@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeIsolatedPdHome } from '../helpers/isolated-pd-home.js';
+import * as fs from 'node:fs';
 const { codexCycle, workbuddyCycle } = vi.hoisted(() => ({ codexCycle: vi.fn(), workbuddyCycle: vi.fn() }));
 vi.mock('@principles/codex-adapter', async (importOriginal) => ({
   ...await importOriginal<typeof import('@principles/codex-adapter')>(), runCodexWorkspaceWorkerCycle: codexCycle,
@@ -10,11 +12,22 @@ vi.mock('../../src/resolve-workspace.js', () => ({ resolveWorkspaceDir: () => 'i
 import { handleCodexWorker } from '../../src/commands/codex-worker.js';
 import { handleWorkbuddyWorker } from '../../src/commands/workbuddy-worker.js';
 
+// PRI-1278 Phase 5: the consumption gate evaluates the §8.4 ownership
+// projection before every cycle — seed a valid isolated install manifest so
+// these drain-lifecycle tests exercise the loop exactly as production does
+// (workspace absent from the manifest = legacy_owned pre-service-host default).
+let isolatedPdHome: string;
+beforeEach(() => {
+  isolatedPdHome = makeIsolatedPdHome('pd-release-drain-home-');
+  vi.stubEnv('PD_SERVICE_PD_HOME', isolatedPdHome);
+});
+
 const originalSend = Object.getOwnPropertyDescriptor(process, 'send');
 afterEach(() => {
   vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllEnvs();
   if (originalSend !== undefined) Object.defineProperty(process, 'send', originalSend);
   else Reflect.deleteProperty(process, 'send');
+  fs.rmSync(isolatedPdHome, { recursive: true, force: true });
 });
 for (const [host, handler, cycle] of [
   ['codex', handleCodexWorker, codexCycle], ['workbuddy', handleWorkbuddyWorker, workbuddyCycle],

@@ -27,7 +27,8 @@ import { createWorkerDrain } from './worker-drain.js';
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { resolvePdHome } from '@principles/install-layout';
-import { runWorkbuddyWorkspaceWorkerCycle, type WorkbuddyWorkerCycleResult } from '@principles/workbuddy-adapter';
+import { runWorkbuddyWorkspaceWorkerCycle, workbuddyWorkerCycleDriver, type WorkbuddyWorkerCycleResult } from '@principles/workbuddy-adapter';
+import { beginWorkerConsumptionCycle, endWorkerConsumptionCycle } from '../services/service-host/worker-consumption-gate.js';
 import { computeWorkbuddyWorkerStatusMode, loadPdConfigForPlugin, retentionWarning, runTrajectoryRetention } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
@@ -161,6 +162,33 @@ function printCycleReport(result: WorkbuddyWorkerCycleResult, json: boolean): vo
   console.log(lines.join('\n'));
 }
 
+/**
+ * PRI-1278 Phase 5: one ownership-gated, mutex-protected consuming cycle —
+ * same contract as the Codex guarded cycle (gate re-evaluated every cycle,
+ * per-cycle mutex only, retention never runs on a refused cycle).
+ */
+async function runOneGuardedWorkbuddyCycle(workspace: string): Promise<{ result: WorkbuddyWorkerCycleResult; consumed: boolean }> {
+  const consumption = beginWorkerConsumptionCycle({ hostKind: 'workbuddy', workspaceDir: workspace, driver: workbuddyWorkerCycleDriver() });
+  if (consumption.verdict.kind !== 'consume') {
+    const { verdict } = consumption;
+    return {
+      consumed: false,
+      result: {
+        workspaceDir: workspace,
+        mode: verdict.kind,
+        reason: verdict.reason,
+        nextAction: verdict.nextAction,
+      },
+    };
+  }
+  try {
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace, emitEvent: (event, payloadJson) => console.error(`[PD:WorkbuddyWorker] ${event}: ${payloadJson}`) });
+    return { result, consumed: true };
+  } finally {
+    endWorkerConsumptionCycle(consumption);
+  }
+}
+
 export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Promise<void> {
   // cli-1: continuous mode streams one report per cycle — that is NOT one
   // parseable JSON document. --json is only valid for the single-output
@@ -205,8 +233,8 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
   }
 
   if (options.once === true) {
-    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace, emitEvent: (event, payloadJson) => console.error(`[PD:WorkbuddyWorker] ${event}: ${payloadJson}`) });
-    runRetentionAfterCycle(workspace);
+    const { result, consumed } = await runOneGuardedWorkbuddyCycle(workspace);
+    if (consumed) runRetentionAfterCycle(workspace);
     printCycleReport(result, options.json === true);
     if (result.mode === 'degraded') process.exitCode = 1;
     return;
@@ -219,8 +247,8 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
       // One escaping cycle exception must not kill the daemon (same
       // PRI-655 discipline as the Codex worker): report, keep looping.
       try {
-        const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace, emitEvent: (event, payloadJson) => console.error(`[PD:WorkbuddyWorker] ${event}: ${payloadJson}`) });
-        runRetentionAfterCycle(workspace);
+        const { result, consumed } = await runOneGuardedWorkbuddyCycle(workspace);
+        if (consumed) runRetentionAfterCycle(workspace);
         printCycleReport(result, false);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
