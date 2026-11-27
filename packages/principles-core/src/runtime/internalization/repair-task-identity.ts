@@ -67,6 +67,11 @@ export async function verifyRepairTaskIdentity(
   if (!payload) {
     return fail('repair_payload_missing', `task=${existing.taskId}`);
   }
+  // PRI-1299 OD-8: durable role is part of repair identity. Missing role on a
+  // payload-valid legacy row is backfillable; a wrong explicit role is conflict.
+  if (pi.repairTaskRole !== undefined && pi.repairTaskRole !== 'repair_artificer') {
+    return fail('repair_role_mismatch', `task=${existing.taskId};role=${pi.repairTaskRole}`);
+  }
   // 4/5. payload 来源与 iteration 必须与请求一致
   if (payload.sourceEvaluatorTaskId !== expectedSourceEvaluatorTaskId) {
     return fail(
@@ -134,7 +139,7 @@ export async function verifyRepairTaskIdentity(
   return {
     ok: true,
     authoritativeCorrelationId: lineage.correlationId,
-    needsLineageBackfill: existingParent === null || existingCorrelation === null,
+    needsLineageBackfill: existingParent === null || existingCorrelation === null || pi.repairTaskRole === undefined,
     channel: pi.channel,
   };
 }

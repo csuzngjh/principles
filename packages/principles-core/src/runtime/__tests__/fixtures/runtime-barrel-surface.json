@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2079,
+  "count": 2080,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1703,6 +1703,7 @@
     "createProductionGateDeps",
     "createRecoverySweepService",
     "createRemediationResult",
+    "createRepairTask",
     "createReuseRecommendationHook",
     "createRuleHostHelpers",
     "createRuntimeStateHandle",

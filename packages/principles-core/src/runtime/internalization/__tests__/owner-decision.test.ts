@@ -262,9 +262,7 @@ function makeInMemoryStateManager(tasks: TaskRecord[], artifacts: MemoryPIArtifa
     async getRunsByTask(id: string) { return [...runs.values()].filter((r) => r.taskId === id); },
     async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
-    async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
-      return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
-    },
+    updateTaskIfDiagnosticJsonUnchanged: store.updateTaskIfDiagnosticJsonUnchanged.bind(store),
     async updateTaskIfDiagnosticJsonAndArtifactsUnchanged(input: {
       taskId: string;
       expectedDiagnosticJson: string | null;
@@ -417,6 +415,21 @@ describe('PRI-629 classification + capability (INV-01/INV-02/§22)', () => {
     const facts = await collectOwnerDecisionFacts(
       makeFactStore([task, artificerFirstRound], makeArtifactStoreWithDecisionArtifact()), EVAL_ID);
     expect(deriveOwnerDecisionCapability(facts!).eligible).toBe(false);
+  });
+
+  it('ambiguous artificer dependencies make owner facts lineage-unresolvable (no first-row selection)', async () => {
+    const otherArtificer = {
+      ...artificerTaskWithPayload(1),
+      taskId: 'artificer-other',
+    };
+    const task = evaluatorNhrTask({ meta: baseMeta({ dependencyTaskIds: [ARTIFER_ID, otherArtificer.taskId] }) });
+    const facts = await collectOwnerDecisionFacts(
+      makeFactStore([task, artificerTaskWithPayload(2), otherArtificer], makeArtifactStoreWithDecisionArtifact()), EVAL_ID);
+
+    expect(facts?.lineageResolvable).toBe(false);
+    expect(facts?.dependencyArtificerTaskId).toBeNull();
+    expect(facts?.dependencyRepairIteration).toBeNull();
+    expect(deriveOwnerDecisionCapability(facts!).blockers).toContain('lineage_unresolvable');
   });
 
   it('missing decision artifact → not eligible (no reviewKey without durable facts)', async () => {
@@ -1212,9 +1225,7 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
       async getTask(id: string) { return store.getTask(id); },
       async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
       async updateTask(id: string, patch: Record<string, unknown>) { return store.updateTask(id, patch); },
-      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Record<string, unknown>, options?: Record<string, unknown>) {
-        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
-      },
+      updateTaskIfDiagnosticJsonUnchanged: store.updateTaskIfDiagnosticJsonUnchanged.bind(store),
     };
     const outcome = await reopenTaskForRevision(sm as never, ARTIFER_ID, {
       revisionCauseId: 'owner-res-ores_x',
@@ -1244,9 +1255,9 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
       },
       // PRI-1293 review fix: reopen 写入改经 CAS — 单行原子写语义不变
       // (patch 整体一次落库), writes 观测同一契约。
-      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Record<string, unknown>, options?: Record<string, unknown>) {
-        writes.push(patch);
-        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+      async updateTaskIfDiagnosticJsonUnchanged(...args: Parameters<MemoryTaskStore['updateTaskIfDiagnosticJsonUnchanged']>) {
+        writes.push(args[2]);
+        return store.updateTaskIfDiagnosticJsonUnchanged(...args);
       },
     };
     await reopenTaskForRevision(sm as never, ARTIFER_ID, {

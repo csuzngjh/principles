@@ -712,16 +712,16 @@
     },
     {
       "entry": "./runtime",
-      "symbol": "validateAndBackfillRepairLineage",
+      "symbol": "createRepairTask",
       "kind": "value",
-      "addedIn": "PRI-1300",
+      "addedIn": "PRI-1299",
       "expiresAt": "2027-11-26",
       "consumers": [
         "packages/host-runtime/src/internalization-consumer-governance.ts",
         "packages/pd-cli/src/services/rulehost-pipeline-runner.ts"
       ],
-      "whyNotInternal": "PRI-1300: the two repair seeders (host-runtime + pd-cli) must share the ONE write-side lineage validation + six-precondition CAS backfill implementation; the pre-PRI-1300 copies of hydrate+merge+CAS in each host were the exact collaborator-drift class this uplift removes, and a core-internal symbol cannot be reached across the package boundary without a deep-import bypass.",
-      "alternativeConsidered": "Keeping per-host hydrate+merge+CAS copies around a shared verifyRepairTaskIdentity was rejected (the write side is where the copies drifted); a narrow subpath export was rejected because the capability already travels with the ./runtime repair-lineage symbols its consumers import."
+      "whyNotInternal": "PRI-1299 Phase 1 requires host-runtime and pd-cli to call the exact same Repair Creation Authority. Keeping createRepairTask core-internal would force both production entry points to retain separate read-check-write, lineage-proof, and UNIQUE-conflict re-arbitration implementations — the duplicate-authority defect this phase removes.",
+      "alternativeConsidered": "A host-local wrapper or orchestrator convenience method was rejected: both repair seeders already hold RuntimeStateManager and only need the structured authority outcome; exporting only lookup/id helpers would still leave atomic repair creation duplicated outside core."
     }
   ],
   "removals": [

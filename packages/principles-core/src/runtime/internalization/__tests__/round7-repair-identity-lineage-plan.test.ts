@@ -51,6 +51,7 @@ interface SeedMeta {
   dependencyTaskIds?: string[];
   runnerDecision?: string;
   repairPayload?: ReturnType<typeof repairPayloadOf>;
+  repairTaskRole?: string;
   channel?: string;
 }
 
@@ -78,6 +79,7 @@ async function mkTask(
         ...(meta.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
         ...(meta.correlationId !== undefined ? { correlationId: meta.correlationId } : {}),
         ...(meta.repairPayload !== undefined ? { repairPayload: meta.repairPayload } : {}),
+        ...(meta.repairTaskRole !== undefined ? { repairTaskRole: meta.repairTaskRole } : {}),
       },
       ...(meta.topCandidateId !== undefined ? { candidateId: meta.topCandidateId } : {}),
     }),
@@ -98,7 +100,7 @@ async function seedModernChainToEvaluator(prefix: string) {
 async function seedRepairTask(ev: string, iteration: number, opts?: {
   omitPayload?: boolean; wrongSource?: string; wrongIteration?: number;
   wrongTaskId?: boolean; parentOverride?: string; correlationOverride?: string;
-  omitLineage?: boolean; channelOverride?: string; status?: 'pending' | 'succeeded';
+  omitLineage?: boolean; omitRole?: boolean; channelOverride?: string; status?: 'pending' | 'succeeded';
 }): Promise<string> {
   const payload = repairPayloadOf(opts?.wrongSource ?? ev, opts?.wrongIteration ?? iteration);
   const taskId = opts?.wrongTaskId === true
@@ -106,6 +108,7 @@ async function seedRepairTask(ev: string, iteration: number, opts?: {
     : artificerRepairTaskId(opts?.wrongSource ?? ev, opts?.wrongIteration ?? iteration);
   const meta: SeedMeta = {
     ...(opts?.omitPayload === true ? {} : { repairPayload: payload }),
+    ...(opts?.omitPayload === true || opts?.omitRole === true ? {} : { repairTaskRole: 'repair_artificer' }),
   };
   if (opts?.omitLineage !== true) {
     meta.parentTaskId = opts?.parentOverride ?? ev;
@@ -144,6 +147,20 @@ describe('P1-1 — Repair 身份完整验证矩阵', () => {
     if (!r.ok) expect(r.reason).toBe('repair_payload_missing');
   });
 
+  it('显式错误 repairTaskRole → 拒绝 repair_role_mismatch', async () => {
+    const { ev } = await seedModernChainToEvaluator('rm');
+    const taskId = artificerRepairTaskId(ev, 1);
+    await mkTask(taskId, 'artificer', 'pending', {
+      repairPayload: repairPayloadOf(ev, 1),
+      repairTaskRole: 'ordinary_artificer',
+      parentTaskId: ev,
+      correlationId: CAND,
+    });
+    const r = await verifyRepair(taskId, ev, 1);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('repair_role_mismatch');
+  });
+
   it('payload 来源不匹配 → 拒绝', async () => {
     const { ev } = await seedModernChainToEvaluator('sm');
     const rep = await seedRepairTask(ev, 1, { wrongSource: 'other-evaluator' });
@@ -167,7 +184,7 @@ describe('P1-1 — Repair 身份完整验证矩阵', () => {
     // 派生但手工篡改: 直接用 wrongTaskId 形态 (payload 仍是 ev/1)。
     const payload = repairPayloadOf(ev, 1);
     await mkTask('artificer-repair-tampered-r1', 'artificer', 'pending', {
-      repairPayload: payload, parentTaskId: ev, correlationId: CAND,
+      repairPayload: payload, repairTaskRole: 'repair_artificer', parentTaskId: ev, correlationId: CAND,
     });
     const r = await verifyRepair('artificer-repair-tampered-r1', ev, 1);
     expect(r.ok).toBe(false);
@@ -206,11 +223,19 @@ describe('P1-1 — Repair 身份完整验证矩阵', () => {
     if (r.ok) expect(r.needsLineageBackfill).toBe(true);
   });
 
+  it('历史任务仅缺 repairTaskRole → 验证通过且标记可回填', async () => {
+    const { ev } = await seedModernChainToEvaluator('legacy-role');
+    const rep = await seedRepairTask(ev, 1, { omitRole: true });
+    const r = await verifyRepair(rep, ev, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.needsLineageBackfill).toBe(true);
+  });
+
   it('来源不是 evaluator → 拒绝 repair_source_not_evaluator', async () => {
     const { art } = await seedModernChainToEvaluator('ne');
     const payload = repairPayloadOf(art, 1);
     const taskId = artificerRepairTaskId(art, 1);
-    await mkTask(taskId, 'artificer', 'pending', { repairPayload: payload, parentTaskId: art, correlationId: CAND });
+    await mkTask(taskId, 'artificer', 'pending', { repairPayload: payload, repairTaskRole: 'repair_artificer', parentTaskId: art, correlationId: CAND });
     const r = await verifyRepair(taskId, art, 1);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('repair_source_not_evaluator');

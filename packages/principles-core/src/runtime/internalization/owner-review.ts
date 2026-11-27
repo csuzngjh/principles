@@ -287,14 +287,26 @@ export async function collectOwnerDecisionFacts(
   let dependencyArtificerTaskId: string | null = null;
   let lineageResolvable = false;
   if (piTask.taskKind === 'evaluator') {
+    let artificerDependencyCount = 0;
+    let malformedArtificerMetadata = false;
+    let resolved: { readonly taskId: string; readonly repairIteration: number } | null = null;
     for (const depId of piTask.dependencyTaskIds) {
       const dep = await store.getTask(depId).catch(() => null);
       if (!dep || dep.taskKind !== 'artificer') continue;
+      artificerDependencyCount += 1;
       const depPi = hydratePITaskRecord(dep);
-      dependencyRepairIteration = depPi?.repairPayload?.repairIteration ?? 0;
-      dependencyArtificerTaskId = dep.taskId;
+      if (!depPi
+        || (depPi.repairTaskRole !== undefined && depPi.repairTaskRole !== 'repair_artificer')
+        || (depPi.repairTaskRole === 'repair_artificer' && !depPi.repairPayload)) {
+        malformedArtificerMetadata = true;
+        continue;
+      }
+      resolved = { taskId: dep.taskId, repairIteration: depPi.repairPayload?.repairIteration ?? 0 };
+    }
+    if (artificerDependencyCount === 1 && !malformedArtificerMetadata && resolved) {
+      dependencyRepairIteration = resolved.repairIteration;
+      dependencyArtificerTaskId = resolved.taskId;
       lineageResolvable = true;
-      break;
     }
   } else {
     for (const depId of piTask.dependencyTaskIds) {

@@ -25,9 +25,7 @@ import {
   SqlitePIArtifactStore,
   PrincipleTreeLedgerAdapter,
   createProductionGateDeps,
-  createPITaskDiagnosticJson,
-  artificerRepairTaskId,
-  validateAndBackfillRepairLineage,
+  createRepairTask,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
   type PIArtifactSnapshot,
@@ -41,7 +39,7 @@ import {
 } from '@principles/core/runtime';
 // PRI-1293 Phase 3: InternalizationOrchestrator.resolveAuthoritativeCorrelationId
 // 静态只读包装 — 跨包访问唯一血缘权威的授权通道 (core 内部模块不进 barrel)。
-import { InternalizationOrchestrator } from '@principles/core/runtime';
+import type { InternalizationOrchestrator } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from './pd-config.js';
 
 /** Structural logger port — PluginLogger satisfies this without adaptation. */
@@ -192,102 +190,36 @@ export function createEvaluatorRepairDeps(
       return isFeatureEnabled(flags, 'evaluator_artificer_repair_loop');
     },
     seedArtificerRepairTask: async (params) => {
-      // P0-4: 确定性 revision identity — evaluatorTaskId + iteration 唯一定位
-      // 一个逻辑 repair 任务; 重放 (consumer 重复周期 / crash 恢复) reuse 而非再建。
-      // PRI-718: id 约定收敛到 pitask-metadata 的单一 owner。
-      const repairTaskId = artificerRepairTaskId(
-        params.repairPayload.sourceEvaluatorTaskId,
-        params.repairPayload.repairIteration,
-      );
-      const existing = await stateManager.getTask(repairTaskId);
-      if (existing) {
-        // PRI-718 (revise ≠ resume): a TERMINAL repair round is finished
-        // corrective work, not a vehicle for new corrective work. Returning
-        // it here made the evaluator re-run against a superseded artifact
-        // forever (EP002-R2: same-artifact score oscillation, one LLM call
-        // per cycle, no new repair). New work requires a new revision epoch
-        // (Owner revise_once) — surface as a seed failure so the evaluator
-        // degrades to needs_human_review instead of looping.
-        if (existing.status === 'succeeded' || existing.status === 'failed' || existing.status === 'needs_human_review') {
-          throw new Error(
-            `repair task ${repairTaskId} already reached terminal status ${existing.status}; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)`,
-          );
-        }
-        // PRI-1293 R7 (P1-1) + PRI-1300: 复用前完整身份验证 + 缺失亲缘字段
-        // CAS 回填 — 唯一实现上收 core (validateAndBackfillRepairLineage),
-        // 与 pd-cli seeder / orchestrator 完成路径同一规则: payload 存在+
-        // 来源/iteration 一致+taskId 互证+来源 evaluator 真实+parent/
-        // correlation 一致+channel 一致。缺失亲缘字段经六项快照前提 CAS
-        // 回填, payload 身份不符一律 fail-closed。宿主层只负责把结构化
-        // 结果逐字映射为既有 throw 字符串 (错误语义不变)。
-        const lineage = await validateAndBackfillRepairLineage(
-          {
-            repairTaskId,
-            existing,
-            sourceEvaluatorTaskId: params.repairPayload.sourceEvaluatorTaskId,
-            repairIteration: params.repairPayload.repairIteration,
-          },
-          stateManager,
-        );
-        if (!lineage.ok) {
-          if (lineage.reason === 'concurrent_modification') {
-            // 并发被触碰则放弃并结构化抛出, 下一轮 seed 重试 (播种幂等, 重试安全)。
-            throw new Error(
-              `evaluator_repair_seed_concurrent_modification: repair task ${repairTaskId} changed during lineage backfill — seed NOT applied, safe to retry`,
-            );
-          }
-          throw new Error(`evaluator_repair_seed_lineage_refused:${lineage.reason}:${lineage.detail}`);
-        }
-        if (lineage.backfilled) {
-          logger?.info?.(`[PD:Consumer] repair task ${repairTaskId} lineage backfilled (parentTaskId + correlationId ${lineage.authoritativeCorrelationId}) before reuse`);
-        }
-        logger?.info?.(`[PD:Consumer] repair task ${repairTaskId} already exists (in-flight ${existing.status}); reusing (idempotent seed)`);
-        return repairTaskId;
+      // PRI-1299 Phase 1: 宿主层只做参数转发与既有错误语义映射; identity、
+      // reuse、payload/channel adjudication、lineage proof、insert 与 UNIQUE
+      // race re-arbitration 全部由 principles-core 的唯一 RepairCreationAuthority 执行。
+      const result = await createRepairTask(stateManager, params);
+      if (result.outcome === 'created') {
+        logger?.info?.(`[PD:Consumer] seeded artificer repair task ${result.task.taskId} (iteration ${params.repairPayload.repairIteration})`);
+        return result.task.taskId;
       }
-      // PRI-1293 Phase 3 (§5.2): repair 任务创建前从来源 evaluator 恢复权威
-      // 血缘 — 校验失败结构化抛出 (流入 evaluator 的 repair_task_seed_failed →
-      // seed_failed 路径), 绝不创建无血缘后继; 成功则把验证过的 correlationId
-      // 与 parentTaskId=sourceEvaluatorTaskId 写入 repair metadata (既有
-      // createPITaskDiagnosticJson 机制), 使 repair 链可回溯根 dreamer、
-      // 下一轮 evaluator 经 mergePITaskMetadata 天然继承同一 id。不信任
-      // runner 调用方传入的任何 candidateId (SeedArtificerRepairParams 本就
-      // 无此字段)。
-      const sourceEvaluatorTask = await stateManager.getTask(params.repairPayload.sourceEvaluatorTaskId);
-      if (!sourceEvaluatorTask) {
+      if (result.outcome === 'adopted_existing') {
+        if (result.backfilled) {
+          logger?.info?.(`[PD:Consumer] repair task ${result.task.taskId} lineage backfilled before reuse`);
+        }
+        logger?.info?.(`[PD:Consumer] repair task ${result.task.taskId} already exists (in-flight ${result.task.status}); reusing (idempotent seed)`);
+        return result.task.taskId;
+      }
+      if (result.reason === 'concurrent_modification') {
         throw new Error(
-          `evaluator_repair_seed_lineage_refused: source evaluator task ${params.repairPayload.sourceEvaluatorTaskId} not found`,
+          `evaluator_repair_seed_concurrent_modification: repair task ${result.task?.taskId ?? params.repairPayload.sourceEvaluatorTaskId} changed during lineage backfill — seed NOT applied, safe to retry`,
         );
       }
-      const lineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
-        sourceEvaluatorTask,
-        (taskId: string) => stateManager.getTask(taskId),
-      );
-      if (!lineage.ok) {
-        throw new Error(`evaluator_repair_seed_lineage_refused:${lineage.reason}:${lineage.detail}`);
+      if (result.reason === 'terminal_repair_task') {
+        throw new Error(result.detail);
       }
-      await stateManager.createTask({
-        taskId: repairTaskId,
-        taskKind: 'artificer',
-        status: 'pending',
-        attemptCount: 0,
-        maxAttempts: 3,
-        diagnosticJson: createPITaskDiagnosticJson({
-          dependencyTaskIds: [...params.inheritedDependencyTaskIds],
-          channel: params.inheritedChannel,
-          pipelineMode: params.inheritedPipelineMode,
-          timeoutMs: params.inheritedTimeoutMs,
-          inputArtifactRefs: [...params.inheritedInputArtifactRefs],
-          outputArtifactRefs: [],
-          parentTaskId: params.repairPayload.sourceEvaluatorTaskId,
-          correlationId: lineage.correlationId,
-          ...(params.ownerEvidenceSelection !== undefined
-            ? { ownerEvidenceSelection: params.ownerEvidenceSelection }
-            : {}),
-          repairPayload: params.repairPayload,
-        }),
-      });
-      logger?.info?.(`[PD:Consumer] seeded artificer repair task ${repairTaskId} (iteration ${params.repairPayload.repairIteration}, correlationId ${lineage.correlationId}${lineage.recoveredFromLegacyRoot ? ', recovered from legacy root' : ''})`);
-      return repairTaskId;
+      if (result.reason === 'repair_source_evaluator_missing') {
+        throw new Error(`evaluator_repair_seed_lineage_refused: ${result.detail}`);
+      }
+      if (result.reason === 'repair_source_lineage_unprovable') {
+        throw new Error(`evaluator_repair_seed_lineage_refused:${result.detail}`);
+      }
+      throw new Error(`evaluator_repair_seed_lineage_refused:${result.reason}:${result.detail}`);
     },
   };
 }

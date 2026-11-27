@@ -98,6 +98,9 @@ export function appendConsumedRevisionCause(
  *   - Round 2 = second repair (after first repair's evaluator needs_revision).
  *   - Max 2 rounds; a 3rd needs_revision fails loud via needs_human_review (EP-03).
  */
+/** PRI-1299 OD-8: durable role marker for evaluator-seeded repair artificer tasks. */
+export type RepairTaskRole = 'repair_artificer';
+
 export interface RepairPayload {
   readonly requiredChanges: readonly string[];
   readonly concerns: readonly string[];
@@ -411,6 +414,14 @@ export interface PITaskMetadata {
    * can address each required change. Undefined on Round-1 artificer tasks.
    */
   repairPayload?: RepairPayload;
+  /**
+   * PRI-1299 OD-8: explicit durable role for evaluator-seeded repair work.
+   * `repairPayload` carries the bounded-round payload; this field marks the
+   * task's repair role so RuleHost recovery does not infer the role from
+   * taskKind alone. Absent on ordinary artificer tasks; legacy repair rows are
+   * CAS-backfilled by the repair lineage authority before adoption/reopen.
+   */
+  repairTaskRole?: string;
   /**
    * Runner 判定(evaluator / rollout_reviewer 的 LLM 决策),由 runner 在
    * succeedTask 收尾时写入。commitNextTaskProposal 依据它做单一迁移决策
@@ -840,6 +851,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       rejectionCount: metadata.rejectionCount,
       adversarialFeedback: metadata.adversarialFeedback,
       repairPayload: metadata.repairPayload,
+      repairTaskRole: metadata.repairTaskRole,
       runnerDecision: metadata.runnerDecision,
       revisionCount: metadata.revisionCount,
       revisionFeedback: metadata.revisionFeedback,
@@ -887,6 +899,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     rejectionCount: base.rejectionCount,
     adversarialFeedback: base.adversarialFeedback,
     repairPayload: base.repairPayload,
+    repairTaskRole: base.repairTaskRole,
     runnerDecision: base.runnerDecision,
     revisionCount: base.revisionCount,
     revisionFeedback: base.revisionFeedback,
@@ -954,7 +967,7 @@ function isValidArtifactRef(value: unknown): value is ArtifactRef {
  *     failedCaseCount (non-negative integer). Absence is valid; presence
  *     validates all fields strictly (rc-1, rc-3).
  */
-function isValidRepairPayload(value: unknown): value is RepairPayload {
+export function isValidRepairPayload(value: unknown): value is RepairPayload {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const p = value as Record<string, unknown>;
   // rc-4: validate array elements are non-empty strings.
@@ -976,6 +989,8 @@ function isValidRepairPayload(value: unknown): value is RepairPayload {
     || p.repairIteration > 2) return false;
   if (typeof p.sourceArtificerArtifactId !== 'string' || p.sourceArtificerArtifactId.trim() === '') return false;
   if (typeof p.sourceEvaluatorTaskId !== 'string' || p.sourceEvaluatorTaskId.trim() === '') return false;
+  if (p.sourceEvaluatorRunId !== undefined
+    && (typeof p.sourceEvaluatorRunId !== 'string' || p.sourceEvaluatorRunId.trim() === '')) return false;
   // PRI-634 R4 (P1-2): optional diagnosticReplay — validate when present.
   if (p.diagnosticReplay !== undefined) {
     if (typeof p.diagnosticReplay !== 'object' || p.diagnosticReplay === null || Array.isArray(p.diagnosticReplay)) return false;
@@ -1227,6 +1242,16 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ({ repairPayload } = m);
   }
 
+  // repairTaskRole (PRI-1299 OD-8): optional string. Non-string values are
+  // malformed metadata; a well-formed but wrong role is preserved so repair
+  // identity/transition callers can classify repair_role_mismatch explicitly
+  // instead of collapsing it into unreadable metadata.
+  let repairTaskRole: string | undefined;
+  if (Object.hasOwn(m, 'repairTaskRole') && m.repairTaskRole !== undefined) {
+    if (typeof m.repairTaskRole !== 'string') return null;
+    ({ repairTaskRole } = m);
+  }
+
   // runnerDecision (transition control, INV-02): optional literal union.
   if (Object.hasOwn(m, 'runnerDecision') && m.runnerDecision !== undefined) {
     if (typeof m.runnerDecision !== 'string' || !RUNNER_DECISIONS.has(m.runnerDecision)) return null;
@@ -1418,6 +1443,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     rejectionCount,
     adversarialFeedback: typeof m.adversarialFeedback === 'string' ? m.adversarialFeedback : undefined,
     repairPayload,
+    repairTaskRole,
     runnerDecision: typeof m.runnerDecision === 'string' && RUNNER_DECISIONS.has(m.runnerDecision)
       ? m.runnerDecision as RunnerDecision
       : undefined,
@@ -1529,6 +1555,7 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     rejectionCount: meta.rejectionCount ?? 0,
     adversarialFeedback: meta.adversarialFeedback,
     repairPayload: meta.repairPayload,
+    repairTaskRole: meta.repairTaskRole,
     runnerDecision: meta.runnerDecision,
     revisionCount: meta.revisionCount,
     revisionFeedback: meta.revisionFeedback,

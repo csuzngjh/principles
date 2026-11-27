@@ -125,7 +125,7 @@ async function seedModernChainToEvaluator(prefix: string) {
 
 async function seedRepairTask(ev: string, iteration: number, opts?: {
   omitLineage?: boolean; parentOverride?: string; correlationOverride?: string;
-  omitPayload?: boolean; lease?: boolean; extraDiagnosticFields?: Record<string, unknown>;
+  omitPayload?: boolean; omitRole?: boolean; lease?: boolean; extraDiagnosticFields?: Record<string, unknown>;
 }): Promise<string> {
   const taskId = artificerRepairTaskId(ev, iteration);
   const meta: SeedMeta = {
@@ -154,6 +154,7 @@ async function seedRepairTask(ev: string, iteration: number, opts?: {
         ...(meta.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
         ...(meta.correlationId !== undefined ? { correlationId: meta.correlationId } : {}),
         ...(meta.repairPayload !== undefined ? { repairPayload: meta.repairPayload } : {}),
+        ...(meta.repairPayload !== undefined && opts?.omitRole !== true ? { repairTaskRole: 'repair_artificer' } : {}),
       },
       ...(opts?.extraDiagnosticFields ?? {}),
     }),
@@ -199,6 +200,7 @@ describe('validateAndBackfillRepairLineage — 合法路径', () => {
     const after = hydratePITaskRecord(need(await sm.getTask(rep), 'rep after'));
     expect(after?.parentTaskId).toBe(ev);
     expect(after?.correlationId).toBe(CAND);
+    expect(after?.repairTaskRole).toBe('repair_artificer');
     // merge 而非重建 — payload / dependency / 状态全部保持。
     expect(after?.repairPayload?.sourceEvaluatorTaskId).toBe(ev);
     expect(after?.dependencyTaskIds).toContain('scribe-x');

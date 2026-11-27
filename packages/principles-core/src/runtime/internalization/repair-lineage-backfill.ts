@@ -175,6 +175,7 @@ export async function validateAndBackfillRepairLineage(
   const merged = mergePITaskMetadata(pi, {
     parentTaskId: params.sourceEvaluatorTaskId,
     correlationId: identity.authoritativeCorrelationId,
+    repairTaskRole: 'repair_artificer',
   });
   const nextDiagnosticJson = replacePIMetadataEnvelope(params.existing.diagnosticJson ?? null, merged);
   if (nextDiagnosticJson === null) {

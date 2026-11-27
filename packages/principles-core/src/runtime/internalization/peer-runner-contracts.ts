@@ -174,6 +174,8 @@ export interface PITaskRecord extends TaskRecord {
   adversarialFeedback?: string;
   /** Evaluator repair payload (PRI-509); present only on artificer repair tasks. */
   repairPayload?: RepairPayload;
+  /** PRI-1299 OD-8: explicit durable repair role; absent on ordinary artificer tasks. */
+  repairTaskRole?: string;
   /** Runner decision (evaluator/rollout_reviewer LLM verdict) — transition control (INV-02). */
   runnerDecision?: RunnerDecision;
   /** Times this task has been reopened for revision (bounded revision budget). */
