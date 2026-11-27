@@ -486,6 +486,46 @@ describe('createLogicalSuccessorTask atomic arbitration', () => {
     }
   });
 
+  it('post-allocation preferred-id collision retries the fallback id once', async () => {
+    await mkTask('parent-fallback-race', 'artificer');
+    const metadata = {
+      dependencyTaskIds: ['parent-fallback-race'], channel: 'prompt' as const, timeoutMs: 300000,
+      inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: 'parent-fallback-race',
+    };
+    const originalCreateTask = stateManager.createTask.bind(stateManager);
+    let intercepted = false;
+    stateManager.createTask = async (input) => {
+      if (!intercepted && input.taskId === 'evaluator-preferred-race') {
+        intercepted = true;
+        await originalCreateTask({
+          ...input,
+          diagnosticJson: JSON.stringify({
+            [PI_METADATA_KEY]: { ...metadata, parentTaskId: 'foreign-parent', channel: 'skill' },
+          }),
+        });
+        throw new Error('UNIQUE constraint failed: tasks.taskId');
+      }
+      return originalCreateTask(input);
+    };
+    try {
+      const result = await createLogicalSuccessorTask({
+        stateManager, parentTaskId: 'parent-fallback-race', successorKind: 'evaluator', channel: 'prompt',
+        preferredTaskId: 'evaluator-preferred-race', fallbackTaskId: 'evaluator-fallback-race', metadata,
+      });
+      expect(result.outcome).toBe('created');
+      if (result.outcome === 'created') {
+        expect(result.task.taskId).toBe('evaluator-fallback-race');
+        expect(result.usedFallback).toBe(true);
+      }
+      const logical = await lookupSuccessorByParent(stateManager, {
+        parentTaskId: 'parent-fallback-race', successorKind: 'evaluator', channel: 'prompt',
+      });
+      expect(logical.outcome).toBe('unique');
+    } finally {
+      stateManager.createTask = originalCreateTask;
+    }
+  });
+
   it('BEGIN failure does not poison later transactions on the same SQLite store', async () => {
     await mkTask('parent-begin-failure', 'artificer');
     const metadata = {

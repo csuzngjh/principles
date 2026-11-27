@@ -156,6 +156,43 @@ export async function createLogicalSuccessorTask(
       if (rescanned.outcome === 'conflict' || rescanned.outcome === 'malformed') {
         return { outcome: 'lookup', lookup: rescanned };
       }
+      if (!allocation.usedFallback && input.fallbackTaskId !== undefined && input.fallbackTaskId !== allocation.taskId) {
+        try {
+          const fallbackTask = await input.stateManager.createTask({
+            taskId: input.fallbackTaskId,
+            taskKind: input.successorKind,
+            status: 'pending',
+            attemptCount: 0,
+            maxAttempts: 3,
+            diagnosticJson: createPITaskDiagnosticJson({
+              ...input.metadata,
+              parentTaskId: input.parentTaskId,
+              channel: input.channel,
+            }),
+          });
+          return { outcome: 'created', task: fallbackTask, usedFallback: true };
+        } catch (fallbackError) {
+          if (!isUniqueViolation(fallbackError)) throw fallbackError;
+          const fallbackRescan = await lookupSuccessorByParent(input.stateManager, {
+            parentTaskId: input.parentTaskId,
+            successorKind: input.successorKind,
+            channel: input.channel,
+          });
+          if (fallbackRescan.outcome === 'unique') return { outcome: 'existing', task: fallbackRescan.successor };
+          if (fallbackRescan.outcome === 'conflict' || fallbackRescan.outcome === 'malformed') {
+            return { outcome: 'lookup', lookup: fallbackRescan };
+          }
+          return {
+            outcome: 'id_conflict',
+            allocation: {
+              outcome: 'id_conflict',
+              reason: 'derived_and_fallback_ids_occupied_by_foreign_chain',
+              detail: 'unique_violation_without_logical_successor:' + allocation.taskId + ',' + input.fallbackTaskId,
+              conflictingTaskIds: [allocation.taskId, input.fallbackTaskId],
+            },
+          };
+        }
+      }
       return {
         outcome: 'id_conflict',
         allocation: {
