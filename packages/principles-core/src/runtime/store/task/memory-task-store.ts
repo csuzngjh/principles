@@ -1,6 +1,7 @@
 /**
  * TaskStore — in-memory test double using a Map.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { TaskRecord } from '../../task-status.js';
 import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-store.js';
 
@@ -36,8 +37,47 @@ function readDiagnosticHostKind(diagnosticJson: string | null | undefined): stri
   }
 }
 
+/**
+ * Memory-store twin of SQLite json_extract at a pi_metadata scalar path.
+ * Undefined represents SQL NULL (missing key, missing envelope, malformed
+ * JSON, or non-object envelope) and therefore never matches a string filter.
+ */
+function readPIMetadataValue(diagnosticJson: string | null | undefined, field: 'parentTaskId' | 'channel'): unknown {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(diagnosticJson);
+    if (!isPlainObject(parsed)) return undefined;
+    const piMetadata = parsed.pi_metadata;
+    if (!isPlainObject(piMetadata)) return undefined;
+    return piMetadata[field];
+  } catch {
+    return undefined;
+  }
+}
+
+interface MemoryWriteTransactionContext {
+  active: boolean;
+}
+
 export class MemoryTaskStore implements TaskStore {
   private readonly tasks = new Map<string, TaskRecord>();
+  private transactionQueue: Promise<void> = Promise.resolve();
+  private readonly transactionContext = new AsyncLocalStorage<MemoryWriteTransactionContext>();
+
+  async withWriteTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const inherited = this.transactionContext.getStore();
+    if (inherited?.active) return fn();
+    const run = this.transactionQueue.then(async () => {
+      const context: MemoryWriteTransactionContext = { active: true };
+      try {
+        return await this.transactionContext.run(context, fn);
+      } finally {
+        context.active = false;
+      }
+    });
+    this.transactionQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
 
   async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
     const now = new Date().toISOString();
@@ -118,6 +158,15 @@ export class MemoryTaskStore implements TaskStore {
     }
     if (filter?.diagnosticHostKind !== undefined) {
       results = results.filter((t) => readDiagnosticHostKind(t.diagnosticJson) === filter.diagnosticHostKind);
+    }
+    // PRI-1299 parity with SqliteTaskStore: exact scalar equality. Missing
+    // metadata reads as undefined/SQL NULL and never matches — not even an
+    // empty-string filter.
+    if (filter?.piParentTaskId !== undefined) {
+      results = results.filter((t) => readPIMetadataValue(t.diagnosticJson, 'parentTaskId') === filter.piParentTaskId);
+    }
+    if (filter?.piChannel !== undefined) {
+      results = results.filter((t) => readPIMetadataValue(t.diagnosticJson, 'channel') === filter.piChannel);
     }
     // Parity with SqliteTaskStore (A-liveness): silently ignoring
     // orderBy/afterCursor here would make cursor-based scans return wrong

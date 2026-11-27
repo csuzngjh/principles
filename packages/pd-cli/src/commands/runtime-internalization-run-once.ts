@@ -936,6 +936,9 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         } else if (commitResult.decision === 'revision_reopen_noop') {
           output.enqueueReason = `revision_reopen_noop: ${commitResult.reason}; transition already materialized (idempotent replay)`;
           output.nextAction = 'No action — idempotent replay.';
+        } else if (commitResult.decision === 'successor_metadata_malformed') {
+          output.enqueueReason = 'successor_metadata_malformed: ' + commitResult.reason + ' (' + commitResult.detail + '); malformed candidates [' + commitResult.malformedCandidateTaskIds.join(', ') + '] — nothing was created or reopened';
+          output.nextAction = commitResult.nextAction;
         } else if (commitResult.decision === 'source_correction_reopened') {
           output.successorKind = 'artificer';
           output.successorTaskIds.push(commitResult.reopenedTaskId);

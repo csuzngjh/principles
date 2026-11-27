@@ -33,6 +33,7 @@ const ROLLOUT_ID = 'rollout-reviewer-001';
 const RUN_ID = 'run-evaluator-001';
 const EVAL_ARTIFACT_ID = `pi-art-${EVAL_ID}-${RUN_ID}`;
 const SCRIBE_ARTIFACT_ID = 'pi-art-scribe-001';
+const ARTIFICER_ARTIFACT_ID = 'pi-art-artificer-current';
 
 // PRI-1293 Phase 3: 血缘可证明的 dreamer 根 — 修复轮完成后的来源 evaluator
 // reopen 走新的血缘门禁, 夹具链必须可回溯根 dreamer (taskId 非 UUID + seed
@@ -110,16 +111,16 @@ function resolution(action: 'accept_current' | 'reject_current', effectiveDecisi
 
 const evaluatorOutput = {
   taskId: EVAL_ID,
-  sourceArtificerArtifactId: 'pi-art-artificer-old',
+  sourceArtificerArtifactId: ARTIFICER_ARTIFACT_ID,
   evaluation: {
     decision: 'needs_revision', summary: 'gaps remain', score: 0.72,
     strengths: ['clear structure'], concerns: ['c1'], requiredChanges: ['fix timeout'],
   },
-  sourceTrace: { artificerArtifactId: 'pi-art-artificer-old', scribeArtifactId: SCRIBE_ARTIFACT_ID },
+  sourceTrace: { artificerArtifactId: ARTIFICER_ARTIFACT_ID, scribeArtifactId: SCRIBE_ARTIFACT_ID },
   risks: [], generatedAt: '2026-08-30T00:00:00.000Z',
 };
 
-function makeArtifacts(): MemoryPIArtifactStore {
+function makeArtifacts(output: unknown = evaluatorOutput): MemoryPIArtifactStore {
   const store = new MemoryPIArtifactStore();
   void store.upsertArtifact({
     artifactId: SCRIBE_ARTIFACT_ID, artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
@@ -128,22 +129,28 @@ function makeArtifacts(): MemoryPIArtifactStore {
     createdAt: '2026-08-29T00:00:00.000Z', updatedAt: '2026-08-29T00:00:00.000Z',
   });
   void store.upsertArtifact({
+    artifactId: ARTIFICER_ARTIFACT_ID, artifactKind: 'principle', sourceTaskId: ARTIFER_ID,
+    lineageArtifactIds: [SCRIBE_ARTIFACT_ID], validationStatus: 'pending',
+    contentJson: JSON.stringify({ implementationSummary: 'current implementation', affectedTools: ['read'], generatedAt: 'x' }),
+    createdAt: '2026-08-29T00:00:00.000Z', updatedAt: '2026-08-29T00:00:00.000Z',
+  });
+  void store.upsertArtifact({
     artifactId: EVAL_ARTIFACT_ID, artifactKind: 'principle', sourceTaskId: EVAL_ID,
     lineageArtifactIds: [], validationStatus: 'pending',
-    contentJson: JSON.stringify(evaluatorOutput),
+    contentJson: JSON.stringify(output),
     createdAt: '2026-08-29T00:00:00.000Z', updatedAt: '2026-08-29T00:00:00.000Z',
   });
   return store;
 }
 
 /** MemoryTaskStore 支撑的忠实 in-memory stateManager(读写语义与 SQLite 一致) */
-function makeHarness(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore) {
+function makeHarness(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore, runOutput: unknown = evaluatorOutput) {
   const [firstTask] = tasks;
   if (!firstTask) throw new Error('makeHarness requires at least one task');
   const store = new MemoryTaskStore();
   for (const t of tasks) void store.createTask({ ...t });
   const runs = new Map([
-    [RUN_ID, { runId: RUN_ID, taskId: EVAL_ID, runtimeKind: 'evaluator', outputPayload: JSON.stringify(evaluatorOutput) }],
+    [RUN_ID, { runId: RUN_ID, taskId: EVAL_ID, runtimeKind: 'evaluator', outputPayload: JSON.stringify(runOutput) }],
   ]);
   const startRun = vi.fn();
   const stateManager = fenced({
@@ -152,6 +159,7 @@ function makeHarness(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore) {
     async getTask(id: string) { return store.getTask(id); },
     async listTasks() { return [] as TaskRecord[]; },
     async getRunsByTask(id: string) { return [...runs.values()].filter((r) => r.taskId === id); },
+    async updateRunOutput() { return undefined; },
     async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
     // eslint-disable-next-line @typescript-eslint/max-params -- 镜像生产 stateManager CAS 签名 (第4参为前提)。
@@ -259,6 +267,44 @@ describe('PRI-629 evaluator owner override resume (no LLM, INV-03)', () => {
     const after = hydratePITaskRecord(mustGet(await h.stateManager.getTask(EVAL_ID), 'evaluator task'));
     expect(after?.ownerResolutions?.[0]?.effectiveDecision).toBe('rejected');
     expect(after?.runnerDecision).toBe('needs_revision');
+  });
+
+  it('supersedes a stale owner resolution and evaluates the revised artificer input instead of failing permanently', async () => {
+    const staleOutput = {
+      ...evaluatorOutput,
+      sourceArtificerArtifactId: 'pi-art-artificer-old',
+      sourceTrace: { ...evaluatorOutput.sourceTrace, artificerArtifactId: 'pi-art-artificer-old' },
+    };
+    const artifacts = makeArtifacts(staleOutput);
+    const h = makeHarness(
+      [flippedEvaluatorTask(resolution('accept_current', 'approved', 'pending')), artificerR2, scribeTask],
+      artifacts,
+      staleOutput,
+    );
+    h.startRun.mockResolvedValue({ runId: 'run-evaluator-current' });
+    h.runtimeAdapter.pollRun.mockResolvedValue({ runId: 'run-evaluator-current', status: 'succeeded' });
+    const freshOutput = {
+      ...evaluatorOutput,
+      evaluation: {
+        ...evaluatorOutput.evaluation,
+        priorRequirementStatuses: [{ id: 'req-1', status: 'resolved' }],
+        requirementLedger: [{ id: 'req-1', statement: 'fix timeout', status: 'resolved' }],
+      },
+    };
+    h.runtimeAdapter.fetchOutput.mockResolvedValue({ payload: freshOutput });
+    const runner = new EvaluatorRunner(
+      { stateManager: h.stateManager, runtimeAdapter: h.runtimeAdapter as never, eventEmitter: h.eventEmitter, artifactStore: artifacts, validator: new DefaultEvaluatorValidator() },
+      { owner: 'test', runtimeKind: 'evaluator' },
+    );
+
+    const result = await runner.run(EVAL_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(h.startRun).toHaveBeenCalledTimes(1);
+    const after = hydratePITaskRecord(mustGet(await h.stateManager.getTask(EVAL_ID), 'evaluator task'));
+    expect(after?.status).toBe('succeeded');
+    expect(after?.ownerResolutions?.[0]?.status).toBe('superseded');
+    expect(after?.ownerResolutions?.[0]?.supersededReason).toBe('input_artifact_stale');
   });
 });
 

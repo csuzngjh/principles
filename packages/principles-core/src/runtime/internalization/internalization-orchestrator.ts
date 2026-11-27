@@ -14,23 +14,27 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
-import { PD_TASK_STATUSES, type TaskRecord, type PDTaskStatus } from '../task-status.js';
+import { type TaskRecord, type PDTaskStatus } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type { RunnerKind } from './peer-runner-contracts.js';
+import type { InternalizationChannel, RunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
 import { deriveSuccessorTaskId } from './internalization-state-machine.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, hasConsumedRevisionCause } from './pitask-metadata.js';
-import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition } from './revision-reopen.js';
+import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition, planRevisionReopenInitialState } from './revision-reopen.js';
+import { verifyRepairTaskIdentity } from './repair-task-identity.js';
+import { lookupSuccessorByParent, type SuccessorLookupResult } from './successor-lookup.js';
+import { createLogicalSuccessorTask } from './successor-create.js';
 import { validateAndBackfillRepairLineage } from './repair-lineage-backfill.js';
-import { inferLegacyParentTaskId } from './correlation-lineage.js';
 // PRI-1293 Phase 3: 唯一 PeerRunnerKind 血缘权威解析器 (core 内部模块,
 // 不入 barrel — 跨包消费方经 InternalizationOrchestrator 静态只读包装访问)。
 import {
   resolveAuthoritativeCorrelationId,
   resolveAuthoritativeCorrelationIdWithLegacyBackfill,
+  planLegacyLineageResolution,
   CORRELATION_LINEAGE_MAX_PARENT_EDGES,
   type CorrelationLineageGetTask,
   type CorrelationLineageResolution,
+  type LegacyLineagePlan,
 } from './correlation-lineage.js';
 import type { PITaskMetadata, SourceCorrectionReceiptV1 } from './pitask-metadata.js';
 import type { PITaskRecord } from './peer-runner-contracts.js';
@@ -183,7 +187,16 @@ export type CommitNextTaskResult =
   /** PRI-1293 R5: 派生 id 与父派生 fallback id 均被异链占用 — fail-closed, 绝不伪装幂等 */
   | { decision: 'successor_id_conflict'; sourceTaskId: string; reason: string; detail?: string }
   | { decision: 'successor_integrity_conflict'; sourceTaskId: string; reason: string; detail: string; conflictingSuccessorTaskIds: string[] }
+  /** PRI-1299 round 2: a relevant successor candidate is provably present but malformed — fail closed, zero writes. */
+  | { decision: 'successor_metadata_malformed'; sourceTaskId: string; reason: string; detail: string; malformedCandidateTaskIds: string[]; nextAction: string }
   | { decision: 'revision_reopen_failed'; sourceTaskId: string; reopenedTaskId: string; reason: string; detail?: string };
+
+/** Private transaction-rollback signal; caught at the transaction boundary and translated back to the structured public result. */
+class CommitDecisionRollback extends Error {
+  constructor(readonly result: CommitNextTaskResult) {
+    super('rollback commit decision');
+  }
+}
 
 // ── Constructor Options ───────────────────────────────────────────────────────
 
@@ -619,6 +632,237 @@ export class InternalizationOrchestrator {
     };
   }
 
+  /**
+   * Read-only preview of the same state-machine gate used by commit. It never
+   * writes lineage, tasks, cascade state, or metadata. null means the source is
+   * eligible to continue to proposal/successor arbitration.
+   */
+  async previewNextTaskTransitionGate(taskId: string): Promise<CommitNextTaskResult | null> {
+    const rawTask = await this.stateManager.getTask(taskId);
+    if (!rawTask) return { decision: 'task_not_found', taskId };
+    const piTask = hydratePITaskRecord(rawTask);
+    if (!piTask) return { decision: 'invalid_task_metadata', taskId, reason: 'Failed to hydrate PITaskRecord from diagnosticJson' };
+    const legacyVerdict = await this.resolveLegacyRunnerVerdict(taskId, rawTask.taskKind);
+    const adversarialReplayFailed = rawTask.taskKind === 'evaluator'
+      ? await this.resolveAdversarialReplayFailed(taskId)
+      : false;
+    const transition = decideInternalizationTransition(transitionInputFromTask(piTask, legacyVerdict, { adversarialReplayFailed }));
+    if (transition.kind === 'HUMAN_REVIEW_REQUIRED' || transition.kind === 'NOT_ADVANCEABLE') {
+      return { decision: 'source_not_succeeded', taskId, status: piTask.status };
+    }
+    if (transition.kind === 'BLOCKED_MISSING_VERDICT') {
+      return { decision: 'blocked_missing_verdict', taskId, reason: transition.reason };
+    }
+    if (transition.kind === 'REVISION_REQUIRED') {
+      return { decision: 'blocked_by_revision', sourceTaskId: taskId, reason: transition.reason, runnerDecision: piTask.runnerDecision ?? 'unknown' };
+    }
+    if (transition.kind === 'TERMINAL_REJECT') {
+      return { decision: 'blocked_by_rejection', sourceTaskId: taskId, reason: transition.reason, runnerDecision: piTask.runnerDecision ?? 'unknown' };
+    }
+    if (transition.kind === 'REOPEN_SOURCE_EVALUATOR' && piTask.repairPayload) {
+      return this.previewRepairReopenTransition(rawTask, piTask, transition.reason);
+    }
+    if (piTask.status !== 'succeeded') {
+      return { decision: 'source_not_succeeded', taskId, status: piTask.status };
+    }
+    if (rawTask.taskKind === 'scribe' && piTask.sourceCorrectionReceipt !== undefined
+      && piTask.sourceCorrectionCauseId !== undefined
+      && piTask.revisionCauseId === piTask.sourceCorrectionCauseId) {
+      if (piTask.sourceCorrectionReceipt.reopenOutcome !== undefined) {
+        return {
+          decision: 'source_correction_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: piTask.sourceCorrectionReceipt.artificerTaskId,
+          reason: `source_correction_outcome_recorded:${piTask.sourceCorrectionReceipt.reopenOutcome.kind}`,
+        };
+      }
+      return this.previewSourceCorrectionReopen(taskId, piTask);
+    }
+    return null;
+  }
+
+  /**
+   * Read-only projection of the repair-completion branch. It performs the
+   * same identity, causal-idempotency, superseded-repair, target-state and
+   * lineage judgments as commit, but never backfills lineage metadata and
+   * never reopens the source evaluator.
+   */
+  private async previewRepairReopenTransition(
+    rawTask: TaskRecord,
+    piTask: PITaskRecord,
+    transitionReason: string,
+  ): Promise<CommitNextTaskResult> {
+    const { taskId } = rawTask;
+    const payload = piTask.repairPayload;
+    if (!payload) return { decision: 'invalid_task_metadata', taskId, reason: 'repair_payload_missing_for_reopen_transition' };
+    const repairIdentity = await verifyRepairTaskIdentity(
+      rawTask,
+      payload.sourceEvaluatorTaskId,
+      payload.repairIteration,
+      this.stateManager,
+    );
+    if (!repairIdentity.ok) {
+      return {
+        decision: 'lineage_refused',
+        sourceTaskId: taskId,
+        reason: repairIdentity.reason,
+        detail: `repair_identity_verification_failed:${repairIdentity.detail} — source evaluator NOT reopened, zero writes`,
+      };
+    }
+
+    const causeId = buildRepairRevisionCauseId(piTask);
+    const srcRaw = await this.stateManager.getTask(payload.sourceEvaluatorTaskId);
+    const srcPi = srcRaw ? hydratePITaskRecord(srcRaw) : null;
+    if (srcPi && hasConsumedRevisionCause(srcPi, causeId)) {
+      return {
+        decision: 'revision_reopen_noop',
+        sourceTaskId: taskId,
+        reopenedTaskId: payload.sourceEvaluatorTaskId,
+        reason: 'revision_cause_already_materialized',
+      };
+    }
+    if (srcPi && srcRaw) {
+      for (const depId of srcPi.dependencyTaskIds) {
+        if (depId === taskId) continue;
+        const dep = await this.stateManager.getTask(depId);
+        if (!dep || dep.taskKind !== 'artificer') continue;
+        const depPi = hydratePITaskRecord(dep);
+        if (
+          depPi?.repairPayload
+          && depPi.repairPayload.sourceEvaluatorTaskId === payload.sourceEvaluatorTaskId
+          && typeof depPi.repairPayload.repairIteration === 'number'
+          && depPi.repairPayload.repairIteration >= payload.repairIteration
+        ) {
+          return {
+            decision: 'revision_reopen_noop',
+            sourceTaskId: taskId,
+            reopenedTaskId: payload.sourceEvaluatorTaskId,
+            reason: 'stale_repair_transition_superseded',
+          };
+        }
+        break;
+      }
+    }
+
+    // PRI-1299 P2 (preview/confirm parity): 初始状态分类必须经共享纯规划器 —
+    // confirm (reopenTaskForRevision 第一快照门) 对初始 leased 的业务拒绝是
+    // task_in_flight_leased (映射 revision_reopen_failed); 预览此前误报
+    // concurrent_modification, 但单次快照的只读预览不存在竞争窗口 —
+    // concurrent_modification 只属于 confirm 的血缘校验漂移/CAS 并发落败。
+    const initialPlan = planRevisionReopenInitialState(srcRaw, causeId);
+    switch (initialPlan.plan) {
+      case 'task_not_found':
+        return {
+          decision: 'revision_reopen_failed',
+          sourceTaskId: taskId,
+          reopenedTaskId: payload.sourceEvaluatorTaskId,
+          reason: 'task_not_found',
+        };
+      case 'invalid_task_metadata':
+        return {
+          decision: 'invalid_task_metadata',
+          taskId: payload.sourceEvaluatorTaskId,
+          reason: 'repair_evaluator_reopen_invalid_task_metadata',
+        };
+      case 'idempotent_replay_same_revision':
+        // 前置 consumed 检查 (上方) 通常先命中; 此处兜底保持同一业务类别
+        // (valid metadata 时不可达 — 顺序与 confirm 一致所需)。
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: payload.sourceEvaluatorTaskId,
+          reason: 'revision_cause_already_materialized',
+        };
+      case 'refused_in_flight':
+        return {
+          decision: 'revision_reopen_failed',
+          sourceTaskId: taskId,
+          reopenedTaskId: payload.sourceEvaluatorTaskId,
+          reason: initialPlan.reason,
+        };
+      case 'proceed':
+        break;
+    }
+    // proceed 蕴含行存在且 metadata 可解析 — 经规划器携带的窄化快照继续。
+    const proceedRaw = initialPlan.rawTask;
+    if (isPeerRunnerKind(proceedRaw.taskKind)) {
+      const lineage = await planLegacyLineageResolution(proceedRaw, this.stateManager);
+      if (!lineage.ok) {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: lineage.reason,
+          detail: lineage.detail,
+        };
+      }
+    }
+    return {
+      decision: 'revision_reopened',
+      sourceTaskId: taskId,
+      reopenedTaskId: payload.sourceEvaluatorTaskId,
+      reason: transitionReason,
+    };
+  }
+
+  /**
+   * Read-only projection of source-correction targeted reopen. The confirm
+   * path additionally records receipt.reopenOutcome and performs the CAS;
+   * every business guard classification is mirrored here without either write.
+   */
+  private async previewSourceCorrectionReopen(
+    scribeTaskId: string,
+    scribePi: PITaskRecord,
+  ): Promise<CommitNextTaskResult> {
+    const receipt: SourceCorrectionReceiptV1 | undefined = scribePi.sourceCorrectionReceipt;
+    if (receipt === undefined) {
+      return { decision: 'invalid_task_metadata', taskId: scribeTaskId, reason: 'source_correction_receipt_missing' };
+    }
+    const causeId = scribePi.sourceCorrectionCauseId
+      ?? `rule-source-correction:${receipt.candidateId}:${receipt.bindingRevision}`;
+    const { artificerTaskId } = receipt;
+    const artificerTask = await this.stateManager.getTask(artificerTaskId);
+    if (!artificerTask) {
+      return { decision: 'source_correction_reopen_failed', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_task_missing' };
+    }
+    const artificerPi = hydratePITaskRecord(artificerTask);
+    if (!artificerPi) {
+      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_metadata_invalid' };
+    }
+    if (hasConsumedRevisionCause(artificerPi, causeId)) {
+      return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'source_correction_cause_already_materialized' };
+    }
+    if (artificerTask.status === 'pending' || artificerTask.status === 'retry_wait') {
+      return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: `artificer_in_flight_${artificerTask.status}` };
+    }
+    if (artificerTask.status !== 'needs_human_review') {
+      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: `artificer_status_${artificerTask.status}` };
+    }
+    const stopReasonCode = artificerPi.humanReviewContext?.reasonCode ?? '';
+    if (stopReasonCode !== receipt.expectedStopReasonCode) {
+      return {
+        decision: 'source_correction_reopen_conflict',
+        sourceTaskId: scribeTaskId,
+        reopenedTaskId: artificerTaskId,
+        reason: `stop_reason_drifted:${stopReasonCode || 'none'}!=${receipt.expectedStopReasonCode}`,
+      };
+    }
+    const lineage = await planLegacyLineageResolution(artificerTask, this.stateManager);
+    if (!lineage.ok) {
+      return {
+        decision: 'source_correction_reopen_conflict',
+        sourceTaskId: scribeTaskId,
+        reopenedTaskId: artificerTaskId,
+        reason: `lineage_refused:${lineage.reason}`,
+      };
+    }
+    return {
+      decision: 'source_correction_reopened',
+      sourceTaskId: scribeTaskId,
+      reopenedTaskId: artificerTaskId,
+      reason: 'original_artificer_reopened_on_new_scribe_epoch',
+    };
+  }
+
   // ── commitNextTaskProposal ──────────────────────────────────────────────
 
   /**
@@ -857,18 +1101,23 @@ export class InternalizationOrchestrator {
     // 校验同时负责历史无 id 链的根侧恢复 — 成功结果 (含 recoveredFromLegacyRoot)
     // 写入新后继 metadata.correlationId; 后继 taskId 派生保持原样 (proposal.
     // correlationId ?? stripTrailingChannel), 不漂移在途历史链的确定性去重。
-    let authoritativeCorrelation: Extract<CorrelationLineageResolution, { ok: true }> | null = null;
+    // PRI-1299 review: first prove the lineage with the read-only planner.
+    // The writing backfill must not run before the successor integrity gate:
+    // otherwise a confirm that ends in successor_integrity_conflict would still
+    // have mutated historical parent edges. If the planner refuses, preserve the
+    // existing lineage_refused precedence with zero writes.
+    let authoritativeLineagePlan: Extract<LegacyLineagePlan, { ok: true }> | null = null;
     if (isPeerRunnerKind(piTask.taskKind)) {
-      const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, this.stateManager);
-      if (!lineage.ok) {
+      const lineagePlan = await planLegacyLineageResolution(rawTask, this.stateManager);
+      if (!lineagePlan.ok) {
         return {
           decision: 'lineage_refused',
           sourceTaskId: taskId,
-          reason: lineage.reason,
-          detail: lineage.detail,
+          reason: lineagePlan.reason,
+          detail: lineagePlan.detail,
         };
       }
-      authoritativeCorrelation = lineage;
+      authoritativeLineagePlan = lineagePlan;
     }
 
     const proposalResult = await this.proposeNextTask(taskId);
@@ -919,15 +1168,40 @@ export class InternalizationOrchestrator {
     // 与本队列链相同, 直查命中异链任务, 级联重开错链的后继并替换其依赖。
     // 扫描按 (parentTaskId, kind, channel) 匹配, 异链 occupant 自然不命中;
     // id 占用冲突在创建路径处理 (fallback 父派生 id + UNIQUE 竞态重扫)。
-    const scannedSuccessors = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
-    if (scannedSuccessors.length > 1) {
-      const conflictingSuccessorTaskIds = scannedSuccessors.map((candidate) => candidate.taskId);
-      return { decision: 'successor_integrity_conflict', sourceTaskId: taskId,
-        reason: 'multiple_successors_for_parent',
-        detail: 'parentTaskId=' + taskId + ';successorKind=' + proposal.taskKind + ';channel=' + proposal.channel + ';taskIds=[' + conflictingSuccessorTaskIds.join(',') + ']',
-        conflictingSuccessorTaskIds };
+    const successorLookup = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
+    if (successorLookup.outcome === 'conflict') {
+      return { decision: successorLookup.decision, sourceTaskId: taskId,
+        reason: successorLookup.reason,
+        detail: successorLookup.detail,
+        conflictingSuccessorTaskIds: [...successorLookup.conflictingSuccessorTaskIds] };
     }
-    const existingSuccessorCandidate = scannedSuccessors[0] ?? null;
+    if (successorLookup.outcome === 'malformed') {
+      return {
+        decision: successorLookup.decision,
+        sourceTaskId: taskId,
+        reason: successorLookup.reason,
+        detail: successorLookup.detail,
+        malformedCandidateTaskIds: [...successorLookup.malformedCandidateTaskIds],
+        nextAction: successorLookup.nextAction,
+      };
+    }
+    // The conflict gate above is now the first write-sensitive decision. Only
+    // after it passes may the legacy lineage resolver persist proven parent edges.
+    // This keeps successor_integrity_conflict truly zero-write while preserving
+    // the pre-existing backfill behavior for paths that can proceed.
+    if (isPeerRunnerKind(piTask.taskKind) && successorLookup.outcome === 'unique') {
+      const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, this.stateManager);
+      if (!lineage.ok) {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: lineage.reason,
+          detail: lineage.detail,
+        };
+      }
+    }
+
+    const existingSuccessorCandidate = successorLookup.outcome === 'unique' ? successorLookup.successor : null;
     // PRI-1293 R5: 级联判定经共享只读 planner (revision-reopen.ts) — commit
     // 与 dry-run 预览消费同一判定, 预览不再把"将重开"误报为 successor_exists。
     const scannedSuccPi = existingSuccessorCandidate !== null ? hydratePITaskRecord(existingSuccessorCandidate) : null;
@@ -1055,116 +1329,136 @@ export class InternalizationOrchestrator {
     // 持久化前 fail-closed: 源深度 9 → 后继 10 放行; 源深度 10 → 结构化拒绝,
     // 零 createTask 零写入。注意此检查只在创建路径 — 上方在途/终态后继的
     // successor_exists 与级联 reopen 不受影响 (reopen 有自身的血缘校验)。
-    if (authoritativeCorrelation !== null
-      && authoritativeCorrelation.parentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
-      return {
-        decision: 'lineage_refused',
-        sourceTaskId: taskId,
-        reason: 'parent_chain_cycle_or_depth_exceeded',
-        detail: `successor_would_exceed_depth_limit:${authoritativeCorrelation.parentEdgeCount + 1}_edges_max_${CORRELATION_LINEAGE_MAX_PARENT_EDGES}`,
-      };
-    }
+    //
+    // PRI-1299 round 8: successor lookup 的非事务预检不能保护后续写入。
+    // 创建路径把 transaction-time lineage plan、最终 successor 仲裁、successor
+    // insert 和 legacy parent-edge backfill 放进同一个写事务。conflict/malformed/
+    // id_conflict 在任何 backfill 前返回;backfill 失败则抛出私有 sentinel,
+    // 让 SQLite rollback 已创建 successor 和部分回填,再在事务外翻译回结构化结果。
+    try {
+      return await this.stateManager.withWriteTransaction(async () => {
+        let creationLineagePlan = authoritativeLineagePlan;
+        if (isPeerRunnerKind(piTask.taskKind)) {
+          const transactionPlan = await planLegacyLineageResolution(rawTask, this.stateManager);
+          if (!transactionPlan.ok) {
+            throw new CommitDecisionRollback({
+              decision: 'lineage_refused',
+              sourceTaskId: taskId,
+              reason: transactionPlan.reason,
+              detail: transactionPlan.detail,
+            });
+          }
+          creationLineagePlan = transactionPlan;
+        }
 
-    const successorMetadata: PITaskMetadata = {
-      dependencyTaskIds: proposal.dependencyTaskIds,
-      channel: proposal.channel,
-      pipelineMode: proposal.pipelineMode,
-      timeoutMs: 300_000,
-      inputArtifactRefs: proposal.inputArtifactRefs,
-      outputArtifactRefs: [],
-      parentTaskId: proposal.parentTaskId,
-      // PRI-1293 Phase 3: 写入的是经过权威校验/恢复的 correlationId —
-      // 历史无 id 链在此补入根侧恢复值 (§3.6.3 历史恢复), 正常链上与
-      // proposal.correlationId 相同 (校验保证链内一致 + 根佐证)。
-      correlationId: authoritativeCorrelation?.correlationId ?? proposal.correlationId,
-    };
+        if (creationLineagePlan !== null
+          && creationLineagePlan.parentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
+          throw new CommitDecisionRollback({
+            decision: 'lineage_refused',
+            sourceTaskId: taskId,
+            reason: 'parent_chain_cycle_or_depth_exceeded',
+            detail: 'successor_would_exceed_depth_limit:' + (creationLineagePlan.parentEdgeCount + 1) + '_edges_max_' + CORRELATION_LINEAGE_MAX_PARENT_EDGES,
+          });
+        }
 
-     
-    // PRI-1293 R5: 创建是 bounded 收敛循环 (至多 2 次)。
-    //   attempt 0 用主派生 id; UNIQUE 落败先重扫——并发创建者若已物化真实
-    //   后继 (同 parent/kind/channel) 按 successor_exists 收敛, 绝不重复创建;
-    //   重扫为空 = occupant 属异链 (扫描为空已证明它非本父子后继), attempt 1
-    //   改用父派生 fallback id。fallback id 对同一 (parent, kind, channel)
-    //   确定性收敛: 两个并发创建者碰壁后落到**同一** fallback id, 胜负由
-    //   UNIQUE 裁决, 败者重扫收敛——不会双链并行。fallback 仍 UNIQUE 落败
-    //   且重扫为空 = 持续占用冲突, fail-closed 结构化 successor_id_conflict
-    //   (绝不折叠为 successor_exists 伪装幂等)。
-    let successorRecord: TaskRecord | null = null;
-    for (let createAttempt = 0; createAttempt < 2 && successorRecord === null; createAttempt++) {
-      const idForCreate = createAttempt === 0
-        ? successorTaskId
-        : successorTaskId + '-p-' + taskId;
-      try {
-        successorRecord = await this.stateManager.createTask({
-          taskId: idForCreate,
-          taskKind: proposal.taskKind,
-          status: 'pending',
-          attemptCount: 0,
-          maxAttempts: 3,
-          inputRef: undefined,
-          resultRef: undefined,
-          lastError: undefined,
-          leaseOwner: undefined,
-          leaseExpiresAt: undefined,
-          diagnosticJson: createPITaskDiagnosticJson(successorMetadata),
+        const successorMetadata: PITaskMetadata = {
+          dependencyTaskIds: proposal.dependencyTaskIds,
+          channel: proposal.channel,
+          pipelineMode: proposal.pipelineMode,
+          timeoutMs: 300_000,
+          inputArtifactRefs: proposal.inputArtifactRefs,
+          outputArtifactRefs: [],
+          parentTaskId: proposal.parentTaskId,
+          // PRI-1293 Phase 3: 写入的是经过权威校验/恢复的 correlationId —
+          // 历史无 id 链在此补入根侧恢复值 (§3.6.3 历史恢复), 正常链上与
+          // proposal.correlationId 相同 (校验保证链内一致 + 根佐证)。
+          correlationId: creationLineagePlan?.correlationId ?? proposal.correlationId,
+        };
+
+        // PRI-1293 R5: 创建是 bounded 收敛循环 (至多 2 次)。
+        //   attempt 0 用主派生 id; UNIQUE 落败先重扫——并发创建者若已物化真实
+        //   后继 (同 parent/kind/channel) 按 successor_exists 收敛, 绝不重复创建;
+        //   重扫为空 = occupant 属异链 (扫描为空已证明它非本父子后继), attempt 1
+        //   改用父派生 fallback id。fallback id 对同一 (parent, kind, channel)
+        //   确定性收敛: 两个并发创建者碰壁后落到**同一** fallback id, 胜负由
+        //   UNIQUE 裁决, 败者重扫收敛——不会双链并行。fallback 仍 UNIQUE 落败
+        //   且重扫为空 = 持续占用冲突, fail-closed 结构化 successor_id_conflict
+        //   (绝不折叠为 successor_exists 伪装幂等)。
+        const creation = await createLogicalSuccessorTask({
+          stateManager: this.stateManager,
+          parentTaskId: taskId,
+          successorKind: proposal.taskKind,
+          channel: proposal.channel,
+          preferredTaskId: successorTaskId,
+          fallbackTaskId: successorTaskId + '-p-' + taskId,
+          metadata: successorMetadata,
         });
-      } catch (createErr) {
-        const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
-        if (!(errMsg.includes('UNIQUE constraint') || errMsg.includes('PRIMARY KEY') || errMsg.includes('already exists'))) {
-          throw createErr;
+
+        if (creation.outcome === 'lookup') {
+          if (creation.lookup.outcome === 'malformed') {
+            return {
+              decision: creation.lookup.decision,
+              sourceTaskId: taskId,
+              reason: creation.lookup.reason,
+              detail: creation.lookup.detail,
+              malformedCandidateTaskIds: [...creation.lookup.malformedCandidateTaskIds],
+              nextAction: creation.lookup.nextAction,
+            } satisfies CommitNextTaskResult;
+          }
+          return {
+            decision: creation.lookup.decision,
+            sourceTaskId: taskId,
+            reason: creation.lookup.reason,
+            detail: creation.lookup.detail,
+            conflictingSuccessorTaskIds: [...creation.lookup.conflictingSuccessorTaskIds],
+          } satisfies CommitNextTaskResult;
         }
-        // UNIQUE 落败: 重扫真实后继。并发创建者物化的新行一律 pending,
-        // successor_exists 收敛语义正确; 既有终态后继早在首个扫描即命中,
-        // 不会到达此处。
-        const rescanned = await this.findSuccessorByParent(taskId, proposal.taskKind, proposal.channel);
-        if (rescanned.length > 1) {
-          const conflictingSuccessorTaskIds = rescanned.map((candidate) => candidate.taskId);
-          return { decision: 'successor_integrity_conflict', sourceTaskId: taskId,
-            reason: 'multiple_successors_for_parent_after_unique_conflict',
-            detail: 'parentTaskId=' + taskId + ';successorKind=' + proposal.taskKind + ';channel=' + proposal.channel + ';taskIds=[' + conflictingSuccessorTaskIds.join(',') + ']',
-            conflictingSuccessorTaskIds };
-        }
-        if (rescanned.length === 1) {
-          return { decision: 'successor_exists', sourceTaskId: taskId,
-            successorTaskId: rescanned.at(0)?.taskId ?? "", successorKind: proposal.taskKind };
-        }
-        // occupant 不可解析 = 损坏行 — 它可能是本链被腐蚀的后继也可能是异链
-        // 残骸, 无法证明任一归属。fallback 创建会复制一条逻辑后继而腐蚀行
-        // 原地留存 (完整性恶化), fail-closed 要求先修复腐蚀 (rc-9 诚实)。
-        const occupantRaw = await this.stateManager.getTask(idForCreate);
-        if (occupantRaw !== null && hydratePITaskRecord(occupantRaw) === null) {
+        if (creation.outcome === 'id_conflict') {
           return {
             decision: 'successor_id_conflict',
             sourceTaskId: taskId,
-            reason: 'occupant_metadata_unparseable',
-            detail: 'task ' + idForCreate + ' occupies the derived id with unparseable diagnosticJson — repair corruption before creating (no fallback duplication of a corrupt row)',
-          };
+            reason: creation.allocation.reason,
+            detail: creation.allocation.detail,
+          } satisfies CommitNextTaskResult;
         }
-        if (createAttempt === 1) {
+
+        if (isPeerRunnerKind(piTask.taskKind)) {
+          const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(
+            rawTask,
+            this.stateManager,
+            creationLineagePlan ?? undefined,
+          );
+          if (!lineage.ok) {
+            throw new CommitDecisionRollback({
+              decision: 'lineage_refused',
+              sourceTaskId: taskId,
+              reason: lineage.reason,
+              detail: lineage.detail,
+            });
+          }
+        }
+
+        if (creation.outcome === 'existing') {
           return {
-            decision: 'successor_id_conflict',
+            decision: 'successor_exists',
             sourceTaskId: taskId,
-            reason: 'derived_and_fallback_ids_occupied_by_foreign_chain',
-            detail: 'primary=' + successorTaskId + ' fallback=' + successorTaskId + '-p-' + taskId + ' both occupied; scan found no successor for parent ' + taskId,
-          };
+            successorTaskId: creation.task.taskId,
+            successorKind: proposal.taskKind,
+          } satisfies CommitNextTaskResult;
         }
-      }
-    }
-    if (successorRecord === null) {
-      // 循环不变式保证不可达 (attempt 1 落败已返回), 防御性 fail-closed。
-      return {
-        decision: 'successor_id_conflict',
-        sourceTaskId: taskId,
-        reason: 'create_loop_exhausted_without_row',
-      };
+
+        return {
+          decision: 'successor_created',
+          sourceTaskId: taskId,
+          successorTaskId: creation.task.taskId,
+          successorKind: proposal.taskKind,
+        } satisfies CommitNextTaskResult;
+      });
+    } catch (error) {
+      if (error instanceof CommitDecisionRollback) return error.result;
+      throw error;
     }
 
-    return {
-      decision: 'successor_created',
-      sourceTaskId: taskId,
-      successorTaskId: successorRecord.taskId,
-      successorKind: proposal.taskKind,
-    };
   }
 
   /**
@@ -1584,45 +1878,22 @@ export class InternalizationOrchestrator {
    * (succeeded/needs_human_review) or failed — proves the logical successor
    * already exists. This mirrors the semantics the deterministic-id UNIQUE
    * constraint catch used to provide as a last resort, extended to chains
-   * whose ids are not derivable. Deterministic: ties break by taskId.
+   * whose ids are not derivable. Multiple matches are an integrity conflict;
+   * taskId ordering is used only for deterministic reporting, never selection.
    */
   private async findSuccessorByParent(
     parentTaskId: string,
     successorKind: RunnerKind,
-    channel: string,
-  ): Promise<TaskRecord[]> {
-    // PRI-1293 R5 (F4 部分缓解): taskKind 过滤下推至 SQL WHERE task_kind = ?
-    // (sqlite-task-store 既有能力), 扫描行数从全表收敛到单一 kind。
-    // parentTaskId 的 json_extract 下推与批量复合索引属 PRI-1299 范围
-    // (统一 Successor Lookup) — 本处是有界缓解而非完整修复。
-    const allTasks = await this.stateManager.listTasks({ statuses: [...PD_TASK_STATUSES], taskKind: successorKind });
-    const matches: TaskRecord[] = [];
-    for (const task of allTasks) {
-      if (task.taskKind !== successorKind) continue;
-      const piTask = hydratePITaskRecord(task);
-      if (!piTask) continue;
-      if (piTask.parentTaskId === parentTaskId && piTask.channel === channel) {
-        matches.push(task);
-      }
-    }
-    if (matches.length === 0) {
-      // PRI-1293 R8 (review #3): 历史未回填后继对持久化 parent 扫描不可见 —
-      // 协调扫描先处理旧父节点时会重复创建后继, 事后才被判完整性冲突。
-      // 创建前用**同一历史推断规则** (单边 inferLegacyParentTaskId, 非通用
-      // dependency 回退) 识别可证明的未回填后继纳入查重; 推断不出或证据
-      // 不足者不算后继 — 与回填门禁同一证明标准, 不放宽。
-      for (const task of allTasks) {
-        if (task.taskKind !== successorKind) continue;
-        const piTask = hydratePITaskRecord(task);
-        if (!piTask || piTask.parentTaskId || piTask.channel !== channel) continue;
-        const inferred = await inferLegacyParentTaskId(task, piTask, this.stateManager);
-        if (inferred.ok && inferred.parentTaskId === parentTaskId) {
-          matches.push(task);
-        }
-      }
-    }
-    matches.sort((a, b) => (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0));
-    return matches;
+    channel: InternalizationChannel,
+  ): Promise<SuccessorLookupResult> {
+    // PRI-1299: thin delegate only. Candidate narrowing is pushed into
+    // TaskStore; zero/unique/conflict adjudication and legacy-parent inference
+    // live in the single core successor-lookup seam shared with pd-cli.
+    return lookupSuccessorByParent(this.stateManager, {
+      parentTaskId,
+      successorKind,
+      channel,
+    });
   }
 
   /**

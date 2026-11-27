@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "generatedBy": "node scripts/check-core-export-surface.mjs --write",
   "subpaths": [
     ".",
     "./evolution-store",
@@ -431,7 +430,7 @@
     {
       "entry": "./runtime",
       "source": "src/runtime/index.ts",
-      "count": 2076,
+      "count": 2079,
       "symbols": [
         "ADAPTIVE_DELIVERY_RECORD_ENUMS",
         "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -2125,6 +2124,7 @@
         "createGoldenTraceFixture",
         "createIntentTemplate",
         "createInternalizationQueueReadModel",
+        "createLogicalSuccessorTask",
         "createMinimalPITaskRecord",
         "createNextTaskProposal",
         "createOwnerEvidenceScopeError",
@@ -2316,6 +2316,7 @@
         "listEvidenceWaitingTasks",
         "listOwnerEvidenceActions",
         "listRecoveryActions",
+        "lookupSuccessorByParent",
         "makeDeterministicDiagnosticianOutput",
         "makeIdempotencyKey",
         "makePrincipleArtifact",
@@ -2368,6 +2369,7 @@
         "planExistingSuccessorTransition",
         "planLegacyLineageResolution",
         "planOwnerVerdictOverrideResume",
+        "planSuccessorIdAllocation",
         "preflightArtificerIntentBasis",
         "preflightArtificerOwnerEvidence",
         "prepareAdaptiveIntervention",

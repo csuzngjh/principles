@@ -201,7 +201,7 @@ export function planOwnerVerdictOverrideResume(piTask: PITaskRecord): OwnerOverr
   if (!resolutions || resolutions.length === 0) return null;
   let latest: OwnerResolutionRecord | null = null;
   for (const r of resolutions) {
-    if (r.revisionEpoch !== epoch) continue;
+    if (r.revisionEpoch !== epoch || r.status === 'superseded') continue;
     if (r.action !== 'accept_current' && r.action !== 'reject_current') continue;
     if (!latest || r.decidedAt > latest.decidedAt) latest = r;
   }
@@ -370,7 +370,7 @@ export function findOwnerResolutionForCurrentEpoch(piTask: PITaskRecord): OwnerR
   if (!resolutions || resolutions.length === 0) return null;
   let latest: OwnerResolutionRecord | null = null;
   for (const r of resolutions) {
-    if (r.revisionEpoch !== epoch) continue;
+    if (r.revisionEpoch !== epoch || r.status === 'superseded') continue;
     if (!latest || r.decidedAt > latest.decidedAt) latest = r;
   }
   return latest;

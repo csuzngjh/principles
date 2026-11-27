@@ -87,6 +87,50 @@ export function planExistingSuccessorTransition(input: {
   return { plan: 'cascade_reopen', cascadeCauseId };
 }
 
+/**
+ * PRI-1299 P2 (preview/confirm parity): revision reopen 的**初始状态判定**唯一
+ * 权威 — 纯函数, 不读不写 store。confirm (reopenTaskForRevision 第一快照门) 与
+ * 只读预览 (orchestrator previewRepairReopenTransition) 必须经本函数获得同一
+ * 业务分类, 消除 "预览把初始 leased 报为 concurrent_modification 而 confirm
+ * 报 task_in_flight_leased" 的分叉:
+ *   - task_not_found / invalid_task_metadata / idempotent_replay_same_revision
+ *     / refused_in_flight(task_in_flight_<status>) 覆盖全部初始状态:
+ *     pending/retry_wait/succeeded/needs_human_review → proceed;
+ *     leased/failed/其他非可 reopen 状态 → refused_in_flight;
+ *   - concurrent_modification **不是**初始状态分类 — 它只属于 confirm 的
+ *     血缘校验期间状态漂移/CAS 并发落败 (单次快照的只读预览不存在竞争窗口,
+ *     永远不得产出该类别)。
+ * 判定顺序与 confirm 第一快照门逐字一致: missing → invalid → consumed → status。
+ */
+export type RevisionReopenInitialStatePlan =
+  | { readonly plan: 'task_not_found' }
+  | { readonly plan: 'invalid_task_metadata'; readonly rawTask: TaskRecord }
+  | { readonly plan: 'idempotent_replay_same_revision'; readonly rawTask: TaskRecord; readonly piTask: PITaskRecord }
+  | { readonly plan: 'refused_in_flight'; readonly reason: string; readonly rawTask: TaskRecord; readonly piTask: PITaskRecord }
+  | { readonly plan: 'proceed'; readonly rawTask: TaskRecord; readonly piTask: PITaskRecord };
+
+export function planRevisionReopenInitialState(
+  rawTask: TaskRecord | null,
+  revisionCauseId?: string,
+): RevisionReopenInitialStatePlan {
+  if (!rawTask) {
+    return { plan: 'task_not_found' };
+  }
+  const piTask = hydratePITaskRecord(rawTask);
+  if (!piTask) {
+    return { plan: 'invalid_task_metadata', rawTask };
+  }
+  if (revisionCauseId && hasConsumedRevisionCause(piTask, revisionCauseId)) {
+    return { plan: 'idempotent_replay_same_revision', rawTask, piTask };
+  }
+  if (rawTask.status === 'pending' || rawTask.status === 'retry_wait'
+    || rawTask.status === 'succeeded' || rawTask.status === 'needs_human_review') {
+    return { plan: 'proceed', rawTask, piTask };
+  }
+  // leased/failed/其他任何非可 reopen 状态 — 静态业务拒绝, 与并发漂移无关。
+  return { plan: 'refused_in_flight', reason: `task_in_flight_${rawTask.status}`, rawTask, piTask };
+}
+
 export interface ReopenRevisionOptions {
   revisionFeedback?: string;
   replaceArtificerDependencyWith?: string;
@@ -113,13 +157,11 @@ export async function reopenTaskForRevision(
   options?: ReopenRevisionOptions,
 ): Promise<{ ok: boolean; reason: string; detail?: string }> {
   const rawTask = await stateManager.getTask(taskId);
-  if (!rawTask) {
-    return { ok: false, reason: 'task_not_found' };
-  }
-  const piTask = hydratePITaskRecord(rawTask);
-  if (!piTask) {
-    return { ok: false, reason: 'invalid_task_metadata' };
-  }
+  // PRI-1299 P2: 初始状态判定经共享纯规划器 (planRevisionReopenInitialState) —
+  // 与只读预览同一业务分类。本函数行为不变:
+  //   missing → task_not_found; invalid → invalid_task_metadata;
+  //   同因已消费 (任意状态) → 真 no-op; pending/retry_wait → 更新输入后继续;
+  //   succeeded/needs_human_review → 可 reopen; leased/failed/其他 → task_in_flight_*。
   // P1 评审修复 (crash-window idempotency): 同一 causeKey 的重放对 **任何**
   // 状态都是真 no-op——不再局限于 pending/retry_wait。此前 metadata+status
   // 是两次写,两写之间 crash 会留下 "terminal 状态 + 已写 causeId" 的残留,
@@ -127,14 +169,22 @@ export async function reopenTaskForRevision(
   // 单行原子写 + 全状态同因 no-op 双保险。
   // PRI-1293 R5: 幂等判定读消费历史而非单槽——单槽会被独立因果流
   // (cascade/repair/owner) 覆盖, 覆盖后旧 cause 的保护失效。
-  if (options?.revisionCauseId && hasConsumedRevisionCause(piTask, options.revisionCauseId)) {
-    return { ok: true, reason: 'idempotent_replay_same_revision' };
+  const initialPlan = planRevisionReopenInitialState(rawTask, options?.revisionCauseId);
+  switch (initialPlan.plan) {
+    case 'task_not_found':
+      return { ok: false, reason: 'task_not_found' };
+    case 'invalid_task_metadata':
+      return { ok: false, reason: 'invalid_task_metadata' };
+    case 'idempotent_replay_same_revision':
+      return { ok: true, reason: 'idempotent_replay_same_revision' };
+    case 'refused_in_flight':
+      return { ok: false, reason: initialPlan.reason };
+    case 'proceed':
+      break;
   }
-  if (rawTask.status === 'pending' || rawTask.status === 'retry_wait') {
-    // 不同 causeKey / 无 causeKey — 更新依赖/反馈后继续 (保证 revision 输入最新)
-  } else if (rawTask.status !== 'succeeded' && rawTask.status !== 'needs_human_review') {
-    return { ok: false, reason: `task_in_flight_${rawTask.status}` };
-  }
+  // proceed 蕴含第一快照行存在且 metadata 可解析 — 经规划器携带的窄化快照继续
+  // (同一对象引用, 漂移比较的第一快照语义不变)。
+  const { rawTask: rawTaskSnapshot, piTask } = initialPlan;
 
   // ── PRI-1293 Phase 3: 血缘门禁 (所有生产 reopen 路径的同一关口) ──
   // 覆盖: Owner revise_once (owner-resolution 直接调本函数)、rollout
@@ -146,7 +196,7 @@ export async function reopenTaskForRevision(
   // (血缘门禁严格限于 PeerRunnerKind, §4.2 作用域隔离)。
   let resolvedLineageCorrelationId: string | undefined;
   if (isPeerRunnerKind(piTask.taskKind)) {
-    const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, stateManager);
+    const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTaskSnapshot, stateManager);
     if (!lineage.ok) {
       return { ok: false, reason: `lineage_refused:${lineage.reason}`, detail: lineage.detail };
     }
@@ -193,12 +243,12 @@ export async function reopenTaskForRevision(
   // 并发写入。若吞掉该差异继续 CAS, 裁决将被推进的轮次永远跳过
   // (resume 入口只读当前轮次)。诚实分类为 concurrent_modification —
   // reopen 不写, Owner 裁决与状态原样保留, 修订波可安全重试。 ──
-  const leaseDrift = (rawTask2.leaseOwner ?? null) !== (rawTask.leaseOwner ?? null)
-    || (rawTask2.leaseExpiresAt ?? null) !== (rawTask.leaseExpiresAt ?? null)
-    || (rawTask2.leaseGeneration ?? 0) !== (rawTask.leaseGeneration ?? 0);
-  const stateDrift = rawTask2.status !== rawTask.status
-    || rawTask2.attemptCount !== rawTask.attemptCount
-    || rawTask2.maxAttempts !== rawTask.maxAttempts;
+  const leaseDrift = (rawTask2.leaseOwner ?? null) !== (rawTaskSnapshot.leaseOwner ?? null)
+    || (rawTask2.leaseExpiresAt ?? null) !== (rawTaskSnapshot.leaseExpiresAt ?? null)
+    || (rawTask2.leaseGeneration ?? 0) !== (rawTaskSnapshot.leaseGeneration ?? 0);
+  const stateDrift = rawTask2.status !== rawTaskSnapshot.status
+    || rawTask2.attemptCount !== rawTaskSnapshot.attemptCount
+    || rawTask2.maxAttempts !== rawTaskSnapshot.maxAttempts;
   const metadataDrift = (piTask2.revisionCount ?? 0) !== (piTask.revisionCount ?? 0)
     || piTask2.runnerDecision !== piTask.runnerDecision
     // completionIntent 为对象 — 引用比较恒不等 (hydrate 每次新实例), 须语义比较。
