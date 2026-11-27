@@ -257,4 +257,62 @@ describe('PRI-1299 review — backfill races and conflict zero-write ordering', 
     expect(afterSource).toBe(beforeSource);
     expect((await sm.listTasks({})).length).toBe(beforeCount);
   });
+
+  it('预检后出现的后继冲突仍保持零写入: legacy 父边不回填且不创建第三个后继', async () => {
+    await mkTask('c9-dreamer', 'dreamer', 'succeeded', { correlationId: 'c9', topCandidateId: 'c9', pipelineMode: 'full_chain' });
+    await mkTask('c9-philosopher-p1', 'philosopher', 'succeeded', {
+      correlationId: 'c9', dependencyTaskIds: ['c9-dreamer'], pipelineMode: 'full_chain',
+    });
+    const beforeSource = need(await sm.getTask('c9-philosopher-p1'), 'source before').diagnosticJson;
+    const beforeCount = (await sm.listTasks({})).length;
+    const secondConnection = new RuntimeStateManager({ workspaceDir });
+    await secondConnection.initialize();
+    const originalListTasks = sm.listTasks.bind(sm);
+    let broadScribeScans = 0;
+    sm.listTasks = async (filter?: Parameters<RuntimeStateManager['listTasks']>[0]) => {
+      const rows = await originalListTasks(filter);
+      if (filter?.taskKind === 'scribe' && filter.piParentTaskId === undefined) {
+        broadScribeScans += 1;
+        if (broadScribeScans === 1) {
+          for (const taskId of ['c9-scribe-race-a', 'c9-scribe-race-b']) {
+            await secondConnection.createTask({
+              taskId,
+              taskKind: 'scribe',
+              status: 'pending',
+              attemptCount: 0,
+              maxAttempts: 3,
+              diagnosticJson: JSON.stringify({
+                [PI_METADATA_KEY]: {
+                  dependencyTaskIds: ['c9-philosopher-p1'], channel: 'prompt', timeoutMs: 300_000,
+                  inputArtifactRefs: [], outputArtifactRefs: [], parentTaskId: 'c9-philosopher-p1',
+                  correlationId: 'c9', pipelineMode: 'full_chain',
+                },
+              }),
+            });
+          }
+        }
+      }
+      return rows;
+    };
+    try {
+      const orchestrator = new InternalizationOrchestrator(
+        { stateManager: sm }, { owner: 'r8-late-conflict', runtimeKind: 'test-double', dryRun: true },
+      );
+      const result = await orchestrator.commitNextTaskProposal('c9-philosopher-p1');
+      expect(result.decision).toBe('successor_integrity_conflict');
+      if (result.decision === 'successor_integrity_conflict') {
+        expect(result.conflictingSuccessorTaskIds).toEqual(['c9-scribe-race-a', 'c9-scribe-race-b']);
+      }
+    } finally {
+      sm.listTasks = originalListTasks;
+      await secondConnection.close();
+    }
+
+    expect(broadScribeScans).toBeGreaterThanOrEqual(1);
+    const afterSource = need(await sm.getTask('c9-philosopher-p1'), 'source after');
+    expect(afterSource.diagnosticJson).toBe(beforeSource);
+    const scribes = (await sm.listTasks({})).filter((task) => task.taskKind === 'scribe').map((task) => task.taskId);
+    expect(scribes).toEqual(['c9-scribe-race-a', 'c9-scribe-race-b']);
+    expect((await sm.listTasks({})).length).toBe(beforeCount + 2);
+  });
 });

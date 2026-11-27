@@ -473,12 +473,13 @@ export async function planLegacyLineageResolution(
 export async function resolveAuthoritativeCorrelationIdWithLegacyBackfill(
   leafTaskRecord: TaskRecord,
   stateManager: RuntimeStateManager,
+  precomputedPlan?: LegacyLineagePlan,
 ): Promise<CorrelationLineageResolution> {
   // PRI-1293 R8 (review #5/#8): plan-then-write — 完整链先经只读 planner
   // 验证 (含 canonical overlay 终验), 验证失败 = 零写入; 验证通过后才逐边
   // 持久化。消除旧实现"逐边上溯即写、上层失败留下部分结果"的
   // cli-5-failure-no-mutation 违反, 同时消除 planner/writer 双遍历漂移。
-  const plan = await planLegacyLineageResolution(leafTaskRecord, stateManager);
+  const plan = precomputedPlan ?? await planLegacyLineageResolution(leafTaskRecord, stateManager);
   if (!plan.ok) return plan;
 
   for (const edge of plan.backfillEdges) {

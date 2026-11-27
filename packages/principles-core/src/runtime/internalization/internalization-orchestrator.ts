@@ -34,6 +34,7 @@ import {
   CORRELATION_LINEAGE_MAX_PARENT_EDGES,
   type CorrelationLineageGetTask,
   type CorrelationLineageResolution,
+  type LegacyLineagePlan,
 } from './correlation-lineage.js';
 import type { PITaskMetadata, SourceCorrectionReceiptV1 } from './pitask-metadata.js';
 import type { PITaskRecord } from './peer-runner-contracts.js';
@@ -189,6 +190,13 @@ export type CommitNextTaskResult =
   /** PRI-1299 round 2: a relevant successor candidate is provably present but malformed — fail closed, zero writes. */
   | { decision: 'successor_metadata_malformed'; sourceTaskId: string; reason: string; detail: string; malformedCandidateTaskIds: string[]; nextAction: string }
   | { decision: 'revision_reopen_failed'; sourceTaskId: string; reopenedTaskId: string; reason: string; detail?: string };
+
+/** Private transaction-rollback signal; caught at the transaction boundary and translated back to the structured public result. */
+class CommitDecisionRollback extends Error {
+  constructor(readonly result: CommitNextTaskResult) {
+    super('rollback commit decision');
+  }
+}
 
 // ── Constructor Options ───────────────────────────────────────────────────────
 
@@ -1098,6 +1106,7 @@ export class InternalizationOrchestrator {
     // otherwise a confirm that ends in successor_integrity_conflict would still
     // have mutated historical parent edges. If the planner refuses, preserve the
     // existing lineage_refused precedence with zero writes.
+    let authoritativeLineagePlan: Extract<LegacyLineagePlan, { ok: true }> | null = null;
     if (isPeerRunnerKind(piTask.taskKind)) {
       const lineagePlan = await planLegacyLineageResolution(rawTask, this.stateManager);
       if (!lineagePlan.ok) {
@@ -1108,6 +1117,7 @@ export class InternalizationOrchestrator {
           detail: lineagePlan.detail,
         };
       }
+      authoritativeLineagePlan = lineagePlan;
     }
 
     const proposalResult = await this.proposeNextTask(taskId);
@@ -1179,8 +1189,7 @@ export class InternalizationOrchestrator {
     // after it passes may the legacy lineage resolver persist proven parent edges.
     // This keeps successor_integrity_conflict truly zero-write while preserving
     // the pre-existing backfill behavior for paths that can proceed.
-    let authoritativeCorrelation: Extract<CorrelationLineageResolution, { ok: true }> | null = null;
-    if (isPeerRunnerKind(piTask.taskKind)) {
+    if (isPeerRunnerKind(piTask.taskKind) && successorLookup.outcome === 'unique') {
       const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(rawTask, this.stateManager);
       if (!lineage.ok) {
         return {
@@ -1190,7 +1199,6 @@ export class InternalizationOrchestrator {
           detail: lineage.detail,
         };
       }
-      authoritativeCorrelation = lineage;
     }
 
     const existingSuccessorCandidate = successorLookup.outcome === 'unique' ? successorLookup.successor : null;
@@ -1321,92 +1329,136 @@ export class InternalizationOrchestrator {
     // 持久化前 fail-closed: 源深度 9 → 后继 10 放行; 源深度 10 → 结构化拒绝,
     // 零 createTask 零写入。注意此检查只在创建路径 — 上方在途/终态后继的
     // successor_exists 与级联 reopen 不受影响 (reopen 有自身的血缘校验)。
-    if (authoritativeCorrelation !== null
-      && authoritativeCorrelation.parentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
-      return {
-        decision: 'lineage_refused',
-        sourceTaskId: taskId,
-        reason: 'parent_chain_cycle_or_depth_exceeded',
-        detail: `successor_would_exceed_depth_limit:${authoritativeCorrelation.parentEdgeCount + 1}_edges_max_${CORRELATION_LINEAGE_MAX_PARENT_EDGES}`,
-      };
-    }
+    //
+    // PRI-1299 round 8: successor lookup 的非事务预检不能保护后续写入。
+    // 创建路径把 transaction-time lineage plan、最终 successor 仲裁、successor
+    // insert 和 legacy parent-edge backfill 放进同一个写事务。conflict/malformed/
+    // id_conflict 在任何 backfill 前返回;backfill 失败则抛出私有 sentinel,
+    // 让 SQLite rollback 已创建 successor 和部分回填,再在事务外翻译回结构化结果。
+    try {
+      return await this.stateManager.withWriteTransaction(async () => {
+        let creationLineagePlan = authoritativeLineagePlan;
+        if (isPeerRunnerKind(piTask.taskKind)) {
+          const transactionPlan = await planLegacyLineageResolution(rawTask, this.stateManager);
+          if (!transactionPlan.ok) {
+            throw new CommitDecisionRollback({
+              decision: 'lineage_refused',
+              sourceTaskId: taskId,
+              reason: transactionPlan.reason,
+              detail: transactionPlan.detail,
+            });
+          }
+          creationLineagePlan = transactionPlan;
+        }
 
-    const successorMetadata: PITaskMetadata = {
-      dependencyTaskIds: proposal.dependencyTaskIds,
-      channel: proposal.channel,
-      pipelineMode: proposal.pipelineMode,
-      timeoutMs: 300_000,
-      inputArtifactRefs: proposal.inputArtifactRefs,
-      outputArtifactRefs: [],
-      parentTaskId: proposal.parentTaskId,
-      // PRI-1293 Phase 3: 写入的是经过权威校验/恢复的 correlationId —
-      // 历史无 id 链在此补入根侧恢复值 (§3.6.3 历史恢复), 正常链上与
-      // proposal.correlationId 相同 (校验保证链内一致 + 根佐证)。
-      correlationId: authoritativeCorrelation?.correlationId ?? proposal.correlationId,
-    };
+        if (creationLineagePlan !== null
+          && creationLineagePlan.parentEdgeCount + 1 > CORRELATION_LINEAGE_MAX_PARENT_EDGES) {
+          throw new CommitDecisionRollback({
+            decision: 'lineage_refused',
+            sourceTaskId: taskId,
+            reason: 'parent_chain_cycle_or_depth_exceeded',
+            detail: 'successor_would_exceed_depth_limit:' + (creationLineagePlan.parentEdgeCount + 1) + '_edges_max_' + CORRELATION_LINEAGE_MAX_PARENT_EDGES,
+          });
+        }
 
-     
-    // PRI-1293 R5: 创建是 bounded 收敛循环 (至多 2 次)。
-    //   attempt 0 用主派生 id; UNIQUE 落败先重扫——并发创建者若已物化真实
-    //   后继 (同 parent/kind/channel) 按 successor_exists 收敛, 绝不重复创建;
-    //   重扫为空 = occupant 属异链 (扫描为空已证明它非本父子后继), attempt 1
-    //   改用父派生 fallback id。fallback id 对同一 (parent, kind, channel)
-    //   确定性收敛: 两个并发创建者碰壁后落到**同一** fallback id, 胜负由
-    //   UNIQUE 裁决, 败者重扫收敛——不会双链并行。fallback 仍 UNIQUE 落败
-    //   且重扫为空 = 持续占用冲突, fail-closed 结构化 successor_id_conflict
-    //   (绝不折叠为 successor_exists 伪装幂等)。
-    const creation = await createLogicalSuccessorTask({
-      stateManager: this.stateManager,
-      parentTaskId: taskId,
-      successorKind: proposal.taskKind,
-      channel: proposal.channel,
-      preferredTaskId: successorTaskId,
-      fallbackTaskId: successorTaskId + '-p-' + taskId,
-      metadata: successorMetadata,
-    });
-    if (creation.outcome === 'lookup') {
-      if (creation.lookup.outcome === 'malformed') {
-        return {
-          decision: creation.lookup.decision,
-          sourceTaskId: taskId,
-          reason: creation.lookup.reason,
-          detail: creation.lookup.detail,
-          malformedCandidateTaskIds: [...creation.lookup.malformedCandidateTaskIds],
-          nextAction: creation.lookup.nextAction,
+        const successorMetadata: PITaskMetadata = {
+          dependencyTaskIds: proposal.dependencyTaskIds,
+          channel: proposal.channel,
+          pipelineMode: proposal.pipelineMode,
+          timeoutMs: 300_000,
+          inputArtifactRefs: proposal.inputArtifactRefs,
+          outputArtifactRefs: [],
+          parentTaskId: proposal.parentTaskId,
+          // PRI-1293 Phase 3: 写入的是经过权威校验/恢复的 correlationId —
+          // 历史无 id 链在此补入根侧恢复值 (§3.6.3 历史恢复), 正常链上与
+          // proposal.correlationId 相同 (校验保证链内一致 + 根佐证)。
+          correlationId: creationLineagePlan?.correlationId ?? proposal.correlationId,
         };
-      }
-      return {
-        decision: creation.lookup.decision,
-        sourceTaskId: taskId,
-        reason: creation.lookup.reason,
-        detail: creation.lookup.detail,
-        conflictingSuccessorTaskIds: [...creation.lookup.conflictingSuccessorTaskIds],
-      };
-    }
-    if (creation.outcome === 'id_conflict') {
-      return {
-        decision: 'successor_id_conflict',
-        sourceTaskId: taskId,
-        reason: creation.allocation.reason,
-        detail: creation.allocation.detail,
-      };
-    }
-    if (creation.outcome === 'existing') {
-      return {
-        decision: 'successor_exists',
-        sourceTaskId: taskId,
-        successorTaskId: creation.task.taskId,
-        successorKind: proposal.taskKind,
-      };
-    }
-    const successorRecord: TaskRecord = creation.task;
 
-    return {
-      decision: 'successor_created',
-      sourceTaskId: taskId,
-      successorTaskId: successorRecord.taskId,
-      successorKind: proposal.taskKind,
-    };
+        // PRI-1293 R5: 创建是 bounded 收敛循环 (至多 2 次)。
+        //   attempt 0 用主派生 id; UNIQUE 落败先重扫——并发创建者若已物化真实
+        //   后继 (同 parent/kind/channel) 按 successor_exists 收敛, 绝不重复创建;
+        //   重扫为空 = occupant 属异链 (扫描为空已证明它非本父子后继), attempt 1
+        //   改用父派生 fallback id。fallback id 对同一 (parent, kind, channel)
+        //   确定性收敛: 两个并发创建者碰壁后落到**同一** fallback id, 胜负由
+        //   UNIQUE 裁决, 败者重扫收敛——不会双链并行。fallback 仍 UNIQUE 落败
+        //   且重扫为空 = 持续占用冲突, fail-closed 结构化 successor_id_conflict
+        //   (绝不折叠为 successor_exists 伪装幂等)。
+        const creation = await createLogicalSuccessorTask({
+          stateManager: this.stateManager,
+          parentTaskId: taskId,
+          successorKind: proposal.taskKind,
+          channel: proposal.channel,
+          preferredTaskId: successorTaskId,
+          fallbackTaskId: successorTaskId + '-p-' + taskId,
+          metadata: successorMetadata,
+        });
+
+        if (creation.outcome === 'lookup') {
+          if (creation.lookup.outcome === 'malformed') {
+            return {
+              decision: creation.lookup.decision,
+              sourceTaskId: taskId,
+              reason: creation.lookup.reason,
+              detail: creation.lookup.detail,
+              malformedCandidateTaskIds: [...creation.lookup.malformedCandidateTaskIds],
+              nextAction: creation.lookup.nextAction,
+            } satisfies CommitNextTaskResult;
+          }
+          return {
+            decision: creation.lookup.decision,
+            sourceTaskId: taskId,
+            reason: creation.lookup.reason,
+            detail: creation.lookup.detail,
+            conflictingSuccessorTaskIds: [...creation.lookup.conflictingSuccessorTaskIds],
+          } satisfies CommitNextTaskResult;
+        }
+        if (creation.outcome === 'id_conflict') {
+          return {
+            decision: 'successor_id_conflict',
+            sourceTaskId: taskId,
+            reason: creation.allocation.reason,
+            detail: creation.allocation.detail,
+          } satisfies CommitNextTaskResult;
+        }
+
+        if (isPeerRunnerKind(piTask.taskKind)) {
+          const lineage = await resolveAuthoritativeCorrelationIdWithLegacyBackfill(
+            rawTask,
+            this.stateManager,
+            creationLineagePlan ?? undefined,
+          );
+          if (!lineage.ok) {
+            throw new CommitDecisionRollback({
+              decision: 'lineage_refused',
+              sourceTaskId: taskId,
+              reason: lineage.reason,
+              detail: lineage.detail,
+            });
+          }
+        }
+
+        if (creation.outcome === 'existing') {
+          return {
+            decision: 'successor_exists',
+            sourceTaskId: taskId,
+            successorTaskId: creation.task.taskId,
+            successorKind: proposal.taskKind,
+          } satisfies CommitNextTaskResult;
+        }
+
+        return {
+          decision: 'successor_created',
+          sourceTaskId: taskId,
+          successorTaskId: creation.task.taskId,
+          successorKind: proposal.taskKind,
+        } satisfies CommitNextTaskResult;
+      });
+    } catch (error) {
+      if (error instanceof CommitDecisionRollback) return error.result;
+      throw error;
+    }
+
   }
 
   /**
