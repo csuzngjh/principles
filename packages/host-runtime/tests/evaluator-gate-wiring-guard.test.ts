@@ -93,7 +93,6 @@ describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction 
     expect(shell).not.toContain('new EvaluatorRunner');
     // PRI-1301: 守卫对象必须是独立 executor 模块 (canonical 构造点); cycle
     // 只做输入装配, 不得重新出现 Runner 构造。
-    expect(EXECUTOR_SRC).toContain('internalization-task-executor.ts');
     expect(executorEvaluatorCase()).toContain('new EvaluatorRunner');
     expect(readSrc(CYCLE_SRC)).not.toContain('new EvaluatorRunner');
   });

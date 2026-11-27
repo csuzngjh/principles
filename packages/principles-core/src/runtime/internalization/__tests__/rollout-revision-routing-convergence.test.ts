@@ -9,11 +9,11 @@
  *      - prompt channel   → reopen scribe (走到底);
  *      - code_tool_hook   → reopen artificer;
  *      - 持久化 rolloutRevisionPayload 的 sourceArtifactId **恒等于 rollout
- *        taskId** — runner 私有返回类型的 `viaArtifactId?: string` 字段在
- *        全部 git 历史中从未被赋值 (引入提交 c41e91032 起即无任何
- *        `viaArtifactId:` 对象字面量赋值), `target.viaArtifactId ?? ctx.taskId`
- *        因此恒取 fallback。本测试在值层面钉住该事实, 任何未来改动若真的
- *        填充 viaArtifactId 必须显式修改本测试 (不得静默改变);
+ *        taskId** — runner 私有返回类型曾声明 `viaArtifactId?: string`, 但
+ *        全部 git 历史中任何实现从未赋值 (引入提交 c41e91032 起即无任何
+ *        `viaArtifactId:` 对象字面量赋值), fallback 因此恒取 rollout taskId。
+ *        评审收编后不再把这个死字段扩进公开共享类型; 本测试在值层面钉住
+ *        现实行为, 任何未来语义修正都必须显式修改本测试 (不得静默改变);
  *      - `rollout_revision_routed` 遥测载荷 (targetTaskId/targetKind/
  *        revisionIteration);
  *      - reopen 接线输入的 sourceArtifactId 同样恒为 rollout taskId。
@@ -21,8 +21,8 @@
  *      `rollout_revision_target_unresolved`。
  *   3. Owner revise_once 路由 (owner-resolution-service → 共享实现) 与自动
  *      路由对同一血缘图解析出**同一目标** (两路由统一同源的行为证据)。
- *   4. 共享 resolveRolloutRevisionTarget 的返回对象不携带 viaArtifactId
- *      own-property (三种路由形状)。
+ *   4. 共享 resolveRolloutRevisionTarget 的返回对象精确为 taskId/kind
+ *      两字段 (三种路由形状)。
  *
  * fixture 结构复用 crash-liveness-regressions.test.ts 的 sqlite 真实装配
  * (dreamer 根血缘门禁可证)。
@@ -36,9 +36,6 @@ import { InternalizationOrchestrator } from '../internalization-orchestrator.js'
 import { RolloutReviewerRunner } from '../rollout-reviewer-runner.js';
 import { DefaultRolloutReviewerValidator } from '../rollout-reviewer-output.js';
 import type { RolloutReviewerOutputV1 } from '../rollout-reviewer-output.js';
-import { SqliteConnection } from '../../store/sqlite-connection.js';
-import { SqlitePIArtifactStore } from '../../store/artifact/sqlite-pi-artifact-store.js';
-import { storeEmitter } from '../../store/event-emitter.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from '../pitask-metadata.js';
 import { resolveRolloutRevisionTarget } from '../revision-reopen.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -136,7 +133,7 @@ function makeRunner(events: TelemetryEvent[], reopenCalls: ReopenCall[]): Rollou
   return new RolloutReviewerRunner({
     stateManager, runtimeAdapter: scriptedAdapter(makeOutput('needs_revision')),
     eventEmitter: captureEmitter(events), validator: new DefaultRolloutReviewerValidator(),
-    artifactStore: new SqlitePIArtifactStore(new SqliteConnection(workspaceDir)),
+    artifactStore: stateManager.piArtifactStore,
     reopenRevisionTarget: async (input) => {
       reopenCalls.push({ ...input });
       const r = await orchestrator.reopenTaskForRevision(input.targetTaskId, {
@@ -166,21 +163,18 @@ async function seedLineage(channel: 'prompt' | 'code_tool_hook'): Promise<void> 
   await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(mergePITaskMetadata(evalPi, { runnerDecision: 'approved' })));
   await mkTask(ROLLOUT_ID, 'rollout_reviewer', [EVAL_ID], channel);
 
-  const conn = new SqliteConnection(workspaceDir);
-  const store = new SqlitePIArtifactStore(conn);
-  await store.upsertArtifact({
+  await stateManager.piArtifactStore.upsertArtifact({
     artifactId: 'pi-art-eval-rrc', artifactKind: 'principle', sourceTaskId: EVAL_ID,
     lineageArtifactIds: [], validationStatus: 'pending',
     contentJson: JSON.stringify({ evaluation: { decision: 'approved', score: 0.9, strengths: [], concerns: [], requiredChanges: [] } }),
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   });
-  await store.upsertArtifact({
+  await stateManager.piArtifactStore.upsertArtifact({
     artifactId: SCRIBE_ART, artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
     lineageArtifactIds: [], validationStatus: 'validated',
     contentJson: JSON.stringify({ principleId: 'c-p', text: '原则', principleDraft: { title: 'c-p', statement: '原则' } }),
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   });
-  conn.close();
 }
 
 async function readRolloutPayload(): Promise<{ sourceArtifactId?: string; targetTaskKind?: string; revisionIteration?: number; status?: string }> {
@@ -206,7 +200,7 @@ describe('PRI-1301 固化 — 自动 needs_revision 路由 (runner 端可观察�
     expect(reopenCalls[0]?.targetTaskId).toBe(SCRIBE_ID);
     expect(reopenCalls[0]?.targetKind).toBe('scribe');
     expect(reopenCalls[0]?.revisionIteration).toBe(1);
-    // viaArtifactId 从未赋值的既有事实: reopen 接线的 sourceArtifactId = rollout taskId
+    // 既有事实: reopen 接线的 sourceArtifactId = rollout taskId
     expect(reopenCalls[0]?.sourceArtifactId).toBe(ROLLOUT_ID);
     const scribePi = hydratePITaskRecord((await stateManager.getTask(SCRIBE_ID)) as TaskRecord);
     expect(scribePi?.revisionCount).toBe(1);
@@ -222,7 +216,7 @@ describe('PRI-1301 固化 — 自动 needs_revision 路由 (runner 端可观察�
     // 遥测: rollout_revision_routed 精确载荷
     const routed = events.filter((e) => e.eventType === 'rollout_revision_routed');
     expect(routed.length).toBe(1);
-    expect(routed[0]?.payload).toMatchObject({
+    expect(routed[0]?.payload).toEqual({
       targetTaskId: SCRIBE_ID,
       targetKind: 'scribe',
       revisionIteration: 1,
@@ -252,7 +246,7 @@ describe('PRI-1301 固化 — 自动 needs_revision 路由 (runner 端可观察�
 
     const routed = events.filter((e) => e.eventType === 'rollout_revision_routed');
     expect(routed.length).toBe(1);
-    expect(routed[0]?.payload).toMatchObject({
+    expect(routed[0]?.payload).toEqual({
       targetTaskId: ARTIFICER_ID,
       targetKind: 'artificer',
       revisionIteration: 1,
@@ -273,15 +267,12 @@ describe('PRI-1301 固化 — 自动 needs_revision 路由 (runner 端可观察�
     if (!evalPi) throw new Error('seed: evaluator not hydratable');
     await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(mergePITaskMetadata(evalPi, { runnerDecision: 'approved' })));
     await mkTask(ROLLOUT_ID, 'rollout_reviewer', [EVAL_ID]);
-    const conn = new SqliteConnection(workspaceDir);
-    const store = new SqlitePIArtifactStore(conn);
-    await store.upsertArtifact({
+    await stateManager.piArtifactStore.upsertArtifact({
       artifactId: 'pi-art-eval-rrc', artifactKind: 'principle', sourceTaskId: EVAL_ID,
       lineageArtifactIds: [], validationStatus: 'pending',
       contentJson: JSON.stringify({ evaluation: { decision: 'approved', score: 0.9, strengths: [], concerns: [], requiredChanges: [] } }),
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
-    conn.close();
 
     const events: TelemetryEvent[] = [];
     const reopenCalls: ReopenCall[] = [];
@@ -295,8 +286,11 @@ describe('PRI-1301 固化 — 自动 needs_revision 路由 (runner 端可观察�
     expect(rolloutPi?.humanReviewContext?.reasonCode).toBe('rollout_revision_target_unresolved');
 
     const nhrEvents = events.filter((e) => e.eventType === 'rollout_reviewer_task_needs_human_review');
-    expect(nhrEvents.length).toBeGreaterThan(0);
-    expect(nhrEvents[0]?.payload).toMatchObject({ reason: 'rollout_revision_target_unresolved' });
+    expect(nhrEvents.length).toBe(1);
+    expect(nhrEvents[0]?.payload).toEqual({
+      reason: 'rollout_revision_target_unresolved',
+      nextAction: 'owner_inspect_retry_or_archive',
+    });
     // 无 routed 遥测
     expect(events.filter((e) => e.eventType === 'rollout_revision_routed').length).toBe(0);
   });
@@ -325,7 +319,7 @@ describe('PRI-1301 固化 — 两条路由同一目标的同源证据', () => {
   });
 });
 
-describe('PRI-1301 固化 — viaArtifactId 从未产生值的回归钉', () => {
+describe('PRI-1301 固化 — 共享 revision target 的精确形状', () => {
   function resolutionStore(shape: 'code_chain' | 'direct_scribe'): (id: string) => Promise<TaskRecord | null> {
     const m = (deps: string[]): string => createPITaskDiagnosticJson({
       dependencyTaskIds: deps, channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [],
@@ -348,18 +342,12 @@ describe('PRI-1301 固化 — viaArtifactId 从未产生值的回归钉', () => 
     return async (id) => rows.find((r) => r.taskId === id) ?? null;
   }
 
-  it('code 链两种 channel 与直接 scribe 链: 解析结果均不携带 viaArtifactId own-property', async () => {
+  it('code 链两种 channel 与直接 scribe 链: 解析结果精确为 taskId/kind 两字段', async () => {
     const codeHook = await resolveRolloutRevisionTarget(resolutionStore('code_chain'), 'rollout-1', 'code_tool_hook');
     const codePrompt = await resolveRolloutRevisionTarget(resolutionStore('code_chain'), 'rollout-1', 'prompt');
     const directScribe = await resolveRolloutRevisionTarget(resolutionStore('direct_scribe'), 'rollout-1', 'prompt');
-    expect(codeHook).toMatchObject({ taskId: 'art-1', kind: 'artificer' });
-    expect(codePrompt).toMatchObject({ taskId: 'scribe-1', kind: 'scribe' });
-    expect(directScribe).toMatchObject({ taskId: 'scribe-1', kind: 'scribe' });
-    // 核心钉: 全 git 历史中 viaArtifactId 从未被赋值 — 解析结果对象上不存在
-    // 该 own-property。若未来实现真的填充它, 本测试必须显式更新 (不得静默)。
-    for (const target of [codeHook, codePrompt, directScribe]) {
-      expect(target).not.toBeNull();
-      expect(Object.prototype.hasOwnProperty.call(target, 'viaArtifactId')).toBe(false);
-    }
+    expect(codeHook).toEqual({ taskId: 'art-1', kind: 'artificer' });
+    expect(codePrompt).toEqual({ taskId: 'scribe-1', kind: 'scribe' });
+    expect(directScribe).toEqual({ taskId: 'scribe-1', kind: 'scribe' });
   });
 });

@@ -28,9 +28,10 @@ import { checkRuleActivationContent } from './rule-activation-contract.js';
 import type { OutputLanguage } from '../language-directive.js';
 // PRI-1301 (SPEC-PD-PIPELINE-SPINE-001 去重收编): 修订目标解析的唯一权威
 // 实现 — 与 Owner revise_once 路由 (owner-resolution-service) 同一来源。
-// 本 runner 此前的私有 resolveRevisionTarget 副本已删除; `viaArtifactId`
-// 字段语义 (从未被任何实现赋值, 恒走 `?? ctx.taskId` fallback) 由共享返回
-// 类型原样保留, 并有回归测试钉住 (rollout-revision-routing-convergence)。
+// 本 runner 此前的私有 resolveRevisionTarget 副本已删除; 私有副本声明过
+// `viaArtifactId`, 但全历史从未赋值 (恒走 `?? ctx.taskId` fallback), 因此
+// 不把该死字段扩进共享公开类型。现有值语义由回归测试钉住
+// (rollout-revision-routing-convergence)。
 import { resolveRolloutRevisionTarget } from './revision-reopen.js';
 
 export type RolloutReviewerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
@@ -1037,7 +1038,7 @@ export class RolloutReviewerRunner {
       requiredChanges: [...ctx.output.review.requiredChanges],
       revisionIteration: iteration,
       sourceRolloutTaskId: ctx.taskId,
-      sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
+      sourceArtifactId: ctx.taskId,
       targetTaskKind: target.kind,
       status: 'pending',
     });
@@ -1060,7 +1061,7 @@ export class RolloutReviewerRunner {
           revisionFeedback: feedback,
           revisionIteration: iteration,
           sourceRolloutTaskId: ctx.taskId,
-          sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
+          sourceArtifactId: ctx.taskId,
         });
         if (!outcome.ok) {
           await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_reopen_failed_${outcome.reason}`, ctx);
@@ -1072,7 +1073,7 @@ export class RolloutReviewerRunner {
       await this.markRevisionIntentAppliedOrThrow(ctx.taskId, iteration, {
         requiredChanges: [...ctx.output.review.requiredChanges],
         sourceRolloutTaskId: ctx.taskId,
-        sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
+        sourceArtifactId: ctx.taskId,
         targetTaskKind: target.kind,
       });
       this.emitRolloutReviewerEvent('rollout_revision_routed', ctx.taskId, {

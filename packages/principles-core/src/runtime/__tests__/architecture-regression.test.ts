@@ -4724,6 +4724,13 @@ describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2B: production construction-point whi
         expect(executorSrc, `${rel} must not import ${token} (host-runtime → pd-cli is a forbidden direction)`).not.toContain(token);
       }
     }
+    // Review hardening: the executor must not type-import its caller. The
+    // evaluator catalog shape is owned by core (`EvaluatorRunnerOptions`),
+    // while `ConsumerHostToolCatalog` remains the cycle's structural port type.
+    expect(
+      readProductionSource2B('host-runtime/src/internalization-task-executor.ts'),
+      'executor must not depend on the consumer-cycle module for host tool catalog types',
+    ).not.toContain('internalization-consumer-cycle.js');
   });
 
 });

@@ -56,11 +56,9 @@ import {
   type ScribeRunnerResult,
   type ArtificerRunnerResult,
   type EvaluatorRunnerResult,
+  type EvaluatorRunnerOptions,
   type RolloutReviewerRunnerResult,
 } from '@principles/core/runtime';
-// ConsumerHostToolCatalog 的权威所有者是 consumer cycle (host 端口目录类型 —
-// evaluator 输入联合引用它)。type-only import, 运行期无循环依赖。
-import type { ConsumerHostToolCatalog } from './internalization-consumer-cycle.js';
 
 /**
  * Runner 遥测窄端口 — 与 core `PeerRunnerTelemetryEmitter` 结构等价
@@ -130,7 +128,7 @@ export type ExecuteSelectedInternalizationTaskInput =
       readonly repairDeps: SelectedEvaluatorRepairDeps;
       /** 对抗重放 gate — 两个入口都必须显式提供各自权威解析结果。 */
       readonly gateDeps: RefinerRuleHostGateDeps;
-      readonly hostToolCatalog?: ConsumerHostToolCatalog;
+      readonly hostToolCatalog?: EvaluatorRunnerOptions['hostToolCatalog'];
       readonly hostSemanticContext?: ArtificerHostSemanticContext;
     } & SelectedInternalizationTaskBaseDeps & { readonly runnerOptions: SelectedInternalizationTaskRunnerOptions })
   | ({

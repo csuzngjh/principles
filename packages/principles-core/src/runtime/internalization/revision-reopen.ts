@@ -297,18 +297,6 @@ export async function reopenTaskForRevision(
 export interface RolloutRevisionTarget {
   taskId: string;
   kind: 'scribe' | 'artificer';
-  /**
-   * PRI-1301 去重收编时的语义保留字段: runner 私有副本的返回类型自引入
-   * 提交 (c41e91032, P0-D/E/F) 起就声明该可选字段, 但**全部 git 历史中
-   * 任何实现从未为其赋过值** (无任何 `viaArtifactId:` 对象字面量赋值),
-   * 消费点 `target.viaArtifactId ?? ctx.taskId` 因此恒取 fallback
-   * (rollout taskId)。共享实现同样不填充它 — 解析只读遍历 dep 链,
-   * 不产生 artifact 身份。该事实由
-   * `__tests__/rollout-revision-routing-convergence.test.ts` 在值层面钉死;
-   * 任何未来改动若真的填充本字段, 必须显式更新那些回归测试
-   * (不得静默改变路由载荷语义)。
-   */
-  viaArtifactId?: string;
 }
 
 /**
