@@ -60,12 +60,19 @@ function readNullableStringField(
   return value;
 }
 
-// Shared across every SqliteTaskStore instance in this process. Cross-connection
-// callers must never enter BEGIN IMMEDIATE while another instance is inside an
-// async transaction callback; doing so can block this single event loop before
-// the first transaction can finish. The DB write lock still serializes writers
-// across processes.
+// Shared across every SqliteTaskStore instance in this process. Every top-level
+// transaction AND every write that does not inherit the active transaction
+// context takes a FIFO position here. SQLite transactions are connection-scoped:
+// without write admission, an unrelated same-connection CRUD write executed
+// during an async transaction callback would be captured by that transaction
+// and could be rolled back after its caller already observed success.
 const SQLITE_WRITE_TRANSACTION_QUEUE: { current: Promise<void> } = { current: Promise.resolve() };
+
+function enqueueSqliteWriteUnit<T>(unit: () => Promise<T>): Promise<T> {
+  const run = SQLITE_WRITE_TRANSACTION_QUEUE.current.then(unit);
+  SQLITE_WRITE_TRANSACTION_QUEUE.current = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 interface SqliteWriteTransactionContext {
   active: boolean;
@@ -79,7 +86,7 @@ export class SqliteTaskStore implements TaskStore {
   async withWriteTransaction<T>(fn: () => Promise<T>): Promise<T> {
     const inherited = this.transactionContext.getStore();
     if (inherited?.active) return fn();
-    const run = SQLITE_WRITE_TRANSACTION_QUEUE.current.then(async () => {
+    return enqueueSqliteWriteUnit(async () => {
       const db = this.connection.getDb();
       const context: SqliteWriteTransactionContext = { active: true };
       let began = false;
@@ -98,35 +105,40 @@ export class SqliteTaskStore implements TaskStore {
         context.active = false;
       }
     });
-    SQLITE_WRITE_TRANSACTION_QUEUE.current = run.then(() => undefined, () => undefined);
-    return run;
+  }
+
+  private async runWriteUnit<T>(write: () => Promise<T>): Promise<T> {
+    if (this.transactionContext.getStore()?.active) return write();
+    return enqueueSqliteWriteUnit(write);
   }
 
   async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
-    const db = this.connection.getDb();
-    const now = new Date().toISOString();
+    return this.runWriteUnit(async () => {
+      const db = this.connection.getDb();
+      const now = new Date().toISOString();
 
-    db.prepare(`
-      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error, input_ref, result_ref, diagnostic_json, lease_generation)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      record.taskId,
-      record.taskKind,
-      record.status,
-      now,
-      now,
-      record.attemptCount,
-      record.maxAttempts,
-      record.leaseOwner ?? null,
-      record.leaseExpiresAt ?? null,
-      record.lastError ?? null,
-      record.inputRef ?? null,
-      record.resultRef ?? null,
-      record.diagnosticJson ?? null,
-      record.leaseGeneration ?? 0,
-    );
+      db.prepare(`
+        INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error, input_ref, result_ref, diagnostic_json, lease_generation)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        record.taskId,
+        record.taskKind,
+        record.status,
+        now,
+        now,
+        record.attemptCount,
+        record.maxAttempts,
+        record.leaseOwner ?? null,
+        record.leaseExpiresAt ?? null,
+        record.lastError ?? null,
+        record.inputRef ?? null,
+        record.resultRef ?? null,
+        record.diagnosticJson ?? null,
+        record.leaseGeneration ?? 0,
+      );
 
-    return (await this.getTask(record.taskId)) as TaskRecord;
+      return (await this.getTask(record.taskId)) as TaskRecord;
+    });
   }
 
   async getTask(taskId: string): Promise<TaskRecord | null> {
@@ -139,32 +151,34 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   async updateTask(taskId: string, patch: TaskStoreUpdatePatch): Promise<TaskRecord> {
-    const db = this.connection.getDb();
-    const now = patch.updatedAt ?? new Date().toISOString();
-    const sets: string[] = ['updated_at = ?'];
-    const values: unknown[] = [now];
+    return this.runWriteUnit(async () => {
+      const db = this.connection.getDb();
+      const now = patch.updatedAt ?? new Date().toISOString();
+      const sets: string[] = ['updated_at = ?'];
+      const values: unknown[] = [now];
 
-    if (patch.status !== undefined) { sets.push('status = ?'); values.push(patch.status); }
-    if (patch.leaseOwner !== undefined) { sets.push('lease_owner = ?'); values.push(patch.leaseOwner); }
-    if (patch.leaseExpiresAt !== undefined) { sets.push('lease_expires_at = ?'); values.push(patch.leaseExpiresAt); }
-    if (patch.attemptCount !== undefined) { sets.push('attempt_count = ?'); values.push(patch.attemptCount); }
-    if (patch.maxAttempts !== undefined) { sets.push('max_attempts = ?'); values.push(patch.maxAttempts); }
-    if (patch.lastError !== undefined) { sets.push('last_error = ?'); values.push(patch.lastError); }
-    if (patch.inputRef !== undefined) { sets.push('input_ref = ?'); values.push(patch.inputRef); }
-    if (patch.resultRef !== undefined) { sets.push('result_ref = ?'); values.push(patch.resultRef); }
-    if (patch.diagnosticJson !== undefined) { sets.push('diagnostic_json = ?'); values.push(patch.diagnosticJson); }
+      if (patch.status !== undefined) { sets.push('status = ?'); values.push(patch.status); }
+      if (patch.leaseOwner !== undefined) { sets.push('lease_owner = ?'); values.push(patch.leaseOwner); }
+      if (patch.leaseExpiresAt !== undefined) { sets.push('lease_expires_at = ?'); values.push(patch.leaseExpiresAt); }
+      if (patch.attemptCount !== undefined) { sets.push('attempt_count = ?'); values.push(patch.attemptCount); }
+      if (patch.maxAttempts !== undefined) { sets.push('max_attempts = ?'); values.push(patch.maxAttempts); }
+      if (patch.lastError !== undefined) { sets.push('last_error = ?'); values.push(patch.lastError); }
+      if (patch.inputRef !== undefined) { sets.push('input_ref = ?'); values.push(patch.inputRef); }
+      if (patch.resultRef !== undefined) { sets.push('result_ref = ?'); values.push(patch.resultRef); }
+      if (patch.diagnosticJson !== undefined) { sets.push('diagnostic_json = ?'); values.push(patch.diagnosticJson); }
 
-    values.push(taskId);
+      values.push(taskId);
 
-    const result = db
-      .prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE task_id = ?`)
-      .run(...values);
+      const result = db
+        .prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE task_id = ?`)
+        .run(...values);
 
-    if (result.changes === 0) {
-      throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`);
-    }
+      if (result.changes === 0) {
+        throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`);
+      }
 
-    return (await this.getTask(taskId)) as TaskRecord;
+      return (await this.getTask(taskId)) as TaskRecord;
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is a CAS PRECONDITION (SPEC-PD-IAER-001 §6.3), not write payload: folding it into the patch type would let it leak into TaskRecord on unconditional updateTask paths.
@@ -237,8 +251,9 @@ export class SqliteTaskStore implements TaskStore {
       readonly expectedLeaseGeneration?: number;
     },
   ): Promise<TaskRecord | null> {
-    const { taskId, expectedDiagnosticJson, artifacts, patch } = input;
-    const db = this.connection.getDb();
+    return this.runWriteUnit(async () => {
+      const { taskId, expectedDiagnosticJson, artifacts, patch } = input;
+      const db = this.connection.getDb();
     const now = patch.updatedAt ?? new Date().toISOString();
     const sets: string[] = ['updated_at = ?'];
     const values: unknown[] = [now];
@@ -300,10 +315,11 @@ export class SqliteTaskStore implements TaskStore {
         ${artifactConditions.map((condition) => `AND ${condition}`).join('\n')}`)
       .run(...values);
 
-    if (result.changes === 0) {
-      return null;
-    }
-    return (await this.getTask(taskId));
+      if (result.changes === 0) {
+        return null;
+      }
+      return (await this.getTask(taskId));
+    });
   }
 
   async listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]> {
@@ -378,9 +394,11 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   async deleteTask(taskId: string): Promise<boolean> {
-    const db = this.connection.getDb();
-    const result = db.prepare('DELETE FROM tasks WHERE task_id = ?').run(taskId);
-    return result.changes > 0;
+    return this.runWriteUnit(async () => {
+      const db = this.connection.getDb();
+      const result = db.prepare('DELETE FROM tasks WHERE task_id = ?').run(taskId);
+      return result.changes > 0;
+    });
   }
 
   // ── Failed-task observability methods (Task 8) ────────────────────────────
