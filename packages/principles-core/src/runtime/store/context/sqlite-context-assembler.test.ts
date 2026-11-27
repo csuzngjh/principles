@@ -49,7 +49,8 @@ function createMockTaskStore(tasks: Map<string, DiagnosticianTaskRecord>): TaskS
     getTask: vi.fn(async (taskId: string) => tasks.get(taskId) ?? null),
     updateTask: vi.fn(),
     updateTaskIfDiagnosticJsonUnchanged: async () => null,
-    listTasks: vi.fn(async () => []),
+    withWriteTransaction: async <T>(fn: () => Promise<T>): Promise<T> => fn(),
+  listTasks: vi.fn(async () => []),
     deleteTask: vi.fn(async () => true),
   };
 }

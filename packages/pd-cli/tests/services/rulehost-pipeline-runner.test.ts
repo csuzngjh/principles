@@ -21,7 +21,7 @@ import { runRuleHostPipeline, backfillScribeIdentity, readScribeOwnerRequirement
 import { handleRuntimeInternalizationEnqueueSuccessors } from '../../src/commands/runtime-internalization-enqueue-successors.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime';
-import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId, hydratePITaskRecord } from '@principles/core/runtime';
+import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId, hydratePITaskRecord, reopenTaskForRevision, InternalizationOrchestrator } from '@principles/core/runtime';
 import { addPrincipleToLedger, updatePrinciple, appendReuseEvidence } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
@@ -397,7 +397,16 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
         if (artificerCallCount === 1) {
           return evaluatorNeedsRevision(taskId, artificerArtifactId);
         }
-        return evaluatorApproved(taskId, artificerArtifactId);
+        const approved = evaluatorApproved(taskId, artificerArtifactId) as {
+          evaluation: Record<string, unknown>;
+        };
+        // Unified successor arbitration reuses the evaluator-seeded repair
+        // artificer as the round-2 artificer. That makes this a PRI-630 repair
+        // evaluation round, so the scripted evaluator must satisfy the same
+        // convergence contract a real repair-round evaluator sees in its prompt.
+        approved.evaluation.priorRequirementStatuses = [{ id: 'req-1', status: 'resolved' }];
+        approved.evaluation.requirementLedger = [{ id: 'req-1', statement: 'fix matcher', status: 'resolved' }];
+        return approved;
       },
     });
 
@@ -415,7 +424,13 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
 
     expect(artificerCallCount).toBe(2);
     expect(artificerPrompts).toHaveLength(2);
-    expect(artificerPrompts[1]).toContain('Prior adversarial replay failures');
+    // PRI-1299 unified successor arbitration: the evaluator-seeded repair
+    // artificer and the synchronous round-2 artificer are the same logical
+    // successor (parent/kind/channel), so RuleHost reuses the repair task
+    // rather than duplicating it. The second prompt must still carry the
+    // deterministic replay failure evidence, now through repairFeedback.
+    expect(artificerPrompts[1]).toContain('repairFeedback');
+    expect(artificerPrompts[1]).toContain('Deterministic Replay Evidence');
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
     expect(result.approvalId).not.toBeNull();
@@ -433,40 +448,103 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       const evalR1 = tasks.find((t) => t.taskId.includes('-evaluator-r1-'));
       const evalR2 = tasks.find((t) => t.taskId.includes('-evaluator-r2-'));
       const artR1 = tasks.find((t) => t.taskId.includes('-artificer-r1-'));
-      const artR2 = tasks.find((t) => t.taskId.includes('-artificer-r2-'));
+      const artR2 = tasks.find((t) => {
+        if (t.taskKind !== 'artificer') return false;
+        return hydratePITaskRecord(t)?.repairPayload?.sourceEvaluatorTaskId === evalR1?.taskId;
+      });
       const philosopher = tasks.find((t) => t.taskKind === 'philosopher');
       const scribe = tasks.find((t) => t.taskKind === 'scribe' && t.taskId.includes('-scribe-'));
-      if (!evalR1 || !evalR2 || !artR1 || !artR2 || !philosopher || !scribe) {
-        throw new Error(`expected full round-1/round-2 chain in persisted tasks, got: ${tasks.map((t) => `${t.taskKind}:${t.taskId}`).join(',')}`);
+      if (!evalR1 || !artR1 || !artR2 || !philosopher || !scribe) {
+        throw new Error(`expected formal repair revision chain in persisted tasks, got: ${tasks.map((t) => `${t.taskKind}:${t.taskId}`).join(',')}`);
       }
+      expect(evalR2, 'repair completion must reopen the original evaluator instead of creating evaluator-r2').toBeUndefined();
       // 1. Round-1 evaluator completed normally — repair seeding was NOT refused.
       expect(evalR1.status, 'round-1 evaluator must not be stranded in needs_human_review').toBe('succeeded');
       // 2. The persisted repair task exists, parented on the round-1 evaluator,
       //    carrying the candidate identity recovered from the dreamer seed root.
-      const repairTask = tasks.find((t) => {
-        if (t.taskKind !== 'artificer') return false;
-        const pi = hydratePITaskRecord(t);
-        return pi?.repairPayload?.sourceEvaluatorTaskId === evalR1.taskId;
-      });
-      if (!repairTask) throw new Error('expected a persisted artificer repair task for the round-1 evaluator');
+      //    Under PRI-1299 unified successor arbitration it is also the round-2
+      //    artificer: RuleHost must execute that one logical successor rather
+      //    than creating a duplicate timestamped round-2 task.
+      const repairTask = artR2;
       const repairPi = hydratePITaskRecord(repairTask);
       expect(repairPi?.parentTaskId).toBe(evalR1.taskId);
       expect(repairPi?.correlationId).toBe('candidate-dreamer-feedback-001');
-      expect(repairTask.status === 'pending' || repairTask.status === 'retry_wait').toBe(true);
+      expect(repairTask.status).toBe('succeeded');
       // 3. End-to-end parent chain: dreamer seed → philosopher → scribe →
-      //    artificer-r1 → evaluator-r1 → artificer-r2 → evaluator-r2.
+      //    artificer-r1 → evaluator-r1 → repair/round-2 artificer. The second
+      //    evaluation is a new revision of evalR1, not a separate evaluator row.
       const parentOf = (t: typeof tasks[number]) => hydratePITaskRecord(t)?.parentTaskId;
       expect(parentOf(philosopher)).toBe('dreamer-feedback-001');
       expect(parentOf(scribe)).toBe(philosopher.taskId);
       expect(parentOf(artR1)).toBe(scribe.taskId);
       expect(parentOf(evalR1)).toBe(artR1.taskId);
       expect(parentOf(artR2)).toBe(evalR1.taskId);
-      expect(parentOf(evalR2)).toBe(artR2.taskId);
-      // 4. The loop's naming correlation must NOT be mistaken for a candidate
-      //    id — sync tasks carry no correlationId of their own.
-      expect(hydratePITaskRecord(evalR1)?.correlationId).toBeUndefined();
+      const evalR1Pi = hydratePITaskRecord(evalR1);
+      expect(evalR1Pi?.revisionCount).toBe(1);
+      expect(evalR1Pi?.dependencyTaskIds).toContain(artR2.taskId);
+      expect(evalR1Pi?.dependencyTaskIds).not.toContain(artR1.taskId);
+      expect(evalR1Pi?.revisionCauseId).toContain(artR2.taskId);
+      const evalR1Runs = await verify.getRunsByTask(evalR1.taskId);
+      expect(evalR1Runs.filter((run) => run.executionStatus === 'succeeded')).toHaveLength(2);
+      const evaluatorArtifacts = await verify.piArtifactStore.listBySourceTaskId(evalR1.taskId);
+      expect(evaluatorArtifacts.find((artifact) => artifact.artifactKind === 'rule')?.artifactId).toBe(result.ruleArtifactId);
+      // Formal transition replay (the reconciliation path) must consume the
+      // same revision cause exactly once: no second reopen, no revision drift.
+      const reconciliationAuthority = new InternalizationOrchestrator(
+        { stateManager: verify },
+        { owner: 'reconciliation-verify', runtimeKind: 'test-double', dryRun: true },
+      );
+      const replayedCommit = await reconciliationAuthority.commitNextTaskProposal(repairTask.taskId);
+      expect(replayedCommit).toMatchObject({
+        decision: 'revision_reopen_noop',
+        sourceTaskId: repairTask.taskId,
+        reopenedTaskId: evalR1.taskId,
+      });
+      expect(hydratePITaskRecord((await verify.getTask(evalR1.taskId))!)?.revisionCount).toBe(1);
+      // 4. Formal reopen may backfill the authoritative candidate correlation
+      //    onto the reopened evaluator; that lineage value is distinct from the
+      //    loop's display/naming prefix and must match the dreamer candidate root.
+      expect(evalR1Pi?.correlationId).toBe('candidate-dreamer-feedback-001');
     } finally {
       await verify.close();
+    }
+
+    // Crash-safe/idempotent production replay: the same RuleHost invocation must
+    // recover the succeeded repair revision chain from SQLite instead of
+    // re-entering runners or materializing a second evaluator chain.
+    const callsBeforeReplay = adapter.startRunCalls.length;
+    const replay = await runRuleHostPipeline({
+      workspaceDir: tmpDir,
+      painId: 'pain-feedback-001',
+      runtimeAdapter: adapter,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      behaviorExamplePack: PIPE_PACK,
+      channel: 'code_tool_hook',
+      pollIntervalMs: 5,
+      timeoutMs: 1000,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+    expect(replay, JSON.stringify(replay)).toMatchObject({
+      decision: 'candidate_ready_for_owner_review',
+      ruleArtifactId: result.ruleArtifactId,
+    });
+    expect(adapter.startRunCalls, 'terminal pipeline replay must not invoke any LLM/runtime stage').toHaveLength(callsBeforeReplay);
+
+    const verifyReplay = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verifyReplay.initialize();
+    try {
+      const replayTasks = await verifyReplay.listTasks();
+      const evaluatorRows = replayTasks.filter((task) => task.taskKind === 'evaluator');
+      const repairRows = replayTasks.filter((task) => task.taskKind === 'artificer' && task.taskId.startsWith('artificer-repair-'));
+      expect(evaluatorRows).toHaveLength(1);
+      expect(repairRows).toHaveLength(1);
+      const replayEvaluatorPi = hydratePITaskRecord(evaluatorRows[0]!);
+      expect(replayEvaluatorPi?.revisionCount).toBe(1);
+      expect(replayEvaluatorPi?.dependencyTaskIds).toEqual([repairRows[0]!.taskId]);
+      const evaluatorRuns = await verifyReplay.getRunsByTask(evaluatorRows[0]!.taskId);
+      expect(evaluatorRuns.filter((run) => run.executionStatus === 'succeeded')).toHaveLength(2);
+    } finally {
+      await verifyReplay.close();
     }
   }, 60_000);
 
@@ -1312,7 +1390,7 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
     }
   }, 60_000);
 
-  it('replay after identity repair publishes: seed ledger mid-flight is unnecessary — repair-then-rerun enqueues (§9.1.8)', async () => {
+  it('replay after identity repair publishes through a CONTROLLED scribe revision — naive rerun reuses the succeeded successor (§9.1.8 + PRI-1299 P1-1)', async () => {
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
     await sm.initialize();
@@ -1326,22 +1404,74 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
       onStoreReady: (store) => { adapter1.artifactStore = store; },
     });
     expect(refused.approvalId).toBeNull();
+    expect(refused.scribeTaskId).not.toBeNull();
+    const run1PhilosopherTaskId = refused.stages.find((s) => s.name === 'philosopher')?.taskId;
+    expect(run1PhilosopherTaskId).toBeTruthy();
 
     // Identity repair: the ledger entry for the candidate appears (e.g. intake
-    // completed or the ledger was restored). Replay publishes.
+    // completed or the ledger was restored).
     seedLedger(tmpDir, '10420000-0000-4000-8000-000000000902', 'cand-repair');
+
+    // PRI-1299 (P1-1): a NAIVE rerun no longer republishes — the succeeded
+    // scribe is the logical successor for (parent, kind, channel) and is
+    // reused without re-execution, so the immutable unstamped artifact stays
+    // unpublished. The artifact's own nextAction names the designed recovery:
+    // a new controlled Scribe revision.
+    const naiveAdapter = makeAdapter();
+    const naiveRerun = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-repair', runtimeAdapter: naiveAdapter,
+      channel: 'prompt', pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { naiveAdapter.artifactStore = store; },
+    });
+    expect(naiveRerun.approvalId).toBeNull();
+    expect(naiveRerun.degradationReason ?? '').toContain('identity_receipt_missing');
+    // Nothing re-executed in the naive rerun: dreamer/philosopher/scribe all
+    // converged on the succeeded persisted successors.
+    expect(naiveAdapter.startRunCalls).toEqual([]);
+    expect(naiveRerun.principleArtifactId).toBe(refused.principleArtifactId);
+
+    // Controlled recovery: reopen the scribe for revision through the ONE core
+    // revision authority (the same function the production revision paths use).
+    // The reopened successor returns to pending — executable again, same task
+    // identity, zero duplication.
+    const sm2 = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm2.initialize();
+    try {
+      const reopened = await reopenTaskForRevision(sm2, refused.scribeTaskId!, { revisionCauseId: 'owner-identity-repair-test' });
+      expect(reopened.ok, JSON.stringify(reopened)).toBe(true);
+    } finally {
+      await sm2.close();
+    }
+
     const adapter2 = makeAdapter();
-    // Run 2 RESUMES run 1's succeeded dreamer seed (no new dreamer startRun) —
-    // pre-register that call so the scripted philosopher can resolve its
-    // sourceDreamerArtifactId lineage from the shared store.
+    // Run 2 RESUMES run 1's succeeded dreamer seed and REUSES the succeeded
+    // philosopher successor (no new startRun for either) — pre-register both
+    // calls so the scripted scribe resolves its artifact lineage from the
+    // shared store.
     adapter2.startRunCalls.push({ taskId: 'dreamer-repair' });
+    adapter2.startRunCalls.push({ taskId: run1PhilosopherTaskId! });
     const published = await runRuleHostPipeline({
       workspaceDir: tmpDir, painId: 'pain-repair', runtimeAdapter: adapter2,
       channel: 'prompt', pollIntervalMs: 5, timeoutMs: 1000,
       onStoreReady: (store) => { adapter2.artifactStore = store; },
     });
     expect(published.approvalId, JSON.stringify(published, null, 1)).not.toBeNull();
-    expect(published.principleArtifactId).not.toBe(refused.principleArtifactId);
+    // The philosopher was reused (no re-execution); the scribe re-executed
+    // exactly once — the controlled revision, not a duplicate successor.
+    expect(adapter2.startRunCalls.filter((c) => c.taskId === run1PhilosopherTaskId)).toHaveLength(1); // pre-registration only
+    expect(adapter2.startRunCalls.filter((c) => c.taskId === refused.scribeTaskId)).toHaveLength(1);
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const tasks = await verify.listTasks();
+      expect(tasks.filter((t) => t.taskKind === 'philosopher')).toHaveLength(1);
+      expect(tasks.filter((t) => t.taskKind === 'scribe')).toHaveLength(1);
+      // The republished artifact carries the repaired ledger identity.
+      const artifact = await verify.piArtifactStore.getArtifactById(published.principleArtifactId!);
+      expect(artifact?.sourcePrincipleId).toBe('10420000-0000-4000-8000-000000000902');
+    } finally {
+      await verify.close();
+    }
     // Exactly one ledger principle exists — the pipeline never creates one.
     expect(await ledgerPrincipleCount(tmpDir)).toBe(1);
   }, 60_000);

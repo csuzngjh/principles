@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2076,
+  "count": 2079,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1694,6 +1694,7 @@
     "createGoldenTraceFixture",
     "createIntentTemplate",
     "createInternalizationQueueReadModel",
+    "createLogicalSuccessorTask",
     "createMinimalPITaskRecord",
     "createNextTaskProposal",
     "createOwnerEvidenceScopeError",
@@ -1885,6 +1886,7 @@
     "listEvidenceWaitingTasks",
     "listOwnerEvidenceActions",
     "listRecoveryActions",
+    "lookupSuccessorByParent",
     "makeDeterministicDiagnosticianOutput",
     "makeIdempotencyKey",
     "makePrincipleArtifact",
@@ -1937,6 +1939,7 @@
     "planExistingSuccessorTransition",
     "planLegacyLineageResolution",
     "planOwnerVerdictOverrideResume",
+    "planSuccessorIdAllocation",
     "preflightArtificerIntentBasis",
     "preflightArtificerOwnerEvidence",
     "prepareAdaptiveIntervention",

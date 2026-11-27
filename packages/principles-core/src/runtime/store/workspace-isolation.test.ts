@@ -152,6 +152,7 @@ describe('Workspace Isolation', () => {
       getTask: async (id: string) => id === 'task-diag' ? diagTask as DiagnosticianTaskRecord : null,
       updateTask: async () => { throw new Error('not implemented'); },
       updateTaskIfDiagnosticJsonUnchanged: async () => null,
+      withWriteTransaction: async <T>(fn: () => Promise<T>): Promise<T> => fn(),
       listTasks: async () => [],
       deleteTask: async () => true,
     };
