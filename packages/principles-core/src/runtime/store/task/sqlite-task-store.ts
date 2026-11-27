@@ -4,6 +4,7 @@
  * Uses better-sqlite3 transactions for atomic read-check-write operations.
  * Validates every row read with TypeBox Value.Check().
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Value } from '@sinclair/typebox/value';
 import { TaskRecordSchema, type TaskRecord, type PDTaskStatus } from '../../task-status.js';
 import { PDRuntimeError } from '../../error-categories.js';
@@ -59,34 +60,85 @@ function readNullableStringField(
   return value;
 }
 
+// Shared across every SqliteTaskStore instance in this process. Every top-level
+// transaction AND every write that does not inherit the active transaction
+// context takes a FIFO position here. SQLite transactions are connection-scoped:
+// without write admission, an unrelated same-connection CRUD write executed
+// during an async transaction callback would be captured by that transaction
+// and could be rolled back after its caller already observed success.
+const SQLITE_WRITE_TRANSACTION_QUEUE: { current: Promise<void> } = { current: Promise.resolve() };
+
+function enqueueSqliteWriteUnit<T>(unit: () => Promise<T>): Promise<T> {
+  const run = SQLITE_WRITE_TRANSACTION_QUEUE.current.then(unit);
+  SQLITE_WRITE_TRANSACTION_QUEUE.current = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+interface SqliteWriteTransactionContext {
+  active: boolean;
+}
+
 export class SqliteTaskStore implements TaskStore {
+  private readonly transactionContext = new AsyncLocalStorage<SqliteWriteTransactionContext>();
+
   constructor(private readonly connection: SqliteConnection) {}
 
+  async withWriteTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const inherited = this.transactionContext.getStore();
+    if (inherited?.active) return fn();
+    return enqueueSqliteWriteUnit(async () => {
+      const db = this.connection.getDb();
+      const context: SqliteWriteTransactionContext = { active: true };
+      let began = false;
+      try {
+        db.prepare('BEGIN IMMEDIATE').run();
+        began = true;
+        const result = await this.transactionContext.run(context, fn);
+        db.prepare('COMMIT').run();
+        return result;
+      } catch (error) {
+        if (began) {
+          try { db.prepare('ROLLBACK').run(); } catch { /* rollback best effort */ }
+        }
+        throw error;
+      } finally {
+        context.active = false;
+      }
+    });
+  }
+
+  private async runWriteUnit<T>(write: () => Promise<T>): Promise<T> {
+    if (this.transactionContext.getStore()?.active) return write();
+    return enqueueSqliteWriteUnit(write);
+  }
+
   async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
-    const db = this.connection.getDb();
-    const now = new Date().toISOString();
+    return this.runWriteUnit(async () => {
+      const db = this.connection.getDb();
+      const now = new Date().toISOString();
 
-    db.prepare(`
-      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error, input_ref, result_ref, diagnostic_json, lease_generation)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      record.taskId,
-      record.taskKind,
-      record.status,
-      now,
-      now,
-      record.attemptCount,
-      record.maxAttempts,
-      record.leaseOwner ?? null,
-      record.leaseExpiresAt ?? null,
-      record.lastError ?? null,
-      record.inputRef ?? null,
-      record.resultRef ?? null,
-      record.diagnosticJson ?? null,
-      record.leaseGeneration ?? 0,
-    );
+      db.prepare(`
+        INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error, input_ref, result_ref, diagnostic_json, lease_generation)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        record.taskId,
+        record.taskKind,
+        record.status,
+        now,
+        now,
+        record.attemptCount,
+        record.maxAttempts,
+        record.leaseOwner ?? null,
+        record.leaseExpiresAt ?? null,
+        record.lastError ?? null,
+        record.inputRef ?? null,
+        record.resultRef ?? null,
+        record.diagnosticJson ?? null,
+        record.leaseGeneration ?? 0,
+      );
 
-    return (await this.getTask(record.taskId)) as TaskRecord;
+      return (await this.getTask(record.taskId)) as TaskRecord;
+    });
   }
 
   async getTask(taskId: string): Promise<TaskRecord | null> {
@@ -99,32 +151,34 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   async updateTask(taskId: string, patch: TaskStoreUpdatePatch): Promise<TaskRecord> {
-    const db = this.connection.getDb();
-    const now = patch.updatedAt ?? new Date().toISOString();
-    const sets: string[] = ['updated_at = ?'];
-    const values: unknown[] = [now];
+    return this.runWriteUnit(async () => {
+      const db = this.connection.getDb();
+      const now = patch.updatedAt ?? new Date().toISOString();
+      const sets: string[] = ['updated_at = ?'];
+      const values: unknown[] = [now];
 
-    if (patch.status !== undefined) { sets.push('status = ?'); values.push(patch.status); }
-    if (patch.leaseOwner !== undefined) { sets.push('lease_owner = ?'); values.push(patch.leaseOwner); }
-    if (patch.leaseExpiresAt !== undefined) { sets.push('lease_expires_at = ?'); values.push(patch.leaseExpiresAt); }
-    if (patch.attemptCount !== undefined) { sets.push('attempt_count = ?'); values.push(patch.attemptCount); }
-    if (patch.maxAttempts !== undefined) { sets.push('max_attempts = ?'); values.push(patch.maxAttempts); }
-    if (patch.lastError !== undefined) { sets.push('last_error = ?'); values.push(patch.lastError); }
-    if (patch.inputRef !== undefined) { sets.push('input_ref = ?'); values.push(patch.inputRef); }
-    if (patch.resultRef !== undefined) { sets.push('result_ref = ?'); values.push(patch.resultRef); }
-    if (patch.diagnosticJson !== undefined) { sets.push('diagnostic_json = ?'); values.push(patch.diagnosticJson); }
+      if (patch.status !== undefined) { sets.push('status = ?'); values.push(patch.status); }
+      if (patch.leaseOwner !== undefined) { sets.push('lease_owner = ?'); values.push(patch.leaseOwner); }
+      if (patch.leaseExpiresAt !== undefined) { sets.push('lease_expires_at = ?'); values.push(patch.leaseExpiresAt); }
+      if (patch.attemptCount !== undefined) { sets.push('attempt_count = ?'); values.push(patch.attemptCount); }
+      if (patch.maxAttempts !== undefined) { sets.push('max_attempts = ?'); values.push(patch.maxAttempts); }
+      if (patch.lastError !== undefined) { sets.push('last_error = ?'); values.push(patch.lastError); }
+      if (patch.inputRef !== undefined) { sets.push('input_ref = ?'); values.push(patch.inputRef); }
+      if (patch.resultRef !== undefined) { sets.push('result_ref = ?'); values.push(patch.resultRef); }
+      if (patch.diagnosticJson !== undefined) { sets.push('diagnostic_json = ?'); values.push(patch.diagnosticJson); }
 
-    values.push(taskId);
+      values.push(taskId);
 
-    const result = db
-      .prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE task_id = ?`)
-      .run(...values);
+      const result = db
+        .prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE task_id = ?`)
+        .run(...values);
 
-    if (result.changes === 0) {
-      throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`);
-    }
+      if (result.changes === 0) {
+        throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`);
+      }
 
-    return (await this.getTask(taskId)) as TaskRecord;
+      return (await this.getTask(taskId)) as TaskRecord;
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is a CAS PRECONDITION (SPEC-PD-IAER-001 §6.3), not write payload: folding it into the patch type would let it leak into TaskRecord on unconditional updateTask paths.
@@ -197,8 +251,9 @@ export class SqliteTaskStore implements TaskStore {
       readonly expectedLeaseGeneration?: number;
     },
   ): Promise<TaskRecord | null> {
-    const { taskId, expectedDiagnosticJson, artifacts, patch } = input;
-    const db = this.connection.getDb();
+    return this.runWriteUnit(async () => {
+      const { taskId, expectedDiagnosticJson, artifacts, patch } = input;
+      const db = this.connection.getDb();
     const now = patch.updatedAt ?? new Date().toISOString();
     const sets: string[] = ['updated_at = ?'];
     const values: unknown[] = [now];
@@ -260,10 +315,11 @@ export class SqliteTaskStore implements TaskStore {
         ${artifactConditions.map((condition) => `AND ${condition}`).join('\n')}`)
       .run(...values);
 
-    if (result.changes === 0) {
-      return null;
-    }
-    return (await this.getTask(taskId));
+      if (result.changes === 0) {
+        return null;
+      }
+      return (await this.getTask(taskId));
+    });
   }
 
   async listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]> {
@@ -314,6 +370,19 @@ export class SqliteTaskStore implements TaskStore {
       conditions.push("COALESCE(json_extract(diagnostic_json, '$.hostKind'), '') = ?");
       values.push(filter.diagnosticHostKind);
     }
+    // PRI-1299: successor lookup narrows candidates inside the same WHERE
+    // clause. No COALESCE here: SQL NULL (missing/malformed JSON metadata)
+    // must never compare equal to an empty-string filter — absence and the
+    // empty value are distinct metadata states. json_valid guards legacy rows:
+    // SQLite json_extract raises on malformed JSON instead of yielding NULL.
+    if (filter?.piParentTaskId !== undefined) {
+      conditions.push("(CASE WHEN json_valid(diagnostic_json) THEN (CASE WHEN json_type(diagnostic_json, '$.pi_metadata.parentTaskId') = 'text' THEN json_extract(diagnostic_json, '$.pi_metadata.parentTaskId') END) END) = ?");
+      values.push(filter.piParentTaskId);
+    }
+    if (filter?.piChannel !== undefined) {
+      conditions.push("(CASE WHEN json_valid(diagnostic_json) THEN (CASE WHEN json_type(diagnostic_json, '$.pi_metadata.channel') = 'text' THEN json_extract(diagnostic_json, '$.pi_metadata.channel') END) END) = ?");
+      values.push(filter.piChannel);
+    }
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
     if (filter?.orderBy === 'updated_at_asc') { sql += ' ORDER BY updated_at ASC, task_id ASC'; }
     else if (filter?.orderBy === 'updated_at_desc') { sql += ' ORDER BY updated_at DESC, task_id DESC'; }
@@ -325,9 +394,11 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   async deleteTask(taskId: string): Promise<boolean> {
-    const db = this.connection.getDb();
-    const result = db.prepare('DELETE FROM tasks WHERE task_id = ?').run(taskId);
-    return result.changes > 0;
+    return this.runWriteUnit(async () => {
+      const db = this.connection.getDb();
+      const result = db.prepare('DELETE FROM tasks WHERE task_id = ?').run(taskId);
+      return result.changes > 0;
+    });
   }
 
   // ── Failed-task observability methods (Task 8) ────────────────────────────

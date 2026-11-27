@@ -490,6 +490,8 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
     const piTask = hydratePITaskRecord(evalTask);
     expect(piTask?.runnerDecision).toBe('approved');
     expect(piTask?.completionIntent?.transitionOverrideReason).toBe('owner_golden_trace_provenance_missing');
+    const recoveredOwnerStampEvidence = await evaluator.recoverSucceededResult(evalTask);
+    expect(recoveredOwnerStampEvidence.outcome).toBe('recovered');
     const { InternalizationOrchestrator } = await import('../internalization-orchestrator.js');
     const orchestrator = new InternalizationOrchestrator(
       { stateManager },

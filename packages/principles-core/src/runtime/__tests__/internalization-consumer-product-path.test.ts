@@ -99,7 +99,7 @@ function createMockStateManager(opts: {
       .mockResolvedValueOnce(pendingTasks)
       .mockResolvedValueOnce(retryWaitTasks)
       .mockResolvedValue([]),
-    getTask: vi.fn().mockResolvedValue(succeededTask),
+    getTask: vi.fn().mockImplementation(async (taskId: string) => taskId === TASK_ID ? succeededTask : null),
     acquireLease: vi.fn().mockResolvedValue(leasedTask),
     markTaskSucceeded: vi.fn().mockResolvedValue(succeededTask),
     markTaskFailed: vi.fn().mockResolvedValue(makeRawTask({ status: 'pending' })),
@@ -114,6 +114,7 @@ function createMockStateManager(opts: {
       runs: [{ runId: RUN_ID, taskId: TASK_ID }],
       degradedRuns: [],
     }),
+    withWriteTransaction: vi.fn().mockImplementation(async (fn: () => Promise<unknown>) => fn()),
     createTask: vi.fn().mockResolvedValue({
       taskId: `philosopher-${TASK_ID}-prompt`,
       taskKind: 'philosopher',
