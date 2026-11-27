@@ -125,46 +125,117 @@ Single row — that is the point. There is no second consumer to tabulate.
 
 ## 5. Code statistics
 
-- Net diff: ~1894 insertions / ~12144 deletions across 85+ files
-  (uncommitted-at-writing; final numbers in PR body)
+- Consolidation commit `a2a814282`: 100 files changed, 2728 insertions,
+  11917 deletions (net −9189 lines)
+- Guard-integration repair `736e5d0c9`: 10 files, 42 insertions, 260 deletions
 
 ## 6. Verification evidence
 
-- Full monorepo build: zero TypeScript errors
-- install-layout tests: 190/190 PASS
-- pd-companion tests: 22 files PASS (+1 skipped)
-- pd-cli service-host suite: 458 passed / 2 failed — both classified
-  environmental: (a) `progress-evidence` EACCES chmod test — /mnt/d does not
-  enforce POSIX permission bits, file UNMODIFIED by this change; (b)
-  `managed-real-cli` concurrency timing — passes in isolation, fails only
-  under multi-suite IO contention (WSL slow-mount class documented in PR-2)
-- openclaw-plugin: full-run failures reproduce as TIMEOUTS under IO
-  contention; `prompt-golden` verified 7/7 in isolation; failing areas
-  (prompt content/feature flags/path resolver) are outside the change surface
-- create-principles-disciple: (pending at writing)
-- host-runtime / codex-adapter / workbuddy-adapter: (pending at writing)
+Build/compile:
+- Full monorepo `npm run build`: zero TypeScript errors, all dist artifacts
+- pd-cli `tsc --noEmit`: clean (after dead shadow-schema excision)
+- create-principles-disciple `typecheck:tests`: clean
+- principles-core / host-runtime tsc: clean
+
+Test evidence (local, WSL /mnt/d — timeout-flaky environment; CI Linux is
+the authoritative full gate):
+- install-layout: **190/190 PASS** (transition-machine rewrite for the
+  single-kind provision_fresh_install machine, incl. from-any-state CAS)
+- pd-companion: **22 test files PASS** incl. the negative guard
+  `no-worker-supervision.test.ts` (AST scan + forbidden-pattern proof +
+  non-vacuousness control)
+- pd-cli service-host suite: **458 passed / 2 failed** — both classified
+  environmental with evidence: (a) `progress-evidence` EACCES chmod test —
+  /mnt/d does not enforce POSIX permission bits and the file is UNMODIFIED
+  by this change; (b) `managed-real-cli` concurrency timing — **passes in
+  isolation**, fails only under multi-suite IO contention
+- create-principles-disciple provisioning + CAS coexistence: **16/17 then
+  14/14 PASS** after rewrite of the stale P0-guard resume tests into the
+  one-time legacy-worker-scan contract (`legacy_worker_still_running`
+  fail-closed, scan-unverifiable fail-closed, clean-scan proceeds,
+  idempotent repetition, no ownership write while blocked — manifest bytes
+  compared before/after)
+- principles-core architecture-regression: **320/320 PASS** (incl. plugin
+  core anti-growth baseline with the classified openclaw-tool-declaration)
+- principles-core feature-flag-lifecycle: **18/18 PASS** (census consumers
+  retargeted at live paths)
+- host-runtime wiring guards: **18/18 PASS** (thin-shell assertions
+  repointed at the openclaw worker; production wiring itself already correct:
+  `hostKinds` labels present in all three host shells)
+- openclaw-plugin: full-run failure clusters reproduce as TIMEOUTS under
+  IO contention (e.g. `prompt-golden` **7/7 in isolation**); failing areas
+  (prompt content/feature flags/path resolver) are outside the change
+  surface; CI `Test OpenClaw Plugin` **PASSED** on the consolidation commit
+- codex-adapter / workbuddy-adapter local runs: failure clusters are
+  real-subprocess timing tests (15–30s per case on /mnt/d, 82 timeout
+  markers) in areas outside the change surface (plugin bundle install,
+  hook adaptive timing)
+
+Error Context routing (diff mode, recorded per §0):
+EP-03 HIGH 98 / EP-02 HIGH 90 / EP-04 HIGH 66 / EP-09 HIGH 66 / EP-12 HIGH 49
+/ EP-14 HIGH 42 / EP-06 HIGH 32 + EP-01/05/07/08 HIGH minors, EP-10/11 MEDIUM.
+Reconciliation: cross-package contract breakage was found by CI (not by
+assumption) and repaired with executable green evidence — surface registry
+entries removed with the deleted implementation, census consumer paths
+retargeted to live files, plugin-core baseline reclassified, wiring guards
+repointed, changeset release intent corrected (private package removed,
+@principles/core declared). Real-entry evidence: managed-real-cli real-CLI
+tests, real transition-CAS tests, Companion negative AST guard.
 
 ## 7. End-to-end acceptance
 
-(to be filled — real-run verification or honest CI-deferral statement)
+Authoritative E2E evidence deferred to CI with honest scoping:
+- `Test packaged install smoke` (CI) performs a real packaged install —
+  the consolidation's install-path validation gate
+- Local real-run E2E (fresh install + scheduler + real task) was not
+  executable in the WSL dev environment within this session; this is a
+  real residual risk, not a hidden one — see §9
 
 ## 8. Evidence that old consumers cannot restart
 
-- Companion contains no worker-spawn code path (negative guard test)
-- No continuous mode exists in any worker CLI (`mode_required` error)
-- Manual worker invocation of non-service_host_owned workspaces refuses
-- OpenClaw plugin contains no in-process consumer registration
-- Autostart entries: (installer upgrade-path scan — evidence in provisioning tests)
+- Companion main process contains no worker command/supervision/drain/
+  liveness machinery — proven by the AST-scanning negative guard which
+  fails loudly on reintroduction (and proves non-vacuousness: the Console
+  spawn path still exists exactly once)
+- `workspace-workers.ts` physically deleted; no production module
+  references `PD_COMPANION_WORKER_IPC` / `pd.worker.drain` /
+  `workspace_worker_` (guard-enforced)
+- No continuous mode exists in any worker CLI: `pd codex worker` /
+  `pd workbuddy worker` without `--once`/`--status` exits `mode_required`
+- Manual worker invocation of a non-service_host_owned workspace refuses
+  with operator guidance (`codex_workspace_not_service_host_owned:<state>`)
+- OpenClaw plugin contains no in-process consumer: the service, its lease
+  and quiesce-ack files are physically deleted; registry entries removed;
+  the plugin-core baseline guard pins the new file inventory
+- Upgrade path: the installer runs a one-time legacy continuous-worker
+  process scan (matches `<host> worker --workspace <dir>` WITHOUT `--once`
+  — a shape only the retired Companion runtime produced); scan-positive or
+  scan-unverifiable keeps ownership transfer pending fail-closed with
+  operator next-action, verified by rewritten provisioning tests
 
 ## 9. Known limitations / follow-ups
 
 - `shadow-progress-store` filename/schema (`pd.shadow-progress.v1`) retains
-  the historical "shadow" name though it is now simply the cross-run progress
-  projection; renaming the persisted file is cosmetic and deferred
-- WSL /mnt/d environmental test noise; CI Linux is the authoritative full gate
-- PR #2811 (driver-matrix consumer gate) is superseded by this consolidation —
-  its per-cycle mutex discipline survives inside the bounded `--once` design
+  the historical "shadow" name though it is now simply the cross-run
+  progress projection; renaming the persisted file is cosmetic and deferred
+- Local real-install E2E not executed in this session (WSL environment);
+  CI packaged-install smoke + the bounded real-CLI tests are the current
+  executable evidence. A follow-up real-environment validation pass on the
+  Owner's machine is recommended before declaring the migration operationally
+  closed
+- PR #2811 (driver-matrix consumer gate) is superseded by this
+  consolidation — its per-cycle mutex discipline survives inside the
+  bounded `--once` design; recommend closing it when this PR merges
+- WSL /mnt/d environmental test noise; CI Linux is the authoritative gate
 
 ## 10. Final answer
 
-(to be completed after E2E)
+**PD is architecturally Service-Host-only as of this PR:**
+every background execution entry is Service-Host-managed run-once dispatch;
+Companion physically cannot spawn/supervise/schedule workers (guard-proven);
+the OpenClaw in-process consumer is deleted, not disabled; continuous modes
+no longer exist; provisioning converges to service_host_owned only, with no
+Companion fallback anywhere. Residual honesty: the local real-install E2E
+pass (§7/§9) remains the one piece of evidence this session could not
+produce — the codebase-level migration is complete, the operational
+acceptance on a real machine is pending.
