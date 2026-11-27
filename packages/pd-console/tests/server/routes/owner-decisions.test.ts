@@ -27,6 +27,8 @@ import type { OwnerDecisionRouteContext } from '../../../src/server/routes/owner
 import { ActivationsConsoleModel } from '../../../src/server/models/ActivationsConsoleModel.js';
 
 const EVAL_ID = 'evaluator-001';
+const DREAMER_ID = 'dreamer-candidate-console';
+const CORRELATION_ID = 'candidate-console';
 const ROLLOUT_ID = 'rollout-reviewer-001';
 const ARTIFER_ID = 'artificer-repair-evaluator-001-r2';
 const SCRIBE_ID = 'scribe-001';
@@ -38,6 +40,8 @@ const SCRIBE_ARTIFACT_ID = `pi-art-${SCRIBE_ID}-run-1`;
 function evaluatorMeta(extra: Record<string, unknown> = {}): string {
   return createPITaskDiagnosticJson({
     dependencyTaskIds: [ARTIFER_ID],
+    parentTaskId: DREAMER_ID,
+    correlationId: CORRELATION_ID,
     channel: 'prompt',
     timeoutMs: 300_000,
     inputArtifactRefs: [],
@@ -59,17 +63,22 @@ function setupDb(): SqliteConnection {
     `INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  const dreamerDiagnostic = JSON.parse(createPITaskDiagnosticJson({ dependencyTaskIds: [], correlationId: CORRELATION_ID, channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] } as never)) as Record<string, unknown>;
+  dreamerDiagnostic.candidateId = CORRELATION_ID;
+  insert.run(DREAMER_ID, 'dreamer', 'succeeded', now, now, 0, 3, JSON.stringify(dreamerDiagnostic));
   // legacy evaluator NHR: 无 humanReviewContext — 由 facts 推断 (矩阵 W)
   insert.run(EVAL_ID, 'evaluator', 'needs_human_review', now, now, 2, 3, evaluatorMeta());
   insert.run(ARTIFER_ID, 'artificer', 'succeeded', now, now, 1, 3, createPITaskDiagnosticJson({
     dependencyTaskIds: [SCRIBE_ID],
+    parentTaskId: EVAL_ID,
+    correlationId: CORRELATION_ID,
     channel: 'prompt',
     timeoutMs: 300_000,
     inputArtifactRefs: [],
     outputArtifactRefs: [],
     repairPayload: {
       requiredChanges: ['fix'], concerns: [], previousScore: 0.7, repairIteration: 2,
-      sourceArtificerArtifactId: 'pi-art-old', sourceEvaluatorTaskId: EVAL_ID,
+      sourceArtificerArtifactId: 'pi-art-old', sourceEvaluatorTaskId: EVAL_ID, sourceEvaluatorRunId: RUN_ID,
     },
   } as never));
   insert.run(SCRIBE_ID, 'scribe', 'succeeded', now, now, 0, 3, createPITaskDiagnosticJson({

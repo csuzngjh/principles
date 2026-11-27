@@ -1154,14 +1154,25 @@ describe('handleFailedTasksRoute', () => {
       // decision-capable: evaluator + dep artificer repairPayload.repairIteration=2
       // + needs_revision + intent + 决策 artifact (legacy 推断路径)
       await seedTask({
-        taskId: 'artificer-r2',
+        taskId: 'dreamer-recover-route',
+        taskKind: 'dreamer',
+        status: 'succeeded',
+        diagnosticJson: (() => {
+          const diagnostic = JSON.parse(createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'recover-route-test' })) as Record<string, unknown>;
+          diagnostic.candidateId = 'recover-route-test';
+          return JSON.stringify(diagnostic);
+        })(),
+      });
+      await seedTask({
+        taskId: 'artificer-repair-decision-task-1-r2',
         taskKind: 'artificer',
         status: 'succeeded',
         meta: {
           dependencyTaskIds: [],
+          parentTaskId: 'decision-task-1',
           repairPayload: {
             requiredChanges: ['fix'], concerns: [], previousScore: 0.7, repairIteration: 2,
-            sourceArtificerArtifactId: 'pi-art-old', sourceEvaluatorTaskId: 'decision-task-1',
+            sourceArtificerArtifactId: 'pi-art-old', sourceEvaluatorTaskId: 'decision-task-1', sourceEvaluatorRunId: 'run-d1',
           },
         },
       });
@@ -1170,7 +1181,8 @@ describe('handleFailedTasksRoute', () => {
         taskKind: 'evaluator',
         status: 'needs_human_review',
         meta: {
-          dependencyTaskIds: ['artificer-r2'],
+          dependencyTaskIds: ['artificer-repair-decision-task-1-r2'],
+          parentTaskId: 'dreamer-recover-route',
           runnerDecision: 'needs_revision',
           completionIntent: { decision: 'needs_revision', sourceRunId: 'run-d1', revisionEpoch: 0, status: 'pending' },
         },
