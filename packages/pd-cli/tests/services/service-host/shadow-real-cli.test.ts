@@ -282,7 +282,14 @@ describe.skipIf(!hasDist)('real CLI cycles through the shadow adapters', () => {
     // both) ──
     const [first, second] = await Promise.all([runOne('conc-a'), runOne('conc-b')]);
     for (const outcome of [first.cycleOutcome, second.cycleOutcome]) {
-      expect(['cycle_completed', 'cycle_completed_without_business_progress', 'degraded']).toContain(outcome);
+      // PRI-1278 Phase 5: the per-workspace worker run mutex now serializes
+      // the two racing cycles at the worker boundary — the loser never
+      // consumes at all and reports paused (<host>_worker_run_in_progress)
+      // instead of racing inside the lease-claim window. That is a strictly
+      // stronger exclusion than the pre-mutex outcome distribution; the
+      // safety invariant asserted below (exactly one further claim, no task
+      // ever attempted twice) is unchanged either way.
+      expect(['cycle_completed', 'cycle_completed_without_business_progress', 'degraded', 'paused']).toContain(outcome);
     }
     // THE lease invariant: across BOTH racing consumers exactly ONE further
     // claim happened (total attempts 1 → 2), and NO task was ever attempted
