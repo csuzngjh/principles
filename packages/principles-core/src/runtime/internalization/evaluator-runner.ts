@@ -47,6 +47,7 @@ import { assessArtificerCodeBearing } from './artificer-code-bearing.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, artificerRepairTaskId, parseLastValidatorErrors, isFreshForNextAttempt, type RepairPayload, type PITaskMetadata, type RunnerDecision, type RunnerCompletionIntent, type HumanReviewContext, type LastValidatorErrors } from './pitask-metadata.js';
+import { resolveEvaluatorArtificerDependencyIdentity, verifyRepairTaskIdentity } from './repair-task-identity.js';
 import {
   HUMAN_REVIEW_REASON,
   planOwnerVerdictOverrideResume,
@@ -580,6 +581,18 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       throw new PDRuntimeError('input_invalid', 'Artificer dependency artifact ID not resolved');
     }
 
+    const dependencyIdentity = await resolveEvaluatorArtificerDependencyIdentity({
+      evaluatorTask: task,
+      store: this.stateManager,
+    });
+    if (dependencyIdentity.kind === 'invalid') {
+      this.emitEvent('repair_dependency_identity_refused', taskId, {
+        reason: dependencyIdentity.reason,
+        detail: dependencyIdentity.detail,
+      });
+      throw new PDRuntimeError('input_invalid', `artificer dependency identity invalid: ${dependencyIdentity.reason}`);
+    }
+
     for (const depId of deps) {
       const depTask = await this.stateManager.getTask(depId);
       if (!depTask) continue;
@@ -945,6 +958,13 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const piTask = hydratePITaskRecord(task);
     if (!piTask) {
       throw new PDRuntimeError('input_invalid', `evaluator task ${task.taskId} metadata is malformed`);
+    }
+    const dependencyIdentity = await resolveEvaluatorArtificerDependencyIdentity({
+      evaluatorTask: task,
+      store: this.stateManager,
+    });
+    if (dependencyIdentity.kind === 'invalid') {
+      throw new PDRuntimeError('input_invalid', `artificer dependency identity invalid: ${dependencyIdentity.reason}`);
     }
     let selected: {
       artifactId: string;
@@ -1977,49 +1997,21 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   > {
     const task = await this.stateManager.getTask(taskId);
     if (!task) return { kind: 'none' };
-    const piTask = hydratePITaskRecord(task);
-    const deps = piTask?.dependencyTaskIds ?? [];
-
-    let artificerDependencyCount = 0;
-    let malformedArtificerMetadata = false;
-    let repairRoleMismatch = false;
-    let missingRepairPayload = false;
-    let resolved: { readonly task: TaskRecord; readonly piTask: PITaskRecord } | undefined;
-    for (const depId of deps) {
-      const depTask = await this.stateManager.getTask(depId);
-      if (!depTask || depTask.taskKind !== 'artificer') continue;
-      artificerDependencyCount += 1;
-      const piDepTask = hydratePITaskRecord(depTask);
-      if (!piDepTask) {
-        malformedArtificerMetadata = true;
-        continue;
-      }
-      if (piDepTask.repairTaskRole !== undefined && piDepTask.repairTaskRole !== 'repair_artificer') {
-        repairRoleMismatch = true;
-        continue;
-      }
-      if (piDepTask.repairTaskRole === 'repair_artificer' && !piDepTask.repairPayload) {
-        missingRepairPayload = true;
-        continue;
-      }
-      resolved = { task: depTask, piTask: piDepTask };
+    const resolution = await resolveEvaluatorArtificerDependencyIdentity({
+      evaluatorTask: task,
+      store: this.stateManager,
+    });
+    if (resolution.kind === 'invalid') {
+      return { kind: 'invalid', reason: resolution.reason };
     }
-    if (malformedArtificerMetadata) {
-      return { kind: 'invalid', reason: 'evaluator_artificer_dependency_metadata_malformed' };
-    }
-    if (missingRepairPayload) {
-      return { kind: 'invalid', reason: 'repair_role_payload_missing' };
-    }
-    if (repairRoleMismatch) {
-      return { kind: 'invalid', reason: 'repair_role_mismatch' };
-    }
-    if (artificerDependencyCount > 1) {
-      return { kind: 'invalid', reason: 'evaluator_ambiguous_artificer_dependencies' };
-    }
-    return resolved === undefined ? { kind: 'none' } : { kind: 'resolved', ...resolved };
+    if (resolution.kind === 'none') return { kind: 'none' };
+    return { kind: 'resolved', task: resolution.task, piTask: resolution.piTask };
   }
 
-  private async resolvePriorRepairIteration(taskId: string, piArtificerTask?: PITaskRecord): Promise<number> {
+  private async resolvePriorRepairIteration(taskId: string, piArtificerTask?: PITaskRecord): Promise<
+    | { readonly kind: 'ok'; readonly iteration: number }
+    | { readonly kind: 'invalid'; readonly reason: string }
+  > {
     const repairPayload = piArtificerTask?.repairPayload;
     const depPrior = repairPayload && typeof repairPayload.repairIteration === 'number'
       ? repairPayload.repairIteration
@@ -2027,9 +2019,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     let durableMax = 0;
     for (let iteration = 1; iteration <= 5; iteration++) {
       const existing = await this.stateManager.getTask(artificerRepairTaskId(taskId, iteration));
-      if (existing) durableMax = iteration;
+      if (!existing) continue;
+      const identity = await verifyRepairTaskIdentity(existing, taskId, iteration, this.stateManager);
+      if (!identity.ok) {
+        return { kind: 'invalid', reason: identity.reason };
+      }
+      durableMax = iteration;
     }
-    return Math.max(depPrior, durableMax);
+    return { kind: 'ok', iteration: Math.max(depPrior, durableMax) };
   }
 
   /**
@@ -2736,7 +2733,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return { kind: 'max_iterations_reached', detail: 'seed_failed' };
     }
     const inheritedArtificerPi = artificerDependency.kind === 'resolved' ? artificerDependency.piTask : undefined;
-    const priorRepairIteration = await this.resolvePriorRepairIteration(evaluatorTaskId, inheritedArtificerPi);
+    const priorRepairResolution = await this.resolvePriorRepairIteration(evaluatorTaskId, inheritedArtificerPi);
+    if (priorRepairResolution.kind === 'invalid') {
+      this.emitEvent('repair_loop_seeding_refused', evaluatorTaskId, {
+        runId: evaluatorRunId,
+        reason: priorRepairResolution.reason,
+        nextAction: 'inspect_deterministic_repair_task_identity',
+      });
+      return { kind: 'max_iterations_reached', detail: 'seed_failed' };
+    }
+    const priorRepairIteration = priorRepairResolution.iteration;
     const inheritedDeps = inheritedArtificerPi ? [...inheritedArtificerPi.dependencyTaskIds] : [];
     const inheritedChannel: InternalizationChannel = inheritedArtificerPi?.channel ?? 'prompt';
     const inheritedPipelineMode = inheritedArtificerPi?.pipelineMode;

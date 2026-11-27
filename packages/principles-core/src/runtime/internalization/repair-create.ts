@@ -51,19 +51,46 @@ export type RepairCreationResult =
       readonly task: TaskRecord;
       readonly backfilled: boolean;
     }
-  | { readonly outcome: 'conflict'; readonly reason: string; readonly detail: string; readonly task?: TaskRecord }
-  | { readonly outcome: 'fail_closed'; readonly reason: string; readonly detail: string; readonly task?: TaskRecord };
+  | { readonly outcome: 'conflict'; readonly reason: string; readonly detail: string; readonly task?: TaskRecord; readonly failureStage?: 'creation' | 'adoption' }
+  | { readonly outcome: 'fail_closed'; readonly reason: string; readonly detail: string; readonly task?: TaskRecord; readonly failureStage?: 'creation' | 'adoption' };
 
-function fail(reason: string, detail: string, task?: TaskRecord): RepairCreationResult {
-  return task === undefined
-    ? { outcome: 'fail_closed', reason, detail }
-    : { outcome: 'fail_closed', reason, detail, task };
+export type RepairCreationFailureResult = Exclude<
+  RepairCreationResult,
+  { readonly outcome: 'created' } | { readonly outcome: 'adopted_existing' }
+>;
+
+/**
+ * Backward-compatible host error text for a failed creation/adoption outcome.
+ * host-runtime and pd-cli intentionally preserve their legacy throw-based
+ * seeder contract; keeping this pure mapping beside the authority prevents
+ * drift while leaving recovery classification unchanged.
+ */
+export function repairSeedErrorMessage(result: RepairCreationFailureResult): string {
+  if (result.reason === 'concurrent_modification') {
+    return `evaluator_repair_seed_concurrent_modification: repair task ${result.task?.taskId ?? 'unknown'} changed during lineage backfill — seed NOT applied, safe to retry`;
+  }
+  if (result.reason === 'terminal_repair_task') return result.detail;
+  if (result.failureStage !== 'adoption' && result.reason === 'repair_source_evaluator_missing') {
+    return `evaluator_repair_seed_lineage_refused: ${result.detail}`;
+  }
+  if (result.failureStage !== 'adoption' && result.reason === 'repair_source_lineage_unprovable') {
+    return `evaluator_repair_seed_lineage_refused:${result.detail}`;
+  }
+  return `evaluator_repair_seed_lineage_refused:${result.reason}:${result.detail}`;
 }
 
-function conflict(reason: string, detail: string, task?: TaskRecord): RepairCreationResult {
+// eslint-disable-next-line @typescript-eslint/max-params -- optional provenance discriminator keeps legacy error mapping local without widening the request object.
+function fail(reason: string, detail: string, task?: TaskRecord, failureStage?: 'creation' | 'adoption'): RepairCreationResult {
   return task === undefined
-    ? { outcome: 'conflict', reason, detail }
-    : { outcome: 'conflict', reason, detail, task };
+    ? { outcome: 'fail_closed', reason, detail, ...(failureStage !== undefined ? { failureStage } : {}) }
+    : { outcome: 'fail_closed', reason, detail, task, ...(failureStage !== undefined ? { failureStage } : {}) };
+}
+
+// eslint-disable-next-line @typescript-eslint/max-params -- optional provenance discriminator keeps legacy error mapping local without widening the request object.
+function conflict(reason: string, detail: string, task?: TaskRecord, failureStage?: 'creation' | 'adoption'): RepairCreationResult {
+  return task === undefined
+    ? { outcome: 'conflict', reason, detail, ...(failureStage !== undefined ? { failureStage } : {}) }
+    : { outcome: 'conflict', reason, detail, task, ...(failureStage !== undefined ? { failureStage } : {}) };
 }
 
 function isTerminalRepairTask(task: TaskRecord): boolean {
@@ -99,6 +126,7 @@ async function adoptExistingRepairTask(input: {
       'terminal_repair_task',
       `repair task ${repairTaskId} already reached terminal status ${existing.status}; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)`,
       existing,
+      'adoption',
     );
   }
 
@@ -109,26 +137,27 @@ async function adoptExistingRepairTask(input: {
     store,
   );
   if (!identity.ok) {
-    return fail(identity.reason, identity.detail, existing);
+    return fail(identity.reason, identity.detail, existing, 'adoption');
   }
 
   const pi = hydratePITaskRecord(existing);
   if (!pi) {
-    return fail('repair_identity_unreadable_metadata', `task=${repairTaskId}`, existing);
+    return fail('repair_identity_unreadable_metadata', `task=${repairTaskId}`, existing, 'adoption');
   }
   if (pi.channel !== params.inheritedChannel) {
     return fail(
       'repair_channel_mismatch',
       `task=${repairTaskId};channel=${pi.channel};requested_channel=${params.inheritedChannel}`,
       existing,
+      'adoption',
     );
   }
   const payloadMatch = samePayload(pi.repairPayload, params.repairPayload);
   if (payloadMatch === 'unbounded') {
-    return fail('repair_payload_unbounded', `task=${repairTaskId};payload exceeds canonical comparison budget`, existing);
+    return fail('repair_payload_unbounded', `task=${repairTaskId};payload exceeds canonical comparison budget`, existing, 'adoption');
   }
   if (!payloadMatch) {
-    return conflict('repair_payload_mismatch', `task=${repairTaskId};persisted repair payload differs from requested payload`, existing);
+    return conflict('repair_payload_mismatch', `task=${repairTaskId};persisted repair payload differs from requested payload`, existing, 'adoption');
   }
 
   if (!identity.needsLineageBackfill) {
@@ -145,14 +174,14 @@ async function adoptExistingRepairTask(input: {
   );
   if (!lineage.ok) {
     if (lineage.reason === 'concurrent_modification') {
-      return conflict('concurrent_modification', lineage.detail, existing);
+      return conflict('concurrent_modification', lineage.detail, existing, 'adoption');
     }
-    return fail(lineage.reason, lineage.detail, existing);
+    return fail(lineage.reason, lineage.detail, existing, 'adoption');
   }
 
   const adopted = lineage.backfilled ? await store.getTask(repairTaskId) : existing;
   if (adopted === null) {
-    return fail('repair_task_disappeared_after_backfill', `task=${repairTaskId}`);
+    return fail('repair_task_disappeared_after_backfill', `task=${repairTaskId}`, undefined, 'adoption');
   }
   return {
     outcome: 'adopted_existing',

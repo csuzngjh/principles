@@ -8,8 +8,10 @@ import {
 } from '../owner-decision-review.js';
 
 const EVALUATOR_ID = 'evaluator-review-1';
-const ARTIFICER_TASK_ID = 'artificer-review-1';
+const ARTIFICER_TASK_ID = 'artificer-repair-evaluator-review-1-r2';
 const SCRIBE_TASK_ID = 'scribe-review-1';
+const DREAMER_ROOT_ID = 'dreamer-owner-review-root';
+const OWNER_REVIEW_CORRELATION_ID = '33333333-3333-4333-8333-333333333333';
 const EVALUATOR_ARTIFACT_ID = 'pi-art-evaluator-review-1-run-1';
 const ARTIFICER_ARTIFACT_ID = 'pi-art-artificer-review-1-run-1';
 const SCRIBE_ARTIFACT_ID = 'pi-art-scribe-review-1-run-1';
@@ -26,6 +28,7 @@ function metadata(taskKind: 'evaluator' | 'artificer' | 'scribe'): PITaskMetadat
     outputArtifactRefs: [],
     ...(taskKind === 'evaluator'
       ? {
+          parentTaskId: DREAMER_ROOT_ID,
           runnerDecision: 'needs_revision' as const,
           revisionCount: 0,
           completionIntent: {
@@ -40,6 +43,20 @@ function metadata(taskKind: 'evaluator' | 'artificer' | 'scribe'): PITaskMetadat
             sourceArtifactId: EVALUATOR_ARTIFACT_ID,
             revisionEpoch: 0,
             createdAt: '2026-08-31T00:00:00.000Z',
+          },
+        }
+      : {}),
+    ...(taskKind === 'artificer'
+      ? {
+          parentTaskId: EVALUATOR_ID,
+          repairTaskRole: 'repair_artificer' as const,
+          repairPayload: {
+            requiredChanges: ['Clarify the confirmation copy.'],
+            concerns: ['The confirmation copy is ambiguous.'],
+            previousScore: 0.72,
+            repairIteration: 2,
+            sourceArtificerArtifactId: 'pi-art-artificer-review-old-run-1',
+            sourceEvaluatorTaskId: EVALUATOR_ID,
           },
         }
       : {}),
@@ -73,6 +90,29 @@ function artifact(input: {
     validationStatus: 'pending',
     contentJson: JSON.stringify(input.content),
     createdAt: '2026-08-31T00:00:00.000Z',
+  };
+}
+
+function ownerReviewDreamerRoot(): TaskRecord {
+  return {
+    taskId: DREAMER_ROOT_ID,
+    taskKind: 'dreamer',
+    status: 'succeeded',
+    attemptCount: 1,
+    maxAttempts: 3,
+    createdAt: '2026-08-31T00:00:00.000Z',
+    updatedAt: '2026-08-31T00:05:00.000Z',
+    diagnosticJson: JSON.stringify({
+      pi_metadata: {
+        dependencyTaskIds: [],
+        channel: 'code_tool_hook',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        correlationId: OWNER_REVIEW_CORRELATION_ID,
+      },
+      candidateId: OWNER_REVIEW_CORRELATION_ID,
+    }),
   };
 }
 
@@ -165,6 +205,7 @@ function makeStore(options: {
     }}),
   ].filter((record) => options.includeScribe !== false || record.artifactId !== SCRIBE_ARTIFACT_ID);
   const tasks: TaskRecord[] = [
+    ownerReviewDreamerRoot(),
     task(EVALUATOR_ID, 'evaluator'),
     ...(options.includeOlderRepair ? [
       task('artificer-review-old', 'artificer'),
@@ -177,6 +218,7 @@ function makeStore(options: {
   const recordsAll = [...records, ...(options.extraArtifacts ?? [])];
   return {
     getTask: async (id) => tasks.find((entry) => entry.taskId === id) ?? null,
+    listTasks: async () => [...tasks],
     listArtifactsBySourceTask: async (id) => recordsAll.filter((entry) => entry.sourceTaskId === id),
     getArtifactById: async (id) => recordsAll.find((entry) => entry.artifactId === id) ?? null,
   };

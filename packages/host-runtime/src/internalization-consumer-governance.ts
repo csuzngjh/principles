@@ -26,6 +26,7 @@ import {
   PrincipleTreeLedgerAdapter,
   createProductionGateDeps,
   createRepairTask,
+  repairSeedErrorMessage,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
   type PIArtifactSnapshot,
@@ -205,21 +206,7 @@ export function createEvaluatorRepairDeps(
         logger?.info?.(`[PD:Consumer] repair task ${result.task.taskId} already exists (in-flight ${result.task.status}); reusing (idempotent seed)`);
         return result.task.taskId;
       }
-      if (result.reason === 'concurrent_modification') {
-        throw new Error(
-          `evaluator_repair_seed_concurrent_modification: repair task ${result.task?.taskId ?? params.repairPayload.sourceEvaluatorTaskId} changed during lineage backfill — seed NOT applied, safe to retry`,
-        );
-      }
-      if (result.reason === 'terminal_repair_task') {
-        throw new Error(result.detail);
-      }
-      if (result.reason === 'repair_source_evaluator_missing') {
-        throw new Error(`evaluator_repair_seed_lineage_refused: ${result.detail}`);
-      }
-      if (result.reason === 'repair_source_lineage_unprovable') {
-        throw new Error(`evaluator_repair_seed_lineage_refused:${result.detail}`);
-      }
-      throw new Error(`evaluator_repair_seed_lineage_refused:${result.reason}:${result.detail}`);
+      throw new Error(repairSeedErrorMessage(result));
     },
   };
 }

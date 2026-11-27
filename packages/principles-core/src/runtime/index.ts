@@ -1612,7 +1612,7 @@ export { verifyRepairTaskIdentity } from './internalization/repair-task-identity
 export { validateAndBackfillRepairLineage } from './internalization/repair-lineage-backfill.js';
 // PRI-1299 Phase 1: repair creation 的唯一权威 — identity lookup、payload/channel
 // adjudication、lineage proof、atomic insert 与 UNIQUE race re-arbitration。
-export { createRepairTask } from './internalization/repair-create.js';
+export { createRepairTask, repairSeedErrorMessage } from './internalization/repair-create.js';
 export { planLegacyLineageResolution } from './internalization/correlation-lineage.js';
 export type { LegacyLineagePlan } from './internalization/correlation-lineage.js';
 export type { RepairIdentityVerification } from './internalization/repair-task-identity.js';

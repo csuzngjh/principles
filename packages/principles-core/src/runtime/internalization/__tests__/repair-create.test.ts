@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import type { TaskRecord } from '../../task-status.js';
-import { createRepairTask } from '../repair-create.js';
+import { createRepairTask, repairSeedErrorMessage } from '../repair-create.js';
 import { artificerRepairTaskId, hydratePITaskRecord, PI_METADATA_KEY, type RepairPayload } from '../pitask-metadata.js';
 import type { InternalizationChannel, PipelineTopologyMode } from '../peer-runner-contracts.js';
 
@@ -395,5 +395,42 @@ describe('createRepairTask — legacy repair rows and persistence', () => {
     } finally {
       await reopened.close();
     }
+  });
+});
+
+describe('repairSeedErrorMessage — host/pd-cli backward-compatible error mapping parity', () => {
+  const failure = (reason: string, detail: string, taskId = 'artificer-repair-evaluator-x-r1') => ({
+    outcome: 'fail_closed' as const,
+    reason,
+    detail,
+    task: { taskId } as TaskRecord,
+  });
+
+  it('maps the seven review-required outcome classes to stable legacy error text', () => {
+    expect(repairSeedErrorMessage(failure('repair_source_evaluator_missing', 'source evaluator task evaluator-x not found')))
+      .toBe('evaluator_repair_seed_lineage_refused: source evaluator task evaluator-x not found');
+    expect(repairSeedErrorMessage(failure('missing_correlation_id_lineage', 'unrecoverable_chain_root_not_dreamer:evaluator:evaluator-x')))
+      .toBe('evaluator_repair_seed_lineage_refused:missing_correlation_id_lineage:unrecoverable_chain_root_not_dreamer:evaluator:evaluator-x');
+    expect(repairSeedErrorMessage({ outcome: 'conflict', reason: 'concurrent_modification', detail: 'changed', task: { taskId: 'artificer-repair-evaluator-x-r1' } as TaskRecord }))
+      .toBe('evaluator_repair_seed_concurrent_modification: repair task artificer-repair-evaluator-x-r1 changed during lineage backfill — seed NOT applied, safe to retry');
+    expect(repairSeedErrorMessage({ outcome: 'conflict', reason: 'terminal_repair_task', detail: 'repair task artificer-repair-evaluator-x-r1 already reached terminal status succeeded; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)', task: { taskId: 'artificer-repair-evaluator-x-r1' } as TaskRecord }))
+      .toBe('repair task artificer-repair-evaluator-x-r1 already reached terminal status succeeded; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)');
+    expect(repairSeedErrorMessage(failure('malformed_repair_payload', 'repairPayload failed structural validation')))
+      .toBe('evaluator_repair_seed_lineage_refused:malformed_repair_payload:repairPayload failed structural validation');
+    expect(repairSeedErrorMessage(failure('repair_correlation_conflicts_authoritative', 'task=artificer-repair-evaluator-x-r1;correlationId=cand-foreign;authoritative=cand-a')))
+      .toBe('evaluator_repair_seed_lineage_refused:repair_correlation_conflicts_authoritative:task=artificer-repair-evaluator-x-r1;correlationId=cand-foreign;authoritative=cand-a');
+    expect(repairSeedErrorMessage(failure('unique_violation_without_verified_repair', 'task=artificer-repair-evaluator-x-r1;insert collided but no repair row is visible')))
+      .toBe('evaluator_repair_seed_lineage_refused:unique_violation_without_verified_repair:task=artificer-repair-evaluator-x-r1;insert collided but no repair row is visible');
+  });
+
+  it('preserves the legacy structured reason shape for adoption/reuse failures', () => {
+    expect(repairSeedErrorMessage({
+      ...failure('repair_source_evaluator_missing', 'source=evaluator-x'),
+      failureStage: 'adoption' as const,
+    })).toBe('evaluator_repair_seed_lineage_refused:repair_source_evaluator_missing:source=evaluator-x');
+    expect(repairSeedErrorMessage({
+      ...failure('repair_source_lineage_unprovable', 'source=evaluator-x;missing_correlation_id_lineage:root_not_dreamer'),
+      failureStage: 'adoption' as const,
+    })).toBe('evaluator_repair_seed_lineage_refused:repair_source_lineage_unprovable:source=evaluator-x;missing_correlation_id_lineage:root_not_dreamer');
   });
 });

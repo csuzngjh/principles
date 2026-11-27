@@ -18,6 +18,7 @@
 
 import { createHash } from 'node:crypto';
 import type { TaskRecord } from '../task-status.js';
+import type { TaskStoreFilter } from '../store/task/task-store.js';
 import type { PITaskRecord } from './peer-runner-contracts.js';
 import {
   hydratePITaskRecord,
@@ -27,6 +28,7 @@ import {
   type OwnerResolutionRecord,
   type RunnerDecision,
 } from './pitask-metadata.js';
+import { resolveEvaluatorArtificerDependencyIdentity } from './repair-task-identity.js';
 
 // ── Reason codes ──────────────────────────────────────────────────────────────
 
@@ -100,6 +102,7 @@ export const LEGACY_ROLLOUT_BUDGET_EXHAUSTED = 'rollout_revision_budget_exhauste
 /** 事实读取所需的最窄接口 — RuntimeStateManager 天然满足前两项。 */
 export interface OwnerDecisionFactStore {
   getTask(taskId: string): Promise<TaskRecord | null>;
+  listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]>;
   listArtifactsBySourceTask(taskId: string): Promise<readonly DecisionArtifactRecord[]>;
 }
 
@@ -287,26 +290,20 @@ export async function collectOwnerDecisionFacts(
   let dependencyArtificerTaskId: string | null = null;
   let lineageResolvable = false;
   if (piTask.taskKind === 'evaluator') {
-    let artificerDependencyCount = 0;
-    let malformedArtificerMetadata = false;
-    let resolved: { readonly taskId: string; readonly repairIteration: number } | null = null;
-    for (const depId of piTask.dependencyTaskIds) {
-      const dep = await store.getTask(depId).catch(() => null);
-      if (!dep || dep.taskKind !== 'artificer') continue;
-      artificerDependencyCount += 1;
-      const depPi = hydratePITaskRecord(dep);
-      if (!depPi
-        || (depPi.repairTaskRole !== undefined && depPi.repairTaskRole !== 'repair_artificer')
-        || (depPi.repairTaskRole === 'repair_artificer' && !depPi.repairPayload)) {
-        malformedArtificerMetadata = true;
-        continue;
+    const dependencyResolution = await resolveEvaluatorArtificerDependencyIdentity({
+      evaluatorTask: raw,
+      store,
+    });
+    if (dependencyResolution.kind === 'ordinary' || dependencyResolution.kind === 'repair') {
+      const requiresRepairDependency = piTask.humanReviewContext?.reasonCode === HUMAN_REVIEW_REASON.evaluatorRepairBudgetExhausted;
+      const consistentWithDecisionEvidence = dependencyResolution.kind === 'repair' || !requiresRepairDependency;
+      if (consistentWithDecisionEvidence) {
+        dependencyRepairIteration = dependencyResolution.kind === 'repair'
+          ? dependencyResolution.payload.repairIteration
+          : 0;
+        dependencyArtificerTaskId = dependencyResolution.task.taskId;
+        lineageResolvable = true;
       }
-      resolved = { taskId: dep.taskId, repairIteration: depPi.repairPayload?.repairIteration ?? 0 };
-    }
-    if (artificerDependencyCount === 1 && !malformedArtificerMetadata && resolved) {
-      dependencyRepairIteration = resolved.repairIteration;
-      dependencyArtificerTaskId = resolved.taskId;
-      lineageResolvable = true;
     }
   } else {
     for (const depId of piTask.dependencyTaskIds) {

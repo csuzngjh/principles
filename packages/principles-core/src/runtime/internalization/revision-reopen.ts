@@ -13,7 +13,8 @@ import type { PITaskRecord } from './peer-runner-contracts.js';
 import { isPeerRunnerKind } from './peer-runner-contracts.js';
 // PRI-1293 Phase 3: reopen 与 commit 共享同一唯一血缘权威 (§5.3 — 只包
 // orchestrator wrapper 不合格; 此处是四条生产 reopen 路径的共同核心)。
-import { resolveAuthoritativeCorrelationIdWithLegacyBackfill } from './correlation-lineage.js';
+import { resolveAuthoritativeCorrelationIdWithLegacyBackfill, type CorrelationLineageTaskStore } from './correlation-lineage.js';
+import { resolveEvaluatorArtificerDependencyIdentity } from './repair-task-identity.js';
 import {
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
@@ -131,6 +132,10 @@ export function planRevisionReopenInitialState(
   return { plan: 'refused_in_flight', reason: `task_in_flight_${rawTask.status}`, rawTask, piTask };
 }
 
+export type ReopenTargetSnapshotValidation =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string; readonly detail?: string };
+
 export interface ReopenRevisionOptions {
   revisionFeedback?: string;
   replaceArtificerDependencyWith?: string;
@@ -141,6 +146,16 @@ export interface ReopenRevisionOptions {
    * 新修订轮。生产调用方必须传。
    */
   revisionCauseId?: string;
+  /**
+   * Write-critical validation executed against the exact post-lineage snapshot
+   * whose diagnosticJson/status/lease fields are then CASed. Use this for
+   * dependency-set invariants (for example stale repair-round adjudication);
+   * validating only at commit entry is time-of-check/time-of-use unsafe.
+   */
+  validateTargetSnapshot?: (snapshot: {
+    readonly rawTask: TaskRecord;
+    readonly piTask: PITaskRecord;
+  }) => Promise<ReopenTargetSnapshotValidation>;
 }
 
 /**
@@ -261,6 +276,17 @@ export async function reopenTaskForRevision(
     };
   }
 
+  if (options?.validateTargetSnapshot) {
+    const validation = await options.validateTargetSnapshot({ rawTask: rawTask2, piTask: piTask2 });
+    if (!validation.ok) {
+      return {
+        ok: false,
+        reason: validation.reason,
+        ...(validation.detail !== undefined ? { detail: validation.detail } : {}),
+      };
+    }
+  }
+
   // 可恢复历史任务: 校验通过后把根侧恢复的 id 安全补入本次 reopen 写
   // (§5.3.7) — 与第二次快照比较, 只有差异才需要补入 (回填只写 parentTaskId,
   // 链上 id 一致性在血缘门禁内已验证, 权威值在两次读取间稳定)。
@@ -356,11 +382,28 @@ export interface RolloutRevisionTarget {
  * code_tool_hook → artificer (规则实现); 其他 channel → scribe (走到底)。
  * 与 RolloutReviewerRunner 的路由规则保持同一实现 (单一来源)。
  */
+type RolloutRevisionTaskSource =
+  | ((taskId: string) => Promise<TaskRecord | null>)
+  | CorrelationLineageTaskStore;
+
+function normalizeRolloutRevisionTaskSource(source: RolloutRevisionTaskSource): CorrelationLineageTaskStore {
+  if (typeof source !== 'function') return source;
+  return {
+    getTask: source,
+    // Callback-only legacy callers cannot provide whole-store predecessor scans.
+    // Strict identity verification then relies on explicit parent/correlation
+    // evidence; it must fail closed rather than reintroduce first-match selection.
+    listTasks: async () => [],
+  };
+}
+
 export async function resolveRolloutRevisionTarget(
-  getTask: (taskId: string) => Promise<TaskRecord | null>,
+  taskSource: RolloutRevisionTaskSource,
   taskId: string,
   channel: string,
 ): Promise<RolloutRevisionTarget | null> {
+  const store = normalizeRolloutRevisionTaskSource(taskSource);
+  const getTask = store.getTask.bind(store);
   const rawTask = await getTask(taskId);
   if (!rawTask) return null;
   const piTask = hydratePITaskRecord(rawTask);
@@ -379,14 +422,18 @@ export async function resolveRolloutRevisionTarget(
       break;
     }
     if (dep.taskKind === 'evaluator') {
-      const evalPi = hydratePITaskRecord(dep);
-      for (const evalDepId of evalPi?.dependencyTaskIds ?? []) {
-        const evalDep = await getTask(evalDepId);
-        if (!evalDep || evalDep.taskKind !== 'artificer') continue;
-        const evalDepPi = hydratePITaskRecord(evalDep);
-        artificerTaskId = evalDep.taskId;
-        artificerDeps = evalDepPi?.dependencyTaskIds ?? [];
-        break;
+      const resolution = await resolveEvaluatorArtificerDependencyIdentity({
+        evaluatorTask: dep,
+        store,
+      });
+      if (resolution.kind === 'invalid') {
+        // Owner-authorized routing is fail-closed: ambiguous/corrupt repair
+        // evidence must not reopen the first artificer row it happens to see.
+        return null;
+      }
+      if (resolution.kind === 'ordinary' || resolution.kind === 'repair') {
+        artificerTaskId = resolution.task.taskId;
+        artificerDeps = resolution.piTask.dependencyTaskIds;
       }
       if (artificerTaskId) break;
     }

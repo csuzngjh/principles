@@ -44,6 +44,7 @@ import {
   createLogicalSuccessorTask,
   // PRI-1299 Phase 1: the ONE repair creation authority shared with host-runtime.
   createRepairTask,
+  repairSeedErrorMessage,
   parsePITaskMetadata,
   parseSeedSourcePainId,
   runAdversarialLoop,
@@ -1021,21 +1022,7 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
       if (result.outcome === 'created' || result.outcome === 'adopted_existing') {
         return result.task.taskId;
       }
-      if (result.reason === 'concurrent_modification') {
-        throw new Error(
-          `evaluator_repair_seed_concurrent_modification: repair task ${result.task?.taskId ?? params.repairPayload.sourceEvaluatorTaskId} changed during lineage backfill — seed NOT applied, safe to retry`,
-        );
-      }
-      if (result.reason === 'terminal_repair_task') {
-        throw new Error(result.detail);
-      }
-      if (result.reason === 'repair_source_evaluator_missing') {
-        throw new Error(`evaluator_repair_seed_lineage_refused: ${result.detail}`);
-      }
-      if (result.reason === 'repair_source_lineage_unprovable') {
-        throw new Error(`evaluator_repair_seed_lineage_refused:${result.detail}`);
-      }
-      throw new Error(`evaluator_repair_seed_lineage_refused:${result.reason}:${result.detail}`);
+      throw new Error(repairSeedErrorMessage(result));
     },
   };
 }

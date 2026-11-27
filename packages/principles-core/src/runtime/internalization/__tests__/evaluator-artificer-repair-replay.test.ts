@@ -50,8 +50,9 @@ let store: SqlitePIArtifactStore;
 const SCRIBE_ID = 'scribe-rr';
 const ART1_ID = 'artificer-rr1';
 const EVAL1_ID = 'evaluator-rr1';
-const REPAIR_ID = 'artificer-repair-rr1';
-const EVAL2_ID = 'evaluator-rr2';
+const REPAIR_ID = 'artificer-repair-evaluator-rr1-r1';
+const DREAMER_ID = 'dreamer-rr-root';
+const CORRELATION_ID = 'cand-repair-replay-root';
 const SCRIBE_ART = 'pi-art-scribe-rr';
 
 /** Round-1 RuleCode: the classic whole-object string-method bug. */
@@ -129,7 +130,8 @@ function artificerOutput(implementationCode: string, scribeArtifactId: string, t
   };
 }
 
-function evaluatorOutput(taskId: string, artificerArtifactId: string, decision: 'approved' | 'needs_revision'): unknown {
+function evaluatorOutput(taskId: string, artificerArtifactId: string, options: { decision: 'approved' | 'needs_revision'; convergedRepairRound?: boolean }): unknown {
+  const { decision, convergedRepairRound = false } = options;
   return {
     taskId,
     sourceArtificerArtifactId: artificerArtifactId,
@@ -142,7 +144,7 @@ function evaluatorOutput(taskId: string, artificerArtifactId: string, decision: 
       requiredChanges: decision === 'needs_revision' ? ['Fix the paramsSummary string-method crash'] : [],
       // PRI-630 convergence: the round-2 evaluator adjudicates the round-1
       // requirement (req-1 = the round-1 requiredChange, sequential id).
-      ...(taskId === EVAL2_ID
+      ...(convergedRepairRound
         ? {
             priorRequirementStatuses: [{ id: 'req-1', status: 'resolved' }],
             requirementLedger: [{ id: 'req-1', statement: 'Fix the paramsSummary string-method crash', status: 'resolved' }],
@@ -180,18 +182,31 @@ interface MkTaskSpec {
   readonly kind: string;
   readonly deps: readonly string[];
   readonly diagnosticJson?: string;
+  readonly parentTaskId?: string;
+  readonly correlationId?: string;
 }
 
 async function mkTask(spec: MkTaskSpec): Promise<void> {
   await stateManager.createTask({
     taskId: spec.id, taskKind: spec.kind, status: 'pending', attemptCount: 0, maxAttempts: 3,
-    diagnosticJson: spec.diagnosticJson ?? meta({ dependencyTaskIds: spec.deps }),
+    diagnosticJson: spec.diagnosticJson ?? meta({
+      dependencyTaskIds: spec.deps,
+      ...(spec.parentTaskId !== undefined ? { parentTaskId: spec.parentTaskId } : {}),
+      ...(spec.correlationId !== undefined ? { correlationId: spec.correlationId } : {}),
+    }),
   });
 }
 
 async function succeed(id: string): Promise<void> {
   const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'rr-test', runtimeKind: 'test-double' });
   await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'rr-test', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
+}
+
+async function mkDreamerRoot(): Promise<void> {
+  const diagnostic = JSON.parse(meta({ dependencyTaskIds: [], correlationId: CORRELATION_ID })) as Record<string, unknown>;
+  diagnostic.candidateId = CORRELATION_ID;
+  await mkTask({ id: DREAMER_ID, kind: 'dreamer', deps: [], diagnosticJson: JSON.stringify(diagnostic) });
+  await succeed(DREAMER_ID);
 }
 
 beforeEach(async () => {
@@ -213,8 +228,9 @@ afterEach(async () => {
 
 describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS → pi-rule', () => {
   it.each(['approved', 'needs_revision'] as const)('closes the full self-healing loop after model %s through the REAL deterministic replay gate', async (decision) => {
-    // ── lineage: scribe task + artifact ──
-    await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: [] });
+    // ── lineage: dreamer root → scribe — strict repair identity requires a provable chain ──
+    await mkDreamerRoot();
+    await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: [], parentTaskId: DREAMER_ID, correlationId: CORRELATION_ID });
     await succeed(SCRIBE_ID);
     await store.upsertArtifact({
       artifactId: SCRIBE_ART, artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
@@ -224,7 +240,7 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     });
 
     // ── Round 1: Artificer emits the paramsSummary string-method bug ──
-    await mkTask({ id: ART1_ID, kind: 'artificer', deps: [SCRIBE_ID] });
+    await mkTask({ id: ART1_ID, kind: 'artificer', deps: [SCRIBE_ID], parentTaskId: SCRIBE_ID, correlationId: CORRELATION_ID });
     const artPrompts: string[] = [];
     const artificer1 = new ArtificerRunner(
       {
@@ -245,13 +261,13 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     if (!art1Artifact) return;
 
     // ── Round 1: Evaluator needs_revision + REAL diagnostic replay ──
-    await mkTask({ id: EVAL1_ID, kind: 'evaluator', deps: [ART1_ID] });
+    await mkTask({ id: EVAL1_ID, kind: 'evaluator', deps: [ART1_ID], parentTaskId: ART1_ID, correlationId: CORRELATION_ID });
     const evalPrompts: string[] = [];
     const seededRepair: { payload?: Record<string, unknown> } = {};
     const evaluator1 = new EvaluatorRunner(
       {
         stateManager,
-        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, art1Artifact.artifactId, decision), evalPrompts, 'run-eval-1'),
+        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, art1Artifact.artifactId, { decision }), evalPrompts, 'run-eval-1'),
         eventEmitter: emitter,
         artifactStore: store,
         validator: new DefaultEvaluatorValidator(),
@@ -261,7 +277,10 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
           // Plugin-style seeder: real task row carrying the repairPayload.
           await mkTask({ id: REPAIR_ID, kind: 'artificer', deps: params.inheritedDependencyTaskIds, diagnosticJson: meta({
             dependencyTaskIds: params.inheritedDependencyTaskIds,
+            parentTaskId: EVAL1_ID,
+            correlationId: CORRELATION_ID,
             repairPayload: params.repairPayload,
+            repairTaskRole: 'repair_artificer',
           }) });
           return REPAIR_ID;
         },
@@ -368,12 +387,19 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     expect(repairArtifact).toBeDefined();
     if (!repairArtifact) return;
 
-    // ── Round 2: Evaluator approves the repaired code → REAL replay PASSES → pi-rule ──
-    await mkTask({ id: EVAL2_ID, kind: 'evaluator', deps: [REPAIR_ID] });
+    // ── Round 2: the SAME evaluator is reopened onto its own repair output → REAL replay PASSES → pi-rule ──
+    await stateManager.updateTask(EVAL1_ID, {
+      status: 'pending',
+      diagnosticJson: meta({
+        dependencyTaskIds: [REPAIR_ID],
+        parentTaskId: ART1_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    });
     const evaluator2 = new EvaluatorRunner(
       {
         stateManager,
-        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL2_ID, repairArtifact.artifactId, 'approved'), [], 'run-eval-2'),
+        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, repairArtifact.artifactId, { decision: 'approved', convergedRepairRound: true }), [], 'run-eval-2'),
         eventEmitter: emitter,
         artifactStore: store,
         validator: new DefaultEvaluatorValidator(),
@@ -383,10 +409,11 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
         gateDeps: createProductionGateDeps(), // REAL gate again
       },
     );
-    const eval2Result = await evaluator2.run(EVAL2_ID);
+    const eval2Result = await evaluator2.run(EVAL1_ID);
     expect(eval2Result.status).toBe('succeeded');
 
-    const eval2Artifacts = await store.listBySourceTaskId(EVAL2_ID);
+    const eval2Artifacts = (await store.listBySourceTaskId(EVAL1_ID))
+      .filter((artifact) => artifact.artifactId !== eval1Artifact.artifactId);
     const ruleArtifact = eval2Artifacts.find((a) => a.artifactKind === 'rule');
     expect(ruleArtifact).toBeDefined();
     if (!ruleArtifact) return;
