@@ -1829,8 +1829,10 @@ describe('PRI-87 DefaultDreamerValidator strict validation', () => {
     expect(runOnceSrc).not.toContain('new DreamerRunner(');
     expect(runOnceSrc).not.toContain('new PassThroughDreamerValidator()');
     // The strict validator is pinned once, inside the ONE shared executor.
+    // PRI-1301: the executor is its own module now (pure move out of the
+    // consumer cycle) — the pin reads the canonical construction module.
     const executorSrc = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'host-runtime', 'src', 'internalization-consumer-cycle.ts'
+      __dirname, '..', '..', '..', '..', 'host-runtime', 'src', 'internalization-task-executor.ts'
     ), 'utf-8');
     expect(executorSrc).toContain('new DefaultDreamerValidator()');
     expect(executorSrc).not.toContain('PassThroughDreamerValidator');
@@ -4598,7 +4600,11 @@ describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2B: production construction-point whi
     = /\bnew\s+(?:Dreamer|Philosopher|Scribe|Artificer|Evaluator|RolloutReviewer)Runner\s*\(/;
   const PEER_RUNNER_WHITELIST = [
     // The ONE shared single-step executor (consumer cycle + run-once 收编点).
-    'packages/host-runtime/src/internalization-consumer-cycle.ts',
+    // PRI-1301: the executor is its own module (pure move out of
+    // internalization-consumer-cycle.ts) — the cycle module now contains ZERO
+    // constructions by contract and is therefore deliberately NOT whitelisted:
+    // any `new <Peer>Runner(` reappearing there is an unauthorized hit.
+    'packages/host-runtime/src/internalization-task-executor.ts',
     // Explicit synchronous adversarial operator — NOT a lease orchestrator
     // (§2.6: never merged into runInternalizationConsumerCycle).
     'packages/pd-cli/src/services/rulehost-pipeline-runner.ts',
@@ -4610,7 +4616,7 @@ describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2B: production construction-point whi
   // this test and forces an explicit, review-visible update of the pin.
   const PEER_RUNNER_CONSTRUCTION_COUNT_BY_FILE: Readonly<Record<string, number>> = {
     // Six factory branches — exactly one construction per peer runner kind.
-    'packages/host-runtime/src/internalization-consumer-cycle.ts': 6,
+    'packages/host-runtime/src/internalization-task-executor.ts': 6,
     // Synchronous pipeline stages: dreamer/philosopher/scribe/artificer/evaluator
     // (no RolloutReviewer — the operator terminates at the adversarial loop).
     'packages/pd-cli/src/services/rulehost-pipeline-runner.ts': 5,
@@ -4624,8 +4630,8 @@ describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2B: production construction-point whi
     // "whitelist emptied by deleting constructions" must fail loudly too.
     for (const kind of ['Dreamer', 'Philosopher', 'Scribe', 'Artificer', 'Evaluator', 'RolloutReviewer']) {
       expect(
-        new RegExp(`\\bnew\\s+${kind}Runner\\s*\\(`).test(readProductionSource2B('host-runtime/src/internalization-consumer-cycle.ts')),
-        `the shared executor must still construct ${kind}Runner inside internalization-consumer-cycle.ts`,
+        new RegExp(`\\bnew\\s+${kind}Runner\\s*\\(`).test(readProductionSource2B('host-runtime/src/internalization-task-executor.ts')),
+        `the shared executor must still construct ${kind}Runner inside internalization-task-executor.ts`,
       ).toBe(true);
     }
     expect(
@@ -4709,10 +4715,22 @@ describe('SPEC-PD-PIPELINE-SPINE-001 Phase 2B: production construction-point whi
 
   // ── Package dependency direction (Phase 2B additions) ───────────────────
   it('Phase 2B: the shared executor file never imports pd-cli or concrete host adapters', () => {
-    const executorSrc = readProductionSource2B('host-runtime/src/internalization-consumer-cycle.ts');
-    for (const token of ['@principles/pd-cli', '@principles/codex-adapter', '@principles/workbuddy-adapter', 'packages/pd-cli']) {
-      expect(executorSrc, `executor must not import ${token} (host-runtime → pd-cli is a forbidden direction)`).not.toContain(token);
+    // PRI-1301: the executor moved to its own module; the dependency-direction
+    // invariant applies to it AND stays on the consumer cycle (the executor's
+    // caller) — neither host-runtime pipeline module may invert the direction.
+    for (const rel of ['host-runtime/src/internalization-task-executor.ts', 'host-runtime/src/internalization-consumer-cycle.ts'] as const) {
+      const executorSrc = readProductionSource2B(rel);
+      for (const token of ['@principles/pd-cli', '@principles/codex-adapter', '@principles/workbuddy-adapter', 'packages/pd-cli']) {
+        expect(executorSrc, `${rel} must not import ${token} (host-runtime → pd-cli is a forbidden direction)`).not.toContain(token);
+      }
     }
+    // Review hardening: the executor must not type-import its caller. The
+    // evaluator catalog shape is owned by core (`EvaluatorRunnerOptions`),
+    // while `ConsumerHostToolCatalog` remains the cycle's structural port type.
+    expect(
+      readProductionSource2B('host-runtime/src/internalization-task-executor.ts'),
+      'executor must not depend on the consumer-cycle module for host tool catalog types',
+    ).not.toContain('internalization-consumer-cycle.js');
   });
 
 });
