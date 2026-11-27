@@ -1003,6 +1003,61 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     return output.sourceArtificerArtifactId === currentInput.artifactId;
   }
 
+  private async ownerResolutionMatchesCurrentInput(
+    taskId: string,
+    resolution: { readonly sourceRunId: string; readonly machineDecision: RunnerDecision },
+    leasedTask: TaskRecord,
+  ): Promise<boolean> {
+    const currentInput = await this.resolveCurrentArtificerInput(leasedTask);
+    const output = await this.recoverIntentOutput(taskId, resolution.sourceRunId, resolution.machineDecision);
+    return output.sourceArtificerArtifactId === currentInput.artifactId;
+  }
+
+  /**
+   * Retire a pending Owner resolution whose evidence input was superseded
+   * before application. The authority log row remains durable; the lease-
+   * fenced conditional metadata write only changes its lifecycle status.
+   */
+  private async supersedeStaleOwnerResolution(
+    taskId: string,
+    leasedTask: TaskRecord,
+    resolutionId: string,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const raw = await this.stateManager.getTask(taskId);
+      const piTask = raw ? hydratePITaskRecord(raw) : null;
+      if (!raw || !piTask?.ownerResolutions) {
+        throw new PDRuntimeError('execution_failed', `owner resolution ${resolutionId} metadata unavailable`);
+      }
+      const target = piTask.ownerResolutions.find((resolution) => resolution.resolutionId === resolutionId);
+      if (!target || target.status === 'superseded') return;
+      if (target.status !== 'pending') {
+        throw new PDRuntimeError('execution_failed', `owner resolution ${resolutionId} is no longer pending`);
+      }
+      const updatedResolutions = piTask.ownerResolutions.map((resolution) => (
+        resolution.resolutionId === resolutionId
+          ? {
+              ...resolution,
+              status: 'superseded' as const,
+              supersededAt: new Date().toISOString(),
+              supersededReason: 'input_artifact_stale',
+            }
+          : resolution
+      ));
+      const updated = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+        taskId,
+        raw.diagnosticJson ?? null,
+        { diagnosticJson: createPITaskDiagnosticJson(mergePITaskMetadata(piTask, { ownerResolutions: updatedResolutions })) },
+        {
+          expectedLeaseOwner: this.resolvedOptions.owner,
+          ...(leasedTask.leaseGeneration !== undefined ? { expectedLeaseGeneration: leasedTask.leaseGeneration } : {}),
+        },
+      );
+      if (updated) return;
+    }
+    throw new PDRuntimeError('execution_failed', `failed to supersede stale owner resolution ${resolutionId}`);
+  }
+
   /** Prove that durable nonterminal review evidence already belongs to the current input artifact. */
   async hasCurrentInputEvidence(task: TaskRecord): Promise<boolean> {
     try {
@@ -1079,10 +1134,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         if ((output.sourceArtificerArtifactId ?? null) !== (artifactOutput.sourceArtificerArtifactId ?? null)) {
           return 'artifact_source_artificer_mismatch';
         }
-        if (isEvaluatorOutputV2(output) && isEvaluatorOutputV2(artifactOutput)
-          && output.adversarialResult !== undefined && artifactOutput.adversarialResult !== undefined
-          && JSON.stringify(output.adversarialResult) !== JSON.stringify(artifactOutput.adversarialResult)) {
-          return 'artifact_adversarial_result_conflicts_run_output';
+        if (isEvaluatorOutputV2(output) && isEvaluatorOutputV2(artifactOutput)) {
+          const runHasReplay = output.adversarialResult !== undefined;
+          const artifactHasReplay = artifactOutput.adversarialResult !== undefined;
+          if (runHasReplay !== artifactHasReplay) return 'artifact_adversarial_result_presence_mismatch';
+          if (runHasReplay && artifactHasReplay
+            && JSON.stringify(output.adversarialResult) !== JSON.stringify(artifactOutput.adversarialResult)) {
+            return 'artifact_adversarial_result_conflicts_run_output';
+          }
         }
         const piTask = hydratePITaskRecord(terminalTask);
         if (piTask) {
@@ -2095,6 +2154,15 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // terminal 的 crash 窗口同样由此收敛 (SPEC §30)。
     const ownerOverride = piTask ? planOwnerVerdictOverrideResume(piTask) : null;
     if (ownerOverride) {
+      if (!await this.ownerResolutionMatchesCurrentInput(taskId, ownerOverride.resolution, leasedTask)) {
+        this.emitEvent('owner_resolution_stale_input', taskId, {
+          resolutionId: ownerOverride.resolution.resolutionId,
+          sourceRunId: ownerOverride.resolution.sourceRunId,
+          nextAction: 'supersede_stale_resolution_and_evaluate_current_input',
+        });
+        await this.supersedeStaleOwnerResolution(taskId, leasedTask, ownerOverride.resolution.resolutionId);
+        return null;
+      }
       return await this.applyOwnerVerdictOverrideAndFinalize(taskId, leasedTask, ownerOverride);
     }
 
@@ -2325,7 +2393,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         currentArtifactId: currentInput.artifactId,
         nextAction: 'formal_upstream_revision_required_before_owner_resolution',
       });
-      throw new PDRuntimeError('input_invalid', 'owner_resolution_input_stale');
+      throw new PDRuntimeError('execution_failed', 'owner_resolution_input_stale');
     }
 
     // SPEC §20 纵深防御: 确定性对抗门失败不允许 approved override (capability

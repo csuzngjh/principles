@@ -20,7 +20,7 @@ export interface RecoverSucceededResultInput<TOutput> {
   readonly task: TaskRecord;
   readonly expectedTaskKind: string;
   readonly resultRefPrefix: string;
-  readonly stateManager: Pick<RuntimeStateManager, 'getRunsByTask'>;
+  readonly stateManager: Pick<RuntimeStateManager, 'getRunsByTask'> & Partial<Pick<RuntimeStateManager, 'getValidRunsByTaskTolerant'>>;
   readonly artifactStore: Pick<PIArtifactStore, 'getArtifactById' | 'listBySourceTaskId'>;
   readonly validateOutput: (output: unknown, taskId: string) => Promise<{ valid: boolean; errors: readonly string[] }>;
   /**
@@ -90,7 +90,9 @@ export async function recoverSucceededPeerRunnerResult<TOutput>(
   const runId = resultRef.slice(input.resultRefPrefix.length + 3);
   if (runId.length === 0) return invalid('result_ref_run_id_empty');
 
-  const runs = await input.stateManager.getRunsByTask(task.taskId);
+  const runs = input.stateManager.getValidRunsByTaskTolerant === undefined
+    ? await input.stateManager.getRunsByTask(task.taskId)
+    : (await input.stateManager.getValidRunsByTaskTolerant(task.taskId)).runs;
   const run = runs.find((candidate) => candidate.runId === runId);
   if (!run) return invalid(`authoritative_run_missing:${runId}`);
   if (run.taskId !== task.taskId) return invalid('authoritative_run_task_mismatch');

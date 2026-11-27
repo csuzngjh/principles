@@ -16,7 +16,7 @@ import { PD_TASK_STATUSES, type TaskRecord } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { inferLegacyParentTaskId } from './correlation-lineage.js';
-import type { InternalizationChannel, RunnerKind } from './peer-runner-contracts.js';
+import { isInternalizationChannel, type InternalizationChannel, type RunnerKind } from './peer-runner-contracts.js';
 
 export interface SuccessorLookupQuery {
   readonly parentTaskId: string;
@@ -132,6 +132,9 @@ function malformedCandidateIsRelevant(task: TaskRecord, query: SuccessorLookupQu
   if (task.taskKind !== query.successorKind) return false;
   const identity = readSuccessorIdentity(task);
   if (!identity.malformed) return false;
+  if (identity.channel !== null && isInternalizationChannel(identity.channel) && identity.channel !== query.channel) {
+    return false;
+  }
   if (identity.parentTaskId === query.parentTaskId) return true;
   return identity.channel === query.channel && identity.parentTaskId === null;
 }

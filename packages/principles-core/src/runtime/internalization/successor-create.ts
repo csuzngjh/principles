@@ -135,7 +135,11 @@ export async function createLogicalSuccessorTask(
         status: 'pending',
         attemptCount: 0,
         maxAttempts: 3,
-        diagnosticJson: createPITaskDiagnosticJson(input.metadata),
+        diagnosticJson: createPITaskDiagnosticJson({
+          ...input.metadata,
+          parentTaskId: input.parentTaskId,
+          channel: input.channel,
+        }),
       });
       return { outcome: 'created', task, usedFallback: allocation.usedFallback };
     } catch (error) {
