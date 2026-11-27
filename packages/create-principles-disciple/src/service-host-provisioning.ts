@@ -228,7 +228,7 @@ function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
       try {
         raw = fs.readFileSync(cmdlinePath);
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
+        const { code } = error as { code?: string };
         // ENOENT/ESRCH means the process exited between directory enumeration
         // and the read; an exited process cannot still consume the workspace.
         if (code !== 'ENOENT' && code !== 'ESRCH') unreadable.push(`${entry.name}:${code ?? 'read_failed'}`);

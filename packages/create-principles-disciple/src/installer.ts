@@ -349,37 +349,6 @@ export function mergePendingProvisioningTargets(
 
 
 /**
- * Whether this run's explicit Service Host migration can affect the workspace
- * the OpenClaw declaration binds NOW. `--host` is not evidence on a deferred
- * resume: it may be omitted while install.json still authoritatively names
- * that bound workspace. This predicate is intentionally conservative and only
- * widens the existing gateway pre-flight; it never creates a migration target.
- */
-export function openClawMigrationRequiresGatewayCheck(options: {
-  readonly host: HostSelection;
-  readonly workspaceDir: string;
-  readonly enableServiceHost?: boolean;
-  readonly serviceHost?: { readonly intent: string; readonly source: string };
-}): boolean {
-  if (installsOpenClaw(options.host)) return true;
-  const explicitEnable = options.serviceHost !== undefined
-    ? options.serviceHost.intent === 'enable' && options.serviceHost.source === 'explicit_flag'
-    : options.enableServiceHost === true;
-  if (!explicitEnable) return false;
-  let binding: HostWorkspaceBinding;
-  try {
-    binding = readHostWorkspaceBinding('openclaw');
-  } catch {
-    return false; // unverifiable is handled fail-closed by provisioning itself
-  }
-  if (binding.state !== 'bound') return false;
-  const candidates = new Set([workspaceKey(options.workspaceDir)]);
-  const manifest = readManifestWorkspacesForProvisioning();
-  for (const workspaceDir of manifest.workspaces) candidates.add(workspaceKey(workspaceDir));
-  return candidates.has(workspaceKey(binding.workspaceDir));
-}
-
-/**
  * Merge the authoritative install-manifest workspaces into an explicitly
  * authorized existing-install migration. Manifest entries carry no host bias:
  * the per-target binding resolver below proves which host (if any) owns the
@@ -5529,6 +5498,38 @@ export function resolveResumeProvisioningHost(
   }
   return { ok: true, host: bound[0] ?? 'none' };
 }
+
+/**
+ * Whether this run's explicit Service Host migration can affect the workspace
+ * the OpenClaw declaration binds NOW. `--host` is not evidence on a deferred
+ * resume: it may be omitted while install.json still authoritatively names
+ * that bound workspace. This predicate is intentionally conservative and only
+ * widens the existing gateway pre-flight; it never creates a migration target.
+ */
+export function openClawMigrationRequiresGatewayCheck(options: {
+  readonly host: HostSelection;
+  readonly workspaceDir: string;
+  readonly enableServiceHost?: boolean;
+  readonly serviceHost?: { readonly intent: string; readonly source: string };
+}): boolean {
+  if (installsOpenClaw(options.host)) return true;
+  const explicitEnable = options.serviceHost !== undefined
+    ? options.serviceHost.intent === 'enable' && options.serviceHost.source === 'explicit_flag'
+    : options.enableServiceHost === true;
+  if (!explicitEnable) return false;
+  let binding: HostWorkspaceBinding;
+  try {
+    binding = readHostWorkspaceBinding('openclaw');
+  } catch {
+    return false; // unverifiable is handled fail-closed by provisioning itself
+  }
+  if (binding.state !== 'bound') return false;
+  const candidates = new Set([workspaceKey(options.workspaceDir)]);
+  const manifest = readManifestWorkspacesForProvisioning();
+  for (const workspaceDir of manifest.workspaces) candidates.add(workspaceKey(workspaceDir));
+  return candidates.has(workspaceKey(binding.workspaceDir));
+}
+
 
 export function resolveUpdateWorkspaceDir(
   workspaceDir: string,
