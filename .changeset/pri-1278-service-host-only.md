@@ -1,7 +1,6 @@
 ---
 "@principles/pd-cli": minor
 "@principles/install-layout": minor
-"@principles/pd-companion": minor
 "principles-disciple": minor
 "@principles/codex-adapter": minor
 "@principles/workbuddy-adapter": minor

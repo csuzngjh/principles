@@ -63,8 +63,8 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   },
   internalization_auto_consumer: {
     decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/service/internalization-auto-consumer*', 'pd-cli runtime-internalization commands', 'codex-adapter workspace worker (PRI-624, via shared host-runtime consumer cycle)'],
-    evidence: 'MVP core-loop liveness — advances ready internalization tasks (PRI-381; default-on since 2026-06-13). PRI-624 elevates it to the Workspace internalization execution authority: one flag, one definition, two consumers (OpenClaw scheduler + Companion workspace worker); flag-off = execution pause, never an evidence freeze.',
+    consumers: ['host-runtime/src/internalization-consumer-cycle*', 'pd-cli runtime-internalization commands', 'codex-adapter workspace worker (PRI-624, via shared host-runtime consumer cycle)'],
+    evidence: 'MVP core-loop liveness — advances ready internalization tasks (PRI-381; default-on since 2026-06-13). PRI-1278: the shared host-runtime consumer cycle is the single execution authority, driven exclusively by the PD Service Host bounded workers; flag-off = execution pause, never an evidence freeze.',
     decided: '2026-08-27',
     graduationCriteria: 'Core-loop closure validated (PR #1358, merged 2026-08-20) — promotion to core optional once stability window passes',
     retirementCriteria: 'Consumer removed from production auto-consumer wiring (would break INV-07 liveness — retire only with replacement)',
@@ -262,7 +262,7 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   },
   openclaw_diagnostician_consumer: {
     decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin internalization_auto_consumer service tick', 'host-runtime runPendingDiagnosticianOnce'],
+    consumers: ['pd openclaw worker --once consumer cycle (Service-Host-driven)', 'host-runtime runPendingDiagnosticianOnce'],
     evidence: 'SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §8.4: L3 automatic diagnosis is the default escalation path; shipped default-on because the pre-feature behaviour had NO automatic diagnosis at all, so enabling cannot regress an existing flow. Flag-off degrades to L2 (Console request-driven) with tasks left pending, never dropped.',
     decided: '2026-11-11',
     graduationCriteria: 'Real OpenClaw workspace evidence: at least one pain submitted via pd_submit_pain is automatically diagnosed by the consumer tick (T36 served with a real task transition, not only the reason string) — only then promote to GRADUATE',

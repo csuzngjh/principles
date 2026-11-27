@@ -124,14 +124,6 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     disabledReason: 'Disabled by default: pd-task service is opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
-    id: 'service:internalization-auto-consumer',
-    kind: 'service',
-    category: 'core',
-    enabledByDefault: true,
-    since: '2026-06-13',
-    description: 'Bounded auto-consumer for dreamer internalization tasks — prevents ready tasks from pending forever (PRI-381)',
-  },
-  {
     id: 'startup:workspace-init',
     kind: 'startup',
     category: 'core',
@@ -146,14 +138,6 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: true,
     since: '2026-06-02',
     description: 'Correction observer start on first prompt per workspace (MVP-Core per ADR-0014 amendment, PRI-293)',
-  },
-  {
-    id: 'startup:internalization-auto-consumer',
-    kind: 'startup',
-    category: 'core',
-    enabledByDefault: true,
-    since: '2026-06-13',
-    description: 'Internalization auto-consumer start on first prompt per workspace (MVP-Core, PRI-381)',
   },
 ];
 

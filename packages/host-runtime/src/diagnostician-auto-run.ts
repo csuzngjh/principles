@@ -94,8 +94,8 @@ export async function runPendingDiagnosticianOnce(
     return {
       served: false,
       reason: 'service_not_running',
-      message: 'the internalization_auto_consumer service is not running',
-      nextAction: 'Start the OpenClaw service, or diagnose from Console (L2) which does not need a timer.',
+      message: 'the internalization consumer cycle is not running in this workspace',
+      nextAction: 'Verify the PD Service Host is enabled (pd service status), or diagnose from Console (L2) which does not need a worker cycle.',
     };
   }
 

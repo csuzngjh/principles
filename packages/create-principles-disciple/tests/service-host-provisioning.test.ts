@@ -431,7 +431,6 @@ describe('provisionFreshInstallWorkspace', () => {
       workspaceDir,
       host: 'openclaw',
       scheduler: ENABLED_SCHEDULER,
-      resume: true,
       bindingVerification: {
         ok: false,
         reason: 'openclaw declaration unreadable',
@@ -452,35 +451,57 @@ describe('provisionFreshInstallWorkspace', () => {
     expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'binding_unverifiable' });
   });
 
-  it('resume refuses to flip while a legacy OpenClaw Gateway may still consume the workspace', async () => {
+  it('one-time switch: a legacy worker process still consuming THIS workspace keeps ownership pending', async () => {
     const { pdHome, workspaceDir } = tempPdHome();
     fakeInstalledCli(pdHome);
     const manifestPath = seedManifest(pdHome, workspaceDir);
+    const manifestBefore = readFileSync(manifestPath, 'utf8');
     const calls: string[][] = [];
     const outcome = await provisionFreshInstallWorkspace({
       pdHome,
       workspaceDir,
-      host: 'openclaw',
+      host: 'codex',
       scheduler: ENABLED_SCHEDULER,
-      resume: true,
+      legacyWorkerScan: { ok: true, workers: [{ pid: 4242, workspaceDir }] },
       warn: () => undefined,
       probes: {
-        gatewayRunning: () => true,
         spawnFn: fakeSpawn({
-          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
+          'codex worker': { code: 0, stdout: '{"mode":"ready"}' },
         }, calls),
       },
     });
     expect(outcome.ownership).toBe('not_provisioned');
     expect(outcome.readiness).toBe('skipped');
+    expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'legacy_worker_still_running' });
     expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
       .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
-    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_consumer_running' });
-    // No readiness probe ran: proving the legacy consumer is gone comes first.
+    expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
+    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_worker_still_running' });
+    // No readiness probe ran: proving the old consumer is gone comes first.
     expect(calls.filter((args) => args.includes('worker'))).toHaveLength(0);
   });
 
-  it('resume probes the VERIFIED host when no legacy Gateway is running', async () => {
+  it('one-time switch: an unverifiable legacy worker scan is fail-closed pending', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    const manifestPath = seedManifest(pdHome, workspaceDir);
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'codex',
+      scheduler: ENABLED_SCHEDULER,
+      legacyWorkerScan: { ok: false, workers: [], detail: 'process table unreadable' },
+      warn: () => undefined,
+      probes: { spawnFn: fakeSpawn({}, []) },
+    });
+    expect(outcome.ownership).toBe('not_provisioned');
+    expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'legacy_worker_still_running' });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
+      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
+    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_worker_still_running' });
+  });
+
+  it('one-time switch: a clean scan lets provisioning proceed to service_host_owned', async () => {
     const { pdHome, workspaceDir } = tempPdHome();
     fakeInstalledCli(pdHome);
     seedManifest(pdHome, workspaceDir);
@@ -488,191 +509,9 @@ describe('provisionFreshInstallWorkspace', () => {
     const outcome = await provisionFreshInstallWorkspace({
       pdHome,
       workspaceDir,
-      host: 'openclaw',
-      scheduler: ENABLED_SCHEDULER,
-      resume: true,
-      warn: () => undefined,
-      probes: {
-        gatewayRunning: () => false,
-        spawnFn: fakeSpawn({
-          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
-          'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'r', managed: { executions: [] } }) },
-        }, calls),
-      },
-    });
-    expect(outcome.ownership).toBe('service_host_owned');
-    expect(calls.some((args) => args.includes('--readiness'))).toBe(true);
-  });
-
-  async function seedDeferredPending(pdHome: string, workspaceDir: string, host: 'codex' | 'workbuddy' | 'all'): Promise<void> {
-    const initial = await provisionFreshInstallWorkspace({
-      pdHome,
-      workspaceDir,
-      host,
-      scheduler: { ...ENABLED_SCHEDULER, state: 'consent_required', enabled: null },
-      warn: () => undefined,
-      probes: { spawnFn: fakeSpawn({}, []) },
-    });
-    expect(initial.pendingProvisioning).toBe(true);
-    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({
-      host,
-      reason: 'scheduler_consent_required',
-    });
-  }
-
-  it.each(['codex', 'workbuddy'] as const)('deferred %s resume with a potentially active legacy consumer is blocked before readiness and CAS', async (host) => {
-    const { pdHome, workspaceDir } = tempPdHome();
-    fakeInstalledCli(pdHome);
-    const manifestPath = seedManifest(pdHome, workspaceDir);
-    await seedDeferredPending(pdHome, workspaceDir, host);
-    const manifestBefore = readFileSync(manifestPath, 'utf8');
-    const calls: string[][] = [];
-    const outcome = await provisionFreshInstallWorkspace({
-      pdHome,
-      workspaceDir,
-      host,
-      scheduler: ENABLED_SCHEDULER,
-      resume: true,
-      warn: () => undefined,
-      probes: {
-        spawnFn: fakeSpawn({
-          [`${host} worker`]: { code: 0, stdout: '{"mode":"ready"}' },
-          'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'r', managed: { executions: [] } }) },
-        }, calls),
-      },
-    });
-
-    expect(outcome.ownership).toBe('not_provisioned');
-    expect(outcome.readiness).toBe('skipped');
-    expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'legacy_consumer_unproven' });
-    expect(outcome.pendingProvisioning).toBe(true);
-    expect(outcome.nextAction.startsWith('controlled_handover:')).toBe(true);
-    expect(outcome.evidencePath).toBeDefined();
-    const evidence = JSON.parse(readFileSync(outcome.evidencePath ?? '', 'utf8')) as Record<string, unknown>;
-    expect(evidence).toMatchObject({
-      schemaVersion: 'pd.service-install-provisioning.v1',
-      pendingProvisioning: true,
-      pendingReason: 'legacy_consumer_unproven',
-      readiness: { status: 'skipped' },
-      ownership: { before: 'legacy_owned', after: 'legacy_owned', generation: 0 },
-    });
-    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
-      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
-    expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
-    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_consumer_unproven' });
-    expect(calls.filter((args) => args.includes('worker') || args.includes('run-once'))).toHaveLength(0);
-  });
-
-  it.each(['codex', 'workbuddy'] as const)('deferred %s resume with unknown legacy consumer status is blocked before readiness and CAS', async (host) => {
-    const { pdHome, workspaceDir } = tempPdHome();
-    fakeInstalledCli(pdHome);
-    const manifestPath = seedManifest(pdHome, workspaceDir);
-    await seedDeferredPending(pdHome, workspaceDir, host);
-    const manifestBefore = readFileSync(manifestPath, 'utf8');
-    const calls: string[][] = [];
-    const outcome = await provisionFreshInstallWorkspace({
-      pdHome,
-      workspaceDir,
-      host,
-      scheduler: ENABLED_SCHEDULER,
-      resume: true,
-      warn: () => undefined,
-      probes: { spawnFn: fakeSpawn({}, calls) },
-    });
-
-    expect(outcome.ownership).toBe('not_provisioned');
-    expect(outcome.readiness).toBe('skipped');
-    expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'legacy_consumer_unproven' });
-    expect(outcome.nextAction).toContain('controlled_handover');
-    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
-      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
-    expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
-    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_consumer_unproven' });
-    expect(calls).toHaveLength(0);
-  });
-
-  it('a deferred Codex pending marker cannot be bypassed when the current binding resolves to none', async () => {
-    const { pdHome, workspaceDir } = tempPdHome();
-    fakeInstalledCli(pdHome);
-    const manifestPath = seedManifest(pdHome, workspaceDir);
-    await seedDeferredPending(pdHome, workspaceDir, 'codex');
-    const manifestBefore = readFileSync(manifestPath, 'utf8');
-    const calls: string[][] = [];
-    const outcome = await provisionFreshInstallWorkspace({
-      pdHome,
-      workspaceDir,
-      host: 'none',
-      scheduler: ENABLED_SCHEDULER,
-      resume: true,
-      warn: () => undefined,
-      probes: {
-        spawnFn: fakeSpawn({
-          'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'r', managed: { executions: [] } }) },
-        }, calls),
-      },
-    });
-
-    expect(outcome.ownership).toBe('not_provisioned');
-    expect(outcome.readiness).toBe('skipped');
-    expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'legacy_consumer_unproven' });
-    expect(outcome.nextAction).toContain('controlled_handover');
-    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
-      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
-    expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
-    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_consumer_unproven' });
-    expect(calls.filter((args) => args.includes('worker') || args.includes('run-once'))).toHaveLength(0);
-  });
-
-  it('deferred host=all resume cannot bypass the Codex/WorkBuddy legacy-consumer guard', async () => {
-    const { pdHome, workspaceDir } = tempPdHome();
-    fakeInstalledCli(pdHome);
-    const manifestPath = seedManifest(pdHome, workspaceDir);
-    await seedDeferredPending(pdHome, workspaceDir, 'all');
-    const manifestBefore = readFileSync(manifestPath, 'utf8');
-    const calls: string[][] = [];
-    let gatewayProbes = 0;
-    const outcome = await provisionFreshInstallWorkspace({
-      pdHome,
-      workspaceDir,
-      host: 'all',
-      scheduler: ENABLED_SCHEDULER,
-      resume: true,
-      warn: () => undefined,
-      probes: {
-        gatewayRunning: () => {
-          gatewayProbes += 1;
-          return false;
-        },
-        spawnFn: fakeSpawn({
-          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
-          'codex worker': { code: 0, stdout: '{"mode":"ready"}' },
-          'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'r', managed: { executions: [] } }) },
-        }, calls),
-      },
-    });
-
-    expect(gatewayProbes).toBe(1);
-    expect(outcome.ownership).toBe('not_provisioned');
-    expect(outcome.readiness).toBe('skipped');
-    expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'legacy_consumer_unproven' });
-    expect(outcome.nextAction).toContain('controlled_handover');
-    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
-      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
-    expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
-    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_consumer_unproven' });
-    expect(calls.filter((args) => args.includes('worker') || args.includes('run-once'))).toHaveLength(0);
-  });
-
-  it('a non-deferred Codex fresh install keeps the existing provisioning behavior', async () => {
-    const { pdHome, workspaceDir } = tempPdHome();
-    fakeInstalledCli(pdHome);
-    const manifestPath = seedManifest(pdHome, workspaceDir);
-    const calls: string[][] = [];
-    const outcome = await provisionFreshInstallWorkspace({
-      pdHome,
-      workspaceDir,
       host: 'codex',
       scheduler: ENABLED_SCHEDULER,
+      legacyWorkerScan: { ok: true, workers: [{ pid: 4242, workspaceDir: path.join(os.tmpdir(), 'pd-other-workspace') }] },
       warn: () => undefined,
       probes: {
         spawnFn: fakeSpawn({
@@ -681,76 +520,31 @@ describe('provisionFreshInstallWorkspace', () => {
         }, calls),
       },
     });
-
     expect(outcome.ownership).toBe('service_host_owned');
-    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
-      .toMatchObject({ status: 'service_host_owned', generation: 1 });
+    // Codex answers the no-consume readiness question through `--status`.
     expect(calls.some((args) => args.includes('--status'))).toBe(true);
   });
 
-  it('concurrent blocked deferred resumes never race into an ownership write', async () => {
+  it('repeating a scan-blocked provisioning is idempotent and never writes ownership', async () => {
     const { pdHome, workspaceDir } = tempPdHome();
     fakeInstalledCli(pdHome);
     const manifestPath = seedManifest(pdHome, workspaceDir);
-    await seedDeferredPending(pdHome, workspaceDir, 'codex');
     const manifestBefore = readFileSync(manifestPath, 'utf8');
-    const calls: string[][] = [];
-    const runResume = () => provisionFreshInstallWorkspace({
-      pdHome,
-      workspaceDir,
-      host: 'codex',
-      scheduler: ENABLED_SCHEDULER,
-      resume: true,
-      warn: () => undefined,
-      probes: {
-        spawnFn: fakeSpawn({
-          'codex worker': { code: 0, stdout: '{"mode":"ready"}' },
-          'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'r', managed: { executions: [] } }) },
-        }, calls),
-      },
-    });
-    const [first, second] = await Promise.all([runResume(), runResume()]);
-
-    for (const outcome of [first, second]) {
-      expect(outcome.ownership).toBe('not_provisioned');
-      expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'legacy_consumer_unproven' });
-    }
-    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
-      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
-    expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
-    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_consumer_unproven' });
-    expect(calls.filter((args) => args.includes('worker') || args.includes('run-once'))).toHaveLength(0);
-  });
-
-  it('repeating a blocked deferred resume is idempotent and still never writes ownership', async () => {
-    const { pdHome, workspaceDir } = tempPdHome();
-    fakeInstalledCli(pdHome);
-    const manifestPath = seedManifest(pdHome, workspaceDir);
-    await seedDeferredPending(pdHome, workspaceDir, 'codex');
-    const manifestBefore = readFileSync(manifestPath, 'utf8');
-    const calls: string[][] = [];
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const outcome = await provisionFreshInstallWorkspace({
         pdHome,
         workspaceDir,
         host: 'codex',
         scheduler: ENABLED_SCHEDULER,
-        resume: true,
+        legacyWorkerScan: { ok: true, workers: [{ pid: 4242, workspaceDir }] },
         warn: () => undefined,
-        probes: {
-          spawnFn: fakeSpawn({
-            'codex worker': { code: 0, stdout: '{"mode":"ready"}' },
-            'service run-once': { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: `r-${attempt}`, managed: { executions: [] } }) },
-          }, calls),
-        },
+        probes: { spawnFn: fakeSpawn({}, []) },
       });
       expect(outcome.ownership).toBe('not_provisioned');
-      expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'legacy_consumer_unproven' });
       expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
         .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
     }
     expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
-    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_consumer_unproven' });
-    expect(calls.filter((args) => args.includes('worker') || args.includes('run-once'))).toHaveLength(0);
+    expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'legacy_worker_still_running' });
   });
 });
