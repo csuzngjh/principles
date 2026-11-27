@@ -431,7 +431,7 @@
     {
       "entry": "./runtime",
       "source": "src/runtime/index.ts",
-      "count": 2075,
+      "count": 2076,
       "symbols": [
         "ADAPTIVE_DELIVERY_RECORD_ENUMS",
         "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -2467,6 +2467,7 @@
         "trimToBudget",
         "truncateReason",
         "validateAdaptiveDeliveryRecord",
+        "validateAndBackfillRepairLineage",
         "validateBehaviorExamplePack",
         "validateControlledAdmissionBinding",
         "validateCorrectionProposal",
