@@ -64,3 +64,27 @@ PD Service Host becomes the ONLY background runtime. Companion loses ALL backgro
 - Section 4.3: review/delete P0-guard pieces that only protected Companion consumers (pendingHost/guardHosts/legacy_consumer_unproven/legacy_consumer_running/bindingVerification parts/resolveResumeProvisioningHost parts/OpenClaw-gateway-as-consumer branch).
 - One-time switch: currently-running old PD workers must be stopped + autostart entries removed; must not create dual-consumer window; minimal safety verification only, not a long-term migration framework.
 - Don't delete real task data/knowledge/credentials/API keys. Workspace isolation/security boundaries intact.
+
+## SESSION CHECKPOINT (2026-11-27, post-consolidation-push)
+
+### Committed & pushed to PR #2810 (branch ai/PRI-1278-phase5-p0-deferred-provisioning-guard)
+- a2a814282 consolidation main commit (100 files, +2728/−11917)
+- 736e5d0c9 structural guard integration repair (10 files)
+- 72e4b288a changeset @principles/core declaration
+- 9cda35c05 final report
+- PR title/body updated to consolidation scope. Report: PRI-1278-SERVICE-HOST-ONLY-FINAL-REPORT.md
+
+### CI state at checkpoint (run 46015262799)
+- PASS: Codex plugin delivery contract, Export Surface Gate, CI Impact Gate, quick gates
+- PENDING: Verify Merge Gate rerun expected; Test pd-cli (Linux+Windows), OpenClaw, create-principles-disciple, packaged install smoke, CodeQL, Devin Review
+- Fixed so far: changeset private-package violation, cpd test typecheck (stale resume/gatewayRunning), plugin-core baseline classification+count pin, census consumer paths, surface registry dead entries, wiring guard paths, codex plugin.json version
+
+### Validation summary (local WSL)
+- build zero-TS-error; install-layout 190/190; pd-companion 22 files; pd-cli service-host 458+2env; cpd provisioning 14/14; core arch 320/320; fflc 18/18; hr wiring guards 18/18
+- openclaw/codex-adapter local failures = IO-contention timeouts (proven by isolation passes); CI Linux authoritative
+
+### Remaining for next session
+1. Watch CI convergence on 9cda35c05; fix any new structural failures (most likely candidates: typecheck:tests in packages not locally verified, packaged-install smoke expectations referencing deleted machinery)
+2. If green: report to Owner, recommend closing PR #2811 (superseded)
+3. Real-machine operational acceptance is the honest residual — recommend Owner-run validation: fresh install, verify scheduler fires, confirm no companion workers exist
+4. Deferred cosmetic: shadow-progress-store naming (persisted schema pd.shadow-progress.v1)

@@ -181,12 +181,12 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     techDetailZh: {
       '输入': '诊断阶段的 distilled principle / candidate artifact',
       '输出': '`DreamerOutput` · 1-5 个候选，每个含 badDecision / betterDecision / riskLevel / strategicPerspective',
-      '注意': '`InternalizationAutoConsumerService` 当前仅自动消费 dreamer，下游需手动触发',
+      '注意': '内化任务由 PD Service Host 驱动的有界 worker 周期统一消费',
     },
     techDetailEn: {
       'Input': 'Distilled principle / candidate artifact from the diagnosis stage',
       'Output': '`DreamerOutput` · 1-5 candidates, each with badDecision / betterDecision / riskLevel / strategicPerspective',
-      'Note': '`InternalizationAutoConsumerService` currently only auto-consumes dreamer; downstream must be triggered manually',
+      'Note': 'Internalization tasks are consumed by bounded worker cycles driven by the PD Service Host',
     },
     isCore: true,
   },
@@ -309,14 +309,14 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     roleZh: '原则生效前的最后一道审查',
     roleEn: 'Final review before a principle goes live',
     detailZh:
-      '评估员通过后，上线评审员做最终把关——评估上线风险、安全检查，决定是否真的推向 rollout。\n\n它在 MVP_CORE_TASK_KINDS 白名单中（队列可见），但 auto-consumer 不会自动推进它——作为原则进入 approval 队列前的最后一道人工关，由 Owner 手动触发。',
+      '评估员通过后，上线评审员做最终把关——评估上线风险、安全检查，决定是否真的推向 rollout。\n\n它在 MVP_CORE_TASK_KINDS 白名单中（队列可见），但自动消费不会自动推进它——作为原则进入 approval 队列前的最后一道人工关，由 Owner 手动触发。',
     detailEn:
-      'After the Evaluator passes, the Rollout Reviewer does the final gate — assessing rollout risks and safety checks, deciding whether to actually push to rollout.\n\nIt is in the MVP_CORE_TASK_KINDS whitelist (visible in the queue), but the auto-consumer does NOT advance it — it is the last manual Owner gate before the approval queue, triggered by hand.',
+      'After the Evaluator passes, the Rollout Reviewer does the final gate — assessing rollout risks and safety checks, deciding whether to actually push to rollout.\n\nIt is in the MVP_CORE_TASK_KINDS whitelist (visible in the queue), but automatic consumption does NOT advance it — it is the last manual Owner gate before the approval queue, triggered by hand.',
     impactLevel: 'green',
-    impactZh: '手动触发的最后关。不被 auto-consumer 自动消费。',
-    impactEn: 'Manual last gate. Not auto-consumed by the auto-consumer.',
+    impactZh: '手动触发的最后关。不在自动消费范围内。',
+    impactEn: 'Manual last gate. Not in automatic consumption scope.',
     techDetailZh: {
-      'MVP 状态': 'MVP-Core（手动）。在 `MVP_CORE_TASK_KINDS` 中，但不被 auto-consumer 自动推进——由 Owner 手动触发（`pd runtime internalization run-once --runner rollout_reviewer`）。',
+      'MVP 状态': 'MVP-Core（手动）。在 `MVP_CORE_TASK_KINDS` 中，但不自动推进——由 Owner 手动触发（`pd runtime internalization run-once --runner rollout_reviewer`）。',
       '输出': '`RolloutReviewerOutputV1` · approve_rollout / needs_revision / reject + rolloutRisks + safetyChecks',
       '实现': '唯一不继承 `BasePeerRunner` 的 peer runner',
     },
@@ -326,7 +326,7 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
       'Implementation': 'The only peer runner that does not extend `BasePeerRunner`',
     },
     isCore: true,
-    mvpNoteZh: 'MVP-Core（手动触发）。在白名单中但不被 auto-consumer 自动消费。',
+    mvpNoteZh: 'MVP-Core（手动触发）。在白名单中但不在自动消费范围内。',
     mvpNoteEn: 'MVP-Core (manual trigger). In the whitelist but not auto-consumed.',
   },
 
