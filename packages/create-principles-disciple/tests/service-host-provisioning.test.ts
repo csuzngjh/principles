@@ -493,7 +493,16 @@ describe('provisionFreshInstallWorkspace', () => {
     expect(outcome.readiness).toBe('skipped');
     expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'legacy_consumer_unproven' });
     expect(outcome.pendingProvisioning).toBe(true);
-    expect(outcome.nextAction).toContain('controlled_handover');
+    expect(outcome.nextAction.startsWith('controlled_handover:')).toBe(true);
+    expect(outcome.evidencePath).toBeDefined();
+    const evidence = JSON.parse(readFileSync(outcome.evidencePath ?? '', 'utf8')) as Record<string, unknown>;
+    expect(evidence).toMatchObject({
+      schemaVersion: 'pd.service-install-provisioning.v1',
+      pendingProvisioning: true,
+      pendingReason: 'legacy_consumer_unproven',
+      readiness: { status: 'skipped' },
+      ownership: { before: 'legacy_owned', after: 'legacy_owned', generation: 0 },
+    });
     expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
       .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
     expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
