@@ -21,7 +21,7 @@ import type { DependencyGateResult, NextTaskProposal } from './internalization-s
 import { deriveSuccessorTaskId } from './internalization-state-machine.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, hasConsumedRevisionCause } from './pitask-metadata.js';
 import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition } from './revision-reopen.js';
-import { verifyRepairTaskIdentity } from './repair-task-identity.js';
+import { validateAndBackfillRepairLineage } from './repair-lineage-backfill.js';
 import { inferLegacyParentTaskId } from './correlation-lineage.js';
 // PRI-1293 Phase 3: 唯一 PeerRunnerKind 血缘权威解析器 (core 内部模块,
 // 不入 barrel — 跨包消费方经 InternalizationOrchestrator 静态只读包装访问)。
@@ -688,46 +688,25 @@ export class InternalizationOrchestrator {
       };
     }
     if (transition.kind === 'REOPEN_SOURCE_EVALUATOR' && piTask.repairPayload) {
-      // PRI-1293 R7 (P1-1): Repair 完成路径的身份前置验证 — 本分支早于通用
-      // PeerRunner 血缘门禁, 不能依赖后续检查兜底。修改来源 Evaluator 之前
-      // 必须证明 Repair 自身: payload 身份与 taskId 互证、来源 Evaluator 真实、
-      // parent/correlation/channel 一致。验证失败 = 零写入 + 结构化拒绝
-      // (不得修改 dependencyTaskIds/清空 inputArtifactRefs/递增 revisionCount)。
-      const repairIdentity = await verifyRepairTaskIdentity(
-        rawTask,
-        piTask.repairPayload.sourceEvaluatorTaskId,
-        piTask.repairPayload.repairIteration,
+      // PRI-1293 R7 (P1-1) + PRI-1300: Repair 完成路径的身份前置验证 + 缺失
+      // 亲缘字段回填 — 唯一实现上收 repair-lineage-backfill.ts (与两个宿主
+      // seeder 复用路径共享)。本分支早于通用 PeerRunner 血缘门禁, 不能依赖
+      // 后续检查兜底。修改来源 Evaluator 之前必须证明 Repair 自身: payload
+      // 身份与 taskId 互证、来源 Evaluator 真实、parent/correlation/channel
+      // 一致。验证失败 = 零写入 + 结构化拒绝 (不得修改 dependencyTaskIds/清空
+      // inputArtifactRefs/递增 revisionCount); CAS 落败 = 并发冲突, 本轮不写
+      // evaluator。
+      const repairLineage = await validateAndBackfillRepairLineage(
+        {
+          repairTaskId: taskId,
+          existing: rawTask,
+          sourceEvaluatorTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+          repairIteration: piTask.repairPayload.repairIteration,
+        },
         this.stateManager,
       );
-      if (!repairIdentity.ok) {
-        return {
-          decision: 'lineage_refused',
-          sourceTaskId: taskId,
-          reason: repairIdentity.reason,
-          detail: `repair_identity_verification_failed:${repairIdentity.detail} — source evaluator NOT reopened, zero writes`,
-        };
-      }
-      if (repairIdentity.needsLineageBackfill) {
-        // 历史缺失 parent/correlation — 来源已证明, 经全快照 CAS 安全补齐
-        // (不覆盖并发 lease); CAS 落败 = 并发冲突, 本轮不写 evaluator。
-        const backfillMerged = mergePITaskMetadata(piTask, {
-          parentTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
-          correlationId: repairIdentity.authoritativeCorrelationId,
-        });
-        const backfillCas = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
-          taskId,
-          rawTask.diagnosticJson ?? null,
-          { diagnosticJson: createPITaskDiagnosticJson(backfillMerged) },
-          {
-            expectedStatus: rawTask.status,
-            expectedAttemptCount: rawTask.attemptCount,
-            expectedMaxAttempts: rawTask.maxAttempts,
-            expectedLeaseOwner: rawTask.leaseOwner ?? null,
-            expectedLeaseExpiresAt: rawTask.leaseExpiresAt ?? null,
-            expectedLeaseGeneration: rawTask.leaseGeneration ?? 0,
-          },
-        );
-        if (backfillCas === null) {
+      if (!repairLineage.ok) {
+        if (repairLineage.reason === 'concurrent_modification') {
           return {
             decision: 'concurrent_modification',
             sourceTaskId: taskId,
@@ -735,6 +714,12 @@ export class InternalizationOrchestrator {
             detail: `repair_identity_backfill_cas_conflict:${taskId} — evaluator NOT reopened, safe to retry`,
           };
         }
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: repairLineage.reason,
+          detail: `repair_identity_verification_failed:${repairLineage.detail} — source evaluator NOT reopened, zero writes`,
+        };
       }
       // PRI-629 P0 (SPEC §12): epoch-aware causal identity — Owner 额外修订轮
       // (revise_once reopen 该 artificer,其 revisionCount+1) 再次完成时,

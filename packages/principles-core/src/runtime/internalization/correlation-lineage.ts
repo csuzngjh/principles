@@ -33,6 +33,7 @@
 
 import type { TaskRecord } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
+import type { TaskStoreFilter } from '../store/task/task-store.js';
 import { createPITaskDiagnosticJson, hydratePITaskRecord, mergePITaskMetadata } from './pitask-metadata.js';
 import { getAllowedPredecessors } from './internalization-job-graph.js';
 import { isPeerRunnerKind, type PITaskRecord } from './peer-runner-contracts.js';
@@ -41,6 +42,19 @@ import {
   candidateIdFromDreamerSeed,
   candidateIdFromDreamerTaskId,
 } from '../activation/ledger-identity.js';
+
+/**
+ * 血缘只读解析对任务存储的最窄需求 (PRI-1300):
+ *   - getTask: 沿 parentTaskId 链上行取证;
+ *   - listTasks: legacy adversarial round≥2 链的唯一前置 needs_revision
+ *     Evaluator 推断 (inferLegacyParentTaskId) 必须按 taskKind 扫描 —
+ *     非推测性暴露, 缺它历史链不可证明。
+ * RuntimeStateManager 结构满足本接口; 窄化是纯类型层收口, 运行时行为不变。
+ */
+export interface CorrelationLineageTaskStore {
+  getTask(taskId: string): Promise<TaskRecord | null>;
+  listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]>;
+}
 
 /** 父链回溯边数上限: 10 条边 (11 个节点) 通过，第 11 条边拒绝。 */
 export const CORRELATION_LINEAGE_MAX_PARENT_EDGES = 10;
@@ -255,7 +269,7 @@ function legacyCorrelationCompatible(child: PITaskRecord, parent: PITaskRecord):
 export async function inferLegacyParentTaskId(
   raw: TaskRecord,
   pi: PITaskRecord,
-  stateManager: RuntimeStateManager,
+  stateManager: CorrelationLineageTaskStore,
 ): Promise<LegacyParentInference> {
   const deps = pi.dependencyTaskIds;
   const loadTypedParent = async (parentTaskId: string, expectedKind: string): Promise<LegacyParentInference> => {
@@ -384,7 +398,7 @@ export type LegacyLineagePlan =
 
 export async function planLegacyLineageResolution(
   leafTaskRecord: TaskRecord,
-  stateManager: RuntimeStateManager,
+  stateManager: CorrelationLineageTaskStore,
 ): Promise<LegacyLineagePlan> {
   const edges: { taskId: string; parentTaskId: string }[] = [];
   let current = leafTaskRecord;

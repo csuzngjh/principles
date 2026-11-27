@@ -4,6 +4,19 @@
   "admissions": [
     {
       "entry": "./runtime",
+      "symbol": "validateAndBackfillRepairLineage",
+      "kind": "value",
+      "addedIn": "PRI-1300",
+      "expiresAt": "2027-11-26",
+      "consumers": [
+        "packages/host-runtime/src/internalization-consumer-governance.ts",
+        "packages/pd-cli/src/services/rulehost-pipeline-runner.ts"
+      ],
+      "whyNotInternal": "PRI-1300: the two repair seeders (host-runtime + pd-cli) must share the ONE write-side lineage validation + six-precondition CAS backfill implementation; the pre-PRI-1300 copies of hydrate+merge+CAS in each host were the exact collaborator-drift class this uplift removes, and a core-internal symbol cannot be reached across the package boundary without a deep-import bypass.",
+      "alternativeConsidered": "Keeping per-host hydrate+merge+CAS copies around a shared verifyRepairTaskIdentity was rejected (the write side is where the copies drifted); a narrow subpath export was rejected because the capability already travels with the ./runtime repair-lineage symbols its consumers import."
+    },
+    {
+      "entry": "./runtime",
       "symbol": "createDiagnosticianRunnerBundle",
       "kind": "value",
       "addedIn": "PRI-1292",
@@ -649,32 +662,6 @@
       ],
       "whyNotInternal": "Round-5 review: the preview derived the deterministic successor id from the raw source taskId instead of the correlation root — an algorithm that never matched what commit creates. The derivation must be a single shared source: commit (orchestrator) and the dry-run preview both consume this pure function. Duplicating it in pd-cli would re-create the exact drift class the round-5 review documented.",
       "alternativeConsidered": "Embedding the derived id into NextTaskProposal was rejected: the proposal type is constructed at multiple sites (peer graph + diagnostician branch + test fixtures) and a new required field would break all constructors; a pure function of (proposal, sourceTaskId) is the narrower seam."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "verifyRepairTaskIdentity",
-      "kind": "value",
-      "addedIn": "PRI-1293",
-      "expiresAt": "2027-11-26",
-      "consumers": [
-        "packages/host-runtime/src/internalization-consumer-governance.ts",
-        "packages/pd-cli/src/services/rulehost-pipeline-runner.ts"
-      ],
-      "whyNotInternal": "SPEC-PD-PIPELINE-SPINE-001 R7: the two repair seeders (host-runtime + pd-cli) and the orchestrator completion path must share ONE repair-identity verification rule; separate copies already drifted once (payload identity unchecked).",
-      "alternativeConsidered": "Duplicating the validator per package was the pre-R7 state and is the exact defect class being fixed."
-    },
-    {
-      "entry": "./runtime",
-      "symbol": "RepairIdentityVerification",
-      "kind": "type",
-      "addedIn": "PRI-1293",
-      "expiresAt": "2027-11-26",
-      "consumers": [
-        "packages/host-runtime/src/internalization-consumer-governance.ts",
-        "packages/pd-cli/src/services/rulehost-pipeline-runner.ts"
-      ],
-      "whyNotInternal": "The verdict shape crosses the package boundary with verifyRepairTaskIdentity; consumer packages need the discriminated union to branch on needsLineageBackfill without re-declaring it.",
-      "alternativeConsidered": "Structural re-declaration in each consumer would keep compiling after the union gains a refusal reason."
     },
     {
       "entry": "./runtime",
