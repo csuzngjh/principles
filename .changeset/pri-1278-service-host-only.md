@@ -1,4 +1,5 @@
 ---
+"@principles/core": minor
 "@principles/pd-cli": minor
 "@principles/install-layout": minor
 "principles-disciple": minor
