@@ -576,6 +576,7 @@ describe('environment detection utilities', () => {
       expect(res.ok).toBe(false);
       expect(res.reason).toBe('verification_unavailable');
       expect(res.error).toContain('process exit could not be verified');
+      expect(mockExecFileSync.mock.calls.some((call) => joinedCall(call).includes('gateway stop'))).toBe(false);
     });
 
     it('ownership-transfer mode accepts only observed-process exit plus a clear listener', async () => {
@@ -618,6 +619,27 @@ describe('environment detection utilities', () => {
       mockExistsSync.mockReturnValue(false);
       const status = await checkOpenClawGateway();
       expect(status.isRunning).toBe(false);
+      expect(status.observation).toBe('no_config');
+    });
+
+    it('classifies malformed gateway config as unverifiable instead of ordinary absence', async () => {
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(() => { throw new Error('EACCES'); });
+      const status = await checkOpenClawGateway();
+      expect(status).toMatchObject({ isRunning: false, observation: 'config_unreadable' });
+    });
+
+    it('classifies a configured but non-listening port separately from missing config', async () => {
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { port } }));
+      const status = await checkOpenClawGateway();
+      expect(status).toMatchObject({ isRunning: false, port, observation: 'port_not_listening' });
     });
 
     it('returns isRunning:true with port when a gateway is listening on the configured port', async () => {

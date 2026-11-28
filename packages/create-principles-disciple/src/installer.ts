@@ -44,7 +44,7 @@ import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installe
 import { findForeignWorkspaceOwner } from './utils/host-workspace-ownership.js';
 import type { HostWorkspaceOwnershipOptions } from './utils/host-workspace-ownership.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, readWorkspaceBackgroundOwnership, resolvePdHome } from '@principles/install-layout';
+import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, readWorkspaceBackgroundOwnership, resolvePdHome, validateMcpBinding, getHostDefaultWorkspaceDirs } from '@principles/install-layout';
 // Namespace import keeps the shared lock capability check explicit at the
 // write boundary; an incompatible older dependency cohort fails closed.
 import * as installLayoutModule from '@principles/install-layout';
@@ -5259,7 +5259,7 @@ function readSecondaryOpenClawDeclaration(homeDir: string): { ok: true; workspac
   return { ok: true, workspace: declaredRaw.trim() };
 }
 
-export type HostWorkspaceBindingSource = 'openclaw_declaration' | 'codex_mcp_binding' | 'workbuddy_governance_dir';
+export type HostWorkspaceBindingSource = 'openclaw_declaration' | 'openclaw_mcp_binding' | 'codex_mcp_binding' | 'workbuddy_governance_dir';
 
 /**
  * What the host itself records about the workspace it is bound to.
@@ -5360,6 +5360,94 @@ function readCodexBindingFromPayloadCache(): CodexBindingFileState {
     : { state: 'absent' };
 }
 
+type OpenClawEvidenceState =
+  | { readonly state: 'absent' }
+  | { readonly state: 'bound'; readonly workspaceDir: string; readonly source: 'openclaw_declaration' | 'openclaw_mcp_binding' }
+  | { readonly state: 'unverifiable'; readonly reason: string };
+
+function readOpenClawDeclarationEvidence(): OpenClawEvidenceState {
+  const declarations: { workspaceDir: string; source: string }[] = [];
+  const problems: string[] = [];
+  for (const configPath of [
+    path.join(getOpenClawDir(), OPENCLAW_PD_CONFIG_FILENAME),
+    path.join(getHomeDir(), '.principles', OPENCLAW_PD_CONFIG_FILENAME),
+  ]) {
+    if (!existsSync(configPath)) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(configPath, 'utf-8'));
+    } catch (error) {
+      problems.push(`openclaw declaration unreadable/invalid at ${configPath} (${describeError(error)})`);
+      continue;
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      problems.push(`openclaw declaration at ${configPath} has no JSON-object root`);
+      continue;
+    }
+    const declared = Object.hasOwn(parsed, 'workspace') ? Reflect.get(parsed, 'workspace') : undefined;
+    if (typeof declared !== 'string' || !isUsableWorkspacePointer(declared.trim())) {
+      problems.push(`openclaw declaration at ${configPath} has no usable absolute "workspace"`);
+      continue;
+    }
+    declarations.push({ workspaceDir: path.resolve(declared.trim()), source: configPath });
+  }
+  if (problems.length > 0) return { state: 'unverifiable', reason: problems.join('; ') };
+  const distinct = declarations.filter((entry, index) => declarations.findIndex((other) => sameWorkspaceTarget(other.workspaceDir, entry.workspaceDir)) === index);
+  if (distinct.length > 1) {
+    return { state: 'unverifiable', reason: `conflicting OpenClaw workspace declarations: ${distinct.map((entry) => `${entry.source}=${entry.workspaceDir}`).join('; ')}` };
+  }
+  return distinct.length === 1
+    ? { state: 'bound', workspaceDir: distinct[0]?.workspaceDir ?? '', source: 'openclaw_declaration' }
+    : { state: 'absent' };
+}
+
+function readOpenClawPayloadBindingEvidence(): OpenClawEvidenceState {
+  const bindingPath = path.join(getPluginExtDir(), 'mcp-binding.json');
+  if (!existsSync(bindingPath)) return { state: 'absent' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(bindingPath, 'utf-8'));
+  } catch (error) {
+    return { state: 'unverifiable', reason: `openclaw mcp-binding unreadable/invalid at ${bindingPath} (${describeError(error)})` };
+  }
+  const verdict = validateMcpBinding(parsed, 'openclaw', process.platform);
+  if (!verdict.ok) {
+    return { state: 'unverifiable', reason: `openclaw mcp-binding at ${bindingPath} is invalid (${verdict.reason})` };
+  }
+  const workspaceDir = path.resolve(verdict.binding.workspaceDir.trim());
+  if (!existsSync(workspaceDir)) {
+    return { state: 'unverifiable', reason: `openclaw mcp-binding at ${bindingPath} names a workspace that does not exist (${workspaceDir})` };
+  }
+  return { state: 'bound', workspaceDir, source: 'openclaw_mcp_binding' };
+}
+
+function readOpenClawWorkspaceBindingEvidence(): HostWorkspaceBinding {
+  const declaration = readOpenClawDeclarationEvidence();
+  const payload = readOpenClawPayloadBindingEvidence();
+  const unverifiable = [declaration, payload].filter((entry): entry is Extract<OpenClawEvidenceState, { state: 'unverifiable' }> => entry.state === 'unverifiable');
+  if (unverifiable.length > 0) {
+    return { state: 'unverifiable', reason: unverifiable.map((entry) => entry.reason).join('; ') };
+  }
+  const bound = [declaration, payload].filter((entry): entry is Extract<OpenClawEvidenceState, { state: 'bound' }> => entry.state === 'bound');
+  if (bound.length === 0) return { state: 'unbound', reason: 'no OpenClaw declaration or mcp-binding records a workspace' };
+  const [first] = bound;
+  if (first === undefined) return { state: 'unbound', reason: 'no OpenClaw declaration or mcp-binding records a workspace' };
+  if (bound.some((entry) => !sameWorkspaceTarget(entry.workspaceDir, first.workspaceDir))) {
+    return { state: 'unverifiable', reason: `conflicting OpenClaw workspace evidence: ${bound.map((entry) => `${entry.source}=${entry.workspaceDir}`).join('; ')}` };
+  }
+  return { state: 'bound', workspaceDir: first.workspaceDir, source: first.source };
+}
+
+function hostDefaultClaimOptions(): { readonly homeDir: string; readonly codexHome: string; readonly openclawHome: string; readonly workbuddyConfigDir: string; readonly platform: string } {
+  return {
+    homeDir: getHomeDir(),
+    codexHome: getCodexHomeDir(),
+    openclawHome: getOpenClawDir(),
+    workbuddyConfigDir: process.env.WORKBUDDY_CONFIG_DIR ?? path.join(getHomeDir(), '.workbuddy'),
+    platform: process.platform,
+  };
+}
+
 /** The workspace a host is ACTUALLY bound to, read from that host's own record. */
 export function readHostWorkspaceBinding(host: 'codex' | 'openclaw' | 'workbuddy'): HostWorkspaceBinding {
   if (host === 'workbuddy') {
@@ -5370,30 +5458,7 @@ export function readHostWorkspaceBinding(host: 'codex' | 'openclaw' | 'workbuddy
     };
   }
   if (host === 'openclaw') {
-    const configPath = path.join(getOpenClawDir(), OPENCLAW_PD_CONFIG_FILENAME);
-    if (!existsSync(configPath)) {
-      return { state: 'unbound', reason: `openclaw declaration absent at ${configPath}` };
-    }
-    let raw: string;
-    try {
-      raw = readFileSync(configPath, 'utf-8');
-    } catch (error) {
-      return { state: 'unverifiable', reason: `openclaw declaration unreadable at ${configPath} (${describeError(error)})` };
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      return { state: 'unverifiable', reason: `openclaw declaration is not valid JSON (${describeError(error)})` };
-    }
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      return { state: 'unverifiable', reason: `openclaw declaration at ${configPath} has no JSON-object root` };
-    }
-    const declared = Object.hasOwn(parsed, 'workspace') ? Reflect.get(parsed, 'workspace') : undefined;
-    if (typeof declared !== 'string' || !isUsableWorkspacePointer(declared.trim())) {
-      return { state: 'unbound', reason: `openclaw declaration at ${configPath} has no usable absolute "workspace"` };
-    }
-    return { state: 'bound', workspaceDir: path.resolve(declared.trim()), source: 'openclaw_declaration' };
+    return readOpenClawWorkspaceBindingEvidence();
   }
 
   // Codex: durable binding first, payload-local legacy second — the same
@@ -5410,6 +5475,23 @@ export function readHostWorkspaceBinding(host: 'codex' | 'openclaw' | 'workbuddy
   if (payload.state === 'invalid') return { state: 'unverifiable', reason: payload.reason };
   return { state: 'unbound', reason: 'no Codex mcp-binding.json records an existing workspace' };
 }
+
+/** Target-specific OpenClaw claim judgment: explicit evidence plus the host default workspaces. */
+function openClawWorkspaceClaimState(workspaceDir: string): 'bound' | 'unbound' | 'unverifiable' {
+  let binding: HostWorkspaceBinding;
+  try {
+    binding = readHostWorkspaceBinding('openclaw');
+  } catch {
+    return 'unverifiable';
+  }
+  if (binding.state === 'unverifiable') return 'unverifiable';
+  if (binding.state === 'bound' && sameWorkspaceTarget(binding.workspaceDir, workspaceDir)) return 'bound';
+  for (const candidate of getHostDefaultWorkspaceDirs('openclaw', hostDefaultClaimOptions())) {
+    if (sameWorkspaceTarget(candidate, workspaceDir)) return 'bound';
+  }
+  return 'unbound';
+}
+
 
 /**
  * PRI-1278 Phase 5 review: a host that is REFRESHED (not explicitly selected)
@@ -5452,6 +5534,15 @@ export function resolveResumeProvisioningHost(
   const bound: (typeof candidates)[number][] = [];
   const unverifiable: string[] = [];
   for (const host of candidates) {
+    if (host === 'openclaw') {
+      const claim = openClawWorkspaceClaimState(workspaceDir);
+      if (claim === 'unverifiable') {
+        unverifiable.push('openclaw: workspace claim evidence could not be verified');
+      } else if (claim === 'bound') {
+        bound.push(host);
+      }
+      continue;
+    }
     let binding: HostWorkspaceBinding;
     try {
       binding = readHostWorkspaceBinding(host);
@@ -5466,7 +5557,9 @@ export function resolveResumeProvisioningHost(
       bound.push(host);
     }
   }
-  if (bound.length === 0 && unverifiable.length > 0) {
+  // Positive evidence for one host is not evidence that another host is
+  // absent. Any unverifiable binding evidence keeps the migration fail-closed.
+  if (unverifiable.length > 0) {
     return {
       ok: false,
       reason: unverifiable.join('; '),
@@ -5499,6 +5592,8 @@ export interface ServiceHostInstallProvisioningInput {
   readonly probes?: ServiceHostBridgeProbes;
   /** Installer-scoped proof collected before mutation for OpenClaw migration targets. */
   readonly openClawGatewayQuiesce?: OpenClawGatewayQuiesce;
+  /** Production re-probe forwarded to the ownership-CAS boundary. */
+  readonly openClawGatewayQuiesceFn?: () => Promise<OpenClawGatewayQuiesce> | OpenClawGatewayQuiesce;
 }
 
 /**
@@ -5568,6 +5663,7 @@ export async function provisionServiceHostInstallTargets(
       ...(input.probes !== undefined ? { probes: input.probes } : {}),
       requireOpenClawGatewayQuiesce: !input.freshInstall,
       ...(input.openClawGatewayQuiesce !== undefined ? { openClawGatewayQuiesce: input.openClawGatewayQuiesce } : {}),
+      ...(input.openClawGatewayQuiesceFn !== undefined ? { openClawGatewayQuiesceFn: input.openClawGatewayQuiesceFn } : {}),
       warn: input.warn,
       ...(input.info !== undefined ? { info: input.info } : {}),
     });
@@ -5589,30 +5685,56 @@ export async function provisionServiceHostInstallTargets(
  * that bound workspace. This predicate is intentionally conservative and only
  * widens the existing gateway pre-flight; it never creates a migration target.
  */
+/**
+ * Translate a measured negative Gateway state into migration evidence. Only a
+ * readable configured port with no listener is positive not-running evidence;
+ * missing/unreadable configuration is unknown, never proof of quiescence.
+ */
+export function openClawGatewayQuiesceFromObservedStatus(
+  status: OpenClawGatewayStatus,
+  explicitOwnershipMigration: boolean,
+): OpenClawGatewayQuiesce {
+  return !explicitOwnershipMigration || status.observation === 'port_not_listening'
+    ? { ok: true, evidence: 'not_running' }
+    : {
+        ok: false,
+        reason: `OpenClaw Gateway state is unverifiable (${status.observation ?? 'observation unavailable'}); absence of a listener is not quiesce evidence`,
+      };
+}
+
 export function openClawMigrationRequiresGatewayCheck(options: {
   readonly host: HostSelection;
   readonly workspaceDir: string;
   readonly enableServiceHost?: boolean;
   readonly serviceHost?: { readonly intent: string; readonly source: string };
+  /** Sibling hosts this already-installed runtime will refresh in the same run. */
+  readonly refreshTargets?: readonly HostTarget[];
 }): boolean {
-  if (installsOpenClaw(options.host)) return true;
+  if (installsOpenClaw(options.host) || options.refreshTargets?.includes('openclaw') === true) return true;
   const explicitEnable = options.serviceHost !== undefined
     ? options.serviceHost.intent === 'enable' && options.serviceHost.source === 'explicit_flag'
     : options.enableServiceHost === true;
   if (!explicitEnable) return false;
-  let binding: HostWorkspaceBinding;
-  try {
-    binding = readHostWorkspaceBinding('openclaw');
-  } catch {
-    return false; // unverifiable is handled fail-closed by provisioning itself
-  }
-  if (binding.state !== 'bound') return false;
-  const candidates = new Set([workspaceKey(options.workspaceDir)]);
   const manifest = readManifestWorkspacesForProvisioning();
-  for (const workspaceDir of manifest.workspaces) candidates.add(workspaceKey(workspaceDir));
-  return candidates.has(workspaceKey(binding.workspaceDir));
+  const candidatePaths = [options.workspaceDir, ...manifest.workspaces];
+  try {
+    const binding = readHostWorkspaceBinding('openclaw');
+    if (binding.state === 'bound') candidatePaths.push(binding.workspaceDir);
+  } catch {
+    // Unverifiable evidence remains fail-closed in resolveResumeProvisioningHost;
+    // it must not become proof that no OpenClaw workspace is in scope.
+  }
+  return candidatePaths.some((workspaceDir) => openClawWorkspaceClaimState(workspaceDir) === 'bound');
 }
 
+
+async function probeOpenClawGatewayQuiesceForMigration(): Promise<OpenClawGatewayQuiesce> {
+  try {
+    return openClawGatewayQuiesceFromObservedStatus(await checkOpenClawGateway(), true);
+  } catch (error) {
+    return { ok: false, reason: `OpenClaw Gateway state could not be re-verified (${error instanceof Error ? error.message : String(error)})` };
+  }
+}
 
 export function resolveUpdateWorkspaceDir(
   workspaceDir: string,
@@ -6501,13 +6623,30 @@ export async function install(
     ok: false,
     reason: 'OpenClaw Gateway quiescence was not evaluated before install',
   };
-  const gatewayStatus = openClawMigrationRequiresGatewayCheck(options)
+  // Host coverage must be known BEFORE the Gateway gate: on an upgrade the
+  // run may refresh an already-installed OpenClaw sibling even when this
+  // invocation names only Codex/none. This is a read-only plan; the identical
+  // persisted/detected state is planned again inside the transaction below.
+  const preflightHostPlan = planUpgradeHosts(
+    options.host,
+    freshInstallRun ? [] : readPersistedInstallHosts(),
+    freshInstallRun ? [] : detectInstalledHosts(),
+  );
+  const requiresGatewayCheck = openClawMigrationRequiresGatewayCheck({
+    ...options,
+    refreshTargets: preflightHostPlan.refreshTargets,
+  });
+  const gatewayStatus = requiresGatewayCheck
     ? await checkOpenClawGateway()
-    : { isRunning: false };
-  if (!gatewayStatus.isRunning) {
-    openClawGatewayQuiesce = { ok: true, evidence: 'not_running' };
+    : null;
+  if (requiresGatewayCheck && gatewayStatus !== null && !gatewayStatus.isRunning) {
+    // A negative port probe is evidence only when the gateway configuration
+    // itself was readable enough to name the port. Missing/malformed config is
+    // unverifiable for ownership migration, while ordinary upgrades keep the
+    // historical non-blocking absence behavior.
+    openClawGatewayQuiesce = openClawGatewayQuiesceFromObservedStatus(gatewayStatus, explicitOwnershipMigration);
   }
-  if (gatewayStatus.isRunning) {
+  if (gatewayStatus?.isRunning === true) {
     const action = await resolveGatewayAction(gatewayStatus, {
       stopGateway: options.stopGateway,
       interactive: !nonInteractive,
@@ -7039,6 +7178,7 @@ export async function install(
     // install/refresh result below, keeping the other hosts' error
     // isolation intact.
     let codexWorkspaceDir: string | undefined;
+    let codexWorkspaceRedirected = false;
     let codexWorkspaceError: string | undefined;
     // PRI-1278 Phase 5 review: materialize a Codex workspace ONLY when Codex
     // is the REQUESTED target. A refresh-only Codex (a plain `--yes` upgrade
@@ -7053,10 +7193,28 @@ export async function install(
           ensureDir: (dir) => fse.ensureDir(dir),
           warn: (message) => logger.warn(message),
         });
-        ({ codexWorkspaceDir } = materialized);
+        ({ codexWorkspaceDir, redirected: codexWorkspaceRedirected } = materialized);
       } catch (error) {
         codexWorkspaceError = error instanceof Error ? error.message : String(error);
         logger.warn(`Host "codex" workspace materialization failed: ${codexWorkspaceError}`);
+      }
+    }
+    // A redirected Codex workspace is itself a Service-Host candidate. The
+    // main runtime-init above targets options.workspaceDir (often OpenClaw),
+    // while Codex setup deliberately uses --skip-init; initialize the real
+    // redirected workspace through the same installed pd-cli mechanism so
+    // ownership cannot outrun discovery authorization.
+    if (codexWorkspaceDir !== undefined && codexWorkspaceRedirected && codexWorkspaceError === undefined) {
+      try {
+        const pdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
+        execFileSync(process.execPath, [pdCliEntry, 'runtime', 'init', '--confirm', '--workspace', codexWorkspaceDir], {
+          stdio: ['ignore', 'ignore', 'pipe'],
+          windowsHide: true,
+          timeout: 30000,
+          env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
+        });
+      } catch (err) {
+        logger.warn(`pd runtime init failed for redirected Codex workspace ${codexWorkspaceDir} (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     const hostResults = await runHostInstallers(options.host, hostInstallCtx, { codexWorkspaceDir, codexWorkspaceError });
@@ -7182,8 +7340,17 @@ export async function install(
       workspaceDir: options.workspaceDir,
       ...(codexWorkspaceDir !== undefined ? { codexWorkspaceDir } : {}),
     });
+    // Existing-install hostless runs are often upgrade/migration invocations
+    // whose workspace came from detection (~/pd-workspace or PD_WORKSPACE_DIR),
+    // not Owner intent. Registering that guess before reading the migration
+    // authority would let the same run self-authorize it. Only an explicit
+    // hostless --workspace is a registration target; verified sibling refresh
+    // bindings below remain authoritative.
+    const registrationRunTargets = freshInstallRun
+      ? runTargets
+      : runTargets.filter((target) => target.host !== 'none' || options.workspaceExplicit === true);
     const servedWorkspaceDirs = [
-      ...runTargets.map((target) => target.workspaceDir),
+      ...registrationRunTargets.map((target) => target.workspaceDir),
       ...refreshedWorkspaceDirs,
     ];
     writeInstallManifest({
@@ -7359,6 +7526,7 @@ export async function install(
         warn: (message) => logger.warn(message),
         info: (message) => logger.info(message),
         openClawGatewayQuiesce,
+        openClawGatewayQuiesceFn: probeOpenClawGatewayQuiesceForMigration,
       });
       serviceHostOutcome = {
         freshInstall,

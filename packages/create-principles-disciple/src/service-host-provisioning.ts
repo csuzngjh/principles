@@ -112,6 +112,8 @@ export interface ProvisioningInput {
   /** Upgrade installs must supply positive Gateway quiesce evidence for OpenClaw targets. */
   readonly requireOpenClawGatewayQuiesce?: boolean;
   readonly openClawGatewayQuiesce?: OpenClawGatewayQuiesce;
+  /** Fresh probe at the ownership-CAS boundary; production installers supply this so readiness work cannot make Gateway evidence stale. */
+  readonly openClawGatewayQuiesceFn?: () => Promise<OpenClawGatewayQuiesce> | OpenClawGatewayQuiesce;
   /**
    * Upgrade one-time-switch evidence (upgrade installs only): the legacy
    * continuous-worker process scan the installer ran BEFORE the first
@@ -190,23 +192,83 @@ const LEGACY_WORKER_HOSTS = new Set(['codex', 'workbuddy']);
  * `worker`, which keeps unrelated Node processes out of the match set.
  */
 export function matchLegacyWorkerArgv(argv: readonly string[]): string | null {
-  // `--once` is the new bounded mode. `--status`/`--readiness` are no-consume
-  // probes, not continuous consumers; OpenClaw never had a CLI continuous worker.
-  if (argv.includes('--once') || argv.includes('--status') || argv.includes('--readiness')) return null;
-  const workerIndex = argv.findIndex((token) => token === 'worker');
-  if (workerIndex <= 0 || !LEGACY_WORKER_HOSTS.has(argv[workerIndex - 1] ?? '')) return null;
-  for (let index = workerIndex + 1; index < argv.length; index += 1) {
-    const token = argv[index];
-    if (token === '--workspace') {
-      const value = argv[index + 1];
-      return typeof value === 'string' && value.length > 0 ? value : null;
+  // Inspect every exact `<host> worker` pair. Mode flags are interpreted only
+  // in the argument stream after that subcommand; a workspace VALUE such as
+  // `--once` is consumed as a value and must not suppress detection.
+  for (let workerIndex = 1; workerIndex < argv.length; workerIndex += 1) {
+    if (argv[workerIndex] !== 'worker' || !LEGACY_WORKER_HOSTS.has(argv[workerIndex - 1] ?? '')) continue;
+    let continuous = true;
+    let workspaceDir: string | null = null;
+    for (let index = workerIndex + 1; index < argv.length; index += 1) {
+      const token = argv[index];
+      if (token === '--workspace') {
+        const value = argv[index + 1];
+        if (typeof value === 'string' && value.length > 0) {
+          workspaceDir = value;
+          index += 1;
+        }
+        continue;
+      }
+      if (token?.startsWith('--workspace=') === true) {
+        const value = token.slice('--workspace='.length);
+        if (value.length > 0) workspaceDir = value;
+        continue;
+      }
+      // `--once` is the new bounded mode. `--status`/`--readiness` are
+      // no-consume probes, not continuous consumers.
+      if (token === '--once' || token === '--status' || token === '--readiness') continuous = false;
     }
-    if (token?.startsWith('--workspace=') === true) {
-      const value = token.slice('--workspace='.length);
-      return value.length > 0 ? value : null;
-    }
+    if (continuous && workspaceDir !== null) return workspaceDir;
   }
   return null;
+}
+
+/**
+ * Windows process entries are a single CommandLine string, not an argv array.
+ * Parse the MSVC/CommandLineToArgvW quoting rules closely enough for the
+ * installer-produced worker shape; malformed whitespace/token structure is a
+ * scan failure rather than a false clean result.
+ */
+export function parseWindowsCommandLineArgv(commandLine: string): readonly string[] | null {
+  const argv: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let tokenActive = false;
+  let backslashes = 0;
+  for (const char of commandLine) {
+    if (char === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (char === '"') {
+      current += '\\'.repeat(Math.floor(backslashes / 2));
+      if (backslashes % 2 === 0) {
+        // A quote preceded by an even number of backslashes toggles quoting;
+        // inside quotes a doubled quote is represented by the sequence rules
+        // closely enough for paths produced by Node/Windows installers.
+        inQuotes = !inQuotes;
+        tokenActive = true;
+      } else {
+        current += '"';
+        tokenActive = true;
+      }
+      backslashes = 0;
+      continue;
+    }
+    current += '\\'.repeat(backslashes);
+    backslashes = 0;
+    if ((char === ' ' || char === '\t') && !inQuotes) {
+      if (tokenActive || current.length > 0) argv.push(current);
+      current = '';
+      tokenActive = false;
+      continue;
+    }
+    current += char;
+    tokenActive = true;
+  }
+  current += '\\'.repeat(backslashes);
+  if (tokenActive || current.length > 0 || argv.length === 0) argv.push(current);
+  return argv.length > 0 && argv.every((token) => typeof token === 'string') ? argv : null;
 }
 
 
@@ -219,13 +281,26 @@ export function parseDarwinProcArgs2(raw: Buffer): readonly string[] | null {
   if (raw.length < 4) return null;
   const argc = raw.readInt32LE(0);
   if (!Number.isInteger(argc) || argc < 1 || argc > 4096) return null;
-  const chunks = raw.subarray(4).toString('utf8').split('\0');
-  if (chunks.length < 2) return null;
-  // chunks[0] is the executable path; empty chunks after it are alignment padding.
-  let index = 1;
-  while (index < chunks.length && chunks[index] === '') index += 1;
-  if (chunks.length - index < argc) return null;
-  return chunks.slice(index, index + argc);
+  const execEnd = raw.indexOf(0, 4);
+  if (execEnd < 4 || execEnd === raw.length - 1) return null;
+
+  // Apple pads the executable path with NUL bytes before argv. Empty leading
+  // argv entries are inherently ambiguous with that padding in this kernel
+  // format; for normal host-launched workers argv[0] is non-empty. Parse the
+  // selected entries byte-wise and require every one to be NUL-terminated so
+  // truncation can never masquerade as a complete argument.
+  let cursor = execEnd + 1;
+  while (cursor < raw.length && raw[cursor] === 0) cursor += 1;
+  if (cursor >= raw.length) return null;
+  const argv: string[] = [];
+  for (let index = 0; index < argc; index += 1) {
+    const end = raw.indexOf(0, cursor);
+    if (end < 0) return null;
+    argv.push(raw.subarray(cursor, end).toString('utf8'));
+    cursor = end + 1;
+    if (cursor > raw.length && index < argc - 1) return null;
+  }
+  return argv;
 }
 
 /** One-shot Darwin argv reader. Ruby/Fiddle is a transient interpreter use, not a service. */
@@ -238,13 +313,23 @@ module PdSysctl
   extern 'int sysctl(void*, unsigned int, void*, void*, void*, unsigned long)'
 end
 failed = []
+pid_exists = lambda do |pid|
+  begin
+    Process.kill(0, pid)
+    true
+  rescue Errno::ESRCH
+    false
+  rescue Errno::EPERM
+    true
+  end
+end
 ARGV.each do |pid_text|
   pid = pid_text.to_i
   next if pid <= 1
   mib = [1, 49, pid].pack('l<3')
   size = [0].pack('Q<')
   if PdSysctl.sysctl(mib, 3, nil, size, nil, 0) != 0
-    failed << pid
+    failed << pid if pid_exists.call(pid)
     next
   end
   len = size.unpack1('Q<')
@@ -252,23 +337,27 @@ ARGV.each do |pid_text|
     failed << pid
     next
   end
-  buf = "\0" * len
-  size = [len].pack('Q<')
+  # KERN_PROCARGS2 is racy while a process execs. Allocate the platform
+  # argument ceiling once (Apple ps uses the same fixed-ceiling strategy) so a
+  # growing argument area cannot silently truncate the second read.
+  capacity = 1024 * 1024 + 1
+  if len > capacity - 1
+    failed << pid
+    next
+  end
+  buf = "\0" * capacity
+  size = [capacity].pack('Q<')
   if PdSysctl.sysctl(mib, 3, buf, size, nil, 0) != 0
-    failed << pid
+    failed << pid if pid_exists.call(pid)
     next
   end
-  raw = buf.byteslice(0, size.unpack1('Q<'))
-  argc = raw.byteslice(0, 4).unpack1('l<')
-  chunks = raw.byteslice(4, raw.bytesize - 4).split("\0", -1)
-  i = 1
-  i += 1 while i < chunks.length && chunks[i] == ''
-  if argc < 1 || chunks.length - i < argc
-    failed << pid
+  out_len = size.unpack1('Q<')
+  if out_len < 4 || out_len >= capacity
+    failed << pid if pid_exists.call(pid)
     next
   end
-  argv = chunks.slice(i, argc)
-  puts "#{pid}:#{argv.map { |arg| arg.unpack1('H*') }.join(',')}"
+  raw = buf.byteslice(0, out_len)
+  puts "#{pid}:#{raw.unpack1('H*')}"
 end
 unless failed.empty?
   warn "kern.procargs2 unreadable for pid(s) #{failed.first(5).join(',')}"
@@ -277,14 +366,14 @@ end
 `;
 
 function listDarwinProcessRows(): LegacyWorkerProcessRow[] {
-  const pidOutput = execFileSync('ps', ['-axo', 'pid='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  const pidOutput = execFileSync('ps', ['-xo', 'pid='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
   const pids = pidOutput.split(/\s+/).map((value) => Number.parseInt(value, 10)).filter((pid) => Number.isInteger(pid) && pid > 1);
   if (pids.length === 0) return [];
   const output = execFileSync('/usr/bin/ruby', ['-e', DARWIN_ARGV_READER, ...pids.map(String)], {
     encoding: 'utf8',
     timeout: 30_000,
     windowsHide: true,
-    maxBuffer: 8 * 1024 * 1024,
+    maxBuffer: 32 * 1024 * 1024,
   });
   const rows: LegacyWorkerProcessRow[] = [];
   for (const line of output.split('\n')) {
@@ -292,7 +381,9 @@ function listDarwinProcessRows(): LegacyWorkerProcessRow[] {
     const separator = line.indexOf(':');
     const pid = Number.parseInt(line.slice(0, separator), 10);
     if (!(separator > 0 && Number.isInteger(pid))) throw new Error('darwin argv reader returned an unparseable row');
-    const argv = line.slice(separator + 1).split(',').filter((hex) => hex.length > 0).map((hex) => Buffer.from(hex, 'hex').toString('utf8'));
+    const raw = Buffer.from(line.slice(separator + 1), 'hex');
+    const argv = parseDarwinProcArgs2(raw);
+    if (argv === null) throw new Error(`darwin KERN_PROCARGS2 payload unparseable for pid ${pid}`);
     rows.push({ pid, commandLine: argv.join(' '), argv });
   }
   return rows;
@@ -305,13 +396,22 @@ function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
     // powershell.exe is the project-allowlisted process-query host (wmic is
     // gone since Windows 11 24H2). EncodedCommand because Node→PowerShell
     // argv quoting corrupts embedded quotes in -Command strings.
-    const script = '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }';
+    const unreadableSentinel = '__PD_COMMANDLINE_UNREADABLE__';
+    const script = '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | ForEach-Object { $cmd = $_.CommandLine; if ($null -eq $cmd -or $cmd.Length -eq 0) { "$($_.ProcessId)`t' + unreadableSentinel + '" } else { "$($_.ProcessId)`t$cmd" } }';
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
     const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
     for (const line of output.split('\n')) {
       const tab = line.indexOf('\t');
       const pid = Number.parseInt(line.slice(0, tab), 10);
-      if (tab > 0 && Number.isInteger(pid) && pid > 0) rows.push({ pid, commandLine: line.slice(tab + 1).trim() });
+      if (tab > 0 && Number.isInteger(pid) && pid > 0) {
+        const commandLine = line.slice(tab + 1).trim();
+        if (commandLine === unreadableSentinel || commandLine.length === 0) {
+          throw new Error(`Windows process command line unreadable for pid ${pid}`);
+        }
+        const argv = parseWindowsCommandLineArgv(commandLine);
+        if (argv === null) throw new Error(`Windows process command line unparseable for pid ${pid}`);
+        rows.push({ pid, commandLine, argv });
+      }
     }
     return rows;
   }
@@ -336,7 +436,8 @@ function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
         if (code !== 'ENOENT' && code !== 'ESRCH') unreadable.push(`${entry.name}:${code ?? 'read_failed'}`);
         continue;
       }
-      const argv = raw.toString('utf8').split('\0').filter((token) => token.length > 0);
+      const argv = raw.toString('utf8').split('\0');
+      if (argv[argv.length - 1] === '') argv.pop();
       if (argv.length === 0) continue; // kernel threads and zombies carry no argv
       rows.push({ pid, commandLine: argv.join(' '), argv });
     }
@@ -894,6 +995,28 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
         ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
         firstCycle: notAttempted('legacy_worker_still_running'),
         nextAction: `Ownership was NOT handed over: ${detail}. Restart the machine first — or let the Companion update finish retiring its old worker processes — then re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      });
+    }
+  }
+
+  // Re-verify OpenClaw quiescence at the CAS boundary as well. The initial
+  // evidence was collected before a long install transaction and readiness
+  // probes; ownership must not flip if the Gateway returned in that window.
+  if (input.requireOpenClawGatewayQuiesce === true && (input.host === 'openclaw' || input.host === 'all')) {
+    let boundaryQuiesce = input.openClawGatewayQuiesce;
+    if (input.openClawGatewayQuiesceFn !== undefined) {
+      try {
+        boundaryQuiesce = await input.openClawGatewayQuiesceFn();
+      } catch (error) {
+        boundaryQuiesce = { ok: false, reason: `Gateway quiescence re-verification failed: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    }
+    if (boundaryQuiesce?.ok !== true) {
+      return recordPending('openclaw_gateway_unproven', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('openclaw_gateway_unproven'),
+        nextAction: `Ownership was NOT handed over because OpenClaw Gateway quiescence could not be re-verified immediately before the ownership write (${boundaryQuiesce?.reason ?? 'no quiesce evidence'}). Stop the OpenClaw Gateway and re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
       });
     }
   }

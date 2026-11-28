@@ -355,15 +355,24 @@ export function getPluginExtDir(
   return path.join(homePaths.openclawHome, 'extensions', 'principles-disciple');
 }
 
+export type OpenClawGatewayObservation =
+  | 'listening'
+  | 'port_not_listening'
+  | 'no_config'
+  | 'config_unreadable'
+  | 'port_not_configured';
+
 export interface OpenClawGatewayStatus {
   isRunning: boolean;
   port?: number;
   pid?: number;
+  /** Why isRunning was decided; ownership migration may not treat unobservable absence as quiesce. */
+  observation?: OpenClawGatewayObservation;
 }
 
-function readOpenClawPort(): number | null {
+function readOpenClawPort(): { port: number | null; observation: Exclude<OpenClawGatewayObservation, 'listening' | 'port_not_listening'> } {
   const configPath = path.join(getOpenClawConfigDir(), 'openclaw.json');
-  if (!fs.existsSync(configPath)) return null;
+  if (!fs.existsSync(configPath)) return { port: null, observation: 'no_config' };
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const config: unknown = JSON.parse(raw);
@@ -371,11 +380,13 @@ function readOpenClawPort(): number | null {
       const { gateway } = config as Record<string, unknown>;
       if (gateway && typeof gateway === 'object' && !Array.isArray(gateway)) {
         const { port } = gateway as Record<string, unknown>;
-        if (typeof port === 'number' && port > 0 && port < 65536) return port;
+        if (typeof port === 'number' && port > 0 && port < 65536) return { port, observation: 'port_not_configured' };
       }
     }
-  } catch { /* ignore */ }
-  return null;
+    return { port: null, observation: 'port_not_configured' };
+  } catch {
+    return { port: null, observation: 'config_unreadable' };
+  }
 }
 
 function checkPortListening(port: number): Promise<boolean> {
@@ -414,11 +425,12 @@ export function parseNetstatPid(output: string, port: number): number | undefine
 }
 
 export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
-  const port = readOpenClawPort();
-  if (!port) return { isRunning: false };
+  const configured = readOpenClawPort();
+  const { port } = configured;
+  if (!port) return { isRunning: false, observation: configured.observation };
 
   const listening = await checkPortListening(port);
-  if (!listening) return { isRunning: false };
+  if (!listening) return { isRunning: false, port, observation: 'port_not_listening' };
 
   let pid: number | undefined = undefined;
   try {
@@ -447,7 +459,7 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
     }
   } catch { /* ignore */ }
 
-  return { isRunning: true, port, pid };
+  return { isRunning: true, port, pid, observation: 'listening' };
 }
 
 /**
@@ -669,6 +681,21 @@ export async function stopOpenClawGateway(
   observed?: OpenClawGatewayStatus,
   deps?: GatewayStopConfirmationDeps,
 ): Promise<GatewayControlResult> {
+  // Ownership transfer must never issue a stop it cannot verify: if the
+  // pre-flight did not resolve both the listener port and the holding PID,
+  // sending the stop first would leave a failure path where the gateway is
+  // down but `restartedGateway` was never set. Refuse before mutation instead.
+  if (deps?.requireProcessExit === true) {
+    const port = observed?.port;
+    const pid = observed?.pid;
+    if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0 || port >= 65536 || typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) {
+      return {
+        ok: false,
+        reason: 'verification_unavailable',
+        error: 'openclaw gateway stop was not issued: the observed gateway port/PID was incomplete, so process exit could not be verified for ownership transfer',
+      };
+    }
+  }
   const command = runGatewayServiceCommand('stop');
   // A successful stop command is only a request, not evidence that the legacy
   // consumer exited. Ownership transfer may proceed only after the observed

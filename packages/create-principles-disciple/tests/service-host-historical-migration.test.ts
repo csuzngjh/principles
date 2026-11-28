@@ -7,6 +7,7 @@ import { readWorkspaceBackgroundOwnership } from '@principles/install-layout';
 import type { ServiceHostSchedulerOutcome } from '../src/service-host-bridge.js';
 import {
   mergeManifestProvisioningTargets,
+  openClawGatewayQuiesceFromObservedStatus,
   openClawMigrationRequiresGatewayCheck,
   provisionServiceHostInstallTargets,
   type ServiceHostInstallProvisioningInput,
@@ -100,6 +101,49 @@ describe('OpenClaw migration gateway preflight authority', () => {
       workspaceDir: path.join(home, 'elsewhere'),
       serviceHost: { intent: 'enable', source: 'explicit_flag' },
     })).toBe(true);
+  });
+
+
+  it('includes the real OpenClaw binding even when the old manifest omitted that workspace', () => {
+    const boundWorkspace = path.join(home, 'actual openclaw workspace');
+    mkdirSync(boundWorkspace, { recursive: true });
+    const openclawHome = path.join(home, '.openclaw');
+    mkdirSync(openclawHome, { recursive: true });
+    writeFileSync(path.join(openclawHome, 'principles-disciple.json'), JSON.stringify({ workspace: boundWorkspace }), 'utf8');
+    const pdHome = path.join(home, '.pd');
+    mkdirSync(pdHome, { recursive: true });
+    writeFileSync(path.join(pdHome, 'install.json'), JSON.stringify({
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: [],
+      workspaces: [path.join(home, 'unrelated manifest workspace')],
+    }), 'utf8');
+
+    expect(openClawMigrationRequiresGatewayCheck({
+      host: 'none',
+      workspaceDir: path.join(home, 'invocation cwd workspace'),
+      serviceHost: { intent: 'enable', source: 'explicit_flag' },
+    })).toBe(true);
+  });
+
+  it('requires the gateway check when OpenClaw is a sibling refresh target even without explicit Service Host migration', () => {
+    expect(openClawMigrationRequiresGatewayCheck({
+      host: 'codex',
+      workspaceDir: path.join(home, 'codex workspace'),
+      refreshTargets: ['openclaw'],
+    })).toBe(true);
+  });
+
+  it('does not treat missing or unreadable gateway config as migration quiesce evidence', () => {
+    for (const observation of ['no_config', 'config_unreadable', 'port_not_configured'] as const) {
+      const quiesce = openClawGatewayQuiesceFromObservedStatus({ isRunning: false, observation }, true);
+      expect(quiesce.ok).toBe(false);
+    }
+    expect(openClawGatewayQuiesceFromObservedStatus({ isRunning: false, observation: 'port_not_listening' }, true))
+      .toEqual({ ok: true, evidence: 'not_running' });
+    // Ordinary upgrades keep the historical absence semantics; the strictness is migration-scoped.
+    expect(openClawGatewayQuiesceFromObservedStatus({ isRunning: false, observation: 'no_config' }, false))
+      .toEqual({ ok: true, evidence: 'not_running' });
   });
 
   it('does not widen the check without explicit migration authorization or for a non-migration target', () => {

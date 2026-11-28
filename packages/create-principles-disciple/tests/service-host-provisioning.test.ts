@@ -25,6 +25,7 @@ import {
   matchLegacyWorkerArgv,
   matchLegacyWorkerCommandLine,
   parseDarwinProcArgs2,
+  parseWindowsCommandLineArgv,
   provisionFreshInstallWorkspace,
   readAllPendingProvisioning,
   readPendingProvisioningEvidence,
@@ -569,8 +570,14 @@ describe('scanRunningLegacyWorkerProcesses — real Linux argv scan', () => {
     const once = start(['codex', 'worker', '--once', '--workspace', workspaceDir]);
     const unrelated = start(['unrelated', 'worker', '--workspace', workspaceDir]);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 75));
-      const scan = scanRunningLegacyWorkerProcesses();
+      // Bounded readiness polling, not a fixed startup sleep: the scan itself
+      // is the observation, and slow CI process startup must not become flaky.
+      const deadline = Date.now() + 2_000;
+      let scan = scanRunningLegacyWorkerProcesses();
+      while (!scan.workers.some((worker) => worker.pid === legacy.pid) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        scan = scanRunningLegacyWorkerProcesses();
+      }
       expect(scan).toMatchObject({ ok: true });
       const found = scan.workers.find((worker) => worker.pid === legacy.pid);
       expect(found?.workspaceDir).toBe(workspaceDir);
@@ -596,6 +603,18 @@ describe('scanRunningLegacyWorkerProcesses — real Linux argv scan', () => {
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'openclaw', 'worker', '--workspace', workspace])).toBeNull();
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'unrelated', 'worker', '--workspace', workspace])).toBeNull();
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'not-worker', '--workspace', workspace])).toBeNull();
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', '', 'worker', '--workspace', workspace])).toBeNull();
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'worker', 'codex', 'worker', '--workspace', workspace])).toBe(workspace);
+    expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'worker', '--workspace', '--once'])).toBe('--once');
+  });
+
+  it('windows command-line tokenization preserves quoted workspace boundaries', () => {
+    const windowsWorkspace = 'C:\\pd legacy worker test\\workspace';
+    const argv = parseWindowsCommandLineArgv(`"C:\\Program Files\\node\\node.exe" pd.js codex worker --workspace "${windowsWorkspace}"`);
+    expect(argv).not.toBeNull();
+    expect(argv?.at(-1)).toBe(windowsWorkspace);
+    expect(matchLegacyWorkerArgv(argv ?? [])).toBe(windowsWorkspace);
+    expect(parseWindowsCommandLineArgv(`node.exe pd.js codex worker --workspace "C:\\path with --once text"`)).toContain('C:\\path with --once text');
   });
 
   it('a process-table read failure is fail-closed, never an empty scan', () => {
@@ -637,6 +656,35 @@ describe('OpenClaw Gateway quiescence evidence gate', () => {
     expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
     expect(readPendingProvisioningEvidence(pdHome, workspaceDir)).toMatchObject({ reason: 'openclaw_gateway_unproven' });
     expect(calls).toHaveLength(0);
+  });
+
+  it('re-verifies Gateway quiescence immediately before CAS and blocks stale positive evidence', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    const manifestPath = seedManifest(pdHome, workspaceDir);
+    const calls: string[][] = [];
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'openclaw',
+      scheduler: ENABLED_SCHEDULER,
+      requireOpenClawGatewayQuiesce: true,
+      openClawGatewayQuiesce: { ok: true, evidence: 'process_exited', pid: 4242 },
+      openClawGatewayQuiesceFn: () => ({ ok: false, reason: 'gateway listener returned during install' }),
+      warn: () => undefined,
+      probes: {
+        spawnFn: fakeSpawn({
+          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
+          'service run-once': { code: 0, stdout: '{"ok":true,"outcome":"completed","managed":{"executions":[]}}' },
+        }, calls),
+      },
+    });
+    expect(outcome.ownership).toBe('not_provisioned');
+    expect(outcome.readiness).toBe('ready');
+    expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'openclaw_gateway_unproven' });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir })).toMatchObject({ status: 'legacy_owned', generation: 0 });
+    expect(calls.some((args) => args.includes('--readiness'))).toBe(true);
+    expect(calls.some((args) => args.includes('run-once'))).toBe(false);
   });
 
   it('verified Gateway process exit evidence permits readiness, CAS, and first run-once', async () => {
@@ -694,8 +742,12 @@ describe.runIf(process.platform === 'darwin')('real Darwin legacy worker scan', 
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--workspace', workspace], { stdio: 'ignore' });
     const once = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--once', '--workspace', workspace], { stdio: 'ignore' });
     try {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      const scan = scanRunningLegacyWorkerProcesses({ platform: 'darwin' });
+      const deadline = Date.now() + 2_000;
+      let scan = scanRunningLegacyWorkerProcesses({ platform: 'darwin' });
+      while (!scan.workers.some((worker) => worker.pid === child.pid) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        scan = scanRunningLegacyWorkerProcesses({ platform: 'darwin' });
+      }
       expect(scan.ok).toBe(true);
       expect(scan.workers).toContainEqual({ pid: child.pid, workspaceDir: workspace });
       expect(scan.workers.some((worker) => worker.pid === once.pid)).toBe(false);
