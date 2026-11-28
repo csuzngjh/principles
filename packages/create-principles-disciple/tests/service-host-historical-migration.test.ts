@@ -67,7 +67,7 @@ describe('historical workspace migration eligibility', () => {
   });
 
   it('unauthorized, unverified-scheduler, and unregistered workspaces remain ineligible', () => {
-    const base: ServiceHostInstallProvisioningInput = {
+    const base = {
       freshInstall: false,
       consentIntent: 'enable',
       consentSource: 'explicit_flag',
@@ -211,7 +211,7 @@ describe('production install provisioning orchestration for historical workspace
     for (const input of [
       { consentIntent: 'refresh_if_registered', consentSource: 'explicit_flag', scheduler: ENABLED_SCHEDULER },
       { consentIntent: 'enable', consentSource: 'recommended_default', scheduler: ENABLED_SCHEDULER },
-      { consentIntent: 'enable', consentSource: 'explicit_flag', scheduler: { ...ENABLED_SCHEDULER, state: 'registered_disabled', enabled: false } },
+      { consentIntent: 'enable', consentSource: 'explicit_flag', scheduler: { ...ENABLED_SCHEDULER, state: 'registered_disabled' as const, enabled: false } },
     ]) {
       let scans = 0;
       const report = await provisionServiceHostInstallTargets({
@@ -240,7 +240,7 @@ describe('production install provisioning orchestration for historical workspace
     seedManifestAndOpenClawBinding(workspaceDir);
     const pdHome = path.join(home, '.pd');
     fakeInstalledCli(pdHome);
-    const base = {
+    const base: ServiceHostInstallProvisioningInput = {
       pdHome,
       freshInstall: false,
       consentIntent: 'enable',
