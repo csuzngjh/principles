@@ -29,6 +29,7 @@ import { handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
 import { SqliteConnection, SqliteActivationStateStore, type RuleHostInput } from '@principles/core/runtime';
 import { createProductionRuleHostGate } from '@principles/host-runtime';
+import { createOpenClawHostRuntime } from '../../src/host-runtime/openclaw-host-runtime.js';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 
 const workspaceDir = '/mock/workspace';
@@ -146,7 +147,10 @@ function makeAllowResult(metadata: Record<string, unknown>): HostEventResult {
 
 const GATE_RULE_ID = 'R_SESSION_PROBE';
 
-async function seedLiveRuleWorkspace(dir: string): Promise<SqliteConnection> {
+async function seedLiveRuleWorkspace(
+  dir: string,
+  implementationCode = "function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'no opinion' }; }",
+): Promise<SqliteConnection> {
   const conn = new SqliteConnection({ workspaceDir: dir });
   const db = conn.getDb();
   const now = new Date().toISOString();
@@ -164,7 +168,7 @@ async function seedLiveRuleWorkspace(dir: string): Promise<SqliteConnection> {
     JSON.stringify({
       principleId: 'P_SESSION_PROBE',
       ruleId: GATE_RULE_ID,
-      implementationCode: "function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'no opinion' }; }",
+      implementationCode,
       goldenTrace: { traceId: 'trace-session-probe', cases: [], createdAt: now, version: 1 },
       ruleHostGateDecision: 'accepted_shadow',
       affectedTools: ['write'],
@@ -184,6 +188,28 @@ async function seedLiveRuleWorkspace(dir: string): Promise<SqliteConnection> {
     deactivatedAt: null,
   });
   return conn;
+}
+
+function bootstrapEmptyGovernanceStore(dir: string): void {
+  const conn = new SqliteConnection({ workspaceDir: dir });
+  conn.getDb();
+  conn.close();
+}
+
+/**
+ * The same adapter composition used by production: native OpenClaw dispatch →
+ * shared production host runtime/gate → handleSharedRuleHostResult. The
+ * before-prompt port is required by the TypeScript interface but is never
+ * dispatched by these before_tool_call tests.
+ */
+function createRealOpenClawBeforeToolRuntime(): ReturnType<typeof createOpenClawHostRuntime> {
+  return createOpenClawHostRuntime({
+    beforePromptBuild: async () => undefined,
+    onBeforeToolResult(event, context, result) {
+      if (!context.workspaceDir) throw new Error('test requires workspaceDir');
+      return handleSharedRuleHostResult(event, { ...context, workspaceDir: context.workspaceDir }, result);
+    },
+  });
 }
 
 describe('Gate Rule Host Only Pipeline', () => {
@@ -361,6 +387,86 @@ describe('Gate Rule Host Only Pipeline', () => {
         expect.objectContaining({ enforcement: 'requireApproval' })
       );
     });
+
+    it('contract-only/unverified host effect: a real production requireApproval is recorded but returns no OpenClaw pause or block object', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gate-require-approval-'));
+      const implementationCode = `
+function evaluate(input) {
+  return { decision: 'requireApproval', matched: true, reason: 'High-risk operation needs approval' };
+}
+var meta = { name: 'require-approval-probe', version: '1', ruleId: '${GATE_RULE_ID}', coversCondition: 'all' };
+`;
+      const conn = await seedLiveRuleWorkspace(dir, implementationCode);
+      try {
+        // No implementationRuntime injection: the production OpenClaw runtime
+        // composition uses the OpenClaw semantic registry and the default Node
+        // RuleCode runtime. The shared result is captured at the production
+        // adapter seam before the native continuation decision is returned.
+        let sharedResult: HostEventResult | undefined;
+        const host = createOpenClawHostRuntime({
+          beforePromptBuild: async () => undefined,
+          onBeforeToolResult(event, context, result) {
+            if (!context.workspaceDir) throw new Error('test requires workspaceDir');
+            sharedResult = result;
+            return handleSharedRuleHostResult(event, { ...context, workspaceDir: context.workspaceDir }, result);
+          },
+        });
+        const adapterResult = await host.dispatchBeforeToolCall(
+          { toolName: 'exec', params: { command: 'rm -rf node_modules' } },
+          { workspaceDir: dir, sessionId, logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
+        );
+
+        // Layer separation: the ruleDecision is requireApproval, but the
+        // shared HostEventResult.decision remains allow and therefore cannot
+        // be treated as evidence of a host pause.
+        expect(sharedResult?.decision).toBe('allow');
+        expect(sharedResult?.metadata?.['ruleDecision']).toBe('requireApproval');
+        expect(sharedResult?.metadata?.['evaluatedLiveRules']).toBe(1);
+
+        // Contract-only characterization: undefined is the adapter-native
+        // continuation value. Whether the OpenClaw host itself pauses is not
+        // probe-verified here; the proven fact is that PD returns no block,
+        // no modified input and no pause object.
+        expect(adapterResult).toBeUndefined();
+        expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledWith(
+          expect.objectContaining({
+            toolName: 'exec',
+            filePath: 'node_modules',
+            decision: 'requireApproval',
+            activationMode: 'live',
+          }),
+        );
+        expect(mockEventLogInstance.recordRuleEnforced).toHaveBeenCalledWith(
+          expect.objectContaining({
+            enforcement: 'requireApproval',
+            toolName: 'exec',
+            filePath: 'node_modules',
+            // Current production characterization: a requireApproval aggregate
+            // carries no winning rule attribution, so the enforced row degrades
+            // to unknown rather than inventing the seeded rule id.
+            ruleId: 'unknown',
+            principleId: 'unknown',
+          }),
+        );
+        expect(mockEventLogInstance.recordRuleHostRequireApproval).toHaveBeenCalledWith(
+          expect.objectContaining({
+            toolName: 'exec',
+            filePath: 'node_modules',
+            reason: 'High-risk operation needs approval',
+            // Same unattributable aggregate fact, preserved as undefined here.
+            ruleId: undefined,
+          }),
+        );
+        // Negative controls: recording approval telemetry must not become a
+        // host-blocking side effect or a block receipt.
+        expect(mockEventLogInstance.recordRuleHostBlocked).not.toHaveBeenCalled();
+        expect(mockEventLogInstance.recordGateBlock).not.toHaveBeenCalled();
+        expect(sessionTracker.trackBlock).not.toHaveBeenCalled();
+      } finally {
+        conn.close();
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('Tool-specific entry filtering (canonicalKind gate contract)', () => {
@@ -415,6 +521,92 @@ describe('Gate Rule Host Only Pipeline', () => {
         expect(evaluateBatch).not.toHaveBeenCalled();
       } finally {
         conn.close();
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('PRI-1309 early-skip telemetry contamination (real OpenClaw host-runtime path)', () => {
+    const SKIP_CASES = [
+      {
+        label: 'non-evaluable read with a structured path',
+        toolName: 'read',
+        params: { file_path: 'src/readonly.ts' },
+        expectedFilePath: 'src/readonly.ts',
+      },
+      {
+        label: 'evaluable agent without a target',
+        toolName: 'sessions_spawn',
+        params: { task: 'investigate the workspace' },
+        expectedFilePath: '',
+      },
+      {
+        label: 'evaluable exec without a command',
+        toolName: 'exec',
+        params: {},
+        expectedFilePath: '',
+      },
+    ] as const;
+
+    for (const testCase of SKIP_CASES) {
+      it(`contract-only fallback contamination: ${testCase.label} still invokes rulehost_evaluated allow persistence`, async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-openclaw-early-skip-'));
+        try {
+          // A real initialized store removes activation_db_not_found as an
+          // explanation: these rows come from the adapter's no-evaluations-array
+          // fallback after the shared gate's early skip.
+          bootstrapEmptyGovernanceStore(dir);
+          const host = createRealOpenClawBeforeToolRuntime();
+          const nativeResult = await host.dispatchBeforeToolCall(
+            { toolName: testCase.toolName, params: testCase.params },
+            { workspaceDir: dir, sessionId, logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
+          );
+
+          expect(nativeResult).toBeUndefined();
+          expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledTimes(1);
+          expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledWith(
+            expect.objectContaining({
+              toolName: testCase.toolName,
+              filePath: testCase.expectedFilePath,
+              matched: false,
+              decision: 'allow',
+              activationMode: 'live',
+              hostKind: 'openclaw',
+            }),
+          );
+          // Negative control: this fallback is evaluation telemetry only, not
+          // a block or a host pause.
+          expect(mockEventLogInstance.recordRuleHostBlocked).not.toHaveBeenCalled();
+          expect(mockEventLogInstance.recordGateBlock).not.toHaveBeenCalled();
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      });
+    }
+
+    it('positive control: an evaluable write reaching the initialized empty store invokes no_rules_armed persistence, not fallback allow', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-openclaw-no-rules-'));
+      try {
+        bootstrapEmptyGovernanceStore(dir);
+        const host = createRealOpenClawBeforeToolRuntime();
+        const nativeResult = await host.dispatchBeforeToolCall(
+          { toolName: 'write', params: { file_path: 'src/safe.ts', content: 'x' } },
+          { workspaceDir: dir, sessionId, logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
+        );
+
+        expect(nativeResult).toBeUndefined();
+        expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledTimes(1);
+        expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledWith(
+          expect.objectContaining({
+            toolName: 'write',
+            filePath: 'src/safe.ts',
+            matched: false,
+            decision: 'no_rules_armed',
+            activationMode: 'live',
+            hostKind: 'openclaw',
+          }),
+        );
+      } finally {
         fs.rmSync(dir, { recursive: true, force: true });
       }
     });

@@ -162,6 +162,59 @@ describe('Phase A default production path (unified shared runtime)', () => {
     }
   });
 
+  it('PRI-1309 characterization (registered-route durable-output inference): native event/ctx toolCallId and runId still persist tool_use_id NULL', async () => {
+    const workspaceDir = createWorkspace();
+    const { afterToolCall } = registerPlugin(workspaceDir);
+    const sessionId = 'phase-a-identity-characterization';
+
+    await afterToolCall(
+      {
+        toolName: 'exec',
+        params: { command: 'echo identity' },
+        result: { exitCode: 0, stdout: 'identity' },
+        sessionId,
+        agentId: 'main',
+        durationMs: 9,
+        runId: 'run_registered_identity_not_a_turn_or_call',
+        toolCallId: 'call_registered_identity_1',
+      },
+      {
+        ...toolContext(workspaceDir, sessionId),
+        // Distinct ctx value: if either native surface were converted into
+        // shared tool_use_id, the durable row would expose which one.
+        toolCallId: 'ctx_registered_identity_1',
+      },
+    );
+
+    const db = openDb(workspaceDir);
+    try {
+      const rows = db.prepare(
+        'SELECT tool_name, outcome, exit_code, params_json, result_preview, tool_use_id, host_kind FROM tool_calls',
+      ).all() as Array<{
+        tool_name: string;
+        outcome: string;
+        exit_code: number;
+        params_json: string;
+        result_preview: string | null;
+        tool_use_id: string | null;
+        host_kind: string | null;
+      }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        tool_name: 'exec',
+        outcome: 'success',
+        exit_code: 0,
+        tool_use_id: null,
+        host_kind: 'openclaw',
+      });
+      expect(JSON.parse(rows[0]!.params_json)).toMatchObject({ command: 'echo identity' });
+      expect(typeof rows[0]!.result_preview).toBe('string');
+    } finally {
+      db.close();
+      WorkspaceContext.dispose(workspaceDir);
+    }
+  });
+
   it('preserves explicit legacy params and falls back to native toolArgs', async () => {
     const workspaceDir = createWorkspace();
     const { afterToolCall } = registerPlugin(workspaceDir);

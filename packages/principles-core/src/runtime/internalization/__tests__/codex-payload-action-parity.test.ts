@@ -35,6 +35,28 @@ const toolSemantics = registryResult.registry;
 
 const PROJECT_DIR = 'C:/work/project';
 
+const SINGLE_FILE_PATCH = [
+  '*** Begin Patch',
+  '*** Update File: src/a.ts',
+  '@@',
+  '-old',
+  '+new',
+  '*** End Patch',
+].join('\n');
+
+const MULTI_FILE_PATCH = [
+  '*** Begin Patch',
+  '*** Update File: src/a.ts',
+  '@@',
+  '-old',
+  '+new',
+  '*** Update File: docs/readme.md',
+  '@@',
+  '-before',
+  '+after',
+  '*** End Patch',
+].join('\n');
+
 interface DesensitizedPayload {
   case: string;
   toolName: string;
@@ -48,6 +70,12 @@ const PAYLOADS: readonly DesensitizedPayload[] = [
   { case: 'readonly-rg-quoting-git', toolName: 'Bash', params: { command: 'rg "git commit" docs/' } },
   { case: 'pathless-unknown-tool', toolName: 'unknown_tool', params: {} },
   { case: 'write-file', toolName: 'write_file', params: { file_path: 'src/a.ts', content: 'x' } },
+  // Native Codex sends the apply_patch body under `command`; older/embedded
+  // callers use `input` or `patch`. All are write-tool payloads, never shell.
+  { case: 'apply-patch-native-command', toolName: 'apply_patch', params: { command: SINGLE_FILE_PATCH } },
+  { case: 'apply-patch-legacy-input', toolName: 'apply_patch', params: { input: SINGLE_FILE_PATCH } },
+  { case: 'apply-patch-legacy-patch', toolName: 'apply_patch', params: { patch: SINGLE_FILE_PATCH } },
+  { case: 'apply-patch-multi-file-native-command', toolName: 'apply_patch', params: { command: MULTI_FILE_PATCH } },
 ];
 
 describe('SPEC-RULECODE-QUALITY-001 Q23 — production/replay action parity on desensitized Codex payloads', () => {
@@ -98,5 +126,48 @@ describe('SPEC-RULECODE-QUALITY-001 Q23 — production/replay action parity on d
     const write = buildRuleHostAction('write_file', { file_path: 'src/a.ts', content: 'x' }, PROJECT_DIR, { canonicalKind: writeKind });
     expect(write.normalizedPath).toContain('src');
     expect(write.canonicalKind).toBe('write');
+  });
+
+  it('pins native apply_patch synthetic-target actuality: command/input/patch and multi-file bodies never become resource paths', () => {
+    const patchPayloads = PAYLOADS.filter((payload) => payload.toolName === 'apply_patch');
+    // Positive control against a vacuous test: all four native/legacy shapes
+    // must be present in the parity corpus before the assertions below mean anything.
+    expect(patchPayloads.map((payload) => payload.case)).toEqual([
+      'apply-patch-native-command',
+      'apply-patch-legacy-input',
+      'apply-patch-legacy-patch',
+      'apply-patch-multi-file-native-command',
+    ]);
+
+    for (const payload of patchPayloads) {
+      const canonicalKind = toolSemantics.resolve(payload.toolName);
+      const productionAction = buildRuleHostAction(payload.toolName, payload.params, PROJECT_DIR, { canonicalKind });
+      const replayInput = createSyntheticRuleHostInput(
+        { toolName: payload.toolName, params: payload.params },
+        {},
+        { projectDir: PROJECT_DIR, toolSemantics },
+      );
+
+      expect(productionAction.canonicalKind, `${payload.case}: the registry classifies apply_patch as write`).toBe('write');
+      expect(
+        productionAction.normalizedPath,
+        `${payload.case}: canonicalKind=write means the patch body is never interpreted as an execute command`,
+      ).toBe('<tool:apply_patch>');
+      expect(productionAction.paramsSummary).toEqual(payload.params);
+      expect(replayInput.action, `${payload.case}: replay sees exactly the production synthetic target`).toEqual(productionAction);
+    }
+
+    const multiFilePayload = patchPayloads.find((payload) => payload.case === 'apply-patch-multi-file-native-command');
+    if (!multiFilePayload) throw new Error('multi-file apply_patch payload missing from corpus');
+    const multiFileAction = buildRuleHostAction(
+      multiFilePayload.toolName,
+      multiFilePayload.params,
+      PROJECT_DIR,
+      { canonicalKind: toolSemantics.resolve(multiFilePayload.toolName) },
+    );
+    // Negative control: a multi-file patch must not collapse invisibly into the
+    // first file header (or any file header) as if that were a trustworthy resource.
+    expect(multiFileAction.normalizedPath).not.toContain('src/a.ts');
+    expect(multiFileAction.normalizedPath).not.toContain('docs/readme.md');
   });
 });

@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import Database from 'better-sqlite3';
 import {
   UNAVAILABLE_RULE_CONTEXT,
   sanitizeToolParams,
@@ -285,6 +286,49 @@ describe('buildProductionRuleContext (PRI-482 Phase 3)', () => {
     db.dispose();
   });
 
+  it('PRI-1309 characterization: the OpenClaw reader is session-only, so a foreign-host/other-project row can still determine target facts', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-assembler-'));
+    const db = new TrajectoryDatabase({ workspaceDir });
+    const rowId = db.recordToolCall({
+      sessionId: 's1',
+      toolName: 'read',
+      outcome: 'success',
+      paramsJson: { file_path: 'src/target.ts' },
+    });
+
+    // Canonical shared-writer rows can carry host/project attribution. Stamp
+    // this fixture row as foreign evidence: if the reader partitioned by either
+    // field it would disappear; the production query selects by session_id only.
+    const raw = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      raw.prepare('UPDATE tool_calls SET host_kind = ?, project_dir = ? WHERE id = ?')
+        .run('codex', path.join(workspaceDir, 'other-project'), rowId);
+      expect(raw.prepare('SELECT host_kind, project_dir FROM tool_calls WHERE id = ?').get(rowId)).toEqual({
+        host_kind: 'codex',
+        project_dir: path.join(workspaceDir, 'other-project'),
+      });
+    } finally {
+      raw.close();
+    }
+
+    const ctx = buildProductionRuleContext('s1', 'src/target.ts', db, workspaceDir);
+
+    expect(ctx.history.status).toBe('available');
+    expect(ctx.history.calls).toHaveLength(1);
+    expect(ctx.history.calls[0]).toMatchObject({
+      sequenceId: rowId,
+      toolName: 'read',
+      canonicalKind: 'read',
+      normalizedPath: 'src/target.ts',
+    });
+    // Characterization, not approval: foreign evidence is visible enough to
+    // produce an affirmative target-read fact. There is no host/project/time
+    // cutoff or current-id exclusion in this reader contract.
+    expect(ctx.facts.priorReadOfTarget).toBe('yes');
+    expect(ctx.facts.readCount).toBe(1);
+    db.dispose();
+  });
+
   it('sameActionBlockCount is always null (spec §5.4, 验收 C)', () => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-assembler-'));
     const db = new TrajectoryDatabase({ workspaceDir });
@@ -356,6 +400,104 @@ describe('buildProductionRuleContext (PRI-482 Phase 3)', () => {
     expect(ctx.history.truncated).toBe(true);
     expect(ctx.history.calls).toHaveLength(3);
     db.dispose();
+  });
+
+  // ── PRI-1309 characterization: OpenClaw assembled facts vs epistemic facts ──
+  // The production OpenClaw assembler passes history + targetPath directly to
+  // computeBehaviorFacts. Unlike the Codex/WorkBuddy providers it does not
+  // conservatively degrade truncated windows or windows containing execute /
+  // other calls. These tests pin that current pseudo-negative behavior; they
+  // are not approval of its epistemic meaning and must not be read as a fix.
+
+  function contextForRows(rows: readonly RuleHostContextRow[], truncated: boolean, targetPath = 'src/target.ts') {
+    const source = { getRuleHostContextRows: () => ({ rows, truncated }) };
+    return buildProductionRuleContext('s-pri1309', targetPath, source, PROJECT_DIR);
+  }
+
+  it('complete window without target read: assembledPriorReadOfTarget=no; epistemicPriorReadOfTarget=no only under the explicit complete-window fixture assumption', () => {
+    const rows = [
+      makeRow({ id: 1, toolName: 'read', outcome: 'success', paramsJson: '{"file_path":"src/other.ts"}' }),
+      makeRow({ id: 2, toolName: 'write', outcome: 'success', paramsJson: '{"path":"src/other.ts"}' }),
+    ];
+
+    const ctx = contextForRows(rows, false);
+
+    expect(ctx.history.status).toBe('available');
+    expect(ctx.history.truncated).toBe(false);
+    expect(ctx.history.calls.map((call) => call.canonicalKind)).toEqual(['read', 'write']);
+    expect(ctx.facts.priorReadOfTarget, 'assembledPriorReadOfTarget').toBe('no');
+    expect(ctx.facts.readCount).toBe(1);
+    expect(ctx.facts.writeCount).toBe(1);
+    expect(ctx.facts.uniqueWritePathCount).toBe(1);
+    expect(ctx.facts.sameActionBlockCount).toBeNull();
+  });
+
+  it('truncated window without visible target read: assembledPriorReadOfTarget=no while epistemicPriorReadOfTarget is unknown', () => {
+    const rows = [
+      makeRow({ id: 1, toolName: 'read', outcome: 'success', paramsJson: '{"file_path":"src/other.ts"}' }),
+      makeRow({ id: 2, toolName: 'write', outcome: 'success', paramsJson: '{"path":"src/other.ts"}' }),
+    ];
+
+    const ctx = contextForRows(rows, true);
+
+    expect(ctx.history.status).toBe('available');
+    expect(ctx.history.truncated).toBe(true);
+    expect(ctx.facts.priorReadOfTarget, 'assembledPriorReadOfTarget').toBe('no');
+    expect(ctx.facts.readCount).toBe(1);
+    expect(ctx.facts.writeCount).toBe(1);
+    expect(ctx.facts.uniqueWritePathCount).toBe(1);
+    expect(ctx.facts.sameActionBlockCount).toBeNull();
+  });
+
+  it('execute present without visible target read: assembledPriorReadOfTarget pseudo-no and exact visible counts while epistemicPriorReadOfTarget is unknown', () => {
+    const rows = [
+      makeRow({ id: 1, toolName: 'read', outcome: 'success', paramsJson: '{"file_path":"src/other.ts"}' }),
+      makeRow({ id: 2, toolName: 'exec', outcome: 'success', paramsJson: '{"command":"node scripts/build.js"}' }),
+    ];
+
+    const ctx = contextForRows(rows, false);
+
+    expect(ctx.history.status).toBe('available');
+    expect(ctx.history.calls.map((call) => call.canonicalKind)).toEqual(['read', 'execute']);
+    expect(ctx.facts.priorReadOfTarget, 'assembledPriorReadOfTarget').toBe('no');
+    expect(ctx.facts.readCount).toBe(1);
+    expect(ctx.facts.writeCount).toBe(0);
+    expect(ctx.facts.uniqueWritePathCount).toBe(0);
+    expect(ctx.facts.sameActionBlockCount).toBeNull();
+  });
+
+  it('other present without visible target read: assembledPriorReadOfTarget pseudo-no and exact visible counts while epistemicPriorReadOfTarget is unknown', () => {
+    const rows = [
+      makeRow({ id: 1, toolName: 'read', outcome: 'success', paramsJson: '{"file_path":"src/other.ts"}' }),
+      makeRow({ id: 2, toolName: 'pd-recall__pd_submit_pain', outcome: 'success', paramsJson: '{"input":"owner pain note"}' }),
+    ];
+
+    const ctx = contextForRows(rows, false);
+
+    expect(ctx.history.status).toBe('available');
+    expect(ctx.history.calls.map((call) => call.canonicalKind)).toEqual(['read', 'other']);
+    expect(ctx.facts.priorReadOfTarget, 'assembledPriorReadOfTarget').toBe('no');
+    expect(ctx.facts.readCount).toBe(1);
+    expect(ctx.facts.writeCount).toBe(0);
+    expect(ctx.facts.uniqueWritePathCount).toBe(0);
+    expect(ctx.facts.sameActionBlockCount).toBeNull();
+  });
+
+  it('real target read: assembledPriorReadOfTarget=yes and epistemicPriorReadOfTarget=yes with exact visible counts', () => {
+    const rows = [
+      makeRow({ id: 1, toolName: 'read', outcome: 'success', paramsJson: '{"file_path":"src/target.ts"}' }),
+      makeRow({ id: 2, toolName: 'write', outcome: 'success', paramsJson: '{"path":"src/other.ts"}' }),
+    ];
+
+    const ctx = contextForRows(rows, false);
+
+    expect(ctx.history.status).toBe('available');
+    expect(ctx.history.calls.map((call) => call.normalizedPath)).toEqual(['src/target.ts', 'src/other.ts']);
+    expect(ctx.facts.priorReadOfTarget, 'assembledPriorReadOfTarget').toBe('yes');
+    expect(ctx.facts.readCount).toBe(1);
+    expect(ctx.facts.writeCount).toBe(1);
+    expect(ctx.facts.uniqueWritePathCount).toBe(1);
+    expect(ctx.facts.sameActionBlockCount).toBeNull();
   });
 
   // ── PRI-825: long baseline-command evidence survives the durable round-trip ──

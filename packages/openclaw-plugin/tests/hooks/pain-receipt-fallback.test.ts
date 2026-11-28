@@ -800,6 +800,60 @@ describe('runAfterToolCallReceiptFallback — hook entry (flags from the CURRENT
     expect(second.line).toBe(`pain_receipt_idempotent:taskId=${deriveSubmitTaskId(painId)}`);
   });
 
+  it('PRI-1309 characterization: a ctx-only native toolCallId still feeds the receipt lane (unlike the shared trajectory lane)', async () => {
+    const ws = workspace({ minimalMetadata: true });
+    const painId = 'mcp_1764000000061_ff000061';
+    const taskId = await persistUnboundPain(ws, painId);
+    const runId = 'openclaw-run-hook-ctx-only-call-id';
+    const targetTurnId = 'user-turn-row:96';
+    const ctxOnlyToolCallId = 'call_ctx_only_native_identity';
+    expect(recordConversationIngestionConsent(ws, 'openclaw', {
+      decision: 'granted',
+      decidedVia: 'owner_directive',
+      disclosureVersion: 'test-v1',
+      evidenceRef: 'hook-ctx-only-call-id-target',
+    }).ok).toBe(true);
+    captureOpenclawUserTurnForTargetEvidence({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      hostTurnId: undefined,
+      fallbackHostTurnId: targetTurnId,
+      text: 'ctx-only native identity owner message',
+    });
+    expect(rememberOpenclawRunTurnCorrelation({
+      workspaceDir: ws,
+      sessionId: EVENT_IDENTITY.sessionId,
+      runId,
+      targetTurnId,
+      message: 'ctx-only native identity owner message',
+    })).toBe(true);
+    recoverSpy.mockClear();
+
+    const result = await runAfterToolCallReceiptFallback({
+      event: {
+        toolName: 'pd-recall__pd_submit_pain',
+        runId,
+        // Deliberately no event.toolCallId: the older relay shape carries the
+        // physical call id on the hook context. The receipt lane is native-aware
+        // and may use it; the shared trajectory lane currently cannot.
+        result: envelopeForReceipt(painId, ws),
+      },
+      ctx: { sessionId: EVENT_IDENTITY.sessionId, toolCallId: ctxOnlyToolCallId },
+      workspaceDir: ws,
+    });
+
+    expect(result.line).toBe(`pain_receipt_recovered:taskId=${taskId}:state=ready_for_diagnosis`);
+    expect(recoverSpy).toHaveBeenCalledTimes(1);
+    expect(recoverSpy).toHaveBeenCalledWith(expect.objectContaining({
+      identity: {
+        sessionId: EVENT_IDENTITY.sessionId,
+        toolCallId: ctxOnlyToolCallId,
+        targetTurnId,
+      },
+      requireTargetTurnIdentity: true,
+    }));
+  });
+
   it('revoking the authorization takes effect on the NEXT event without a restart', async () => {
     const ws = workspace({ minimalMetadata: true });
     const painId = 'mcp_1764000000007_aa000007';

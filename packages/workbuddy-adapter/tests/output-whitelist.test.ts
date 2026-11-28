@@ -28,6 +28,44 @@ describe('encodeWorkbuddyOutput', () => {
     expect(workbuddyOutputFieldsAreWhitelisted(output).ok).toBe(true);
   });
 
+  it('probe-verified (WorkBuddy only): the deny channel emits exactly permissionDecision deny/reason with no auxiliary host-control fields', () => {
+    const output = encodeWorkbuddyOutput({ decision: 'deny', reason: 'PD: protected path', source: 'workbuddy:pre_tool_use' }, 'before_tool_call');
+    if (output === null) throw new Error('probe-verified deny unexpectedly encoded as empty stdout');
+
+    expect(output.hookSpecificOutput).toEqual({
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: 'PD: protected path',
+    });
+    // Negative control: the only host-blocking evidence characterized here is
+    // WorkBuddy's probe-verified permissionDecision=deny channel. No ask,
+    // pause, continue:false or allow-fast-path field is emitted.
+    expect(Object.keys(output)).toEqual(['hookSpecificOutput']);
+    expect(Object.keys(output.hookSpecificOutput).sort()).toEqual([
+      'hookEventName',
+      'permissionDecision',
+      'permissionDecisionReason',
+    ]);
+  });
+
+  it('probe-verified empty neutral stdout (WorkBuddy only): requireApproval metadata does not emit allow, ask, pause or block output', () => {
+    const output = encodeWorkbuddyOutput({
+      decision: 'allow',
+      source: 'workbuddy:pre_tool_use',
+      metadata: {
+        ruleDecision: 'requireApproval',
+        matched: true,
+        ruleReason: 'owner approval required',
+      },
+    }, 'before_tool_call');
+
+    // Probe evidence is specific to WorkBuddy: null means EMPTY stdout, and
+    // silence is the neutral channel because permissionDecision="allow" can
+    // bypass the host permission ask. This characterization does not
+    // extrapolate that evidence to Codex or OpenClaw.
+    expect(output).toBeNull();
+  });
+
   it('neutral results encode to null (EMPTY stdout) for every event kind', () => {
     for (const kind of ['before_tool_call', 'after_tool_call', 'before_prompt_build', 'session_start'] as const) {
       expect(encodeWorkbuddyOutput({ decision: 'allow', source: 'workbuddy:x' }, kind)).toBeNull();
