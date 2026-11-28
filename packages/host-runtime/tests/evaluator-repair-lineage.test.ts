@@ -101,6 +101,7 @@ describe('createEvaluatorRepairDeps.seedArtificerRepairTask — PRI-1293 Phase 3
     expect(pi?.correlationId).toBe(CAND_A);
     // D3: parentTaskId=sourceEvaluatorTaskId — repair 链从此可回溯根 dreamer。
     expect(pi?.parentTaskId).toBe(sourceEvaluator);
+    expect(pi?.repairTaskRole).toBe('repair_artificer');
   });
 
   it('来源链不可证明: 结构化拒绝, 零任务创建', async () => {
@@ -159,6 +160,7 @@ describe('createEvaluatorRepairDeps.seedArtificerRepairTask — PRI-1293 Phase 3
     const after = hydratePITaskRecord((await stateManager.getTask(repairTaskId))!);
     expect(after?.parentTaskId).toBe(sourceEvaluator);
     expect(after?.correlationId).toBe(CAND_A);
+    expect(after?.repairTaskRole).toBe('repair_artificer');
     // 既有字段保持 — 补齐是 merge 不是重建。
     expect(after?.repairPayload?.sourceEvaluatorTaskId).toBe(sourceEvaluator);
     expect(after?.dependencyTaskIds).toContain('scribe-x');

@@ -34,6 +34,7 @@ import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol
 import type { RefinerRuleHostGateDeps } from '../internalization/refiner-rulehost-gate.js';
 import { runAdversarialLoop } from '../adversarial-loop.js';
 import { createLogicalSuccessorTask } from '../internalization/successor-create.js';
+import { createRepairTask } from '../internalization/repair-create.js';
 import { reopenTaskForRevision } from '../internalization/revision-reopen.js';
 import type { RetryPolicyConfig } from '../store/lifecycle/retry-policy.js';
 
@@ -1283,6 +1284,113 @@ describe('runAdversarialLoop (PRI-428)', () => {
     expect(artificerTasks.map((task) => task.taskId)).toEqual([taskId]);
   }, 60_000);
 
+  it('rejects an explicit repair role without repairPayload instead of treating it as ordinary work', async () => {
+    await h.stateManager.createTask({
+      taskId: 'loop-repair-role-missing-payload',
+      taskKind: 'artificer',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: SCRIBE_TASK_ID,
+        repairTaskRole: 'repair_artificer',
+      }),
+    });
+    h.adapter.queueArtificer(makeArtificerOutput);
+
+    const result = await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    });
+
+    expect(result.decision).toBe('rejected');
+    expect(result.degradationReason).toBe('repair_role_payload_missing');
+    expect(h.adapter.startRunCalls.map((call) => call.taskId)).toEqual(['loop-repair-role-missing-payload']);
+  }, 60_000);
+
+  it('keeps the ambiguous-artificer guard when an evaluator depends on ordinary and repair work', async () => {
+    const artificerCreation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: SCRIBE_TASK_ID,
+      successorKind: 'artificer',
+      channel: 'prompt',
+      preferredTaskId: 'loop-ambiguous-ordinary-artificer',
+      metadata: {
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: SCRIBE_TASK_ID,
+      },
+    });
+    if (artificerCreation.outcome !== 'created') throw new Error(`expected artificer creation, got ${artificerCreation.outcome}`);
+    const evaluatorCreation = await createLogicalSuccessorTask({
+      stateManager: h.stateManager,
+      parentTaskId: artificerCreation.task.taskId,
+      successorKind: 'evaluator',
+      channel: 'prompt',
+      preferredTaskId: 'loop-ambiguous-repair-evaluator',
+      metadata: {
+        dependencyTaskIds: [artificerCreation.task.taskId],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        parentTaskId: artificerCreation.task.taskId,
+      },
+    });
+    if (evaluatorCreation.outcome !== 'created') throw new Error(`expected evaluator creation, got ${evaluatorCreation.outcome}`);
+
+    const repair = await createRepairTask(h.stateManager, {
+      repairPayload: {
+        requiredChanges: ['fix matcher'],
+        concerns: [],
+        previousScore: 0.4,
+        repairIteration: 1,
+        sourceArtificerArtifactId: 'pi-art-source',
+        sourceEvaluatorTaskId: evaluatorCreation.task.taskId,
+      },
+      inheritedDependencyTaskIds: [SCRIBE_TASK_ID],
+      inheritedChannel: 'prompt',
+      inheritedTimeoutMs: 300_000,
+      inheritedInputArtifactRefs: [],
+    });
+    expect(repair.outcome).toBe('created');
+    if (repair.outcome !== 'created') return;
+
+    const evaluator = await h.stateManager.getTask(evaluatorCreation.task.taskId);
+    const evaluatorPi = evaluator ? hydratePITaskRecord(evaluator) : null;
+    if (!evaluatorPi) throw new Error('expected evaluator PI metadata');
+    await h.stateManager.updateTask(evaluatorCreation.task.taskId, {
+      diagnosticJson: createPITaskDiagnosticJson({
+        ...evaluatorPi,
+        dependencyTaskIds: [artificerCreation.task.taskId, repair.task.taskId],
+      }),
+    });
+
+    h.adapter.queueArtificer(makeArtificerOutput);
+    const result = await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    });
+
+    expect(result.decision).toBe('rejected');
+    expect(result.degradationReason).toBe('evaluator_revision_round_ambiguous_artificer_dependencies');
+    expect(h.adapter.startRunCalls.map((call) => call.taskId)).toEqual([artificerCreation.task.taskId]);
+  }, 60_000);
+
   it('resumes the reopened original evaluator after a crash between repair reopen and revision execution', async () => {
     // Build the pre-repair chain with real runner executions against real
     // SQLite/artifact persistence. The repair task shape mirrors the production
@@ -1388,6 +1496,8 @@ describe('runAdversarialLoop (PRI-428)', () => {
       status: 'pending',
       revisionCount: 1,
     });
+    const repairAfterCrash = hydratePITaskRecord((await h.stateManager.getTask(repairCreation.task.taskId))!);
+    expect(repairAfterCrash?.repairTaskRole).toBe('repair_artificer');
     expect(reopenedAfterCrash?.dependencyTaskIds).toEqual([repairCreation.task.taskId]);
     const callsBeforeResume = h.adapter.startRunCalls.length;
 

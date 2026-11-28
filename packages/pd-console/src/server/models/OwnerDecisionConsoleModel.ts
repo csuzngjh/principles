@@ -18,7 +18,7 @@ import {
   deriveOwnerDecisionCapability,
   buildOwnerDecisionReview,
 } from '@principles/core/runtime';
-import type { OwnerDecisionReviewSnapshot, TaskRecord } from '@principles/core/runtime';
+import type { OwnerDecisionReviewSnapshot, TaskRecord, TaskStoreFilter } from '@principles/core/runtime';
 import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import type { PIArtifactStore } from '@principles/core/runtime';
 import { ActivationsConsoleModel } from './ActivationsConsoleModel.js';
@@ -171,11 +171,28 @@ function makeRowReader(db: { prepare: (sql: string) => { get: (id: string) => un
   };
 }
 
+/** Narrow read-model scan used only for lineage proof; it must accept legacy/test rows. */
+function makeRowLister(db: { prepare: (sql: string) => { all: () => unknown[] } }) {
+  return async (filter?: TaskStoreFilter): Promise<TaskRecord[]> => {
+    const rows = db.prepare('SELECT * FROM tasks').all()
+      .filter(isRecordRow)
+      .map((row) => rowToTaskRecord(row))
+      .filter((row): row is TaskRecord => row !== null);
+    let selected = rows;
+    if (filter?.status !== undefined) selected = selected.filter((row) => row.status === filter.status);
+    if (filter?.statuses !== undefined) selected = selected.filter((row) => filter.statuses?.includes(row.status));
+    if (filter?.taskKind !== undefined) selected = selected.filter((row) => row.taskKind === filter.taskKind);
+    if (filter?.limit !== undefined) selected = selected.slice(0, filter.limit);
+    return selected;
+  };
+}
+
 /** 行 → TaskRecord 的窄映射（tasks 表全部列；diagnostic_json 键名转换）。 */
 
 interface TaskDecisionItemDependencies {
   readonly artifactStore: PIArtifactStore;
   readonly readTaskRow: (taskId: string) => TaskRecord | null;
+  readonly listTaskRows: (filter?: TaskStoreFilter) => Promise<TaskRecord[]>;
 }
 
 /** 单任务 capability → 决策条目（不 eligible → null，INV-01）。 */
@@ -191,6 +208,13 @@ async function deriveTaskDecisionItem(
         return dependencies.readTaskRow(taskId);
       } catch {
         return null;
+      }
+    },
+    listTasks: async (filter?: TaskStoreFilter): Promise<TaskRecord[]> => {
+      try {
+        return await dependencies.listTaskRows(filter);
+      } catch {
+        return [];
       }
     },
     listArtifactsBySourceTask: async (taskId: string) => {
@@ -367,6 +391,7 @@ export class OwnerDecisionConsoleModel {
           {
             artifactStore,
             readTaskRow: makeRowReader(db),
+            listTaskRows: makeRowLister(db),
           },
         );
         if (item) items.push(item);
@@ -505,7 +530,11 @@ export class OwnerDecisionConsoleModel {
       for (const row of rows) {
         const task = rowToTaskRecord(row);
         if (!task) continue;
-        const item = await deriveTaskDecisionItem(task, { artifactStore, readTaskRow: makeRowReader(db) });
+        const item = await deriveTaskDecisionItem(task, {
+          artifactStore,
+          readTaskRow: makeRowReader(db),
+          listTaskRows: makeRowLister(db),
+        });
         if (item) ids.add(task.taskId);
       }
       return ids;

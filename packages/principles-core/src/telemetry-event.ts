@@ -451,6 +451,8 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_repair_loop_mark_review_failed'),
   Type.Literal('evaluator_repair_loop_max_iterations'),
   Type.Literal('evaluator_repair_loop_seeder_missing'),
+  Type.Literal('evaluator_repair_loop_seeding_refused'),
+  Type.Literal('evaluator_repair_dependency_identity_refused'),
   Type.Literal('evaluator_repair_loop_test_out_of_scope'),
   Type.Literal('evaluator_repair_task_seed_failed'),
   Type.Literal('evaluator_repair_task_seeded'),

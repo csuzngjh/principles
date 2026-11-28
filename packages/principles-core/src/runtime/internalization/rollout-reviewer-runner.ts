@@ -1014,7 +1014,7 @@ export class RolloutReviewerRunner {
     // PRI-1301: 唯一权威实现 (revision-reopen.ts) — 绑定 stateManager.getTask
     // 调用, 与被删除的私有副本逐行等价 (同一遍历序/同一路由判决)。
     const target = await resolveRolloutRevisionTarget(
-      (id) => this.stateManager.getTask(id),
+      this.stateManager,
       ctx.taskId,
       ctx.channel ?? 'prompt',
     );

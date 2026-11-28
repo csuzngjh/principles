@@ -95,21 +95,35 @@ function makeArtificerTaskWithRepairPayload(repairIteration: number): TaskRecord
     previousScore: 0.55,
     repairIteration,
     sourceArtificerArtifactId: 'pi-art-artificer-previous',
-    sourceEvaluatorTaskId: 'evaluator-previous',
+    sourceEvaluatorTaskId: EVALUATOR_TASK_ID,
   };
   return makeArtificerTask({
+    taskId: `artificer-repair-${EVALUATOR_TASK_ID}-r${repairIteration}`,
     diagnosticJson: createPITaskDiagnosticJson({
       dependencyTaskIds: [SCRIBE_TASK_ID],
       channel: 'prompt',
       timeoutMs: 300_000,
       inputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_ARTIFACT_ID }],
       outputArtifactRefs: [{ artifactType: 'principle', ref: ARTIFICER_ARTIFACT_ID }],
+      parentTaskId: EVALUATOR_TASK_ID,
+      repairTaskRole: 'repair_artificer',
       repairPayload,
     }),
   });
 }
 
-function makeEvaluatorTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
+function makeLineageDreamerTask(): TaskRecord {
+  return {
+    taskId: 'dreamer-evaluator-repair-loop-root', taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    diagnosticJson: JSON.stringify({
+      pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [], correlationId: '11111111-1111-4111-8111-111111111111' },
+      candidateId: '11111111-1111-4111-8111-111111111111',
+    }),
+  };
+}
+
+function makeEvaluatorTask(overrides: Partial<TaskRecord> = {}, dependencyTaskId: string = ARTIFICER_TASK_ID): TaskRecord {
   return {
     taskId: EVALUATOR_TASK_ID,
     taskKind: 'evaluator',
@@ -119,7 +133,8 @@ function makeEvaluatorTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     diagnosticJson: createPITaskDiagnosticJson({
-      dependencyTaskIds: [ARTIFICER_TASK_ID],
+      dependencyTaskIds: [dependencyTaskId],
+      parentTaskId: 'dreamer-evaluator-repair-loop-root',
       channel: 'prompt',
       timeoutMs: 300_000,
       inputArtifactRefs: [{ artifactType: 'principle', ref: ARTIFICER_ARTIFACT_ID }],
@@ -148,15 +163,15 @@ function makeScribeArtifact(): PIArtifactRecord {
   };
 }
 
-function makeArtificerArtifact(): PIArtifactRecord {
+function makeArtificerArtifact(sourceTaskId: string = ARTIFICER_TASK_ID, artifactId: string = ARTIFICER_ARTIFACT_ID): PIArtifactRecord {
   return {
-    artifactId: ARTIFICER_ARTIFACT_ID,
+    artifactId,
     artifactKind: 'principle',
-    sourceTaskId: ARTIFICER_TASK_ID,
+    sourceTaskId,
     lineageArtifactIds: [],
     validationStatus: 'pending',
     contentJson: JSON.stringify({
-      taskId: ARTIFICER_TASK_ID,
+      taskId: sourceTaskId,
       sourceScribeArtifactId: SCRIBE_ARTIFACT_ID,
       implementationPlan: {
         summary: 'Add input validation to all async operations',
@@ -227,6 +242,7 @@ function makeApprovedOutput(): EvaluatorOutputV1 {
 
 function createMockDeps(overrides: {
   artificerTask?: TaskRecord;
+  evaluatorTask?: TaskRecord;
   evaluatorOutput?: EvaluatorOutputV1;
   isRepairLoopEnabled?: () => boolean;
   seedArtificerRepairTask?: (params: SeedArtificerRepairParams) => Promise<string>;
@@ -249,21 +265,25 @@ function createMockDeps(overrides: {
   seedArtificerRepairTask: ReturnType<typeof vi.fn> | null;
 } {
   const artifactStore = overrides.artifactStore ?? new MemoryPIArtifactStore();
-  const evaluatorTask = makeEvaluatorTask();
   const artificerTask = overrides.artificerTask ?? makeArtificerTask();
+  const evaluatorTask = overrides.evaluatorTask ?? makeEvaluatorTask({}, artificerTask.taskId);
   const scribeTask = makeScribeTask();
+  const dreamerTask = makeLineageDreamerTask();
   const extraTasks = overrides.extraTasks ?? [];
+  const allTasks = [evaluatorTask, artificerTask, scribeTask, dreamerTask, ...extraTasks];
 
   const stateManager = fenced({
     acquireLease: vi.fn().mockResolvedValue(evaluatorTask),
     getTask: vi.fn().mockImplementation((id: string) => {
       if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorTask);
-      if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
+      if (id === artificerTask.taskId) return Promise.resolve(artificerTask);
       if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
+      if (id === dreamerTask.taskId) return Promise.resolve(dreamerTask);
       const extra = extraTasks.find((t) => t.taskId === id);
       if (extra) return Promise.resolve(extra);
       return Promise.resolve(null);
     }),
+    listTasks: vi.fn().mockImplementation(() => Promise.resolve([...allTasks])),
     getRunsByTask: vi.fn().mockResolvedValue([{
       runId: 'run-evaluator-001',
       taskId: EVALUATOR_TASK_ID,
@@ -365,6 +385,8 @@ function createMockDeps(overrides: {
 async function seedArtifacts(store: PIArtifactStore): Promise<void> {
   await store.upsertArtifact(makeScribeArtifact());
   await store.upsertArtifact(makeArtificerArtifact());
+  await store.upsertArtifact(makeArtificerArtifact(`artificer-repair-${EVALUATOR_TASK_ID}-r1`, `${ARTIFICER_ARTIFACT_ID}-r1`));
+  await store.upsertArtifact(makeArtificerArtifact(`artificer-repair-${EVALUATOR_TASK_ID}-r2`, `${ARTIFICER_ARTIFACT_ID}-r2`));
 }
 
 
@@ -704,6 +726,257 @@ describe('PRI-509: Evaluator→Artificer Repair Loop (Slice 4 + 5)', () => {
           && (call[0] as Record<string, unknown>).eventType === 'evaluator_task_needs_human_review',
       );
       expect(reviewCall).toBeDefined();
+    });
+
+    it('same-run repair reuse delegates adoption to the injected authority (PRI-1299)', async () => {
+      const store = new MemoryPIArtifactStore();
+      await seedArtifacts(store);
+      const repairTaskId = `artificer-repair-${EVALUATOR_TASK_ID}-r1`;
+      const existingPayload: RepairPayload = {
+        requiredChanges: ['same run change'],
+        concerns: ['same run concern'],
+        previousScore: 0.6,
+        repairIteration: 1,
+        sourceArtificerArtifactId: ARTIFICER_ARTIFACT_ID,
+        sourceEvaluatorTaskId: EVALUATOR_TASK_ID,
+        sourceEvaluatorRunId: 'run-evaluator-001',
+      };
+      const existingRepair = makeArtificerTask({
+        taskId: repairTaskId,
+        status: 'pending',
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [SCRIBE_TASK_ID],
+          channel: 'prompt',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+          repairPayload: existingPayload,
+        }),
+      });
+      const { deps, stateManager, seedArtificerRepairTask } = createMockDeps({
+        artifactStore: store,
+        isRepairLoopEnabled: () => true,
+        seedArtificerRepairTask: async () => repairTaskId,
+        evaluatorOutput: makeNeedsRevisionOutput(),
+        extraTasks: [existingRepair],
+      });
+
+      const runner = new EvaluatorRunner(deps, {
+        owner: 'test',
+        runtimeKind: 'evaluator',
+        pollIntervalMs: 10,
+        timeoutMs: 1000,
+      });
+
+      const result = await runner.run(EVALUATOR_TASK_ID);
+      expect(result.status).toBe('succeeded');
+      expect(seedArtificerRepairTask).not.toBeNull();
+      expect(seedArtificerRepairTask).toHaveBeenCalledTimes(1);
+      if (!seedArtificerRepairTask) throw new Error('seeder unexpectedly null');
+      const seedCall = seedArtificerRepairTask.mock.calls[0]?.[0] as SeedArtificerRepairParams | undefined;
+      expect(seedCall?.repairPayload).toEqual(existingPayload);
+      expect(stateManager.updateTask).not.toHaveBeenCalledWith(
+        EVALUATOR_TASK_ID,
+        expect.objectContaining({ status: 'needs_human_review' }),
+      );
+    });
+
+    it('same-run terminal repair cannot bypass the authority (PRI-1299 fail closed)', async () => {
+      const store = new MemoryPIArtifactStore();
+      await seedArtifacts(store);
+      const repairTaskId = `artificer-repair-${EVALUATOR_TASK_ID}-r1`;
+      const existingPayload: RepairPayload = {
+        requiredChanges: ['same run change'],
+        concerns: ['same run concern'],
+        previousScore: 0.6,
+        repairIteration: 1,
+        sourceArtificerArtifactId: ARTIFICER_ARTIFACT_ID,
+        sourceEvaluatorTaskId: EVALUATOR_TASK_ID,
+        sourceEvaluatorRunId: 'run-evaluator-001',
+      };
+      const terminalRepair = makeArtificerTask({
+        taskId: repairTaskId,
+        status: 'succeeded',
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [SCRIBE_TASK_ID],
+          channel: 'prompt',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+          repairPayload: existingPayload,
+        }),
+      });
+      const { deps, stateManager, seedArtificerRepairTask } = createMockDeps({
+        artifactStore: store,
+        isRepairLoopEnabled: () => true,
+        seedArtificerRepairTask: async () => {
+          throw new Error('terminal_repair_task');
+        },
+        evaluatorOutput: makeNeedsRevisionOutput(),
+        extraTasks: [terminalRepair],
+      });
+
+      const runner = new EvaluatorRunner(deps, {
+        owner: 'test',
+        runtimeKind: 'evaluator',
+        pollIntervalMs: 10,
+        timeoutMs: 1000,
+      });
+
+      const result = await runner.run(EVALUATOR_TASK_ID);
+      expect(result.status).toBe('succeeded');
+      expect(seedArtificerRepairTask).toHaveBeenCalledTimes(1);
+      expect(stateManager.updateTask).toHaveBeenCalledWith(
+        EVALUATOR_TASK_ID,
+        expect.objectContaining({ status: 'needs_human_review' }),
+      );
+      expectNhrWriteWithReason(stateManager, 'evaluator_repair_seed_failed');
+    });
+
+    it('same-run row whose payload names a different repair identity is refused (PRI-1299)', async () => {
+      const store = new MemoryPIArtifactStore();
+      await seedArtifacts(store);
+      const repairTaskId = `artificer-repair-${EVALUATOR_TASK_ID}-r1`;
+      const mismatchedPayload: RepairPayload = {
+        requiredChanges: ['foreign identity'],
+        concerns: [],
+        previousScore: 0.6,
+        repairIteration: 1,
+        sourceArtificerArtifactId: ARTIFICER_ARTIFACT_ID,
+        sourceEvaluatorTaskId: 'evaluator-foreign',
+        sourceEvaluatorRunId: 'run-evaluator-001',
+      };
+      const mismatchedRepair = makeArtificerTask({
+        taskId: repairTaskId,
+        status: 'pending',
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [SCRIBE_TASK_ID],
+          channel: 'prompt',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+          repairPayload: mismatchedPayload,
+        }),
+      });
+      const { deps, stateManager, seedArtificerRepairTask } = createMockDeps({
+        artifactStore: store,
+        isRepairLoopEnabled: () => true,
+        evaluatorOutput: makeNeedsRevisionOutput(),
+        extraTasks: [mismatchedRepair],
+      });
+
+      const runner = new EvaluatorRunner(deps, {
+        owner: 'test',
+        runtimeKind: 'evaluator',
+        pollIntervalMs: 10,
+        timeoutMs: 1000,
+      });
+
+      const result = await runner.run(EVALUATOR_TASK_ID);
+      expect(result.status).toBe('succeeded');
+      expect(seedArtificerRepairTask).not.toHaveBeenCalled();
+      expectNhrWriteWithReason(stateManager, 'evaluator_repair_seed_failed');
+      const eventEmitter = deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> };
+      const refusedCall = eventEmitter.emitTelemetry.mock.calls.find(
+        (call: readonly unknown[]) => typeof call[0] === 'object' && call[0] !== null
+          && (call[0] as Record<string, unknown>).eventType === 'evaluator_repair_loop_seeding_refused',
+      );
+      const payload = (refusedCall?.[0] as Record<string, unknown> | undefined)?.payload as Record<string, unknown> | undefined;
+      expect(payload?.reason).toBe('repair_payload_source_mismatch');
+    });
+
+    it('multiple artificer dependencies refuse seeding instead of inheriting the first row (PRI-1299)', async () => {
+      const store = new MemoryPIArtifactStore();
+      await seedArtifacts(store);
+      const otherArtificer = makeArtificerTask({ taskId: 'artificer-other' });
+      const ambiguousEvaluator = makeEvaluatorTask({
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [ARTIFICER_TASK_ID, otherArtificer.taskId],
+          channel: 'prompt',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [{ artifactType: 'principle', ref: ARTIFICER_ARTIFACT_ID }],
+          outputArtifactRefs: [],
+        }),
+      });
+      const { deps, stateManager, seedArtificerRepairTask } = createMockDeps({
+        artifactStore: store,
+        isRepairLoopEnabled: () => true,
+        evaluatorTask: ambiguousEvaluator,
+        evaluatorOutput: makeNeedsRevisionOutput(),
+        extraTasks: [otherArtificer],
+      });
+
+      const runner = new EvaluatorRunner(deps, {
+        owner: 'test',
+        runtimeKind: 'evaluator',
+        pollIntervalMs: 10,
+        timeoutMs: 1000,
+      });
+
+      const result = await runner.run(EVALUATOR_TASK_ID);
+      expect(result.status).toBe('failed');
+      expect(result.errorCategory).toBe('input_invalid');
+      expect(seedArtificerRepairTask).not.toHaveBeenCalled();
+      expect(deps.runtimeAdapter.startRun as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+      expect(stateManager.updateTask).not.toHaveBeenCalledWith(
+        EVALUATOR_TASK_ID,
+        expect.objectContaining({ status: 'needs_human_review' }),
+      );
+      const eventEmitter = deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> };
+      const refusedCall = eventEmitter.emitTelemetry.mock.calls.find(
+        (call: readonly unknown[]) => typeof call[0] === 'object' && call[0] !== null
+          && (call[0] as Record<string, unknown>).eventType === 'evaluator_repair_dependency_identity_refused',
+      );
+      const payload = (refusedCall?.[0] as Record<string, unknown> | undefined)?.payload as Record<string, unknown> | undefined;
+      expect(payload?.reason).toBe('evaluator_ambiguous_artificer_dependencies');
+    });
+
+    it.each([
+      { role: 'repair_artificer', expectedReason: 'repair_role_payload_missing' },
+      { role: 'ordinary_artificer', expectedReason: 'repair_role_mismatch' },
+    ])('repair role metadata is adjudicated before seeding (%s)', async ({ role, expectedReason }) => {
+      const store = new MemoryPIArtifactStore();
+      await seedArtifacts(store);
+      const roleMarkedDep = makeArtificerTask({
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [SCRIBE_TASK_ID],
+          channel: 'prompt',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_ARTIFACT_ID }],
+          outputArtifactRefs: [{ artifactType: 'principle', ref: ARTIFICER_ARTIFACT_ID }],
+          repairTaskRole: role,
+        }),
+      });
+      const { deps, stateManager, seedArtificerRepairTask } = createMockDeps({
+        artifactStore: store,
+        isRepairLoopEnabled: () => true,
+        artificerTask: roleMarkedDep,
+        evaluatorOutput: makeNeedsRevisionOutput(),
+      });
+
+      const runner = new EvaluatorRunner(deps, {
+        owner: 'test',
+        runtimeKind: 'evaluator',
+        pollIntervalMs: 10,
+        timeoutMs: 1000,
+      });
+
+      const result = await runner.run(EVALUATOR_TASK_ID);
+      expect(result.status).toBe('failed');
+      expect(result.errorCategory).toBe('input_invalid');
+      expect(seedArtificerRepairTask).not.toHaveBeenCalled();
+      expect(deps.runtimeAdapter.startRun as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+      expect(stateManager.updateTask).not.toHaveBeenCalledWith(
+        EVALUATOR_TASK_ID,
+        expect.objectContaining({ status: 'needs_human_review' }),
+      );
+      const eventEmitter = deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> };
+      const refusedCall = eventEmitter.emitTelemetry.mock.calls.find(
+        (call: readonly unknown[]) => typeof call[0] === 'object' && call[0] !== null
+          && (call[0] as Record<string, unknown>).eventType === 'evaluator_repair_dependency_identity_refused',
+      );
+      const payload = (refusedCall?.[0] as Record<string, unknown> | undefined)?.payload as Record<string, unknown> | undefined;
+      expect(payload?.reason).toBe(expectedReason);
     });
   });
 });

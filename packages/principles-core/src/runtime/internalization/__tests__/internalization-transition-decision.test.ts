@@ -287,6 +287,39 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
     expect(mockStateManager.createTask).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      label: 'repair role without payload',
+      meta: makeMeta({ repairTaskRole: 'repair_artificer' }),
+      expectedReason: 'repair_role_payload_missing',
+    },
+    {
+      label: 'wrong repair role with payload',
+      meta: makeMeta({
+        repairTaskRole: 'ordinary_artificer',
+        repairPayload: makeRepairPayload(1, 'evaluator-cand-4b-prompt'),
+      }),
+      expectedReason: 'repair_role_mismatch',
+    },
+  ])('corrupt repair identity cannot fall through to ADVANCE ($label)', async ({ meta, expectedReason }) => {
+    const repairTask = makeTask({
+      taskId: 'artificer-repair-evaluator-cand-4b-prompt-r1',
+      taskKind: 'artificer',
+      status: 'succeeded',
+      meta,
+    });
+    mockStateManager.getTask.mockResolvedValue(repairTask);
+    const orchestrator = makeOrchestrator();
+
+    const preview = await orchestrator.previewNextTaskTransitionGate(repairTask.taskId);
+    const result = await orchestrator.commitNextTaskProposal(repairTask.taskId);
+
+    expect(preview).toMatchObject({ decision: 'lineage_refused', reason: expectedReason });
+    expect(result).toMatchObject({ decision: 'lineage_refused', reason: expectedReason });
+    expect(mockStateManager.createTask).not.toHaveBeenCalled();
+    expect(mockStateManager.updateTask).not.toHaveBeenCalled();
+  });
+
   it('revision wave 级联: evaluator(revisionCount>0) re-succeed → 已 succeeded 的 rollout 被 reopen', async () => {
     const evaluatorTask = makeTask({
       taskId: 'evaluator-cand-5-prompt', taskKind: 'evaluator', status: 'succeeded',

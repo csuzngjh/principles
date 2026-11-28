@@ -218,10 +218,11 @@ function makeEvaluator(options: {
       validator: new DefaultEvaluatorValidator(),
       isRepairLoopEnabled: () => repairEnabled,
       seedArtificerRepairTask: async (params) => {
+        // Mirror the production Repair Creation Authority: replay/adoption of
+        // the same deterministic repair returns the existing row; `calls`
+        // records only an actual new repair creation.
+        if (await stateManager.getTask(REPAIR_ID)) return REPAIR_ID;
         calls.push('seed');
-        // Mirror the production governance seeder: the repair task row
-        // carries the repairPayload (sourceEvaluatorRunId included) so the
-        // crash-resume dedupe can find it.
         await stateManager.createTask({
           taskId: REPAIR_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
           diagnosticJson: createPITaskDiagnosticJson({

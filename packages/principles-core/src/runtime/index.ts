@@ -1610,6 +1610,9 @@ export { verifyRepairTaskIdentity } from './internalization/repair-task-identity
 // PRI-1300: repair 血缘校验 + 六项快照前提 CAS 回填的单一写侧实现 —
 // host-runtime / pd-cli 两个 seeder 复用路径共享, 禁止各自演化 hydrate+merge+CAS。
 export { validateAndBackfillRepairLineage } from './internalization/repair-lineage-backfill.js';
+// PRI-1299 Phase 1: repair creation 的唯一权威 — identity lookup、payload/channel
+// adjudication、lineage proof、atomic insert 与 UNIQUE race re-arbitration。
+export { createRepairTask, repairSeedErrorMessage } from './internalization/repair-create.js';
 export { planLegacyLineageResolution } from './internalization/correlation-lineage.js';
 export type { LegacyLineagePlan } from './internalization/correlation-lineage.js';
 export type { RepairIdentityVerification } from './internalization/repair-task-identity.js';

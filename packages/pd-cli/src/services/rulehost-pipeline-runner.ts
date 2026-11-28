@@ -38,15 +38,15 @@ import {
   EvaluatorRunner,
   DefaultEvaluatorValidator,
   InternalizationOrchestrator,
-  createPITaskDiagnosticJson,
   // PRI-1299 review fix (P1-1): the ONE core logical-successor creation
   // authority — spine successors (philosopher/scribe) are created/reused
   // through it, never through direct stateManager.createTask timestamp rows.
   createLogicalSuccessorTask,
+  // PRI-1299 Phase 1: the ONE repair creation authority shared with host-runtime.
+  createRepairTask,
+  repairSeedErrorMessage,
   parsePITaskMetadata,
   parseSeedSourcePainId,
-  artificerRepairTaskId,
-  validateAndBackfillRepairLineage,
   runAdversarialLoop,
   evaluateInRefinerSandbox,
   DEFAULT_MAX_ROUNDS,
@@ -1015,99 +1015,14 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
       }
     },
     seedArtificerRepairTask: async (params: SeedArtificerRepairParams): Promise<string> => {
-      // rc-7: each call gets a fresh task ID — never reuse a cached ID.
-      // P0-4: deterministic revision identity + reuse on replay.
-      // PRI-718: id 约定收敛到 pitask-metadata 的单一 owner。
-      const repairTaskId = artificerRepairTaskId(
-        params.repairPayload.sourceEvaluatorTaskId,
-        params.repairPayload.repairIteration,
-      );
-      const existing = await stateManager.getTask(repairTaskId);
-      if (existing) {
-        // PRI-718 (revise ≠ resume): terminal repair rounds are finished
-        // corrective work — never vehicles for new corrective work. In-flight
-        // rounds are the legitimate replay-reuse population.
-        if (existing.status === 'succeeded' || existing.status === 'failed' || existing.status === 'needs_human_review') {
-          throw new Error(
-            `repair task ${repairTaskId} already reached terminal status ${existing.status}; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)`,
-          );
-        }
-        // PRI-1293 R7 (P1-1) + PRI-1300: 复用前完整身份验证 + 缺失亲缘字段
-        // CAS 回填 — 唯一实现上收 core (validateAndBackfillRepairLineage),
-        // 与 host-runtime seeder / orchestrator 完成路径同一规则, 禁止两份
-        // 实现各自演化。宿主层只负责把结构化结果逐字映射为既有 throw
-        // 字符串 (错误语义不变; 本宿主原本无对应日志, 不新增)。
-        const lineage = await validateAndBackfillRepairLineage(
-          {
-            repairTaskId,
-            existing,
-            sourceEvaluatorTaskId: params.repairPayload.sourceEvaluatorTaskId,
-            repairIteration: params.repairPayload.repairIteration,
-          },
-          stateManager,
-        );
-        if (!lineage.ok) {
-          if (lineage.reason === 'concurrent_modification') {
-            throw new Error(
-              `evaluator_repair_seed_concurrent_modification: repair task ${repairTaskId} changed during lineage backfill — seed NOT applied, safe to retry`,
-            );
-          }
-          throw new Error(`evaluator_repair_seed_lineage_refused:${lineage.reason}:${lineage.detail}`);
-        }
-        return repairTaskId;
+      // PRI-1299 Phase 1: pd-cli 只转发 SeedArtificerRepairParams 并映射既有
+      // throw 语义; create/adopt/conflict/fail-closed 由 principles-core 的
+      // 唯一 RepairCreationAuthority 决定 (与 host-runtime 同一实现)。
+      const result = await createRepairTask(stateManager, params);
+      if (result.outcome === 'created' || result.outcome === 'adopted_existing') {
+        return result.task.taskId;
       }
-      // PRI-1293 Phase 3 (§5.2): 与 host-runtime seeder 相同的权威血缘关口 —
-      // 唯一实现经 InternalizationOrchestrator.resolveAuthoritativeCorrelationId
-      // 静态只读包装访问, 绝不本地重写父链遍历。校验失败结构化抛出 (evaluator
-      // 侧 repair_task_seed_failed 路径), 成功则 repair 任务携带验证过的
-      // correlationId + parentTaskId=sourceEvaluatorTaskId, 下一轮 evaluator
-      // 经 metadata 继承同一 id。
-      const sourceEvaluatorTask = await stateManager.getTask(params.repairPayload.sourceEvaluatorTaskId);
-      if (!sourceEvaluatorTask) {
-        throw new Error(
-          `evaluator_repair_seed_lineage_refused: source evaluator task ${params.repairPayload.sourceEvaluatorTaskId} not found`,
-        );
-      }
-      const lineage = await InternalizationOrchestrator.resolveAuthoritativeCorrelationId(
-        sourceEvaluatorTask,
-        (taskId: string) => stateManager.getTask(taskId),
-      );
-      if (!lineage.ok) {
-        throw new Error(`evaluator_repair_seed_lineage_refused:${lineage.reason}:${lineage.detail}`);
-      }
-      await stateManager.createTask({
-        taskId: repairTaskId,
-        // D1 (PRI-509): task kind is 'artificer' — reuses the artificer
-        // runner, which detects repairPayload in diagnosticJson and
-        // forwards it to the prompt builder as repairFeedback.
-        taskKind: 'artificer',
-        status: 'pending',
-        attemptCount: 0,
-        maxAttempts: 3,
-        // rc-1, rc-6: serialize via the validated helper — repairPayload
-        // is untrusted LLM output but `createPITaskDiagnosticJson` writes
-        // it through `serializePITaskMetadata`, which `parsePITaskMetadata`
-        // re-validates on read (defense in depth).
-        diagnosticJson: createPITaskDiagnosticJson({
-          // PITaskMetadata fields are mutable arrays (the metadata envelope
-          // serializes them as JSON arrays). The SeedArtificerRepairParams
-          // contract carries readonly arrays (rc-1: untrusted input from the
-          // evaluator LLM). Spread to a fresh mutable array — no mutation of
-          // the caller's data.
-          dependencyTaskIds: [...params.inheritedDependencyTaskIds],
-          channel: params.inheritedChannel,
-          timeoutMs: params.inheritedTimeoutMs,
-          inputArtifactRefs: [...params.inheritedInputArtifactRefs],
-          outputArtifactRefs: [],
-          parentTaskId: params.repairPayload.sourceEvaluatorTaskId,
-          correlationId: lineage.correlationId,
-          ...(params.ownerEvidenceSelection !== undefined
-            ? { ownerEvidenceSelection: params.ownerEvidenceSelection }
-            : {}),
-          repairPayload: params.repairPayload,
-        }),
-      });
-      return repairTaskId;
+      throw new Error(repairSeedErrorMessage(result));
     },
   };
 }

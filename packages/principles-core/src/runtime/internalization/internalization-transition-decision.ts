@@ -153,7 +153,7 @@ export function transitionInputFromTask(
     taskStatus: piTask.status,
     runnerDecision: resolveEffectiveRunnerDecision(piTask),
     legacyRunnerDecision,
-    isRepairTask: piTask.repairPayload !== undefined,
+    isRepairTask: piTask.repairPayload !== undefined || piTask.repairTaskRole !== undefined,
     revisionCount: piTask.revisionCount ?? 0,
     ...(extras?.adversarialReplayFailed ? { adversarialReplayFailed: true } : {}),
     ...(piTask.completionIntent?.transitionOverrideReason === 'owner_golden_trace_provenance_missing'

@@ -255,7 +255,16 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
           'artificer_successor_metadata_malformed');
       }
 
-      if (artificerPi.repairPayload) {
+      const { repairPayload } = artificerPi;
+      if (artificerPi.repairTaskRole !== undefined || repairPayload) {
+        if (artificerPi.repairTaskRole !== undefined && artificerPi.repairTaskRole !== 'repair_artificer') {
+          return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            'repair_role_mismatch');
+        }
+        if (!repairPayload) {
+          return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+            'repair_role_payload_missing');
+        }
         // Formal repair completion has exactly one transition authority. A
         // synchronous loop may drive the reopened evaluator, but must never
         // materialize a parallel evaluator successor chain.
@@ -278,7 +287,7 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
           return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
             'repair_transition_source_task_mismatch');
         }
-        if (commit.reopenedTaskId !== artificerPi.repairPayload.sourceEvaluatorTaskId) {
+        if (commit.reopenedTaskId !== repairPayload.sourceEvaluatorTaskId) {
           return rejected(round, lastEvaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
             'repair_transition_reopened_task_mismatch');
         }
@@ -541,20 +550,38 @@ async function resolveEvaluatorRevisionRound(
 ): Promise<EvaluatorRevisionRoundResolution> {
   let artificerDependencyCount = 0;
   let malformedArtificerMetadata = false;
+  let missingRepairPayload = false;
+  let invalidRepairRole = false;
   let repairPayload: PITaskRecord['repairPayload'] | undefined;
   for (const dependencyTaskId of evaluatorPi.dependencyTaskIds) {
     const dependency = await stateManager.getTask(dependencyTaskId);
     if (!dependency || dependency.taskKind !== 'artificer') continue;
     artificerDependencyCount += 1;
     const dependencyPi = hydratePITaskRecord(dependency);
-    if (!dependencyPi) malformedArtificerMetadata = true;
-    if (dependencyPi) {
-      const { repairPayload: dependencyRepairPayload } = dependencyPi;
-      if (dependencyRepairPayload) repairPayload = dependencyRepairPayload;
+    if (!dependencyPi) {
+      malformedArtificerMetadata = true;
+      continue;
     }
+    // OD-8: repair dependencies are identified by the durable repair role.
+    // repairPayload remains a legacy fallback for rows written before OD-8;
+    // the transition authority backfills the explicit role before reopen.
+    if (dependencyPi.repairTaskRole === undefined && dependencyPi.repairPayload === undefined) continue;
+    if (dependencyPi.repairTaskRole !== undefined && dependencyPi.repairTaskRole !== 'repair_artificer') {
+      invalidRepairRole = true;
+      continue;
+    }
+    const { repairPayload: dependencyRepairPayload } = dependencyPi;
+    if (!dependencyRepairPayload) {
+      missingRepairPayload = true;
+      continue;
+    }
+    repairPayload = dependencyRepairPayload;
   }
-  if (malformedArtificerMetadata) {
+  if (malformedArtificerMetadata || missingRepairPayload) {
     return { kind: 'invalid', reason: 'evaluator_revision_round_artificer_metadata_malformed' };
+  }
+  if (invalidRepairRole) {
+    return { kind: 'invalid', reason: 'evaluator_revision_round_repair_role_mismatch' };
   }
   if (artificerDependencyCount === 0) return { kind: 'plain' };
   if (artificerDependencyCount !== 1) {

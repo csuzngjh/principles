@@ -34,7 +34,7 @@
 import type { TaskRecord } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { TaskStoreFilter } from '../store/task/task-store.js';
-import { createPITaskDiagnosticJson, hydratePITaskRecord, mergePITaskMetadata } from './pitask-metadata.js';
+import { artificerRepairTaskId, createPITaskDiagnosticJson, hydratePITaskRecord, mergePITaskMetadata } from './pitask-metadata.js';
 import { getAllowedPredecessors } from './internalization-job-graph.js';
 import { isPeerRunnerKind, type PITaskRecord } from './peer-runner-contracts.js';
 
@@ -287,7 +287,7 @@ export async function inferLegacyParentTaskId(
   // Old repair seeder persisted an explicit sourceEvaluatorTaskId in repairPayload.
   if (pi.taskKind === 'artificer' && pi.repairPayload) {
     const {sourceEvaluatorTaskId} = pi.repairPayload;
-    const expectedId = 'artificer-repair-' + sourceEvaluatorTaskId + '-r' + pi.repairPayload.repairIteration;
+    const expectedId = artificerRepairTaskId(sourceEvaluatorTaskId, pi.repairPayload.repairIteration);
     if (raw.taskId !== expectedId) return { ok: false, reason: 'repair_task_id_does_not_match_repair_payload' };
     return loadTypedParent(sourceEvaluatorTaskId, 'evaluator');
   }

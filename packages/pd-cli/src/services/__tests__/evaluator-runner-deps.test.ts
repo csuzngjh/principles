@@ -33,8 +33,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { createEvaluatorRunnerDeps } from '../rulehost-pipeline-runner.js';
-import type { SeedArtificerRepairParams } from '@principles/core/runtime';
-import type { RuntimeStateManager, TaskRecord } from '@principles/core/runtime';
+import { createEvaluatorRepairDeps } from '@principles/host-runtime';
+import { RuntimeStateManager, type SeedArtificerRepairParams, type TaskRecord } from '@principles/core/runtime';
 
 // ─── Test workspace helpers ────────────────────────────────────────────────
 
@@ -102,6 +102,8 @@ function createMockStateManager(): {
   const stateManager = {
     getTask: vi.fn(async (taskId: string) =>
       createdTasks.find((t) => t.taskId === taskId) ?? null),
+    listTasks: vi.fn(async () => [...createdTasks]),
+    withWriteTransaction: vi.fn(async (fn: () => Promise<unknown>) => fn()),
     createTask: vi.fn(async (record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>) => {
       const now = new Date().toISOString();
       const task: TaskRecord = { ...record, createdAt: now, updatedAt: now };
@@ -139,6 +141,7 @@ function makeValidSeedParams(): SeedArtificerRepairParams {
     },
     inheritedDependencyTaskIds: ['scribe-task-001'],
     inheritedChannel: 'prompt',
+    inheritedPipelineMode: 'full_chain',
     inheritedTimeoutMs: 300_000,
     inheritedInputArtifactRefs: [
       { artifactType: 'principle', ref: 'pi-art-scribe-001' },
@@ -319,10 +322,12 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     const meta = parsed.pi_metadata;
     expect(meta).toBeDefined();
     expect(meta.repairPayload).toEqual(params.repairPayload);
+    expect(meta.repairTaskRole).toBe('repair_artificer');
 
     // Inherited lineage must be preserved (PRI-508 context + PRI-509 deps)
     expect(meta.dependencyTaskIds).toEqual(params.inheritedDependencyTaskIds);
     expect(meta.channel).toBe(params.inheritedChannel);
+    expect(meta.pipelineMode).toBe(params.inheritedPipelineMode);
     expect(meta.timeoutMs).toBe(params.inheritedTimeoutMs);
     expect(meta.inputArtifactRefs).toEqual(params.inheritedInputArtifactRefs);
     expect(meta.ownerEvidenceSelection).toEqual(params.ownerEvidenceSelection);
@@ -438,6 +443,7 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     const afterMeta = JSON.parse(after?.diagnosticJson ?? '{}') as { pi_metadata?: Record<string, unknown> };
     expect(afterMeta.pi_metadata?.parentTaskId).toBe('evaluator-r0');
     expect(afterMeta.pi_metadata?.correlationId).toBe('cand-r0');
+    expect(afterMeta.pi_metadata?.repairTaskRole).toBe('repair_artificer');
     // 既有字段保持 (merge 而非重建)。
     expect(afterMeta.pi_metadata?.repairPayload).toEqual(params.repairPayload);
 
@@ -459,6 +465,52 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     };
     await expect(deps.seedArtificerRepairTask(orphanParams)).rejects.toThrow(/evaluator_repair_seed_lineage_refused/);
     expect(createdTasks.find((t) => t.taskId === orphanRepairId)?.diagnosticJson).toBe(orphanJson);
+  });
+
+  it('host-runtime 与 pd-cli 并发 seed 同一 Repair — 同一 authority 只落一行', async () => {
+    const workspaceDir = createTempWorkspace(true);
+    tmpWorkspaces.push(workspaceDir);
+    const hostState = new RuntimeStateManager({ workspaceDir });
+    const cliState = new RuntimeStateManager({ workspaceDir });
+    await hostState.initialize();
+    await cliState.initialize();
+    try {
+      // 可证明来源链 (dreamer candidate → evaluator) 对两个连接均可见。
+      await hostState.createTask({
+        taskId: 'dreamer-cross-entry', taskKind: 'dreamer', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }, candidateId: 'cand-r0' }),
+      });
+      await hostState.createTask({
+        taskId: 'evaluator-r0', taskKind: 'evaluator', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'cand-r0', parentTaskId: 'dreamer-cross-entry' } }),
+      });
+
+      const hostDeps = createEvaluatorRepairDeps(workspaceDir, hostState);
+      const cliDeps = createEvaluatorRunnerDeps({
+        stateManager: cliState,
+        runtimeAdapter: {} as never,
+        eventEmitter: {} as never,
+        validator: {} as never,
+        artifactStore: {} as never,
+        workspaceDir,
+      });
+      if (typeof cliDeps.seedArtificerRepairTask !== 'function') throw new Error('seedArtificerRepairTask missing');
+
+      const params = makeValidSeedParams();
+      const [hostTaskId, cliTaskId] = await Promise.all([
+        hostDeps.seedArtificerRepairTask(params),
+        cliDeps.seedArtificerRepairTask(params),
+      ]);
+
+      expect(hostTaskId).toBe(cliTaskId);
+      const repairRows = (await hostState.listTasks({ taskKind: 'artificer' }))
+        .filter((task) => task.taskId === hostTaskId);
+      expect(repairRows).toHaveLength(1);
+      expect((await cliState.listTasks({ taskKind: 'artificer' })).filter((task) => task.taskId === hostTaskId)).toHaveLength(1);
+    } finally {
+      await cliState.close();
+      await hostState.close();
+    }
   });
 
   it('deps spread contains all required base PeerRunnerDeps fields (EP-02: real path gets full deps)', () => {

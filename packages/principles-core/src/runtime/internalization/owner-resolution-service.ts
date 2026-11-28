@@ -40,6 +40,7 @@ import {
   type OwnerDecisionReviewStore,
 } from './owner-decision-review.js';
 import { reopenTaskForRevision, resolveRolloutRevisionTarget } from './revision-reopen.js';
+import { resolveEvaluatorArtificerDependencyIdentity } from './repair-task-identity.js';
 
 const CAS_ATTEMPTS = 3;
 const OWNER_INSTRUCTION_MAX_CHARS = 500;
@@ -99,6 +100,7 @@ export interface OwnerResolutionApplyDeps {
 export function factStoreFromStateManager(stateManager: RuntimeStateManager): OwnerDecisionFactStore {
   return {
     getTask: (taskId) => stateManager.getTask(taskId),
+    listTasks: (filter) => stateManager.listTasks(filter),
     listArtifactsBySourceTask: async (taskId) => {
       const artifacts = await stateManager.piArtifactStore.listBySourceTaskId(taskId);
       return artifacts.map((a) => ({
@@ -195,15 +197,16 @@ async function resolveReviseTarget(
 ): Promise<{ taskId: string } | null> {
   if (!piTask) return null;
   if (piTask.taskKind === 'evaluator') {
-    // 最新 repair Artificer = 当前依赖链上的 artificer（budget 耗尽的那轮）
-    for (const depId of piTask.dependencyTaskIds) {
-      const dep = await deps.stateManager.getTask(depId);
-      if (dep?.taskKind === 'artificer') return { taskId: dep.taskId };
-    }
-    return null;
+    const resolution = await resolveEvaluatorArtificerDependencyIdentity({
+      evaluatorTask: piTask,
+      store: deps.stateManager,
+    });
+    return resolution.kind === 'ordinary' || resolution.kind === 'repair'
+      ? { taskId: resolution.task.taskId }
+      : null;
   }
   const target = await resolveRolloutRevisionTarget(
-    (id) => deps.stateManager.getTask(id),
+    deps.stateManager,
     piTask.taskId,
     piTask.channel ?? 'prompt',
   );

@@ -148,7 +148,10 @@ function makeHarness(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore, runO
   const [firstTask] = tasks;
   if (!firstTask) throw new Error('makeHarness requires at least one task');
   const store = new MemoryTaskStore();
-  for (const t of tasks) void store.createTask({ ...t });
+  const rows = tasks.some((entry) => entry.taskId === RESUME_DREAMER_ROOT)
+    ? tasks
+    : [dreamerRootTask(), ...tasks];
+  for (const t of rows) void store.createTask({ ...t });
   const runs = new Map([
     [RUN_ID, { runId: RUN_ID, taskId: EVAL_ID, runtimeKind: 'evaluator', outputPayload: JSON.stringify(runOutput) }],
   ]);
@@ -601,5 +604,69 @@ describe('PRI-718: stale repair completion must not downgrade the evaluator dep'
     const after = hydratePITaskRecord(mustGet(await h.store.getTask(EVAL_ID), 'evaluator task'));
     expect(after?.dependencyTaskIds).toEqual([R2_ID]);
     expect(after?.revisionCount).toBe(2);
+  });
+
+  function ordinaryArtificerDependency(): TaskRecord {
+    return task({
+      taskId: 'artificer-ordinary-stale-guard',
+      taskKind: 'artificer',
+      status: 'succeeded',
+      meta: meta({
+        dependencyTaskIds: [SCRIBE_ID],
+        parentTaskId: EVAL_ID,
+        correlationId: 'cand-resume-root',
+      }),
+    });
+  }
+
+  it.each([
+    ['ordinary before newer repair', (ordinaryId: string) => [ordinaryId, R2_ID]],
+    ['ordinary after newer repair', (ordinaryId: string) => [R2_ID, ordinaryId]],
+  ])('%s: scan is complete and preview/commit agree on stale supersession', async (_label, dependencyOrder) => {
+    const ordinary = ordinaryArtificerDependency();
+    const dependencies = dependencyOrder(ordinary.taskId);
+    const h = guardHarness(R1_ID, dependencies);
+    void h.store.createTask({ ...ordinary });
+
+    const preview = await h.orchestrator.previewNextTaskTransitionGate(h.completingRepairId);
+    expect(preview?.decision).toBe('revision_reopen_noop');
+    if (preview?.decision === 'revision_reopen_noop') expect(preview.reason).toBe('stale_repair_transition_superseded');
+
+    const result = await h.orchestrator.commitNextTaskProposal(h.completingRepairId);
+    expect(result.decision).toBe('revision_reopen_noop');
+    if (result.decision === 'revision_reopen_noop') expect(result.reason).toBe('stale_repair_transition_superseded');
+    const after = hydratePITaskRecord(mustGet(await h.store.getTask(EVAL_ID), 'evaluator task'));
+    expect(after?.dependencyTaskIds).toEqual(dependencies);
+    expect(after?.revisionCount).toBe(1);
+  });
+
+  it('role-only repair evidence vetoes reopen in both preview and commit even when newer valid repair exists', async () => {
+    const h = guardHarness(R1_ID, [R2_ID]);
+    const r2Raw = mustGet(await h.store.getTask(R2_ID), 'repair r2 task');
+    const parsed = JSON.parse(r2Raw.diagnosticJson ?? '{}') as { pi_metadata: Record<string, unknown> };
+    delete parsed.pi_metadata.repairPayload;
+    parsed.pi_metadata.repairTaskRole = 'repair_artificer';
+    await h.store.updateTask(R2_ID, { diagnosticJson: JSON.stringify(parsed) });
+
+    const preview = await h.orchestrator.previewNextTaskTransitionGate(h.completingRepairId);
+    expect(preview?.decision).toBe('lineage_refused');
+    const result = await h.orchestrator.commitNextTaskProposal(h.completingRepairId);
+    expect(result.decision).toBe('lineage_refused');
+    const after = hydratePITaskRecord(mustGet(await h.store.getTask(EVAL_ID), 'evaluator task'));
+    expect(after?.dependencyTaskIds).toEqual([R2_ID]);
+    expect(after?.revisionCount).toBe(1);
+  });
+
+  it('malformed repair evidence vetoes reopen in both preview and commit without downgrading dependencies', async () => {
+    const h = guardHarness(R1_ID, [R2_ID]);
+    await h.store.updateTask(R2_ID, { diagnosticJson: '{bad-json' });
+
+    const preview = await h.orchestrator.previewNextTaskTransitionGate(h.completingRepairId);
+    expect(preview?.decision).toBe('lineage_refused');
+    const result = await h.orchestrator.commitNextTaskProposal(h.completingRepairId);
+    expect(result.decision).toBe('lineage_refused');
+    const after = hydratePITaskRecord(mustGet(await h.store.getTask(EVAL_ID), 'evaluator task'));
+    expect(after?.dependencyTaskIds).toEqual([R2_ID]);
+    expect(after?.revisionCount).toBe(1);
   });
 });

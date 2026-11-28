@@ -20,8 +20,8 @@ import type { InternalizationChannel, RunnerKind } from './peer-runner-contracts
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
 import { deriveSuccessorTaskId } from './internalization-state-machine.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, hasConsumedRevisionCause } from './pitask-metadata.js';
-import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition, planRevisionReopenInitialState } from './revision-reopen.js';
-import { verifyRepairTaskIdentity } from './repair-task-identity.js';
+import { reopenTaskForRevision, buildRepairRevisionCauseId, planExistingSuccessorTransition, planRevisionReopenInitialState, type ReopenRevisionOptions } from './revision-reopen.js';
+import { planStaleRepairTransitionFromDependencyScan, scanEvaluatorArtificerDependencyIdentity, verifyRepairTaskIdentity } from './repair-task-identity.js';
 import { lookupSuccessorByParent, type SuccessorLookupResult } from './successor-lookup.js';
 import { createLogicalSuccessorTask } from './successor-create.js';
 import { validateAndBackfillRepairLineage } from './repair-lineage-backfill.js';
@@ -659,7 +659,7 @@ export class InternalizationOrchestrator {
     if (transition.kind === 'TERMINAL_REJECT') {
       return { decision: 'blocked_by_rejection', sourceTaskId: taskId, reason: transition.reason, runnerDecision: piTask.runnerDecision ?? 'unknown' };
     }
-    if (transition.kind === 'REOPEN_SOURCE_EVALUATOR' && piTask.repairPayload) {
+    if (transition.kind === 'REOPEN_SOURCE_EVALUATOR') {
       return this.previewRepairReopenTransition(rawTask, piTask, transition.reason);
     }
     if (piTask.status !== 'succeeded') {
@@ -682,6 +682,33 @@ export class InternalizationOrchestrator {
   }
 
   /**
+   * Shared stale-repair guard for preview and commit. The evaluator dependency
+   * chain is scanned through the single Core repair dependency resolver — an
+   * ordinary artificer never terminates the scan early, malformed/unprovable
+   * repair candidates fail closed, and only another valid same-evaluator repair
+   * at an equal/newer round supersedes this completion.
+   */
+  private async resolveStaleRepairTransitionGuard(input: {
+    readonly sourceEvaluatorTask: TaskRecord;
+    readonly completingRepairTaskId: string;
+    readonly completingRepairIteration: number;
+  }): Promise<
+    | { readonly kind: 'clear' }
+    | { readonly kind: 'superseded' }
+    | { readonly kind: 'invalid'; readonly reason: string; readonly detail: string }
+  > {
+    const scan = await scanEvaluatorArtificerDependencyIdentity({
+      evaluatorTask: input.sourceEvaluatorTask,
+      store: this.stateManager,
+    });
+    return planStaleRepairTransitionFromDependencyScan({
+      scan,
+      completingRepairTaskId: input.completingRepairTaskId,
+      completingRepairIteration: input.completingRepairIteration,
+    });
+  }
+
+  /**
    * Read-only projection of the repair-completion branch. It performs the
    * same identity, causal-idempotency, superseded-repair, target-state and
    * lineage judgments as commit, but never backfills lineage metadata and
@@ -694,7 +721,14 @@ export class InternalizationOrchestrator {
   ): Promise<CommitNextTaskResult> {
     const { taskId } = rawTask;
     const payload = piTask.repairPayload;
-    if (!payload) return { decision: 'invalid_task_metadata', taskId, reason: 'repair_payload_missing_for_reopen_transition' };
+    if (!payload) {
+      return {
+        decision: 'lineage_refused',
+        sourceTaskId: taskId,
+        reason: 'repair_role_payload_missing',
+        detail: `repair task ${taskId} carries repairTaskRole but no valid repairPayload — source evaluator NOT reopened, zero writes`,
+      };
+    }
     const repairIdentity = await verifyRepairTaskIdentity(
       rawTask,
       payload.sourceEvaluatorTaskId,
@@ -722,25 +756,26 @@ export class InternalizationOrchestrator {
       };
     }
     if (srcPi && srcRaw) {
-      for (const depId of srcPi.dependencyTaskIds) {
-        if (depId === taskId) continue;
-        const dep = await this.stateManager.getTask(depId);
-        if (!dep || dep.taskKind !== 'artificer') continue;
-        const depPi = hydratePITaskRecord(dep);
-        if (
-          depPi?.repairPayload
-          && depPi.repairPayload.sourceEvaluatorTaskId === payload.sourceEvaluatorTaskId
-          && typeof depPi.repairPayload.repairIteration === 'number'
-          && depPi.repairPayload.repairIteration >= payload.repairIteration
-        ) {
-          return {
-            decision: 'revision_reopen_noop',
-            sourceTaskId: taskId,
-            reopenedTaskId: payload.sourceEvaluatorTaskId,
-            reason: 'stale_repair_transition_superseded',
-          };
-        }
-        break;
+      const staleGuard = await this.resolveStaleRepairTransitionGuard({
+        sourceEvaluatorTask: srcRaw,
+        completingRepairTaskId: taskId,
+        completingRepairIteration: payload.repairIteration,
+      });
+      if (staleGuard.kind === 'invalid') {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: staleGuard.reason,
+          detail: `stale_repair_guard_unprovable:${staleGuard.detail} — source evaluator NOT reopened, zero writes`,
+        };
+      }
+      if (staleGuard.kind === 'superseded') {
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: payload.sourceEvaluatorTaskId,
+          reason: 'stale_repair_transition_superseded',
+        };
       }
     }
 
@@ -931,15 +966,105 @@ export class InternalizationOrchestrator {
         runnerDecision: piTask.runnerDecision ?? 'unknown',
       };
     }
-    if (transition.kind === 'REOPEN_SOURCE_EVALUATOR' && piTask.repairPayload) {
-      // PRI-1293 R7 (P1-1) + PRI-1300: Repair 完成路径的身份前置验证 + 缺失
-      // 亲缘字段回填 — 唯一实现上收 repair-lineage-backfill.ts (与两个宿主
-      // seeder 复用路径共享)。本分支早于通用 PeerRunner 血缘门禁, 不能依赖
-      // 后续检查兜底。修改来源 Evaluator 之前必须证明 Repair 自身: payload
-      // 身份与 taskId 互证、来源 Evaluator 真实、parent/correlation/channel
-      // 一致。验证失败 = 零写入 + 结构化拒绝 (不得修改 dependencyTaskIds/清空
-      // inputArtifactRefs/递增 revisionCount); CAS 落败 = 并发冲突, 本轮不写
-      // evaluator。
+    if (transition.kind === 'REOPEN_SOURCE_EVALUATOR') {
+      if (!piTask.repairPayload) {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: 'repair_role_payload_missing',
+          detail: `repair task ${taskId} carries repairTaskRole but no valid repairPayload — source evaluator NOT reopened, zero writes`,
+        };
+      }
+      // PRI-1293 R7 (P1-1) + PRI-1300: Repair 完成路径的身份前置验证保持只读;
+      // 缺失亲缘字段/OD-8 repair role 的 CAS 回填延后到初始状态分类确认会
+      // 实际 reopen 之后。否则 leased / same-cause no-op 会先写 repair row,
+      // 破坏 preview/confirm 的零写 parity。
+      const repairIdentity = await verifyRepairTaskIdentity(
+        rawTask,
+        piTask.repairPayload.sourceEvaluatorTaskId,
+        piTask.repairPayload.repairIteration,
+        this.stateManager,
+      );
+      if (!repairIdentity.ok) {
+        return {
+          decision: 'lineage_refused',
+          sourceTaskId: taskId,
+          reason: repairIdentity.reason,
+          detail: `repair_identity_verification_failed:${repairIdentity.detail} — source evaluator NOT reopened, zero writes`,
+        };
+      }
+      // PRI-629 P0 (SPEC §12): epoch-aware causal identity — Owner 额外修订轮
+      // (revise_once reopen 该 artificer,其 revisionCount+1) 再次完成时,
+      // 重开来源 evaluator 必须使用新 causeId 才是真 reopen;同 epoch 重放
+      // (crash/reconciliation) 使用相同 causeId → no-op。
+      const completingRepairPayload = piTask.repairPayload;
+      const causeId = buildRepairRevisionCauseId(piTask);
+      // A/B: cause 已 materialize 的判定前移 — 目标(任意状态)的 revisionCauseId
+      // 与本 repair 的 causeId 相同,说明这轮 reopen 已发生过: 目标可能仍在
+      // pending(等待重跑),也可能已经跑完(succeeded 且带新 verdict)。两种
+      // 情况重放都不得再次 reopen(后者会丢弃已完成的修订轮 verdict)。
+      const srcRaw = await this.stateManager.getTask(piTask.repairPayload.sourceEvaluatorTaskId);
+      const srcPi = srcRaw ? hydratePITaskRecord(srcRaw) : null;
+      if (srcPi && hasConsumedRevisionCause(srcPi, causeId)) {
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+          reason: 'revision_cause_already_materialized',
+        };
+      }
+      // PRI-718 (superseded-repair downgrade guard): a stale completion
+      // recovery (e.g. reconciliation replaying an OLDER repair's transition)
+      // must not re-point the evaluator's artificer dependency back to a
+      // superseded round — that made the evaluator re-evaluate the same old
+      // artifact forever (EP002-R2 F3). Replacement is allowed only when the
+      // completing repair IS the evaluator's current repair dep, or is a
+      // NEWER round of the same source evaluator.
+      if (srcPi && srcRaw) {
+        const staleGuard = await this.resolveStaleRepairTransitionGuard({
+          sourceEvaluatorTask: srcRaw,
+          completingRepairTaskId: taskId,
+          completingRepairIteration: piTask.repairPayload.repairIteration,
+        });
+        if (staleGuard.kind === 'invalid') {
+          return {
+            decision: 'lineage_refused',
+            sourceTaskId: taskId,
+            reason: staleGuard.reason,
+            detail: `stale_repair_guard_unprovable:${staleGuard.detail} — source evaluator NOT reopened, zero writes`,
+          };
+        }
+        if (staleGuard.kind === 'superseded') {
+          return {
+            decision: 'revision_reopen_noop',
+            sourceTaskId: taskId,
+            reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+            reason: 'stale_repair_transition_superseded',
+          };
+        }
+      }
+      // 与只读 preview 使用同一初始状态分类器: missing / invalid / same-cause
+      // replay / in-flight 都是零写分支。只有确认当前快照允许 reopen 后,才
+      // 执行 repair 血缘 + OD-8 role CAS 回填;随后 reopenTaskForRevision 对
+      // 状态漂移再次裁决,仍保留并发安全。
+      const initialPlan = planRevisionReopenInitialState(srcRaw, causeId);
+      switch (initialPlan.plan) {
+        case 'task_not_found':
+          return { decision: 'revision_reopen_failed', sourceTaskId: taskId,
+            reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId, reason: 'task_not_found' };
+        case 'invalid_task_metadata':
+          return { decision: 'invalid_task_metadata', taskId: piTask.repairPayload.sourceEvaluatorTaskId,
+            reason: 'repair_evaluator_reopen_invalid_task_metadata' };
+        case 'idempotent_replay_same_revision':
+          return { decision: 'revision_reopen_noop', sourceTaskId: taskId,
+            reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+            reason: 'idempotent_replay_same_revision' };
+        case 'refused_in_flight':
+          return { decision: 'revision_reopen_failed', sourceTaskId: taskId,
+            reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId, reason: initialPlan.reason };
+        case 'proceed':
+          break;
+      }
       const repairLineage = await validateAndBackfillRepairLineage(
         {
           repairTaskId: taskId,
@@ -965,61 +1090,39 @@ export class InternalizationOrchestrator {
           detail: `repair_identity_verification_failed:${repairLineage.detail} — source evaluator NOT reopened, zero writes`,
         };
       }
-      // PRI-629 P0 (SPEC §12): epoch-aware causal identity — Owner 额外修订轮
-      // (revise_once reopen 该 artificer,其 revisionCount+1) 再次完成时,
-      // 重开来源 evaluator 必须使用新 causeId 才是真 reopen;同 epoch 重放
-      // (crash/reconciliation) 使用相同 causeId → no-op。
-      const causeId = buildRepairRevisionCauseId(piTask);
-      // A/B: cause 已 materialize 的判定前移 — 目标(任意状态)的 revisionCauseId
-      // 与本 repair 的 causeId 相同,说明这轮 reopen 已发生过: 目标可能仍在
-      // pending(等待重跑),也可能已经跑完(succeeded 且带新 verdict)。两种
-      // 情况重放都不得再次 reopen(后者会丢弃已完成的修订轮 verdict)。
-      const srcRaw = await this.stateManager.getTask(piTask.repairPayload.sourceEvaluatorTaskId);
-      const srcPi = srcRaw ? hydratePITaskRecord(srcRaw) : null;
-      if (srcPi && hasConsumedRevisionCause(srcPi, causeId)) {
-        return {
-          decision: 'revision_reopen_noop',
-          sourceTaskId: taskId,
-          reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
-          reason: 'revision_cause_already_materialized',
-        };
-      }
-      // PRI-718 (superseded-repair downgrade guard): a stale completion
-      // recovery (e.g. reconciliation replaying an OLDER repair's transition)
-      // must not re-point the evaluator's artificer dependency back to a
-      // superseded round — that made the evaluator re-evaluate the same old
-      // artifact forever (EP002-R2 F3). Replacement is allowed only when the
-      // completing repair IS the evaluator's current repair dep, or is a
-      // NEWER round of the same source evaluator.
-      if (srcPi && srcRaw) {
-        for (const depId of srcPi.dependencyTaskIds) {
-          if (depId === taskId) continue;
-          const dep = await this.stateManager.getTask(depId);
-          if (!dep || dep.taskKind !== 'artificer') continue;
-          const depPi = hydratePITaskRecord(dep);
-          if (
-            depPi?.repairPayload
-            && depPi.repairPayload.sourceEvaluatorTaskId === piTask.repairPayload.sourceEvaluatorTaskId
-            && typeof depPi.repairPayload.repairIteration === 'number'
-            && depPi.repairPayload.repairIteration >= piTask.repairPayload.repairIteration
-          ) {
-            return {
-              decision: 'revision_reopen_noop',
-              sourceTaskId: taskId,
-              reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
-              reason: 'stale_repair_transition_superseded',
-            };
-          }
-          break; // the evaluator's artificer dep is singular (linear chain)
-        }
-      }
       const reopened = await this.reopenTaskForRevision(piTask.repairPayload.sourceEvaluatorTaskId, {
         replaceArtificerDependencyWith: taskId,
         reason: 'artificer_repair_complete',
         revisionCauseId: causeId,
+        validateTargetSnapshot: async ({ rawTask: targetSnapshot }) => {
+          const writeCriticalGuard = await this.resolveStaleRepairTransitionGuard({
+            sourceEvaluatorTask: targetSnapshot,
+            completingRepairTaskId: taskId,
+            completingRepairIteration: completingRepairPayload.repairIteration,
+          });
+          if (writeCriticalGuard.kind === 'invalid') {
+            return {
+              ok: false,
+              reason: `lineage_refused:${writeCriticalGuard.reason}`,
+              detail: `stale_repair_guard_unprovable_at_write:${writeCriticalGuard.detail} — source evaluator NOT reopened, zero writes`,
+            };
+          }
+          if (writeCriticalGuard.kind === 'superseded') {
+            return { ok: false, reason: 'stale_repair_transition_superseded' };
+          }
+          return { ok: true };
+        },
       });
       if (!reopened.ok) {
         // Repair 已成功但来源 Evaluator reopen 失败不是正常终点；保留真实拒绝类别。
+        if (reopened.reason === 'stale_repair_transition_superseded') {
+          return {
+            decision: 'revision_reopen_noop',
+            sourceTaskId: taskId,
+            reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+            reason: 'stale_repair_transition_superseded',
+          };
+        }
         if (reopened.reason.startsWith('lineage_refused:')) {
           return { decision: 'lineage_refused', sourceTaskId: taskId,
             reason: reopened.reason.slice('lineage_refused:'.length), detail: reopened.detail ?? reopened.reason };
@@ -1678,18 +1781,7 @@ export class InternalizationOrchestrator {
    */
   async reopenTaskForRevision(
     taskId: string,
-    options?: {
-      revisionFeedback?: string;
-      replaceArtificerDependencyWith?: string;
-      reason?: string;
-      /**
-       * P0-4 revision identity: 同一逻辑修订动作的稳定标识。相同 causeKey 对
-       * 已 reopen 目标重放 = 真正 no-op (不递增 revisionCount,不重写反馈);
-       * 不同 causeKey = 新修订轮 (正常递增)。未提供时退化为旧行为 (每次 +1,
-       * 仅建议内部测试使用;生产调用方必须传)。
-       */
-      revisionCauseId?: string;
-    },
+    options?: ReopenRevisionOptions,
   ): Promise<{ ok: boolean; reason: string; detail?: string }> {
     // PRI-629: 提取至 revision-reopen.ts 的单一核心实现 (Console/CLI 复用),
     // orchestrator 方法保留为兼容委托。

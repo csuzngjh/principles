@@ -174,13 +174,13 @@ describe('createEvaluatorRepairDeps', () => {
       inheritedTimeoutMs: 300_000,
       inheritedInputArtifactRefs: [],
     });
-    const failedId = await deps.seedArtificerRepairTask(makeParams(3));
+    const failedId = await deps.seedArtificerRepairTask(makeParams(1));
     await stateManager.updateTask(failedId, { status: 'failed' });
-    await expect(deps.seedArtificerRepairTask(makeParams(3))).rejects.toThrow(/terminal status failed/);
+    await expect(deps.seedArtificerRepairTask(makeParams(1))).rejects.toThrow(/terminal status failed/);
 
-    const nhrId = await deps.seedArtificerRepairTask(makeParams(4));
+    const nhrId = await deps.seedArtificerRepairTask(makeParams(2));
     await stateManager.updateTask(nhrId, { status: 'needs_human_review' });
-    await expect(deps.seedArtificerRepairTask(makeParams(4))).rejects.toThrow(/terminal status needs_human_review/);
+    await expect(deps.seedArtificerRepairTask(makeParams(2))).rejects.toThrow(/terminal status needs_human_review/);
   });
 });
 

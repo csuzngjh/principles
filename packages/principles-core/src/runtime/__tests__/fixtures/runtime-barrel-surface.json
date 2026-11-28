@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2079,
+  "count": 2081,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1703,6 +1703,7 @@
     "createProductionGateDeps",
     "createRecoverySweepService",
     "createRemediationResult",
+    "createRepairTask",
     "createReuseRecommendationHook",
     "createRuleHostHelpers",
     "createRuntimeStateHandle",
@@ -1975,6 +1976,7 @@
     "renderPrinciplesToDirectives",
     "renderReportMarkdown",
     "reopenTaskForRevision",
+    "repairSeedErrorMessage",
     "replayGoldenTrace",
     "resolveAgentRuntimeBinding",
     "resolveArtificerRunnerOptions",

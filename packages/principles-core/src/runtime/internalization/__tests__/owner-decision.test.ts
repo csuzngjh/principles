@@ -57,6 +57,7 @@ import type { TaskRecord } from '../../task-status.js';
 const EVAL_ID = 'evaluator-001';
 const ARTIFER_ID = 'artificer-repair-evaluator-001-r2';
 const SCRIBE_ID = 'scribe-001';
+const ORDINARY_ARTIFICER_ID = 'artificer-owner-ordinary';
 const RUN_ID = 'run-evaluator-001';
 const ARTIFACT_ID = `pi-art-${EVAL_ID}-${RUN_ID}`;
 
@@ -78,7 +79,7 @@ function budgetExhaustedRepairPayload(): RepairPayload {
     previousScore: 0.7,
     repairIteration: 2,
     sourceArtificerArtifactId: 'pi-art-artificer-old',
-    sourceEvaluatorTaskId: 'evaluator-previous',
+    sourceEvaluatorTaskId: EVAL_ID,
   };
 }
 
@@ -97,6 +98,7 @@ function nhrContext(reasonCode: string = HUMAN_REVIEW_REASON.evaluatorRepairBudg
 // (repair artificer) 必须可回溯根 dreamer, 否则新的 reopen 血缘门禁按设计
 // 拒绝。本文件夹具链此前无 dreamer 根, 这里补一个共享根并挂链 (断言不变)。
 const OWNER_DECISION_DREAMER_ROOT = 'dreamer-owner-decision-root';
+const OWNER_DECISION_CORRELATION_ID = '11111111-1111-4111-8111-111111111111';
 
 function dreamerRootTask(): TaskRecord {
   return {
@@ -110,9 +112,9 @@ function dreamerRootTask(): TaskRecord {
     diagnosticJson: JSON.stringify({
       pi_metadata: {
         dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
-        inputArtifactRefs: [], outputArtifactRefs: [],
+        inputArtifactRefs: [], outputArtifactRefs: [], correlationId: OWNER_DECISION_CORRELATION_ID,
       },
-      candidateId: 'cand-owner-decision-root',
+      candidateId: OWNER_DECISION_CORRELATION_ID,
     }),
   };
 }
@@ -138,7 +140,7 @@ function evaluatorNhrTask(overrides: { meta?: Partial<PITaskMetadata>; status?: 
 
 function artificerTaskWithPayload(repairIteration: number): TaskRecord {
   return {
-    taskId: ARTIFER_ID,
+    taskId: `artificer-repair-${EVAL_ID}-r${repairIteration}`,
     taskKind: 'artificer',
     status: 'succeeded',
     attemptCount: 1,
@@ -147,15 +149,33 @@ function artificerTaskWithPayload(repairIteration: number): TaskRecord {
     updatedAt: '2026-08-29T00:00:00.000Z',
     diagnosticJson: createPITaskDiagnosticJson(baseMeta({
       dependencyTaskIds: [SCRIBE_ID],
-      parentTaskId: OWNER_DECISION_DREAMER_ROOT,
+      parentTaskId: EVAL_ID,
+      repairTaskRole: 'repair_artificer',
       repairPayload: {
         requiredChanges: ['fix timeout handling'],
         concerns: ['c1'],
         previousScore: 0.7,
         repairIteration,
         sourceArtificerArtifactId: 'pi-art-artificer-old',
-        sourceEvaluatorTaskId: 'evaluator-previous',
+        sourceEvaluatorTaskId: EVAL_ID,
       },
+    })),
+  };
+}
+
+function ordinaryArtificerTask(channel: 'prompt' | 'code_tool_hook' = 'prompt'): TaskRecord {
+  return {
+    taskId: ORDINARY_ARTIFICER_ID,
+    taskKind: 'artificer',
+    status: 'succeeded',
+    attemptCount: 1,
+    maxAttempts: 3,
+    createdAt: '2026-08-29T00:00:00.000Z',
+    updatedAt: '2026-08-29T00:00:00.000Z',
+    diagnosticJson: createPITaskDiagnosticJson(baseMeta({
+      channel,
+      dependencyTaskIds: [SCRIBE_ID],
+      parentTaskId: EVAL_ID,
     })),
   };
 }
@@ -185,8 +205,10 @@ function makeArtifactStoreWithDecisionArtifact(content: unknown = {
 }
 
 function makeFactStore(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore): OwnerDecisionFactStore {
+  const allTasks = [dreamerRootTask(), ...tasks.filter((task) => task.taskId !== OWNER_DECISION_DREAMER_ROOT)];
   return {
-    getTask: async (id) => tasks.find((t) => t.taskId === id) ?? null,
+    getTask: async (id) => allTasks.find((t) => t.taskId === id) ?? null,
+    listTasks: async () => [...allTasks],
     listArtifactsBySourceTask: async (id) => artifacts.listBySourceTaskId(id).then((list) => list.map((a) => ({
       artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
     }))),
@@ -259,12 +281,11 @@ function makeInMemoryStateManager(tasks: TaskRecord[], artifacts: MemoryPIArtifa
     _store: store,
     piArtifactStore: artifacts,
     async getTask(id: string) { return store.getTask(id); },
+    async listTasks(filter?: Parameters<MemoryTaskStore['listTasks']>[0]) { return store.listTasks(filter); },
     async getRunsByTask(id: string) { return [...runs.values()].filter((r) => r.taskId === id); },
     async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
-    async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1], options?: Record<string, unknown>) {
-      return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
-    },
+    updateTaskIfDiagnosticJsonUnchanged: store.updateTaskIfDiagnosticJsonUnchanged.bind(store),
     async updateTaskIfDiagnosticJsonAndArtifactsUnchanged(input: {
       taskId: string;
       expectedDiagnosticJson: string | null;
@@ -419,6 +440,95 @@ describe('PRI-629 classification + capability (INV-01/INV-02/§22)', () => {
     expect(deriveOwnerDecisionCapability(facts!).eligible).toBe(false);
   });
 
+  it('ambiguous artificer dependencies make owner facts lineage-unresolvable (no first-row selection)', async () => {
+    const otherArtificer = {
+      ...artificerTaskWithPayload(1),
+      taskId: 'artificer-other',
+    };
+    const task = evaluatorNhrTask({ meta: baseMeta({ dependencyTaskIds: [ARTIFER_ID, otherArtificer.taskId] }) });
+    const facts = await collectOwnerDecisionFacts(
+      makeFactStore([task, artificerTaskWithPayload(2), otherArtificer], makeArtifactStoreWithDecisionArtifact()), EVAL_ID);
+
+    expect(facts?.lineageResolvable).toBe(false);
+    expect(facts?.dependencyArtificerTaskId).toBeNull();
+    expect(facts?.dependencyRepairIteration).toBeNull();
+    expect(deriveOwnerDecisionCapability(facts!).blockers).toContain('lineage_unresolvable');
+  });
+
+  it('repair identity negative matrix: foreign/id/iteration/channel/parent/correlation/role-only/malformed all make lineage unresolvable', async () => {
+    const mutateRepair = (mutate: (meta: Record<string, unknown>) => void): TaskRecord => {
+      const row = artificerTaskWithPayload(2);
+      const parsed = JSON.parse(row.diagnosticJson!) as { pi_metadata: Record<string, unknown> };
+      mutate(parsed.pi_metadata);
+      return { ...row, diagnosticJson: JSON.stringify(parsed) };
+    };
+    const expectInvalid = async (repair: TaskRecord, evaluator: TaskRecord = evaluatorNhrTask()): Promise<void> => {
+      const facts = await collectOwnerDecisionFacts(
+        makeFactStore([evaluator, repair], makeArtifactStoreWithDecisionArtifact()), EVAL_ID);
+      expect(facts?.lineageResolvable).toBe(false);
+      expect(facts?.dependencyArtificerTaskId).toBeNull();
+      expect(facts?.dependencyRepairIteration).toBeNull();
+      const cap = deriveOwnerDecisionCapability(facts!);
+      expect(cap.eligible).toBe(false);
+      expect(cap.blockers).toContain('lineage_unresolvable');
+    };
+
+    await expectInvalid(mutateRepair((meta) => {
+      (meta.repairPayload as Record<string, unknown>).sourceEvaluatorTaskId = 'evaluator-foreign';
+    }));
+
+    const wrongId = { ...artificerTaskWithPayload(2), taskId: 'artificer-repair-forged-r2' };
+    await expectInvalid(wrongId, evaluatorNhrTask({ meta: { dependencyTaskIds: [wrongId.taskId] } }));
+
+    await expectInvalid(mutateRepair((meta) => {
+      (meta.repairPayload as Record<string, unknown>).repairIteration = 1;
+    }));
+    await expectInvalid(mutateRepair((meta) => { meta.channel = 'code_tool_hook'; }));
+    await expectInvalid(mutateRepair((meta) => { meta.parentTaskId = 'evaluator-other'; }));
+    await expectInvalid(mutateRepair((meta) => { meta.correlationId = '22222222-2222-4222-8222-222222222222'; }));
+    await expectInvalid(mutateRepair((meta) => { delete meta.repairPayload; }));
+    await expectInvalid({ ...artificerTaskWithPayload(2), diagnosticJson: '{bad-json' });
+  });
+
+  it('payload-only valid repair is legacy-compatible and remains eligible without write-side backfill', async () => {
+    const repair = (() => {
+      const row = artificerTaskWithPayload(2);
+      const parsed = JSON.parse(row.diagnosticJson!) as { pi_metadata: Record<string, unknown> };
+      delete parsed.pi_metadata.repairTaskRole;
+      return { ...row, diagnosticJson: JSON.stringify(parsed) };
+    })();
+    const facts = await collectOwnerDecisionFacts(
+      makeFactStore([evaluatorNhrTask(), repair], makeArtifactStoreWithDecisionArtifact()), EVAL_ID);
+    expect(facts?.lineageResolvable).toBe(true);
+    expect(facts?.dependencyRepairIteration).toBe(2);
+    expect(deriveOwnerDecisionCapability(facts!).eligible).toBe(true);
+  });
+
+  it('explicit budget-exhausted evidence with only an ordinary artificer is inconsistent and not eligible', async () => {
+    const facts = await collectOwnerDecisionFacts(
+      makeFactStore([evaluatorNhrTask(), ordinaryArtificerTask()], makeArtifactStoreWithDecisionArtifact()), EVAL_ID);
+    expect(facts?.lineageResolvable).toBe(false);
+    expect(facts?.dependencyArtificerTaskId).toBeNull();
+    expect(deriveOwnerDecisionCapability(facts!).blockers).toContain('lineage_unresolvable');
+  });
+
+  it('dependency store read failure is fail-closed rather than treated as absence', async () => {
+    const evaluator = evaluatorNhrTask();
+    const repair = artificerTaskWithPayload(2);
+    const base = makeFactStore([evaluator, repair], makeArtifactStoreWithDecisionArtifact());
+    const throwingStore: OwnerDecisionFactStore = {
+      ...base,
+      getTask: async (id) => {
+        if (id === repair.taskId) throw new Error('injected dependency read failure');
+        return base.getTask(id);
+      },
+    };
+    const facts = await collectOwnerDecisionFacts(throwingStore, EVAL_ID);
+    expect(facts?.lineageResolvable).toBe(false);
+    expect(facts?.dependencyArtificerTaskId).toBeNull();
+    expect(deriveOwnerDecisionCapability(facts!).blockers).toContain('lineage_unresolvable');
+  });
+
   it('missing decision artifact → not eligible (no reviewKey without durable facts)', async () => {
     const emptyStore = new MemoryPIArtifactStore();
     const facts = await collectOwnerDecisionFacts(
@@ -502,9 +612,9 @@ describe('PRI-629 classification + capability (INV-01/INV-02/§22)', () => {
       channel: 'code_tool_hook',
       runnerDecision: 'approved',
       humanReviewContext: undefined,
-      dependencyTaskIds: [ARTIFER_ID],
+      dependencyTaskIds: [ORDINARY_ARTIFICER_ID],
     }) });
-    const artificer = artificerTaskWithPayload(0);
+    const artificer = ordinaryArtificerTask('code_tool_hook');
     const byId = new Map<string, TaskRecord>([
       [task.taskId, task],
       [evaluator.taskId, evaluator],
@@ -516,7 +626,7 @@ describe('PRI-629 classification + capability (INV-01/INV-02/§22)', () => {
       'code_tool_hook',
     );
     expect(target).not.toBeNull();
-    expect(target?.taskId).toBe(ARTIFER_ID);
+    expect(target?.taskId).toBe(ORDINARY_ARTIFICER_ID);
   });
 
   it('N-3: legacy budget-exhausted semantics unchanged (needs_revision still required outside no-accept reasons)', async () => {
@@ -561,6 +671,7 @@ describe('PRI-629 classification + capability (INV-01/INV-02/§22)', () => {
 
     const rendered = await buildOwnerDecisionReview({
       getTask: (id) => sm.getTask(id),
+      listTasks: (filter) => sm.listTasks(filter),
       getArtifactById: (id) => store.getArtifactById(id).then((a) => a ?? null),
       listArtifactsBySourceTask: async (id) => (await store.listBySourceTaskId(id)).map((a) => ({
         artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
@@ -645,6 +756,7 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     const sm = makeInMemoryStateManager([task, artificerTaskWithPayload(2)], artifacts);
     const factStore: OwnerDecisionFactStore = {
       getTask: (id) => sm.getTask(id),
+      listTasks: (filter) => sm.listTasks(filter),
       listArtifactsBySourceTask: async (id) => (await artifacts.listBySourceTaskId(id)).map((a) => ({
         artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
       })),
@@ -709,6 +821,7 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     const sm = makeInMemoryStateManager([task, evaluator, artificerTaskWithPayload(0)], artifacts);
     const factStore: OwnerDecisionFactStore = {
       getTask: (id) => sm.getTask(id),
+      listTasks: (filter) => sm.listTasks(filter),
       listArtifactsBySourceTask: async (id) => (await artifacts.listBySourceTaskId(id)).map((a) => ({
         artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
       })),
@@ -769,11 +882,12 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
       channel: 'code_tool_hook',
       runnerDecision: 'approved',
       humanReviewContext: undefined,
-      dependencyTaskIds: [ARTIFER_ID],
+      dependencyTaskIds: [ORDINARY_ARTIFICER_ID],
     }) });
-    const sm = makeInMemoryStateManager([task, evaluator, artificerTaskWithPayload(1)], artifacts);
+    const sm = makeInMemoryStateManager([task, evaluator, ordinaryArtificerTask('code_tool_hook')], artifacts);
     const factStore: OwnerDecisionFactStore = {
       getTask: (id) => sm.getTask(id),
+      listTasks: (filter) => sm.listTasks(filter),
       listArtifactsBySourceTask: async (id) => (await artifacts.listBySourceTaskId(id)).map((a) => ({
         artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
       })),
@@ -800,18 +914,18 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     expect(outcome.status).toBe('resolved');
     if (outcome.status === 'resolved') {
       expect(outcome.applied).toBe(true);
-      expect(outcome.targetTaskId).toBe(ARTIFER_ID);
+      expect(outcome.targetTaskId).toBe(ORDINARY_ARTIFICER_ID);
     }
     // artificer 被 reopen: revisionCount+1、owner-res causeId、状态回 pending
-    const artPi = hydratePITaskRecord((await sm.getTask(ARTIFER_ID))!);
+    const artPi = hydratePITaskRecord((await sm.getTask(ORDINARY_ARTIFICER_ID))!);
     expect(artPi?.revisionCount).toBe(1);
     expect(artPi?.revisionCauseId).toMatch(/^owner-res-ores_/);
-    expect((await sm.getTask(ARTIFER_ID))?.status).toBe('pending');
+    expect((await sm.getTask(ORDINARY_ARTIFICER_ID))?.status).toBe('pending');
     // rollout 任务留 NHR,resolution applied
     const rolloutPi = hydratePITaskRecord((await sm.getTask(ROLLOUT_ID))!);
     expect(rolloutPi?.status).toBe('needs_human_review');
     expect(rolloutPi?.ownerResolutions?.[0]?.status).toBe('applied');
-    expect(rolloutPi?.ownerResolutions?.[0]?.targetTaskId).toBe(ARTIFER_ID);
+    expect(rolloutPi?.ownerResolutions?.[0]?.targetTaskId).toBe(ORDINARY_ARTIFICER_ID);
   });
 
   it('same reviewKey/action with changed lineage evidence digest is not an idempotent replay', async () => {
@@ -1024,6 +1138,7 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     const sm = makeInMemoryStateManager([task, artificerTaskWithPayload(2)], gateStore);
     const factStore: OwnerDecisionFactStore = {
       getTask: (id) => sm.getTask(id),
+      listTasks: (filter) => sm.listTasks(filter),
       listArtifactsBySourceTask: async (id) => (await gateStore.listBySourceTaskId(id)).map((a) => ({
         artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
       })),
@@ -1212,9 +1327,7 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
       async getTask(id: string) { return store.getTask(id); },
       async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
       async updateTask(id: string, patch: Record<string, unknown>) { return store.updateTask(id, patch); },
-      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Record<string, unknown>, options?: Record<string, unknown>) {
-        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
-      },
+      updateTaskIfDiagnosticJsonUnchanged: store.updateTaskIfDiagnosticJsonUnchanged.bind(store),
     };
     const outcome = await reopenTaskForRevision(sm as never, ARTIFER_ID, {
       revisionCauseId: 'owner-res-ores_x',
@@ -1231,6 +1344,7 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
     void store.createTask({ ...artificerTaskWithPayload(2) });
     // PRI-1293 Phase 3: reopen 目标可回溯根 dreamer (血缘门禁可证明)。
     void store.createTask({ ...dreamerRootTask() });
+    void store.createTask({ ...evaluatorNhrTask({ status: 'succeeded' }) });
     const writes: Record<string, unknown>[] = [];
     const sm = {
       async getTask(id: string) { return store.getTask(id); },
@@ -1244,9 +1358,9 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
       },
       // PRI-1293 review fix: reopen 写入改经 CAS — 单行原子写语义不变
       // (patch 整体一次落库), writes 观测同一契约。
-      async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Record<string, unknown>, options?: Record<string, unknown>) {
-        writes.push(patch);
-        return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch, options);
+      async updateTaskIfDiagnosticJsonUnchanged(...args: Parameters<MemoryTaskStore['updateTaskIfDiagnosticJsonUnchanged']>) {
+        writes.push(args[2]);
+        return store.updateTaskIfDiagnosticJsonUnchanged(...args);
       },
     };
     await reopenTaskForRevision(sm as never, ARTIFER_ID, {
@@ -1279,10 +1393,28 @@ describe('PRI-629 resolveRolloutRevisionTarget (§18 routing)', () => {
       attemptCount: 1, maxAttempts: 3, createdAt: 't', updatedAt: 't',
       diagnosticJson: createPITaskDiagnosticJson(baseMeta({ dependencyTaskIds: [EVAL_ID], channel: 'code_tool_hook' })),
     };
-    const allTasks: TaskRecord[] = [scribe, artificer, evaluator, rollout];
+    const allTasks: TaskRecord[] = [dreamerRootTask(), scribe, artificer, evaluator, rollout];
     const getTask = async (id: string): Promise<TaskRecord | null> => allTasks.find((t) => t.taskId === id) ?? null;
     expect(await resolveRolloutRevisionTarget(getTask, 'rollout-1', 'code_tool_hook')).toEqual({ taskId: ARTIFER_ID, kind: 'artificer' });
     expect(await resolveRolloutRevisionTarget(getTask, 'rollout-1', 'prompt')).toEqual({ taskId: SCRIBE_ID, kind: 'scribe' });
+  });
+
+  it('fails closed instead of selecting the first row when evaluator artificer dependencies are ambiguous', async () => {
+    const ordinary = ordinaryArtificerTask('code_tool_hook');
+    const repair = artificerTaskWithPayload(2);
+    const evaluator = evaluatorNhrTask({ status: 'succeeded', meta: baseMeta({
+      channel: 'code_tool_hook',
+      dependencyTaskIds: [ORDINARY_ARTIFICER_ID, ARTIFER_ID],
+      humanReviewContext: undefined,
+    }) });
+    const rollout: TaskRecord = {
+      taskId: 'rollout-ambiguous', taskKind: 'rollout_reviewer', status: 'needs_human_review',
+      attemptCount: 1, maxAttempts: 3, createdAt: 't', updatedAt: 't',
+      diagnosticJson: createPITaskDiagnosticJson(baseMeta({ dependencyTaskIds: [EVAL_ID], channel: 'code_tool_hook' })),
+    };
+    const allTasks: TaskRecord[] = [dreamerRootTask(), ordinary, repair, evaluator, rollout];
+    const getTask = async (id: string): Promise<TaskRecord | null> => allTasks.find((t) => t.taskId === id) ?? null;
+    expect(await resolveRolloutRevisionTarget(getTask, 'rollout-ambiguous', 'code_tool_hook')).toBeNull();
   });
 });
 

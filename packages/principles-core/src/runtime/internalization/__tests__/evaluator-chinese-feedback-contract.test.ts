@@ -50,8 +50,9 @@ let store: SqlitePIArtifactStore;
 const SCRIBE_ID = 'scribe-lang';
 const ART1_ID = 'artificer-lang-1';
 const EVAL1_ID = 'evaluator-lang-1';
-const REPAIR_ID = 'artificer-repair-lang-1';
-const EVAL2_ID = 'evaluator-lang-2';
+const REPAIR_ID = 'artificer-repair-evaluator-lang-1-r1';
+const DREAMER_ID = 'dreamer-lang-root';
+const CORRELATION_ID = 'cand-lang-root';
 const SCRIBE_ART = 'pi-art-scribe-lang';
 
 /** Round-1 RuleCode (buggy) and Round-2 RuleCode (fixed) — must reach the rule artifact byte-identical. */
@@ -137,8 +138,9 @@ function artificerOutput(implementationCode: string, scribeArtifactId: string, t
 function evaluatorOutput(
   taskId: string,
   artificerArtifactId: string,
-  decision: 'approved' | 'needs_revision',
+  options: { decision: 'approved' | 'needs_revision'; convergedRepairRound?: boolean },
 ): unknown {
+  const { decision, convergedRepairRound = false } = options;
   return {
     taskId,
     sourceArtificerArtifactId: artificerArtifactId,
@@ -151,7 +153,7 @@ function evaluatorOutput(
       requiredChanges: decision === 'needs_revision' ? [ZH_REQUIRED_CHANGE] : [],
       // PRI-630 convergence: round 2 must echo the round-1 Chinese requirement
       // VERBATIM — the real validator enforces exact statement equality.
-      ...(taskId === EVAL2_ID
+      ...(convergedRepairRound
         ? {
             priorRequirementStatuses: [{ id: 'req-1', status: 'resolved' }],
             requirementLedger: [{ id: 'req-1', statement: ZH_REQUIRED_CHANGE, status: 'resolved' }],
@@ -190,16 +192,27 @@ function meta(o: Record<string, unknown> = {}): string {
   });
 }
 
-async function mkTask(spec: { id: string; kind: string; deps: readonly string[]; diagnosticJson?: string }): Promise<void> {
+async function mkTask(spec: { id: string; kind: string; deps: readonly string[]; diagnosticJson?: string; parentTaskId?: string; correlationId?: string }): Promise<void> {
   await stateManager.createTask({
     taskId: spec.id, taskKind: spec.kind, status: 'pending', attemptCount: 0, maxAttempts: 3,
-    diagnosticJson: spec.diagnosticJson ?? meta({ dependencyTaskIds: spec.deps }),
+    diagnosticJson: spec.diagnosticJson ?? meta({
+      dependencyTaskIds: spec.deps,
+      ...(spec.parentTaskId !== undefined ? { parentTaskId: spec.parentTaskId } : {}),
+      ...(spec.correlationId !== undefined ? { correlationId: spec.correlationId } : {}),
+    }),
   });
 }
 
 async function succeed(id: string): Promise<void> {
   const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'lang-test', runtimeKind: 'test-double' });
   await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'lang-test', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
+}
+
+async function mkDreamerRoot(): Promise<void> {
+  const diagnostic = JSON.parse(meta({ dependencyTaskIds: [], correlationId: CORRELATION_ID })) as Record<string, unknown>;
+  diagnostic.candidateId = CORRELATION_ID;
+  await mkTask({ id: DREAMER_ID, kind: 'dreamer', deps: [], diagnosticJson: JSON.stringify(diagnostic) });
+  await succeed(DREAMER_ID);
 }
 
 beforeEach(async () => {
@@ -217,8 +230,9 @@ afterEach(async () => {
 
 describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-evaluation (downstream contract)', () => {
   it('Chinese feedback survives artificer repair and passes the PRI-630 verbatim ledger convergence', async () => {
-    // ── lineage: scribe task + artifact ──
-    await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: [] });
+    // ── lineage: dreamer root → scribe — strict repair identity requires a provable chain ──
+    await mkDreamerRoot();
+    await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: [], parentTaskId: DREAMER_ID, correlationId: CORRELATION_ID });
     await succeed(SCRIBE_ID);
     await store.upsertArtifact({
       artifactId: SCRIBE_ART, artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
@@ -228,7 +242,7 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     });
 
     // ── Round 1: artificer emits the buggy code ──
-    await mkTask({ id: ART1_ID, kind: 'artificer', deps: [SCRIBE_ID] });
+    await mkTask({ id: ART1_ID, kind: 'artificer', deps: [SCRIBE_ID], parentTaskId: SCRIBE_ID, correlationId: CORRELATION_ID });
     const artificer1 = new ArtificerRunner(
       {
         stateManager,
@@ -243,13 +257,13 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     expect((await artificer1.run(ART1_ID)).status).toBe('succeeded');
 
     // ── Round 1: evaluator needs_revision with CHINESE feedback ──
-    await mkTask({ id: EVAL1_ID, kind: 'evaluator', deps: [ART1_ID] });
+    await mkTask({ id: EVAL1_ID, kind: 'evaluator', deps: [ART1_ID], parentTaskId: ART1_ID, correlationId: CORRELATION_ID });
     const eval1Prompts: string[] = [];
     const eval1SystemPrompts: string[] = [];
     const evaluator1 = new EvaluatorRunner(
       {
         stateManager,
-        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, 'pi-art-artificer-lang-1-run-1', 'needs_revision'), 'run-eval-1', { payloads: eval1Prompts, systemPrompts: eval1SystemPrompts }),
+        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, 'pi-art-artificer-lang-1-run-1', { decision: 'needs_revision' }), 'run-eval-1', { payloads: eval1Prompts, systemPrompts: eval1SystemPrompts }),
         eventEmitter: emitter,
         artifactStore: store,
         validator: new DefaultEvaluatorValidator(),
@@ -257,7 +271,10 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
         seedArtificerRepairTask: async (params) => {
           await mkTask({ id: REPAIR_ID, kind: 'artificer', deps: params.inheritedDependencyTaskIds, diagnosticJson: meta({
             dependencyTaskIds: params.inheritedDependencyTaskIds,
+            parentTaskId: EVAL1_ID,
+            correlationId: CORRELATION_ID,
             repairPayload: params.repairPayload,
+            repairTaskRole: 'repair_artificer',
           }) });
           return REPAIR_ID;
         },
@@ -316,12 +333,19 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     // ── Round 2: evaluator approves; the Chinese prior requirement flows in
     //    via previousEvaluation and the verbatim Chinese ledger echo PASSES
     //    the real convergence validation ──
-    await mkTask({ id: EVAL2_ID, kind: 'evaluator', deps: [REPAIR_ID] });
+    await stateManager.updateTask(EVAL1_ID, {
+      status: 'pending',
+      diagnosticJson: meta({
+        dependencyTaskIds: [REPAIR_ID],
+        parentTaskId: ART1_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    });
     const eval2Prompts: string[] = [];
     const evaluator2 = new EvaluatorRunner(
       {
         stateManager,
-        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL2_ID, repairArtifact.artifactId, 'approved'), 'run-eval-2', { payloads: eval2Prompts }),
+        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, repairArtifact.artifactId, { decision: 'approved', convergedRepairRound: true }), 'run-eval-2', { payloads: eval2Prompts }),
         eventEmitter: emitter,
         artifactStore: store,
         validator: new DefaultEvaluatorValidator(),
@@ -332,7 +356,7 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
         outputLanguage: 'zh-CN',
       },
     );
-    const eval2Result = await evaluator2.run(EVAL2_ID);
+    const eval2Result = await evaluator2.run(EVAL1_ID);
     // The real DefaultEvaluatorValidator (with expectedRequirements from the
     // Chinese prior context) accepted the verbatim Chinese ledger echo.
     expect(eval2Result.status).toBe('succeeded');
@@ -343,7 +367,7 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     expect(eval2Prompts[0]).toContain(ZH_REQUIRED_CHANGE);
 
     // (4) The formal rule artifact assembles with machine fields intact.
-    const eval2Artifacts = await store.listBySourceTaskId(EVAL2_ID);
+    const eval2Artifacts = await store.listBySourceTaskId(EVAL1_ID);
     const ruleArtifact = eval2Artifacts.find((a) => a.artifactKind === 'rule');
     expect(ruleArtifact).toBeDefined();
     if (!ruleArtifact) return;
