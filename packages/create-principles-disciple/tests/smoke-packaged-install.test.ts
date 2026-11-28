@@ -11,6 +11,7 @@ import {
   INSTALL_LAYOUT_PACKAGE,
   classifyPrePublishCohort,
 } from './helpers/prepublish-cohort.js';
+import { readWorkspaceBackgroundOwnership } from '@principles/install-layout';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
 const TMPDIR = fs.realpathSync(os.tmpdir());
@@ -351,6 +352,112 @@ describe('Real packaged install smoke test', () => {
     expect(fs.existsSync(path.join(installedMcpDir, 'node_modules', 'zod'))).toBe(true);
 
     expect(npmWasInvoked).toBe(false);
+  }, 600_000);
+
+  it('redirected Codex workspace is initialized, registered, and first-scheduled through the real installer', async () => {
+    // A real Codex installation is host state that pre-exists the PD installer:
+    // the Marketplace payload pin plus PLUGIN_DATA runtime/binding are already
+    // present. Model that state faithfully, but execute the real packaged
+    // installer and real installed pd-cli afterwards. The OpenClaw workspace
+    // from the preceding install owns tempWorkspaceDir, so passing it again must
+    // redirect Codex to <codexHome>/pd-workspace.
+    const cliEntry = path.resolve(INSTALLER_DIR, 'dist', 'index.js');
+    const codexHome = path.join(tempHomeDir, '.codex');
+    const redirectedWorkspace = path.join(codexHome, 'pd-workspace');
+    const canonicalRuntime = path.join(tempHomeDir, '.pd', 'runtime');
+    const readVersion = (component: string): string => {
+      const parsed = JSON.parse(fs.readFileSync(path.join(canonicalRuntime, component, 'package.json'), 'utf8')) as { version?: unknown };
+      if (typeof parsed.version !== 'string' || parsed.version.length === 0) throw new Error(`canonical runtime version missing for ${component}`);
+      return parsed.version;
+    };
+    const cohort = {
+      codexAdapter: readVersion('codex-adapter'),
+      hostRuntime: readVersion('host-runtime'),
+      core: readVersion('core'),
+      mcpServer: readVersion('pd-mcp-server'),
+    };
+    const marketplaceVersionDir = path.join(codexHome, 'plugins', 'cache', 'principles', 'principles-disciple', '999.0.0');
+    fs.mkdirSync(marketplaceVersionDir, { recursive: true });
+    fs.writeFileSync(path.join(marketplaceVersionDir, 'runtime-version.json'), JSON.stringify(cohort, null, 2), 'utf8');
+
+    const pluginDataRoot = path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles');
+    const runtimeDir = path.join(pluginDataRoot, 'runtime');
+    const linkComponent = (packageName: string, component: string): void => {
+      const target = path.join(runtimeDir, 'node_modules', '@principles', packageName);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.symlinkSync(path.join(canonicalRuntime, component), target, process.platform === 'win32' ? 'junction' : 'dir');
+    };
+    linkComponent('codex-adapter', 'codex-adapter');
+    linkComponent('host-runtime', 'host-runtime');
+    linkComponent('core', 'core');
+    linkComponent('pd-mcp-server', 'pd-mcp-server');
+    fs.mkdirSync(pluginDataRoot, { recursive: true });
+    const serverEntry = path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
+    fs.writeFileSync(path.join(pluginDataRoot, 'mcp-binding.json'), JSON.stringify({
+      schemaVersion: 'pd.mcp-binding.v1',
+      host: 'codex',
+      workspaceDir: redirectedWorkspace,
+      runtimeDir,
+      serverEntry,
+      versions: { mcpServer: cohort.mcpServer, core: cohort.core },
+    }, null, 2), 'utf8');
+
+    const execFileAsync = await loadExecFileAsync();
+    let stdout = '';
+    let stderr = '';
+    try {
+      const result = await execFileAsync(process.execPath, [
+        cliEntry,
+        '--host', 'codex',
+        '--yes',
+        '--enable-service-host',
+        '--workspace', tempWorkspaceDir,
+        '--json',
+      ], {
+        env: {
+          ...process.env,
+          HOME: tempHomeDir,
+          USERPROFILE: tempHomeDir,
+          PD_INSTALL_PLUGIN_DIR: hermeticPublicationDir,
+          PD_CONSOLE_PORT_BASE: String(consolePortBaseForThisRun),
+          PD_SKIP_NPM_UPGRADE: '1',
+          PD_SKIP_GLOBAL_SHIM: '1',
+        },
+        timeout: 600_000,
+      });
+      stdout = result.stdout;
+    } catch (e: unknown) {
+      const err = e as { stdout?: string; stderr?: string; message?: string; code?: unknown };
+      stdout = err.stdout ?? '';
+      stderr = err.stderr ?? '';
+      if (stdout.trim().length === 0) {
+        throw new Error(`redirected Codex installer produced no JSON stdout: message=${String(err.message)} code=${String(err.code)} stderr=${stderr.slice(0, 2000)}`);
+      }
+    }
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    if (parsed.success !== true) {
+      throw new Error(`redirected Codex install failed: reason=${String(parsed.reason)} error=${String(parsed.error)} nextAction=${String(parsed.nextAction)} serviceHost=${JSON.stringify(parsed.serviceHost)} stderr=${stderr.slice(0, 1000)}`);
+    }
+
+    expect(fs.existsSync(path.join(redirectedWorkspace, '.pd', 'state.db')), 'redirected Codex workspace was not initialized').toBe(true);
+    const binding = JSON.parse(fs.readFileSync(path.join(pluginDataRoot, 'mcp-binding.json'), 'utf8')) as { workspaceDir?: unknown };
+    expect(path.resolve(String(binding.workspaceDir))).toBe(path.resolve(redirectedWorkspace));
+
+    const manifestPath = path.join(tempHomeDir, '.pd', 'install.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { workspaces?: unknown };
+    expect(Array.isArray(manifest.workspaces) ? manifest.workspaces.map((entry) => path.resolve(String(entry))) : []).toContain(path.resolve(redirectedWorkspace));
+    const ownership = readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir: redirectedWorkspace });
+    expect(ownership.status).toBe('service_host_owned');
+
+    const evidencePath = path.join(tempHomeDir, '.pd', 'service', 'install-provisioning.json');
+    const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8')) as {
+      workspaceDir?: unknown;
+      firstCycle?: { attempted?: boolean; executed?: number; runId?: string; reason?: string; outcome?: string };
+    };
+    expect(path.resolve(String(evidence.workspaceDir))).toBe(path.resolve(redirectedWorkspace));
+    expect(evidence.firstCycle?.attempted, `first cycle was not attempted: ${JSON.stringify(evidence.firstCycle)}`).toBe(true);
+    expect(typeof evidence.firstCycle?.runId).toBe('string');
+    expect(evidence.firstCycle?.executed, `first cycle did not execute the redirected Codex workspace: ${JSON.stringify(evidence.firstCycle)}`).toBeGreaterThan(0);
   }, 600_000);
 
   it('PRI-1037: installed plugin payload is lean — better-sqlite3 only, no core copy or link', () => {

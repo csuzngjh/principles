@@ -466,7 +466,7 @@ export function parseDarwinArgvReaderOutput(output: string): LegacyWorkerProcess
   return rows;
 }
 
-function listDarwinProcessRows(): LegacyWorkerProcessRow[] {
+function listDarwinProcessRows(afterEnumeration?: () => void): LegacyWorkerProcessRow[] {
   // `-x` is NOT a same-user filter on Darwin: it also exposes unrelated
   // daemons, and KERN_PROCARGS2 can return EINVAL for another account's
   // process. Legacy installer-spawned workers belong to the install user, so
@@ -474,20 +474,24 @@ function listDarwinProcessRows(): LegacyWorkerProcessRow[] {
   // cannot be inspected remains fail-closed in the Ruby reader.
   const currentUser = execFileSync('/usr/bin/id', ['-un'], { encoding: 'utf8', timeout: 10_000, windowsHide: true }).trim();
   if (currentUser.length === 0) throw new Error('darwin scan could not resolve the current user');
-  const pidOutput = execFileSync('/bin/ps', ['-xo', 'pid=,user=,stat='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  const pidOutput = execFileSync('/bin/ps', ['-xo', 'pid=,user=,stat=,comm='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
   const pids: number[] = [];
   for (const line of pidOutput.split('\n')) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
-    const [pidText, user, stat] = trimmed.split(/\s+/);
+    const [pidText, user, stat, commandText] = trimmed.split(/\s+/);
     const pid = Number.parseInt(pidText ?? '', 10);
-    if (!(Number.isInteger(pid) && pid > 1) || typeof user !== 'string' || user.length === 0 || typeof stat !== 'string' || stat.length === 0) {
+    if (!(Number.isInteger(pid) && pid > 1) || typeof user !== 'string' || user.length === 0 || typeof stat !== 'string' || stat.length === 0 || typeof commandText !== 'string' || commandText.length === 0) {
       throw new Error(`darwin ps returned an unparseable process row: ${trimmed.slice(0, 80)}`);
     }
-    if (user !== currentUser || stat.startsWith('Z')) continue;
+    // Legacy workers are Node processes. Restricting the expensive
+    // KERN_PROCARGS2 pass to Node keeps the scan bounded on a real macOS host
+    // while preserving exact argv evidence for every process that can match.
+    if (user !== currentUser || stat.startsWith('Z') || path.basename(commandText) !== 'node') continue;
     pids.push(pid);
   }
   if (pids.length === 0) return [];
+  afterEnumeration?.();
   const output = execFileSync('/usr/bin/ruby', ['-e', DARWIN_ARGV_READER, ...pids.map(String)], {
     encoding: 'utf8',
     timeout: 30_000,
@@ -498,7 +502,7 @@ function listDarwinProcessRows(): LegacyWorkerProcessRow[] {
 }
 
 /** Platform process table as (pid, commandLine/argv) rows — bounded, read-only. */
-function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
+function listProcessRows(platform: string, afterDarwinEnumeration?: () => void): LegacyWorkerProcessRow[] {
   const rows: LegacyWorkerProcessRow[] = [];
   if (platform === 'win32') {
     // powershell.exe is the project-allowlisted process-query host (wmic is
@@ -554,7 +558,7 @@ function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
     }
     return rows;
   }
-  if (platform === 'darwin') return listDarwinProcessRows();
+  if (platform === 'darwin') return listDarwinProcessRows(afterDarwinEnumeration);
   // Other POSIX process APIs do not expose a portable argv-boundary-safe table.
   // Returning a flat `ps args` parse would fabricate confidence; quiesce is
   // unverifiable instead (the caller's fail-closed gate stays pending).
@@ -577,10 +581,12 @@ export function scanRunningLegacyWorkerProcesses(options: {
   readonly platform?: string;
   /** Test seam: replace the process-table read. */
   readonly rows?: () => readonly LegacyWorkerProcessRow[];
+  /** Darwin race-test seam: runs after process enumeration and before argv reads. */
+  readonly afterDarwinEnumeration?: () => void;
 } = {}): LegacyWorkerScan {
   let rows: readonly LegacyWorkerProcessRow[];
   try {
-    rows = options.rows !== undefined ? options.rows() : listProcessRows(options.platform ?? process.platform);
+    rows = options.rows !== undefined ? options.rows() : listProcessRows(options.platform ?? process.platform, options.afterDarwinEnumeration);
   } catch (error) {
     return { ok: false, workers: [], detail: `process scan failed: ${error instanceof Error ? error.message : String(error)}` };
   }

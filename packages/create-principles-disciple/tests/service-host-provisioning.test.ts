@@ -890,5 +890,41 @@ describe.runIf(process.platform === 'darwin')('real Darwin legacy worker scan', 
       zombieParent.kill('SIGKILL');
       rmSync(workspace, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
+
+  it('treats a process that becomes a zombie after enumeration as exited residue', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'pd-darwin-zombie-race-'));
+    const pidFile = path.join(dir, 'child.pid');
+    const parent = spawn('/usr/bin/python3', [
+      '-c',
+      'import os,time,sys\npid=os.fork()\nif pid == 0:\n os.execl("/bin/sh", "sh", "-c", "sleep 60")\nwith open(sys.argv[1], "w") as f:\n f.write(str(pid))\ntime.sleep(60)',
+      pidFile,
+    ], { stdio: 'ignore' });
+    let childPid: number | undefined;
+    try {
+      const deadline = Date.now() + 2_000;
+      while (!existsSync(pidFile) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(existsSync(pidFile), 'zombie-race child pid file was not written').toBe(true);
+      childPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      expect(Number.isInteger(childPid) && childPid > 1).toBe(true);
+      let hookRan = false;
+      const scan = scanRunningLegacyWorkerProcesses({
+        platform: 'darwin',
+        afterDarwinEnumeration: () => {
+          hookRan = true;
+          if (childPid !== undefined) process.kill(childPid, 'SIGKILL');
+        },
+      });
+      expect(hookRan).toBe(true);
+      expect(scan.ok, scan.detail ?? 'no scan detail').toBe(true);
+    } finally {
+      if (childPid !== undefined) {
+        try { process.kill(childPid, 'SIGKILL'); } catch { /* already dead or reaped */ }
+      }
+      parent.kill('SIGKILL');
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
 });
