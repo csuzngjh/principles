@@ -1,0 +1,19 @@
+
+> create-principles-disciple@1.156.2 test
+> vitest run --run tests/service-host-provisioning.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.1.0 [39m[90m/mnt/d/Code/_worktrees/principles/PRI-1278-phase5-p0-guard-20261127/packages/create-principles-disciple[39m
+
+[temp-lifecycle] test-runs: kept 17
+[temp-lifecycle] TMPDIR -> /mnt/d/Code/.pd-tmp/principles/test-runs/vitest-20261127-121338-7a15a7
+ [32m✓[39m tests/service-host-provisioning.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 4559[2mms[22m[39m
+   [32m✓[39m provisionFreshInstallWorkspace [2m(19)[22m
+     [33m[2m✓[22m[39m records EACH deferred workspace independently (multi-host pending registry)[33m 395[2mms[22m[39m
+     [33m[2m✓[22m[39m repeating a blocked deferred resume is idempotent and still never writes ownership[33m 361[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m19 passed[39m[22m[90m (19)[39m
+[2m   Start at [22m 12:13:38
+[2m   Duration [22m 5.75s[2m (tests 90%, import 4%, transform 3%, setup 2%, worker 1%)[22m
+

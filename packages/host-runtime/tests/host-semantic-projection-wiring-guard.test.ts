@@ -28,7 +28,7 @@ const CYCLE_SRC = fileURLToPath(new URL('../src/internalization-consumer-cycle.t
 const EXECUTOR_SRC = fileURLToPath(new URL('../src/internalization-task-executor.ts', import.meta.url));
 const RUN_ONCE_SRC = fileURLToPath(new URL('../../pd-cli/src/commands/runtime-internalization-run-once.ts', import.meta.url));
 const PIPELINE_RUNNER_SRC = fileURLToPath(new URL('../../pd-cli/src/services/rulehost-pipeline-runner.ts', import.meta.url));
-const OPENCLAW_SERVICE_SRC = fileURLToPath(new URL('../../openclaw-plugin/src/service/internalization-auto-consumer-service.ts', import.meta.url));
+const OPENCLAW_SERVICE_SRC = fileURLToPath(new URL('../../openclaw-plugin/src/openclaw-worker.ts', import.meta.url));
 const CODEX_WORKER_SRC = fileURLToPath(new URL('../../codex-adapter/src/worker/workspace-worker.ts', import.meta.url));
 
 function readSrc(p: string): string {

@@ -39,7 +39,6 @@ function buildTestProgram(): Command {
     .command('worker')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--once', 'Run exactly one bounded cycle and exit')
-    .option('--interval <ms>', 'Cycle interval for continuous mode')
     .option('--status', 'Report the SPEC §15 worker mode without executing anything')
     .option('--json', 'Output raw JSON')
     .action(() => {});
@@ -92,9 +91,8 @@ describe('codex Slice C command registration (cli-7)', () => {
     program2.parse(['node', 'pd', 'codex', 'worker', '--status']);
     const worker2 = program2.commands.find((c) => c.name() === 'codex')?.commands.find((c) => c.name() === 'worker');
     expect(worker2?.opts().status).toBe(true);
-    // --interval is registered for continuous mode
-    const intervalOption = worker?.options.find((o) => o.long === '--interval');
-    expect(intervalOption).toBeDefined();
+    // Continuous mode is gone: no interval knob is registered.
+    expect(worker?.options.find((o) => o.long === '--interval')).toBeUndefined();
   });
 });
 
@@ -133,13 +131,36 @@ describe('codex ingest catch-up handler (functional)', () => {
 
 describe('codex worker handler (functional)', () => {
   let workspaceDir: string;
+  let pdHomeDir: string;
   let logSpy: ReturnType<typeof vi.spyOn>;
+
+  function writeOwnership(state: 'service_host_owned' | 'legacy_owned' | 'handover_preparing' | 'no_record'): void {
+    const record = state === 'no_record' ? undefined : {
+      state,
+      effectiveOwner: state === 'service_host_owned' ? 'service_host' : 'legacy',
+      generation: 1,
+      operationId: state === 'handover_preparing' ? 'op-fixture' : null,
+      previousOwner: state === 'handover_preparing' ? 'legacy' : null,
+      targetOwner: state === 'handover_preparing' ? 'service_host' : null,
+      updatedAt: '2026-11-20T00:00:00.000Z',
+    };
+    fs.writeFileSync(path.join(pdHomeDir, 'install.json'), JSON.stringify({
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: ['codex'],
+      workspaces: [workspaceDir],
+      ...(record !== undefined ? { backgroundExecutions: { [workspaceDir]: record } } : {}),
+    }), 'utf8');
+  }
 
   beforeEach(() => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-worker-'));
+    pdHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-worker-home-'));
+    process.env.PD_SERVICE_PD_HOME = pdHomeDir;
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, '.state', 'trajectory.db'), '');
+    writeOwnership('service_host_owned');
     const config = getDefaultPdConfig();
     config.features['host.codex'].enabled = true;
     config.features.internalization_auto_consumer.enabled = false;
@@ -150,7 +171,9 @@ describe('codex worker handler (functional)', () => {
   afterEach(() => {
     logSpy.mockRestore();
     process.exitCode = 0;
+    delete process.env.PD_SERVICE_PD_HOME;
     fs.rmSync(workspaceDir, { recursive: true, force: true });
+    fs.rmSync(pdHomeDir, { recursive: true, force: true });
   });
 
   it('--once reports paused with reason+nextAction when the consumer flag is off', { timeout: 20_000 }, async () => {
@@ -164,14 +187,14 @@ describe('codex worker handler (functional)', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
-  it('--json without --once/--status is refused (continuous mode streams, it is not one JSON document)', async () => {
+  it('--json without --once/--status is refused because continuous mode no longer exists', async () => {
     const { handleCodexWorker } = await import('../../src/commands/codex-worker.js');
     await handleCodexWorker({ workspace: workspaceDir, json: true });
     expect(logSpy).toHaveBeenCalledTimes(1);
     const error = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as { error: string; reason: string; nextAction: string };
     expect(error.error).toBe('cli_contract');
-    expect(error.reason).toBe('json_without_once_or_status');
-    expect(error.nextAction).toContain('--once');
+    expect(error.reason).toBe('mode_required');
+    expect(error.nextAction).toContain('no continuous mode');
     expect(process.exitCode).toBe(1);
   });
 
@@ -188,20 +211,65 @@ describe('codex worker handler (functional)', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
-  it('--status reports manual_action_required for a workspace absent from the install manifest', async () => {
+  it('--status reports Service Host ownership truthfully and pauses a no-record workspace without Companion copy', async () => {
     const { handleCodexWorker } = await import('../../src/commands/codex-worker.js');
-    // Execution enabled — the manifest absence is then the deciding fact.
     const config = getDefaultPdConfig();
     config.features['host.codex'].enabled = true;
     config.features.internalization_auto_consumer.enabled = true;
     fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    writeOwnership('no_record');
     await handleCodexWorker({ workspace: workspaceDir, status: true, json: true });
     expect(logSpy).toHaveBeenCalledTimes(1);
-    const report = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as { mode: string; reason: string; registeredInInstallManifest: boolean; nextAction: string };
-    expect(report.mode).toBe('manual_action_required');
-    expect(report.reason).toBe('workspace_not_in_install_manifest');
-    expect(report.registeredInInstallManifest).toBe(false);
-    expect(report.nextAction).toContain('pd codex ingest catch-up');
+    const report = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as {
+      mode: string; reason: string; registeredInInstallManifest: boolean; serviceHostManaged: boolean;
+      ownership: { state: string; source?: string }; nextAction: string;
+    };
+    expect(report.mode).toBe('paused');
+    expect(report.reason).toBe('codex_workspace_not_service_host_owned:legacy_owned');
+    expect(report.registeredInInstallManifest).toBe(true);
+    expect(report.serviceHostManaged).toBe(false);
+    expect(report.ownership).toMatchObject({ state: 'legacy_owned', source: 'no_record' });
+    expect(report.nextAction).toContain('service_host_owned');
+    expect(report.nextAction).not.toContain('Companion');
     expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it('ownership gates --once: legacy/no-record pauses before config evaluation, handover residue pauses, and held mutex pauses non-fatally', async () => {
+    const { handleCodexWorker } = await import('../../src/commands/codex-worker.js');
+    const { acquireWorkspaceServiceRunLock, releaseServiceRunLock } = await import('../../src/services/service-host/locking/service-run-lock.js');
+
+    writeOwnership('legacy_owned');
+    await handleCodexWorker({ workspace: workspaceDir, once: true, json: true });
+    let report = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as { mode: string; reason: string; nextAction: string };
+    expect(report).toMatchObject({ mode: 'paused', reason: 'codex_workspace_not_service_host_owned:legacy_owned' });
+    expect(report.nextAction).toContain('provisioning');
+
+    writeOwnership('handover_preparing');
+    await handleCodexWorker({ workspace: workspaceDir, once: true, json: true });
+    report = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as { mode: string; reason: string };
+    expect(report).toMatchObject({ mode: 'paused', reason: 'codex_workspace_not_service_host_owned:handover_preparing' });
+
+    writeOwnership('service_host_owned');
+    const lock = acquireWorkspaceServiceRunLock(pdHomeDir, workspaceDir);
+    if (!lock.ok) throw new Error(`fixture lock failed: ${lock.kind}`);
+    try {
+      await handleCodexWorker({ workspace: workspaceDir, once: true, json: true });
+      report = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as { mode: string; reason: string };
+      expect(report).toMatchObject({ mode: 'paused', reason: 'codex_worker_run_in_progress' });
+      expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      releaseServiceRunLock(lock.handle);
+    }
+  });
+
+  it('an unreadable ownership manifest degrades --once and exits 1', async () => {
+    const { handleCodexWorker } = await import('../../src/commands/codex-worker.js');
+    fs.writeFileSync(path.join(pdHomeDir, 'install.json'), '{ not json', 'utf8');
+    await handleCodexWorker({ workspace: workspaceDir, once: true, json: true });
+    const report = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as { mode: string; reason: string; nextAction: string };
+    expect(report.mode).toBe('degraded');
+    expect(report.reason).toContain('codex_owner_marker_unreadable:');
+    expect(report.nextAction.length).toBeGreaterThan(10);
+    expect(process.exitCode).toBe(1);
   });
 });

@@ -1,28 +1,31 @@
 /**
- * SPEC-PD-SERVICE-HOST-001 §8.4 transition primitive tests (PRI-1282 Phase 4).
+ * Service-Host-only background-execution provisioning tests.
  *
  * Covers the CAS write path end-to-end against REAL files in a temp dir
  * (real fs, no fsOps stubs unless a case explicitly injects an IO fault):
- * state-machine legality, generation fencing, operationId idempotency,
- * cross-process lock semantics (busy / stale reclaim / token-guarded
- * release), unknown-field preservation, legacy single-key migration, and
- * atomicity (a failed write leaves the previous manifest untouched).
+ * the single `provision_fresh_install` transition, parse-only historical
+ * residue, generation fencing, idempotent terminal replay, workspace
+ * isolation, cross-process lock semantics, unknown-field preservation,
+ * legacy single-key migration, real-directory pinning, and atomicity (a
+ * failed write leaves the previous manifest untouched).
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { fork } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { pathToFileURL } from 'node:url';
 import {
+  BACKGROUND_EXECUTION_TRANSITIONS,
   acquireBackgroundExecutionCasLock,
   casGatePath,
   defaultCasFsOps,
   readWorkspaceBackgroundOwnership,
   transitionWorkspaceBackgroundExecution,
 } from './background-execution-transition.js';
-import { parseInstallManifest } from './index.js';
+import { parseInstallManifest, type BackgroundExecutionRecord } from './index.js';
 
 // Module-scope temp root: workspace fixtures below derive from it at import
 // time, so it must exist before those constants evaluate.
@@ -41,6 +44,59 @@ function manifestPath(name: string): string {
 // linux; dev hosts may be win32).
 const WS = path.resolve(tmpRoot, 'ws-alpha');
 const WS_B = path.resolve(tmpRoot, 'ws-beta');
+const WS_C = path.resolve(tmpRoot, 'ws-gamma');
+const WS_D = path.resolve(tmpRoot, 'ws-delta');
+const WS_E = path.resolve(tmpRoot, 'ws-epsilon');
+
+const FIXED_TIME = '2026-11-22T00:00:00.000Z';
+
+function legacyRecord(generation: number): BackgroundExecutionRecord {
+  return {
+    state: 'legacy_owned',
+    effectiveOwner: 'legacy',
+    generation,
+    operationId: null,
+    previousOwner: null,
+    targetOwner: null,
+    updatedAt: FIXED_TIME,
+  };
+}
+
+function serviceHostRecord(generation: number): BackgroundExecutionRecord {
+  return {
+    state: 'service_host_owned',
+    effectiveOwner: 'service_host',
+    generation,
+    operationId: null,
+    previousOwner: null,
+    targetOwner: null,
+    updatedAt: FIXED_TIME,
+  };
+}
+
+function handoverResidueRecord(generation: number, operationId: string): BackgroundExecutionRecord {
+  return {
+    state: 'handover_preparing',
+    effectiveOwner: 'legacy',
+    generation,
+    operationId,
+    previousOwner: 'legacy',
+    targetOwner: 'service_host',
+    updatedAt: FIXED_TIME,
+  };
+}
+
+function rollbackResidueRecord(generation: number, operationId: string): BackgroundExecutionRecord {
+  return {
+    state: 'rollback_pending',
+    effectiveOwner: 'service_host',
+    generation,
+    operationId,
+    previousOwner: 'service_host',
+    targetOwner: 'legacy',
+    updatedAt: FIXED_TIME,
+  };
+}
 
 function seedManifest(
   name: string,
@@ -80,278 +136,413 @@ describe('readWorkspaceBackgroundOwnership', () => {
     expect(readWorkspaceBackgroundOwnership({ manifestPath: malformed, workspaceDir: WS }))
       .toMatchObject({ status: 'manifest_unreadable', reason: 'install_manifest_malformed' });
 
-    const invalid = seedManifest('reader-invalid', { workspaces: [] });
+    const invalid = manifestPath('reader-invalid');
     fs.writeFileSync(invalid, JSON.stringify({ layoutVersion: 1, mode: 'nope', hosts: ['openclaw'] }), 'utf8');
     expect(readWorkspaceBackgroundOwnership({ manifestPath: invalid, workspaceDir: WS }).status)
       .toBe('manifest_unreadable');
   });
 
-  it('projects no-record and every persisted state', () => {
+  it('projects no-record as un-provisioned and every historical persisted state remains parseable', () => {
     const file = seedManifest('reader-states', {
-      workspaces: [WS, WS_B],
+      workspaces: [WS, WS_B, WS_C, WS_D, WS_E],
       backgroundExecutions: {
-        [WS_B]: { state: 'service_host_owned', effectiveOwner: 'service_host', generation: 3, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-22T00:00:00.000Z' },
+        [WS]: legacyRecord(2),
+        [WS_B]: handoverResidueRecord(3, 'historical-op-h'),
+        [WS_C]: serviceHostRecord(4),
+        [WS_D]: rollbackResidueRecord(5, 'historical-op-r'),
       },
     });
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
-      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_B }))
-      .toMatchObject({ status: 'service_host_owned', generation: 3 });
 
-    const preparing = seedManifest('reader-preparing', {
-      backgroundExecutions: {
-        [WS]: { state: 'handover_preparing', effectiveOwner: 'legacy', generation: 2, operationId: 'op-1', previousOwner: 'legacy', targetOwner: 'service_host', updatedAt: '2026-11-22T00:00:00.000Z' },
-      },
-    });
-    const projected = readWorkspaceBackgroundOwnership({ manifestPath: preparing, workspaceDir: WS });
-    expect(projected.status).toBe('handover_preparing');
-    if (projected.status === 'handover_preparing') expect(projected.record.operationId).toBe('op-1');
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
+      .toMatchObject({ status: 'legacy_owned', source: 'record', generation: 2 });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_B }))
+      .toMatchObject({ status: 'handover_preparing', generation: 3 });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_C }))
+      .toMatchObject({ status: 'service_host_owned', generation: 4 });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_D }))
+      .toMatchObject({ status: 'rollback_pending', generation: 5 });
+    // Absent means not-yet-provisioned. The projection keeps the legacy_owned
+    // label for compatibility, with generation 0 and no record.
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_E }))
+      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
   });
 });
 
-describe('transitionWorkspaceBackgroundExecution — handover sequence', () => {
-  it('begin_handover registers the workspace, writes preparing, and preserves unknown fields', () => {
-    const file = seedManifest('handover-begin', {
-      workspaces: [WS_B],
+describe('provision_fresh_install', () => {
+  it('is the only live transition kind', () => {
+    expect(BACKGROUND_EXECUTION_TRANSITIONS).toEqual(['provision_fresh_install']);
+  });
+
+  it('provisions a registered no-record workspace to service_host_owned at generation 1 and preserves unknown fields', () => {
+    const file = seedManifest('provision-no-record', {
       extra: { channel: 'stable', autoCheck: { enabled: true }, releaseMetadataUrl: 'https://example.invalid/x' },
     });
     const result = transitionWorkspaceBackgroundExecution({
-      manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-h1', registerWorkspace: true,
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-provision-1',
     });
-    expect(result).toMatchObject({ ok: true, changed: true, record: { state: 'handover_preparing', effectiveOwner: 'legacy', generation: 1, operationId: 'op-h1' } });
+    expect(result).toMatchObject({
+      ok: true,
+      changed: true,
+      record: {
+        state: 'service_host_owned',
+        effectiveOwner: 'service_host',
+        generation: 1,
+        operationId: null,
+        previousOwner: null,
+        targetOwner: null,
+      },
+    });
     const raw = readRaw(file);
-    // PREPARING grants no new rights: effectiveOwner stays legacy (§8.4-3).
-    expect(raw.backgroundExecutions).toMatchObject({ [WS]: { state: 'handover_preparing', effectiveOwner: 'legacy' } });
-    expect(raw.workspaces).toEqual([WS_B, WS]);
-    // The update side owns these fields — a transition must never drop them.
+    expect(raw.backgroundExecutions).toMatchObject({ [WS]: { state: 'service_host_owned', generation: 1 } });
+    // The update side owns these fields — provisioning must never drop them.
     expect(raw.channel).toBe('stable');
     expect(raw.autoCheck).toEqual({ enabled: true });
     expect(raw.releaseMetadataUrl).toBe('https://example.invalid/x');
-    // The written document must re-parse.
+    expect(parseInstallManifest(raw).manifest).toBeDefined();
+    // The persisted projection is the authority, not the return value.
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
+      .toMatchObject({ status: 'service_host_owned', generation: 1 });
+  });
+
+  it('registers an unregistered workspace in the same atomic write when requested', () => {
+    const file = seedManifest('provision-register', { workspaces: [] });
+    const result = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-provision-register',
+      registerWorkspace: true,
+    });
+    expect(result).toMatchObject({ ok: true, changed: true, record: { generation: 1 } });
+    const raw = readRaw(file);
+    expect(raw.workspaces).toContain(WS);
+    expect(raw.backgroundExecutions).toMatchObject({ [WS]: { state: 'service_host_owned', generation: 1 } });
     expect(parseInstallManifest(raw).manifest).toBeDefined();
   });
 
-  it('begin_handover is idempotent per operationId and refuses a second operation', () => {
-    const file = seedManifest('handover-idempotent');
-    const first = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-a' });
-    expect(first).toMatchObject({ ok: true, changed: true });
-    const replay = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-a' });
-    expect(replay).toMatchObject({ ok: true, changed: false });
-    const second = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-b' });
-    expect(second).toMatchObject({ ok: false, reason: 'operation_in_progress' });
-  });
-
-  it('complete_handover CAS-flips only the addressed operation and only from preparing', () => {
-    const file = seedManifest('handover-complete');
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-h2' });
-    const mismatch = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'complete_handover', operationId: 'op-OTHER' });
-    expect(mismatch).toMatchObject({ ok: false, reason: 'operation_mismatch' });
-    const flip = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'complete_handover', operationId: 'op-h2' });
-    expect(flip).toMatchObject({ ok: true, changed: true, record: { state: 'service_host_owned', effectiveOwner: 'service_host', generation: 2, operationId: null } });
-    // A replay after the flip is unexpected_state — the COMMAND layer turns
-    // this into verify-only recovery, the primitive never re-flips.
-    const replay = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'complete_handover', operationId: 'op-h2' });
-    expect(replay).toMatchObject({ ok: false, reason: 'unexpected_state' });
-    // From legacy (never prepared) it is also refused.
-    const file2 = seedManifest('handover-complete-legacy');
-    expect(transitionWorkspaceBackgroundExecution({ manifestPath: file2, workspaceDir: WS, kind: 'complete_handover', operationId: 'op-x' }))
-      .toMatchObject({ ok: false, reason: 'unexpected_state' });
-  });
-
-  it('abort_handover restores legacy with generation+1', () => {
-    const file = seedManifest('handover-abort');
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-ab' });
-    const abort = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'abort_handover', operationId: 'op-ab' });
-    expect(abort).toMatchObject({ ok: true, changed: true, record: { state: 'legacy_owned', generation: 2, operationId: null } });
-  });
-});
-
-describe('transitionWorkspaceBackgroundExecution — rollback sequence', () => {
-  it('walks service_host_owned → rollback_pending → legacy_owned with monotonic generations', () => {
-    const file = seedManifest('rollback-walk');
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-r1' });
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'complete_handover', operationId: 'op-r1' });
-    const begin = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_rollback', operationId: 'op-r2' });
-    expect(begin).toMatchObject({ ok: true, record: { state: 'rollback_pending', effectiveOwner: 'service_host', generation: 3, operationId: 'op-r2' } });
-    const finish = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'complete_rollback', operationId: 'op-r2' });
-    expect(finish).toMatchObject({ ok: true, record: { state: 'legacy_owned', generation: 4 } });
+  it('flips an explicit legacy_owned record with generation > 0 to service_host_owned', () => {
+    const file = seedManifest('provision-legacy-residue', {
+      backgroundExecutions: { [WS]: legacyRecord(2) },
+    });
+    const result = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-provision-legacy',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      changed: true,
+      previous: { state: 'legacy_owned', generation: 2 },
+      record: { state: 'service_host_owned', effectiveOwner: 'service_host', generation: 3, operationId: null },
+    });
     expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
-      .toMatchObject({ status: 'legacy_owned', source: 'record', generation: 4 });
+      .toMatchObject({ status: 'service_host_owned', generation: 3 });
   });
 
-  it('abort_rollback restores service_host_owned from a stuck rollback', () => {
-    const file = seedManifest('rollback-abort');
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-q1' });
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'complete_handover', operationId: 'op-q1' });
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_rollback', operationId: 'op-q2' });
-    const abort = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'abort_rollback', operationId: 'op-q2' });
-    expect(abort).toMatchObject({ ok: true, record: { state: 'service_host_owned', generation: 4 } });
-  });
-
-  it('begin_rollback refuses a legacy-owned workspace', () => {
-    const file = seedManifest('rollback-legacy');
-    expect(transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_rollback', operationId: 'op-z' }))
-      .toMatchObject({ ok: false, reason: 'unexpected_state' });
-  });
-});
-
-describe('real-directory ownership pinning (PRI-1282 review)', () => {
-  it('migrates an alias-keyed record onto the real directory in the same CAS, registers the real dir, and a repointed alias cannot inherit ownership', () => {
-    const real = path.join(tmpRoot, 'ws-real-target');
-    const other = path.join(tmpRoot, 'ws-other-target');
-    const link = path.join(tmpRoot, 'ws-link');
-    fs.mkdirSync(real, { recursive: true });
-    fs.mkdirSync(other, { recursive: true });
-    try {
-      fs.symlinkSync(real, link);
-    } catch {
-      return; // platform without symlink privileges (unprivileged Windows)
-    }
-    const realpath = (target: string): string | undefined => {
-      try {
-        return fs.realpathSync.native(target);
-      } catch {
-        return undefined;
-      }
-    };
-    const realKey = path.resolve(fs.realpathSync.native(real));
-    // An ownership record registered under the ALIAS spelling — the legacy
-    // shape a repointable symlink could carry to another workspace.
-    const file = seedManifest('alias-pin', {
-      workspaces: [link],
-      backgroundExecutions: {
-        [link]: { state: 'service_host_owned', effectiveOwner: 'service_host', generation: 5, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-22T00:00:00.000Z' },
+  it.each([
+    { label: 'handover_preparing', record: handoverResidueRecord(4, 'historical-handover-op') },
+    { label: 'rollback_pending', record: rollbackResidueRecord(5, 'historical-rollback-op') },
+  ])('flips $label residue directly to service_host_owned without matching its historical operationId', ({ record }) => {
+    const file = seedManifest(`provision-${record.state}`, {
+      backgroundExecutions: { [WS]: record },
+    });
+    const result = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'a-new-installer-operation-id',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      changed: true,
+      previous: { state: record.state, generation: record.generation },
+      record: {
+        state: 'service_host_owned',
+        effectiveOwner: 'service_host',
+        generation: record.generation + 1,
+        operationId: null,
+        previousOwner: null,
+        targetOwner: null,
       },
     });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
+      .toMatchObject({ status: 'service_host_owned', generation: record.generation + 1 });
+  });
 
-    const res = transitionWorkspaceBackgroundExecution({
-      manifestPath: file, workspaceDir: real, kind: 'begin_rollback', operationId: 'rb-alias-1', realpath,
+  it('is idempotent on terminal replay and never bumps the generation, including for a different retry operationId', () => {
+    const file = seedManifest('provision-replay');
+    const first = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-op-1',
     });
-    expect(res.ok).toBe(true);
-    const raw = readRaw(file);
-    const records = raw.backgroundExecutions as Record<string, { state: string }>;
-    // The record moved onto the REAL directory; the alias key is gone.
-    expect(records[realKey]).toMatchObject({ state: 'rollback_pending' });
-    expect(records[link]).toBeUndefined();
-    // …and the real directory is registered so the key parses back.
-    expect(raw.workspaces).toContain(realKey);
+    expect(first).toMatchObject({ ok: true, changed: true, record: { generation: 1 } });
+    const afterFirst = fs.readFileSync(file, 'utf8');
 
-    // Repoint the link at ANOTHER workspace: the new target must not
-    // inherit the first workspace's ownership.
-    fs.rmSync(link);
-    fs.symlinkSync(other, link);
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: link, realpath }))
-      .toMatchObject({ status: 'legacy_owned' });
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: real, realpath }))
-      .toMatchObject({ status: 'rollback_pending' });
-  });
-});
-
-describe('fencing, registration, and side-effect isolation', () => {
-  it('a stale observed generation never writes', () => {
-    const file = seedManifest('fence-stale');
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-f1' });
-    const stale = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'complete_handover', operationId: 'op-f1', expectedGeneration: 0 });
-    expect(stale).toMatchObject({ ok: false, reason: 'stale_generation' });
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }).status).toBe('handover_preparing');
-  });
-
-  it('requires manifest registration unless begin_handover registers', () => {
-    const file = seedManifest('registration-missing', { workspaces: [WS_B] });
-    expect(transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-n1' }))
-      .toMatchObject({ ok: false, reason: 'workspace_not_registered' });
-  });
-
-  it('one workspace transition never touches another workspace record', () => {
-    const file = seedManifest('isolation', {
-      workspaces: [WS, WS_B],
-      backgroundExecutions: {
-        [WS_B]: { state: 'service_host_owned', effectiveOwner: 'service_host', generation: 7, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-22T00:00:00.000Z' },
-      },
+    const sameReplay = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-op-1',
     });
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-iso' });
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_B }))
-      .toMatchObject({ status: 'service_host_owned', generation: 7 });
+    expect(sameReplay).toMatchObject({ ok: true, changed: false, record: { generation: 1 } });
+
+    const retryReplay = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-op-2',
+    });
+    expect(retryReplay).toMatchObject({ ok: true, changed: false, record: { generation: 1 } });
+    expect(fs.readFileSync(file, 'utf8')).toBe(afterFirst);
   });
 
   it('migrates the legacy single-key spelling in the same atomic write', () => {
     const file = seedManifest('legacy-key', {
-      legacyBackgroundExecution: { state: 'legacy_owned', effectiveOwner: 'legacy', generation: 2, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-22T00:00:00.000Z' },
+      legacyBackgroundExecution: legacyRecord(2),
     });
-    const result = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-lg' });
-    expect(result).toMatchObject({ ok: true, record: { generation: 3 } });
+    const result = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-provision-single-key',
+    });
+    expect(result).toMatchObject({ ok: true, record: { state: 'service_host_owned', generation: 3 } });
     const raw = readRaw(file);
     expect(raw.backgroundExecution).toBeUndefined();
-    expect(raw.backgroundExecutions).toMatchObject({ [WS]: { state: 'handover_preparing', generation: 3 } });
+    expect(raw.backgroundExecutions).toMatchObject({ [WS]: { state: 'service_host_owned', generation: 3 } });
+  });
+});
+
+describe('real-directory ownership pinning', () => {
+  it('migrates alias-keyed residue onto the real directory in the same CAS, registers the real dir, and a repointed alias cannot inherit ownership', () => {
+    const real = path.resolve(tmpRoot, 'ws-real-target');
+    const other = path.resolve(tmpRoot, 'ws-other-target');
+    const link = path.resolve(tmpRoot, 'ws-link');
+    const realKey = path.resolve(real);
+    // Injectable realpath identity lets this test exercise the production
+    // alias logic without depending on platform symlink privileges.
+    const aliasTargets = new Map<string, string>([
+      [link, real],
+      [real, real],
+      [other, other],
+    ]);
+    const realpath = (target: string): string | undefined => aliasTargets.get(path.resolve(target)) ?? path.resolve(target);
+    aliasTargets.set(path.resolve(link), real);
+    aliasTargets.set(path.resolve(real), real);
+    aliasTargets.set(path.resolve(other), other);
+
+    // Historical residue registered under the ALIAS spelling — the shape a
+    // repointable symlink could otherwise carry to another workspace.
+    const file = seedManifest('alias-pin', {
+      workspaces: [link],
+      backgroundExecutions: { [link]: legacyRecord(5) },
+    });
+
+    const res = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: real,
+      kind: 'provision_fresh_install',
+      operationId: 'install-provision-alias',
+      realpath,
+    });
+    expect(res).toMatchObject({ ok: true, changed: true, record: { state: 'service_host_owned', generation: 6 } });
+    const raw = readRaw(file);
+    const records = raw.backgroundExecutions as Record<string, { state: string; generation: number }>;
+    // The record moved onto the REAL directory; the alias key is gone.
+    expect(records[realKey]).toMatchObject({ state: 'service_host_owned', generation: 6 });
+    expect(records[link]).toBeUndefined();
+    // …and the real directory is registered so the key parses back.
+    expect(raw.workspaces).toContain(realKey);
+    expect(parseInstallManifest(raw).manifest).toBeDefined();
+
+    // Repoint the alias at ANOTHER workspace: the new target must not inherit
+    // the first workspace's ownership.
+    aliasTargets.set(path.resolve(link), path.resolve(other));
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: link, realpath }))
+      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: real, realpath }))
+      .toMatchObject({ status: 'service_host_owned', generation: 6 });
+  });
+});
+
+describe('fencing, registration, and side-effect isolation', () => {
+  it('a stale observed generation never writes; the current generation succeeds as positive control', () => {
+    const file = seedManifest('fence-stale', {
+      backgroundExecutions: { [WS]: legacyRecord(2) },
+    });
+    const stale = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-fence-stale',
+      expectedGeneration: 1,
+    });
+    expect(stale).toMatchObject({ ok: false, reason: 'stale_generation' });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
+      .toMatchObject({ status: 'legacy_owned', generation: 2 });
+
+    const current = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-fence-current',
+      expectedGeneration: 2,
+    });
+    expect(current).toMatchObject({ ok: true, changed: true, record: { generation: 3 } });
   });
 
-  it('a failed atomic write leaves the previous manifest untouched', () => {
-    const file = seedManifest('io-fault');
-    transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-io' });
+  it('requires manifest registration unless provisioning explicitly registers the workspace', () => {
+    const file = seedManifest('registration-missing', { workspaces: [WS_B] });
+    expect(transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-no-register',
+    })).toMatchObject({ ok: false, reason: 'workspace_not_registered' });
+
+    expect(transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-register',
+      registerWorkspace: true,
+    })).toMatchObject({ ok: true, changed: true, record: { generation: 1 } });
+  });
+
+  it('one workspace provision never touches legacy records in other workspaces', () => {
+    const otherLegacy = legacyRecord(7);
+    const otherResidue = rollbackResidueRecord(8, 'other-workspace-historical-op');
+    const file = seedManifest('workspace-isolation', {
+      workspaces: [WS, WS_B, WS_C],
+      backgroundExecutions: {
+        [WS]: legacyRecord(2),
+        [WS_B]: otherLegacy,
+        [WS_C]: otherResidue,
+      },
+    });
+    const result = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-isolation',
+    });
+    expect(result).toMatchObject({ ok: true, changed: true, record: { generation: 3 } });
+    const raw = readRaw(file);
+    expect(raw.backgroundExecutions).toMatchObject({
+      [WS]: { state: 'service_host_owned', generation: 3 },
+      [WS_B]: otherLegacy,
+      [WS_C]: otherResidue,
+    });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_B }))
+      .toMatchObject({ status: 'legacy_owned', generation: 7 });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_C }))
+      .toMatchObject({ status: 'rollback_pending', generation: 8 });
+  });
+
+  it('a failed atomic write leaves the previous manifest untouched and releases the lock for retry', () => {
+    const file = seedManifest('io-fault', {
+      backgroundExecutions: { [WS]: legacyRecord(2) },
+    });
     const before = fs.readFileSync(file, 'utf8');
     const failing = {
       ...defaultCasFsOps(),
       writeFile: () => ({ ok: false as const, code: 'io' as const, error: new Error('disk full (injected)') }),
     };
-    const result = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'complete_handover', operationId: 'op-io', fsOps: failing });
+    const result = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-io',
+      fsOps: failing,
+    });
     expect(result).toMatchObject({ ok: false, reason: 'io_error' });
     expect(fs.readFileSync(file, 'utf8')).toBe(before);
     // No temp residue: the failure path removes its own temp file.
     const residue = fs.readdirSync(path.dirname(file)).filter((name) => name.includes('cas-tmp'));
     expect(residue).toEqual([]);
     // The lock was released by the failure path — a retry succeeds.
-    expect(transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'complete_handover', operationId: 'op-io' }))
-      .toMatchObject({ ok: true });
+    expect(transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-io-retry',
+    })).toMatchObject({ ok: true, changed: true, record: { generation: 3 } });
   });
 });
 
 describe('cross-process lock', () => {
   it('reports lock_busy with holder attribution while another operation holds it', () => {
     const file = seedManifest('lock-busy');
-    const holder = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'begin_handover', workspaceDir: WS });
+    const holder = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'provision_fresh_install', workspaceDir: WS });
     expect(holder.ok).toBe(true);
     if (!holder.ok) return;
-    const blocked = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-l1' });
+    const blocked = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-lock-busy',
+    });
     expect(blocked).toMatchObject({ ok: false, reason: 'lock_busy' });
-    if (!blocked.ok) expect(blocked.message).toContain('operation=begin_handover');
+    if (!blocked.ok) expect(blocked.message).toContain('operation=provision_fresh_install');
     holder.handle.release();
-    // After release the transition proceeds.
-    expect(transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-l1' }))
-      .toMatchObject({ ok: true });
+    // After release the provision proceeds.
+    expect(transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-lock-after-release',
+    })).toMatchObject({ ok: true });
   });
 
-  it('reclaims a lock whose holder PID is provably dead (PRI-1282 P1-2: PID liveness, not file age, is the reclaim authority)', () => {
+  it('reclaims a lock whose holder PID is provably dead (PID liveness, not file age, is the reclaim authority)', () => {
     const file = seedManifest('lock-stale');
     const fakePast = () => new Date(Date.now() - 60_000);
-    const holder = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'begin_handover', workspaceDir: WS, now: fakePast });
+    const holder = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'provision_fresh_install', workspaceDir: WS, now: fakePast });
     expect(holder.ok).toBe(true);
-    // NOT released — simulates a crashed holder. A fresh transition whose
+    // NOT released — simulates a crashed holder. A fresh provision whose
     // liveness probe proves the recorded PID dead must quarantine + reclaim
     // it, complete its work, and release cleanly (no lock residue, no
     // quarantine residue).
-    const result = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-s1', probes: { processAlive: () => 'dead' } });
+    const result = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-dead-holder',
+      probes: { processAlive: () => 'dead' },
+    });
     expect(result).toMatchObject({ ok: true });
     expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
     const residue = fs.readdirSync(path.dirname(file)).filter((name) => name.includes('.stale-'));
     expect(residue).toEqual([]);
   });
 
-  it('a stale-but-LIVE lock is never reclaimed — file age alone proves nothing (PRI-1282 P1-2)', () => {
+  it('a stale-but-LIVE lock is never reclaimed — file age alone proves nothing', () => {
     const file = seedManifest('lock-stale-live');
     const fakePast = () => new Date(Date.now() - 60_000);
-    const holder = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'begin_handover', workspaceDir: WS, now: fakePast });
+    const holder = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'provision_fresh_install', workspaceDir: WS, now: fakePast });
     expect(holder.ok).toBe(true);
     if (!holder.ok) return;
     // Older than the TTL but the recorded PID is still alive (default probe
     // on process.pid) → fail-closed busy, never an eviction the live holder
     // would resume under.
-    const blocked = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-s2' });
+    const blocked = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-live-holder',
+    });
     expect(blocked).toMatchObject({ ok: false, reason: 'lock_busy' });
     holder.handle.release();
     expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
   });
 
-  it('a filesystem failure mid-reclaim is fail-closed, never a false acquire (PRI-1282 P1)', () => {
+  it('a filesystem failure mid-reclaim is fail-closed, never a false acquire', () => {
     const file = seedManifest('lock-reclaim-io');
     const real = defaultCasFsOps();
     const holderA = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-A', workspaceDir: WS });
@@ -379,7 +570,12 @@ describe('cross-process lock', () => {
     const lockDir = `${file}.cas.lock`;
     fs.mkdirSync(lockDir, { recursive: false });
     fs.writeFileSync(path.join(lockDir, 'owner.json'), 'not-json', 'utf8');
-    const result = transitionWorkspaceBackgroundExecution({ manifestPath: file, workspaceDir: WS, kind: 'begin_handover', operationId: 'op-v1' });
+    const result = transitionWorkspaceBackgroundExecution({
+      manifestPath: file,
+      workspaceDir: WS,
+      kind: 'provision_fresh_install',
+      operationId: 'install-lock-invalid',
+    });
     expect(result).toMatchObject({ ok: false, reason: 'lock_invalid' });
   });
 
@@ -388,20 +584,19 @@ describe('cross-process lock', () => {
     const first = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-a', workspaceDir: WS });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
-    // Expire the first holder's lock by reclaiming: simulate TTL passage.
-    const staleDir = `${file}.cas.lock`;
-    fs.rmSync(staleDir, { recursive: true, force: true });
+    const lockDir = `${file}.cas.lock`;
+    fs.rmSync(lockDir, { recursive: true, force: true });
     const second = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-b', workspaceDir: WS });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     // The FIRST handle's release must not delete the SECOND holder's lock.
     first.handle.release();
-    expect(fs.existsSync(path.join(staleDir, 'owner.json'))).toBe(true);
+    expect(fs.existsSync(path.join(lockDir, 'owner.json'))).toBe(true);
     second.handle.release();
-    expect(fs.existsSync(staleDir)).toBe(false);
+    expect(fs.existsSync(lockDir)).toBe(false);
   });
 
-  it('release never deletes a lock carrying a foreign token (PRI-1282 P1)', () => {
+  it('release never deletes a lock carrying a foreign token', () => {
     const file = seedManifest('lock-release-foreign');
     const first = acquireBackgroundExecutionCasLock({ manifestPath: file, operation: 'op-a', workspaceDir: WS });
     expect(first.ok).toBe(true);
@@ -514,14 +709,12 @@ describe('cross-process lock', () => {
   });
 });
 
-// ─── Real cross-process contention (PRI-1282 review round 4) ────────────────
+// ─── Real cross-process contention ──────────────────────────────────────────
 // Children run the BUILT dist (npm test builds before vitest) behind an IPC
 // barrier: the parent dictates the exact interleaving — no random sleeps.
 const distDir = path.resolve(import.meta.dirname, '..', 'dist');
 const distModuleUrl = pathToFileURL(path.join(distDir, 'background-execution-transition.js')).href;
 const distAvailable = fs.existsSync(path.join(distDir, 'background-execution-transition.js'));
-
-import type { ChildProcess } from 'node:child_process';
 
 interface ChildHandle { child: ChildProcess }
 
@@ -603,85 +796,6 @@ function waitForExit(child: ChildProcess): Promise<void> {
     first.handle.release();
     expect(fs.existsSync(`${file}.cas.lock`)).toBe(false);
   }, 30_000);
-});
-
-describe('provision_fresh_install (PRI-1278 Phase 5 first-install ownership)', () => {
-  it('flips a brand-new workspace to service_host_owned in ONE write (generation 1) and registers it', () => {
-    const file = seedManifest('provision-fresh', { workspaces: [] });
-    const result = transitionWorkspaceBackgroundExecution({
-      manifestPath: file,
-      workspaceDir: WS,
-      kind: 'provision_fresh_install',
-      operationId: 'install-prov-1',
-      freshInstall: true,
-      registerWorkspace: true,
-    });
-    expect(result).toMatchObject({
-      ok: true,
-      changed: true,
-      record: { state: 'service_host_owned', effectiveOwner: 'service_host', generation: 1, operationId: null, previousOwner: null, targetOwner: null },
-    });
-    const raw = readRaw(file);
-    expect(raw.workspaces).toContain(WS);
-    expect(raw.backgroundExecutions).toMatchObject({ [WS]: { state: 'service_host_owned', generation: 1 } });
-    expect(parseInstallManifest(raw).manifest).toBeDefined();
-    // The persisted projection is the authority, not the return value.
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
-      .toMatchObject({ status: 'service_host_owned', generation: 1 });
-  });
-
-  it('is idempotent on replay and never bumps the generation', () => {
-    const file = seedManifest('provision-replay', { workspaces: [] });
-    const first = transitionWorkspaceBackgroundExecution({
-      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-1', freshInstall: true, registerWorkspace: true,
-    });
-    expect(first).toMatchObject({ ok: true, changed: true });
-    const replay = transitionWorkspaceBackgroundExecution({
-      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-2', freshInstall: true, registerWorkspace: true,
-    });
-    expect(replay).toMatchObject({ ok: true, changed: false, record: { generation: 1 } });
-  });
-
-  it('refuses without the explicit fresh-install proof', () => {
-    const file = seedManifest('provision-no-proof', { workspaces: [WS] });
-    expect(transitionWorkspaceBackgroundExecution({
-      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-1',
-    })).toMatchObject({ ok: false, reason: 'invalid_input' });
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
-      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
-  });
-
-  it('refuses a workspace that already carries ownership HISTORY (upgrade must use handover)', () => {
-    const file = seedManifest('provision-history', {
-      backgroundExecutions: {
-        [WS]: { state: 'legacy_owned', effectiveOwner: 'legacy', generation: 2, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-22T00:00:00.000Z' },
-      },
-    });
-    expect(transitionWorkspaceBackgroundExecution({
-      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-1', freshInstall: true,
-    })).toMatchObject({ ok: false, reason: 'unexpected_state' });
-    // Nothing was overwritten.
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS }))
-      .toMatchObject({ status: 'legacy_owned', source: 'record', generation: 2 });
-  });
-
-  it('honors the generation fence and never touches another workspace record', () => {
-    const file = seedManifest('provision-multi', {
-      workspaces: [WS_B],
-      backgroundExecutions: {
-        [WS_B]: { state: 'legacy_owned', effectiveOwner: 'legacy', generation: 4, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-22T00:00:00.000Z' },
-      },
-    });
-    expect(transitionWorkspaceBackgroundExecution({
-      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-1', freshInstall: true, registerWorkspace: true, expectedGeneration: 1,
-    })).toMatchObject({ ok: false, reason: 'stale_generation' });
-    const ok = transitionWorkspaceBackgroundExecution({
-      manifestPath: file, workspaceDir: WS, kind: 'provision_fresh_install', operationId: 'op-2', freshInstall: true, registerWorkspace: true, expectedGeneration: 0,
-    });
-    expect(ok).toMatchObject({ ok: true, changed: true });
-    expect(readWorkspaceBackgroundOwnership({ manifestPath: file, workspaceDir: WS_B }))
-      .toMatchObject({ status: 'legacy_owned', generation: 4 });
-  });
 });
 
 describe('parseInstallManifest — Service-Host-only manifests', () => {

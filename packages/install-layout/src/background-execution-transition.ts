@@ -1,17 +1,30 @@
 /**
- * Workspace background-execution ownership transitions — the CAS write path
- * for SPEC-PD-SERVICE-HOST-001 §8.4 (PRI-1282 Phase 4).
+ * Workspace background-execution provisioning — the CAS write path for the
+ * Service-Host-only runtime model (PRI-1278 consolidation).
  *
  * The manifest schema (`backgroundExecutions`, `BackgroundExecutionRecord`)
- * lives in `index.ts`; this module owns the STATE MACHINE half that the
- * schema doc string deferred: starting, completing, aborting and rolling back
- * a per-Workspace ownership transition under a cross-process critical section
- * with monotonic-generation fencing and operationId idempotency.
+ * lives in `index.ts`; this module owns the single live write transition,
+ * `provision_fresh_install`, together with the cross-process critical
+ * section, monotonic-generation fencing and idempotent terminal replay.
  *
- * Phase attribution (Owner execution directive 2026-11-22, closing the
- * SPEC §8.4-10 / TD §9 conflict): Phase 4 implements this minimal, reusable
- * primitive and uses it for the OpenClaw per-Workspace handover; Phase 5
- * REUSES it for Codex / WorkBuddy — there is no second state machine.
+ * Current ownership model:
+ *  - `service_host_owned` is the ONLY live ownership state. Consumption
+ *    admission is binary: a consumer is admitted when the projection is
+ *    `service_host_owned`, and is paused/fail-closed otherwise.
+ *  - `legacy_owned`, `handover_preparing` and `rollback_pending` remain in
+ *    the persisted schema only so pre-consolidation manifests stay parseable.
+ *    They are historical residue; no code path may WRITE them anymore.
+ *  - An absent record means "not yet provisioned". It is not proof that any
+ *    legacy runtime owns the workspace.
+ *
+ * Why provisioning may flip every persisted state directly: the legacy
+ * consumer implementation is deleted repo-wide, so a pre-existing record —
+ * including interrupted handover/rollback residue — cannot prove a live
+ * consumer that this CAS must quiesce. Migration safety is owned by the
+ * installer's one-time stop-old-entries sequencing BEFORE provisioning is
+ * invoked, not by this state machine; lease fencing remains the task-level
+ * backstop. This primitive's narrower job is to serialize the write, fence
+ * stale generations, and converge each workspace exactly once.
  *
  * Concurrency model:
  *  - physical exclusion: one lock directory next to the manifest
@@ -27,17 +40,16 @@
  *    reclaim's check and its recreate, and a release deletes only the
  *    lock whose owner token it verified inside the same transaction;
  *  - logical fencing: inside the critical section the writer re-reads the
- *    current record; a stale observed `generation` or an unexpected state
- *    loses and nothing is written;
+ *    current record; a stale observed `generation` loses and nothing is
+ *    written;
  *  - durability: the manifest lands via temp file + atomic rename, so a crash
  *    mid-write leaves either the previous or the complete new document —
  *    never a partial one.
  *
- * Ownership of process liveness is NEVER consulted: PID, startup order and
- * delays are not proof (SPEC §8.4). The persisted record is the only
- * authority; `readWorkspaceBackgroundOwnership` is its read-side projection
- * shared by the OpenClaw Gateway gate, the `pd openclaw worker` gate and the
- * handover/rollback commands.
+ * Process liveness is NEVER ownership proof: PID, startup order and delays
+ * are not proof. The persisted record is the only authority;
+ * `readWorkspaceBackgroundOwnership` is its read-side projection for
+ * provisioning and consumer-admission readers.
  */
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
@@ -645,7 +657,7 @@ export type WorkspaceBackgroundOwnership =
   | {
       status: 'legacy_owned';
       source: 'no_record' | 'record';
-      /** Implicit generation of the legacy default is 0; a record carries its own. */
+      /** Implicit generation of the absent-record/un-provisioned projection is 0; a record carries its own. */
       generation: number;
       record?: BackgroundExecutionRecord;
     }
@@ -672,7 +684,7 @@ export interface ReadOwnershipOptions {
  * caller happened to pass: `workspaces[]` may hold an alias (symlinked or
  * differently-spelled canonical path) of the same directory while the worker
  * is launched with the real path — a lexical lookup then misses the record
- * and silently drops the workspace to the legacy default. Every
+ * and silently treats the workspace as un-provisioned. Every
  * `workspaces[]` entry naming the same real directory is a candidate record
  * key; several disagreeing records under one real directory are
  * refuse-to-guess structural damage, never silently merged.
@@ -725,11 +737,15 @@ const OWNER_ALIAS_CONFLICT_NEXT_ACTION =
   'Two registered path spellings of the same directory carry DIFFERENT ownership records; a writer must reconcile ~/.pd/install.json (remove the duplicate workspace entry / record) before background execution decisions.';
 
 /**
- * The single read-side projection of §8.4 ownership for ONE workspace.
- * Consumers: the OpenClaw Gateway start/tick gate, the `pd openclaw worker`
- * gate, and the handover/rollback commands. Fail-closed: an unreadable or
- * malformed manifest is `manifest_unreadable` — "cannot decide" is NEVER
- * collapsed into "legacy by default" for a consumer that is about to act.
+ * The single read-side ownership projection for ONE workspace in the
+ * Service-Host-only model. `service_host_owned` is the only state that may
+ * admit consumption; every other persisted state is historical residue, and
+ * an absent record means not-yet-provisioned. For projection compatibility
+ * the absent case is still represented as `legacy_owned`/`no_record`/
+ * generation 0 — readers must interpret that as un-provisioned, never as a
+ * living legacy consumer. Fail-closed: an unreadable or malformed manifest
+ * is `manifest_unreadable`; "cannot decide" is NEVER collapsed into an
+ * admission decision for a consumer that is about to act.
  */
 export function readWorkspaceBackgroundOwnership(options: ReadOwnershipOptions): WorkspaceBackgroundOwnership {
   const fsOps = options.fsOps ?? realFsOps;
@@ -791,12 +807,6 @@ export function readWorkspaceBackgroundOwnership(options: ReadOwnershipOptions):
 
 export const BACKGROUND_EXECUTION_TRANSITIONS = [
   'provision_fresh_install',
-  'begin_handover',
-  'abort_handover',
-  'complete_handover',
-  'begin_rollback',
-  'complete_rollback',
-  'abort_rollback',
 ] as const;
 export type BackgroundExecutionTransitionKind = (typeof BACKGROUND_EXECUTION_TRANSITIONS)[number];
 
@@ -805,25 +815,17 @@ export interface TransitionBackgroundExecutionInput {
   workspaceDir: string;
   kind: BackgroundExecutionTransitionKind;
   /**
-   * Idempotency key of the operator's operation. Must match the persisted
-   * `operationId` of an in-flight transition record for complete/abort; a
-   * begin replaying the SAME id onto the same transition state is a no-op.
+   * Idempotency key of the operator's provisioning operation. The converged
+   * `service_host_owned` record is steady-state and therefore persists
+   * `operationId: null` (the schema contract); replay safety is enforced by
+   * treating that converged state as a no-op rather than by writing a second
+   * generation.
    */
   operationId: string;
   /** Caller-observed generation fence; mismatch refuses (stale view loses). */
   expectedGeneration?: number;
-  /** begin_handover only: also merge the workspace into `workspaces[]`. */
+  /** Also merge the workspace into `workspaces[]` in the same atomic write. */
   registerWorkspace?: boolean;
-  /**
-   * provision_fresh_install ONLY: the caller's proof that this Workspace has
-   * no historical background consumer (a brand-new PD install created it in
-   * this run). A legacy upgrade NEVER passes this — it must use
-   * begin_handover so the old consumer is stopped and verified first.
-   * The proof is enforced structurally below: the manifest must hold NO
-   * ownership record for the workspace (absence of history), not merely a
-   * `legacy_owned` record.
-   */
-  freshInstall?: boolean;
   platform?: string;
   now?: () => Date;
   staleMs?: number;
@@ -850,8 +852,6 @@ export interface TransitionBackgroundExecutionFailure {
     | 'workspace_not_registered'
     | 'unexpected_state'
     | 'stale_generation'
-    | 'operation_in_progress'
-    | 'operation_mismatch'
     | 'lock_busy'
     | 'lock_invalid'
     | 'lock_io_error'
@@ -868,48 +868,31 @@ export type TransitionBackgroundExecutionResult =
 interface TransitionSpec {
   from: readonly BackgroundExecutionState[];
   to: BackgroundExecutionState;
-  /** The transition record must carry an operationId (in-flight states). */
-  needsOperationId: boolean;
 }
 
 const TRANSITION_SPECS: Record<BackgroundExecutionTransitionKind, TransitionSpec> = {
-  // Fresh-install provisioning: a brand-new Workspace is born Service-Host
-  // owned in ONE atomic write (generation 0 → 1). There is no old consumer
-  // to quiesce, so the handover_preparing staging is not used; the caller
-  // still has to prove absence of history through the manifest itself.
-  provision_fresh_install: { from: ['legacy_owned'], to: 'service_host_owned', needsOperationId: false },
-  // legacy_owned -> handover_preparing; effectiveOwner stays legacy (SPEC §8.4-3:
-  // PREPARING grants no new rights — the old consumer remains the only one).
-  begin_handover: { from: ['legacy_owned', 'handover_preparing'], to: 'handover_preparing', needsOperationId: true },
-  abort_handover: { from: ['handover_preparing'], to: 'legacy_owned', needsOperationId: false },
-  complete_handover: { from: ['handover_preparing'], to: 'service_host_owned', needsOperationId: false },
-  begin_rollback: { from: ['service_host_owned', 'rollback_pending'], to: 'rollback_pending', needsOperationId: true },
-  complete_rollback: { from: ['rollback_pending'], to: 'legacy_owned', needsOperationId: false },
-  abort_rollback: { from: ['rollback_pending'], to: 'service_host_owned', needsOperationId: false },
+  // Service-Host-only provisioning is a direct convergence write from ANY
+  // persisted state. All three non-service states are parse-only residue in
+  // the new model: the legacy consumer implementation has been deleted
+  // repo-wide, so there is no consumer left for a handover/rollback machine
+  // to quiesce. The installer's stop-old-entries sequencing owns migration
+  // safety before it calls this primitive; the CAS only guarantees that the
+  // convergence write itself is serialized, generation-fenced and atomic.
+  provision_fresh_install: {
+    from: ['legacy_owned', 'handover_preparing', 'rollback_pending', 'service_host_owned'],
+    to: 'service_host_owned',
+  },
 };
 
 function buildTargetRecord(context: {
   kind: BackgroundExecutionTransitionKind;
   currentGeneration: number;
-  operationId: string;
   nowIso: string;
 }): BackgroundExecutionRecord {
   const generation = context.currentGeneration + 1;
-  const { operationId, nowIso } = context;
+  const { nowIso } = context;
   switch (context.kind) {
     case 'provision_fresh_install':
-      return { state: 'service_host_owned', effectiveOwner: 'service_host', generation, operationId: null, previousOwner: null, targetOwner: null, updatedAt: nowIso };
-    case 'begin_handover':
-      return { state: 'handover_preparing', effectiveOwner: 'legacy', generation, operationId, previousOwner: 'legacy', targetOwner: 'service_host', updatedAt: nowIso };
-    case 'abort_handover':
-      return { state: 'legacy_owned', effectiveOwner: 'legacy', generation, operationId: null, previousOwner: null, targetOwner: null, updatedAt: nowIso };
-    case 'complete_handover':
-      return { state: 'service_host_owned', effectiveOwner: 'service_host', generation, operationId: null, previousOwner: null, targetOwner: null, updatedAt: nowIso };
-    case 'begin_rollback':
-      return { state: 'rollback_pending', effectiveOwner: 'service_host', generation, operationId, previousOwner: 'service_host', targetOwner: 'legacy', updatedAt: nowIso };
-    case 'complete_rollback':
-      return { state: 'legacy_owned', effectiveOwner: 'legacy', generation, operationId: null, previousOwner: null, targetOwner: null, updatedAt: nowIso };
-    case 'abort_rollback':
       return { state: 'service_host_owned', effectiveOwner: 'service_host', generation, operationId: null, previousOwner: null, targetOwner: null, updatedAt: nowIso };
   }
 }
@@ -923,20 +906,20 @@ function projectOwnership(
     return { status: 'legacy_owned', source: record !== undefined ? 'record' : 'no_record', generation, record };
   }
   if (record === undefined) {
-    // Unreachable for transition states (a record must exist), kept total.
+    // Unreachable for persisted non-legacy states (a record must exist), kept total.
     return { status: 'legacy_owned', source: 'no_record', generation };
   }
   return { status: state, generation, record };
 }
 
 /**
- * Execute one §8.4 state-machine transition for one Workspace under the CAS
- * critical section. The manifest is read, validated, mutated as a RAW object
- * (unknown top-level fields survive — the update side owns `channel` /
- * `autoCheck` / `releaseMetadataUrl`), re-validated, and landed with an
- * atomic rename. A legacy single-key `backgroundExecution` spelling is
- * migrated to the per-Workspace map in the same write (both spellings after
- * the write would be a parse conflict).
+ * Execute the one live ownership transition — provision this Workspace into
+ * `service_host_owned` — under the CAS critical section. The manifest is
+ * read, validated, mutated as a RAW object (unknown top-level fields survive
+ * — the update side owns `channel` / `autoCheck` / `releaseMetadataUrl`),
+ * re-validated, and landed with an atomic rename. A legacy single-key
+ * `backgroundExecution` spelling is migrated to the per-Workspace map in the
+ * same write (both spellings after the write would be a parse conflict).
  */
 export function transitionWorkspaceBackgroundExecution(
   input: TransitionBackgroundExecutionInput,
@@ -1004,19 +987,19 @@ export function transitionWorkspaceBackgroundExecution(
       };
     }
 
-    // Workspace registration: begin_handover may register (single atomic write
-    // together with the record); every other kind requires existing membership
-    // because a marker key outside `workspaces[]` cannot parse back. An alias
-    // registration for the same real directory counts as registered.
+    // Workspace registration: provisioning may register the workspace in the
+    // same atomic write when the caller explicitly asks for it. Otherwise the
+    // workspace must already be a member because a record key outside
+    // `workspaces[]` cannot parse back. An alias registration for the same
+    // real directory counts as registered.
     const registered = identity.registeredAliases.length > 0;
-    const mayRegister = (input.kind === 'begin_handover' || input.kind === 'provision_fresh_install')
-      && input.registerWorkspace === true;
+    const mayRegister = input.registerWorkspace === true;
     if (!registered && !mayRegister) {
       return {
         ok: false,
         reason: 'workspace_not_registered',
         message: `workspace ${canonical} is not in the manifest workspaces list`,
-        nextAction: 'Register the workspace through a begin_handover with registration, or the installer bind path.',
+        nextAction: 'Register the workspace through installer provisioning or the installer bind path.',
       };
     }
 
@@ -1027,39 +1010,25 @@ export function transitionWorkspaceBackgroundExecution(
     const currentState: BackgroundExecutionState = currentRecord?.state ?? 'legacy_owned';
     const currentGeneration = currentRecord?.generation ?? 0;
 
-    // Fresh-install provisioning is the ONE transition that skips the legacy
-    // handover staging, so its authorization must be proven here rather than
-    // trusted from the caller:
-    //  - `freshInstall` must be explicitly asserted (a legacy upgrade that
-    //    forgot it can never flip ownership silently);
-    //  - the manifest must hold NO ownership record at all for this
-    //    workspace (a `legacy_owned` RECORD is history — that workspace has
-    //    been managed before and must go through begin_handover);
-    //  - an already-provisioned workspace is an idempotent replay.
-    if (input.kind === 'provision_fresh_install') {
-      if (input.freshInstall !== true) {
-        return {
-          ok: false,
-          reason: 'invalid_input',
-          message: 'provision_fresh_install requires freshInstall=true; upgrades must use begin_handover so the legacy consumer is stopped and verified first',
-          nextAction: 'Use pd service handover for an existing workspace; fresh-install provisioning is install-time only.',
-        };
-      }
-      const alreadyOwned = currentRecord !== undefined
-        && currentState === 'service_host_owned'
-        && currentRecord.effectiveOwner === 'service_host';
-      if (alreadyOwned) {
-        return { ok: true, changed: false, record: currentRecord, previous: currentRecord };
-      }
-      if (currentRecord !== undefined) {
-        return {
-          ok: false,
-          reason: 'unexpected_state',
-          message: `workspace already carries a background-execution record (${currentState}, generation ${currentGeneration}); fresh-install provisioning refuses to overwrite history`,
-          nextAction: 'Use pd service handover (with legacy consumer quiesce) to move this workspace to the Service Host.',
-          current: projectOwnership(currentState, currentGeneration, currentRecord),
-        };
-      }
+    // `service_host_owned` is the converged terminal state. Replaying a
+    // provision onto a canonical terminal record is a no-op and must never
+    // mint another generation: concurrent installers/retries are allowed to
+    // converge exactly once. The persisted steady-state record carries
+    // `operationId: null` by schema, so terminal idempotency is state-based
+    // rather than a second write keyed by the caller's operation id. A no-op
+    // does not consult the generation fence because no write is attempted.
+    //
+    // Exception: an alias-keyed terminal record still needs the realpath
+    // pinning repair below. With no later transition kinds left, provisioning
+    // is the only remaining write opportunity that can move that historical
+    // record onto the real directory. That repair rewrites the SAME record
+    // (same generation); it is not a new ownership transition.
+    const terminalRecord = currentRecord !== undefined && currentState === spec.to ? currentRecord : undefined;
+    const terminalNeedsRealpathPinning = terminalRecord !== undefined
+      && priorKey !== undefined
+      && priorKey !== recordKey;
+    if (terminalRecord !== undefined && !terminalNeedsRealpathPinning) {
+      return { ok: true, changed: false, record: terminalRecord, previous: terminalRecord };
     }
 
     if (input.expectedGeneration !== undefined && input.expectedGeneration !== currentGeneration) {
@@ -1068,22 +1037,6 @@ export function transitionWorkspaceBackgroundExecution(
         reason: 'stale_generation',
         message: `observed generation ${input.expectedGeneration} but the manifest holds ${currentGeneration}`,
         nextAction: 'Re-read the ownership record and retry with the current generation; a stale observer never writes.',
-        current: projectOwnership(currentState, currentGeneration, currentRecord),
-      };
-    }
-
-    if (currentRecord !== undefined && currentState === spec.to && spec.needsOperationId) {
-      // Idempotent begin replay: same operationId onto the same transition
-      // state is a no-op; a different id means another operation owns it.
-      const holderOp = currentRecord.operationId ?? '';
-      if (holderOp === input.operationId) {
-        return { ok: true, changed: false, record: currentRecord, previous: currentRecord };
-      }
-      return {
-        ok: false,
-        reason: 'operation_in_progress',
-        message: `workspace is ${currentState} under operationId ${holderOp || '(none)'}; refusing to start ${input.operationId}`,
-        nextAction: 'Wait for the in-flight operation to finish or abort it explicitly; one transition operation per workspace.',
         current: projectOwnership(currentState, currentGeneration, currentRecord),
       };
     }
@@ -1098,24 +1051,13 @@ export function transitionWorkspaceBackgroundExecution(
       };
     }
 
-    // complete/abort must address the operation that opened the transition.
-    if (currentState === 'handover_preparing' || currentState === 'rollback_pending') {
-      const holderOp = currentRecord?.operationId ?? '';
-      if (holderOp !== input.operationId) {
-        return {
-          ok: false,
-          reason: 'operation_mismatch',
-          message: `${input.kind} addresses operationId ${input.operationId} but the transition record holds ${holderOp || '(none)'}`,
-          nextAction: 'Use the persisted operationId, or abort the in-flight operation first.',
-          current: projectOwnership(currentState, currentGeneration, currentRecord),
-        };
-      }
-    }
+    // Historical handover/rollback operationIds are deliberately NOT matched
+    // here. Those records are residue from a deleted migration machine, not
+    // live operations; provisioning supersedes them directly.
 
     const target = buildTargetRecord({
       kind: input.kind,
       currentGeneration,
-      operationId: input.operationId,
       nowIso: now().toISOString(),
     });
 
@@ -1136,15 +1078,12 @@ export function transitionWorkspaceBackgroundExecution(
     // Migrate the legacy single-key spelling away in the same write.
     delete raw.backgroundExecution;
     // The record key MUST be a workspaces[] member or it cannot parse back:
-    // the real directory registers in the same CAS — on begin_handover for
-    // a new workspace, on any later transition that migrated an alias-keyed
-    // record (PRI-1282 review).
+    // once provisioning has been admitted, the real directory registers in
+    // the same CAS. This covers both first-time registration and migration of
+    // an alias-keyed record onto the real directory (PRI-1282 review).
     const registeredKeys = manifest.workspaces ?? [];
     const recordKeyRegistered = registeredKeys.some((entry) => pathApi.resolve(entry) === recordKey);
     if (!recordKeyRegistered) {
-      raw.workspaces = mergeInstallManifestWorkspaces(manifest, recordKey, platform);
-      raw.hosts = installManifestHostsForPersist(manifest);
-    } else if (input.kind === 'begin_handover' && input.registerWorkspace === true && !registered) {
       raw.workspaces = mergeInstallManifestWorkspaces(manifest, recordKey, platform);
       raw.hosts = installManifestHostsForPersist(manifest);
     }

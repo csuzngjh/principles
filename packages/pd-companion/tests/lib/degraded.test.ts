@@ -1,10 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildDegradedPageHtml,
-  buildDegradedWorkspacesTrayView,
-  buildStalledWorkersTrayView,
   describeDegraded,
-  describeWorkspaceWorkerDegraded,
   escapeHtml,
 } from '../../src/lib/degraded.js';
 
@@ -58,60 +55,5 @@ describe('escapeHtml / buildDegradedPageHtml', () => {
     const html = buildDegradedPageHtml(describeDegraded('launch_failed', '<img src=x onerror=alert(1)>'));
     expect(html).not.toContain('<img src=x');
     expect(html).toContain('&lt;img src=x');
-  });
-});
-
-describe('workspace worker degraded Owner view (PRI-715)', () => {
-  const wsA = 'D:\\Code\\ws-a';
-
-  it('notification copy names the workspace, the reason and a concrete recovery', () => {
-    const info = describeWorkspaceWorkerDegraded(wsA);
-    expect(info.title).toContain('ws-a');
-    expect(info.body).toContain('重启次数已耗尽');
-    expect(info.body).toContain('重启 PD Companion');
-  });
-
-  it('falls back to the full path when the directory has no basename', () => {
-    const info = describeWorkspaceWorkerDegraded('D:\\');
-    expect(info.title).toContain('D:\\');
-  });
-
-  it('empty degraded list projects an empty tray view (healthy fleet stays silent)', () => {
-    const view = buildDegradedWorkspacesTrayView([]);
-    expect(view.statusSuffix).toBe('');
-    expect(view.menuLabels).toEqual([]);
-  });
-
-  it('tray view lists every degraded workspace with identity, reason and next action', () => {
-    const view = buildDegradedWorkspacesTrayView([wsA, 'D:\\Code\\ws-b']);
-    expect(view.statusSuffix).toContain('2 个工作区');
-    expect(view.menuLabels[0]).toContain('已停止');
-    const joined = view.menuLabels.join('\n');
-    expect(joined).toContain('ws-a');
-    expect(joined).toContain(String.raw`D:\Code\ws-a`);
-    expect(joined).toContain('ws-b');
-    expect(joined).toContain('重启 PD Companion');
-  });
-});
-
-describe('stalled worker tray view (PRI-1264 review: the stall survives the toast)', () => {
-  const wsA = 'D:\\Code\\ws-stall';
-
-  it('empty stall set projects an empty tray view', () => {
-    const view = buildStalledWorkersTrayView([]);
-    expect(view.statusSuffix).toBe('');
-    expect(view.menuLabels).toEqual([]);
-  });
-
-  it('lists stalled workspaces with their OWN state wording — never disguised as restart-exhaustion', () => {
-    const view = buildStalledWorkersTrayView([wsA]);
-    expect(view.statusSuffix).toContain('worker 周期停滞');
-    const joined = view.menuLabels.join('\n');
-    expect(joined).toContain('ws-stall');
-    expect(joined).toContain('周期停滞');
-    expect(joined).toContain('重启 PD Companion');
-    // The recovery guidance must not borrow the restart-exhaustion story.
-    expect(joined).not.toContain('重启次数已耗尽');
-    expect(joined).not.toContain('管道已停止');
   });
 });

@@ -760,7 +760,7 @@ program
   .option('--host <host>', 'Host adapter to install (none/openclaw/codex/workbuddy/all; default none = PD Service Host only)')
   // Gateway lock prevention: auto-stop a running OpenClaw gateway before
   // install (avoids EPERM on the backup rename) and restart it afterwards.
-  .option('--stop-gateway', 'Stop the OpenClaw gateway before install if running, restart after', false)
+  .option('--stop-gateway', 'Stop the OpenClaw gateway before install if running, restart after; explicit Service Host migration requires a verified stopped Gateway', false)
   // PRI-1281 Phase 3 / PRI-1278 Phase 5: scheduler consent. Register creates
   // installed_disabled; enable arms the automatic managed runs. On a FRESH
   // install --yes accepts enable as the recommended default; --json and

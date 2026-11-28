@@ -1917,7 +1917,7 @@ describe('runWorkbuddyEarlyPreflight (PRI-1062)', () => {
       'utf8',
     );
     const preflightCall = source.indexOf('runWorkbuddyEarlyPreflight()');
-    const gatewayStop = source.indexOf('stopOpenClawGateway(gatewayStatus)');
+    const gatewayStop = source.search(/stopOpenClawGateway\(\s*gatewayStatus/);
     expect(preflightCall).toBeGreaterThan(-1);
     expect(gatewayStop).toBeGreaterThan(-1);
     expect(preflightCall).toBeLessThan(gatewayStop);

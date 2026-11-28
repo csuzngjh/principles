@@ -1,0 +1,111 @@
+
+> create-principles-disciple@1.156.2 test
+> vitest run --run tests/service-host-provisioning.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.1.0 [39m[90m/mnt/d/Code/_worktrees/principles/PRI-1278-phase5-p0-guard-20261127/packages/create-principles-disciple[39m
+
+[temp-lifecycle] test-runs: kept 17
+[temp-lifecycle] TMPDIR -> /mnt/d/Code/.pd-tmp/principles/test-runs/vitest-20261127-120553-cfc1ec
+ [31m❯[39m tests/service-host-provisioning.test.ts [2m([22m[2m18 tests[22m[2m | [22m[31m6 failed[39m[2m)[22m[33m 5061[2mms[22m[39m
+   [31m❯[39m provisionFreshInstallWorkspace [2m(18)[22m
+     [33m[2m✓[22m[39m Service-Host-only: owns the workspace, reports waiting_for_host_binding, runs the first real cycle, writes evidence[33m 388[2mms[22m[39m
+     [32m✓[39m never hands over ownership when the scheduler is not verified enabled — it records a PENDING marker[32m 258[2mms[22m[39m
+     [32m✓[39m refuses an upgrade workspace that already carries an ownership record[32m 118[2mms[22m[39m
+     [32m✓[39m a failed readiness probe leaves ownership untouched (no consumer, no silent flip)[32m 239[2mms[22m[39m
+     [33m[2m✓[22m[39m first-cycle evidence counts REAL worker runs and THIS run's progress only[33m 327[2mms[22m[39m
+     [32m✓[39m host worker probes never receive --pd-home and carry the trusted HOME instead[32m 269[2mms[22m[39m
+     [33m[2m✓[22m[39m records EACH deferred workspace independently (multi-host pending registry)[33m 470[2mms[22m[39m
+     [32m✓[39m persists the REAL directory, so a re-pointed link cannot claim a new target on resume[32m 275[2mms[22m[39m
+     [32m✓[39m resume refuses to flip ownership when the host binding cannot be verified[32m 248[2mms[22m[39m
+     [32m✓[39m resume refuses to flip while a legacy OpenClaw Gateway may still consume the workspace[32m 251[2mms[22m[39m
+     [32m✓[39m resume probes the VERIFIED host when no legacy Gateway is running[32m 216[2mms[22m[39m
+[31m     [31m×[31m deferred codex resume with a potentially active legacy consumer is blocked before readiness and CAS[39m[33m 316[2mms[22m[39m
+[31m     [31m×[31m deferred workbuddy resume with a potentially active legacy consumer is blocked before readiness and CAS[39m[32m 280[2mms[22m[39m
+[31m     [31m×[31m deferred codex resume with unknown legacy consumer status is blocked before readiness and CAS[39m[32m 219[2mms[22m[39m
+[31m     [31m×[31m deferred workbuddy resume with unknown legacy consumer status is blocked before readiness and CAS[39m[32m 219[2mms[22m[39m
+[31m     [31m×[31m deferred host=all resume cannot bypass the Codex/WorkBuddy legacy-consumer guard[39m[33m 352[2mms[22m[39m
+     [32m✓[39m a non-deferred Codex fresh install keeps the existing provisioning behavior[32m 249[2mms[22m[39m
+[31m     [31m×[31m repeating a blocked deferred resume is idempotent and still never writes ownership[39m[33m 363[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 6 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/service-host-provisioning.test.ts[2m > [22mprovisionFreshInstallWorkspace[2m > [22mdeferred codex resume with a potentially active legacy consumer is blocked before readiness and CAS
+[41m[1m FAIL [22m[49m tests/service-host-provisioning.test.ts[2m > [22mprovisionFreshInstallWorkspace[2m > [22mdeferred workbuddy resume with a potentially active legacy consumer is blocked before readiness and CAS
+[31m[1mAssertionError[22m: expected 'service_host_owned' to be 'not_provisioned' // Object.is equality[39m
+
+Expected: [32m"[7mnot_provisio[27mned"[39m
+Received: [31m"[7mservice_host_ow[27mned"[39m
+
+[36m [2m❯[22m tests/service-host-provisioning.test.ts:[2m492:31[22m[39m
+    [90m490|[39m     })[33m;[39m
+    [90m491|[39m
+    [90m492|[39m     [34mexpect[39m(outcome[33m.[39mownership)[33m.[39m[34mtoBe[39m([32m'not_provisioned'[39m)[33m;[39m
+    [90m   |[39m                               [31m^[39m
+    [90m493|[39m     [34mexpect[39m(outcome[33m.[39mreadiness)[33m.[39m[34mtoBe[39m([32m'skipped'[39m)[33m;[39m
+    [90m494|[39m     expect(outcome.firstCycle).toMatchObject({ attempted: false, reaso…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/service-host-provisioning.test.ts[2m > [22mprovisionFreshInstallWorkspace[2m > [22mdeferred codex resume with unknown legacy consumer status is blocked before readiness and CAS
+[41m[1m FAIL [22m[49m tests/service-host-provisioning.test.ts[2m > [22mprovisionFreshInstallWorkspace[2m > [22mdeferred workbuddy resume with unknown legacy consumer status is blocked before readiness and CAS
+[31m[1mAssertionError[22m: expected 'failed' to be 'skipped' // Object.is equality[39m
+
+Expected: [32m"[7mskipp[27med"[39m
+Received: [31m"[7mfail[27med"[39m
+
+[36m [2m❯[22m tests/service-host-provisioning.test.ts:[2m522:31[22m[39m
+    [90m520|[39m
+    [90m521|[39m     [34mexpect[39m(outcome[33m.[39mownership)[33m.[39m[34mtoBe[39m([32m'not_provisioned'[39m)[33m;[39m
+    [90m522|[39m     [34mexpect[39m(outcome[33m.[39mreadiness)[33m.[39m[34mtoBe[39m([32m'skipped'[39m)[33m;[39m
+    [90m   |[39m                               [31m^[39m
+    [90m523|[39m     expect(outcome.firstCycle).toMatchObject({ attempted: false, reaso…
+    [90m524|[39m     [34mexpect[39m(outcome[33m.[39mnextAction)[33m.[39m[34mtoContain[39m([32m'controlled_handover'[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/service-host-provisioning.test.ts[2m > [22mprovisionFreshInstallWorkspace[2m > [22mdeferred host=all resume cannot bypass the Codex/WorkBuddy legacy-consumer guard
+[31m[1mAssertionError[22m: expected 'service_host_owned' to be 'not_provisioned' // Object.is equality[39m
+
+Expected: [32m"[7mnot_provisio[27mned"[39m
+Received: [31m"[7mservice_host_ow[27mned"[39m
+
+[36m [2m❯[22m tests/service-host-provisioning.test.ts:[2m561:31[22m[39m
+    [90m559|[39m
+    [90m560|[39m     [34mexpect[39m(gatewayProbes)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+    [90m561|[39m     [34mexpect[39m(outcome[33m.[39mownership)[33m.[39m[34mtoBe[39m([32m'not_provisioned'[39m)[33m;[39m
+    [90m   |[39m                               [31m^[39m
+    [90m562|[39m     [34mexpect[39m(outcome[33m.[39mreadiness)[33m.[39m[34mtoBe[39m([32m'skipped'[39m)[33m;[39m
+    [90m563|[39m     expect(outcome.firstCycle).toMatchObject({ attempted: false, reaso…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/service-host-provisioning.test.ts[2m > [22mprovisionFreshInstallWorkspace[2m > [22mrepeating a blocked deferred resume is idempotent and still never writes ownership
+[31m[1mAssertionError[22m: expected 'service_host_owned' to be 'not_provisioned' // Object.is equality[39m
+
+Expected: [32m"[7mnot_provisio[27mned"[39m
+Received: [31m"[7mservice_host_ow[27mned"[39m
+
+[36m [2m❯[22m tests/service-host-provisioning.test.ts:[2m619:33[22m[39m
+    [90m617|[39m         }[33m,[39m
+    [90m618|[39m       })[33m;[39m
+    [90m619|[39m       [34mexpect[39m(outcome[33m.[39mownership)[33m.[39m[34mtoBe[39m([32m'not_provisioned'[39m)[33m;[39m
+    [90m   |[39m                                 [31m^[39m
+    [90m620|[39m       expect(outcome.firstCycle).toMatchObject({ attempted: false, rea…
+    [90m621|[39m       expect(readWorkspaceBackgroundOwnership({ manifestPath, workspac…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m6 failed[39m[22m[2m | [22m[1m[32m12 passed[39m[22m[90m (18)[39m
+[2m   Start at [22m 12:05:53
+[2m   Duration [22m 6.66s[2m (tests 86%, transform 6%, import 5%, setup 2%, worker 1%)[22m
+
+npm error Lifecycle script `test` failed with error:
+npm error code 1
+npm error path /mnt/d/Code/_worktrees/principles/PRI-1278-phase5-p0-guard-20261127/packages/create-principles-disciple
+npm error workspace create-principles-disciple@1.156.2
+npm error location /mnt/d/Code/_worktrees/principles/PRI-1278-phase5-p0-guard-20261127/packages/create-principles-disciple
+npm error command failed
+npm error command sh -c vitest run --run tests/service-host-provisioning.test.ts

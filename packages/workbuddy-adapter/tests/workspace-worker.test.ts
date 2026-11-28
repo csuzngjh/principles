@@ -235,11 +235,15 @@ describe('WorkBuddy worker cycle — cycle liveness (Phase 2, PRI-1280)', () => 
     }
   });
 
-  it('driver mapping covers all three identities (companion / service_host / manual)', async () => {
+  it('driver mapping covers the two live identities and collapses the retired companion driver to manual', async () => {
     const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
     const previous = process.env.PD_INVOCATION_SOURCE;
     try {
-      for (const [source, expected] of [['companion', 'companion'], ['service_host', 'service_host'], [undefined, 'manual']] as const) {
+      // PRI-1278 Phase 5: 'companion' is retired — no Companion runtime exists
+      // that could produce it, so a legacy env leftover self-declaring it is
+      // not authoritative and attributes as manual. Only service_host and
+      // manual remain producible driver identities.
+      for (const [source, expected] of [['service_host', 'service_host'], [undefined, 'manual'], ['companion', 'manual']] as const) {
         if (source === undefined) delete process.env.PD_INVOCATION_SOURCE;
         else process.env.PD_INVOCATION_SOURCE = source;
         await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
@@ -249,6 +253,31 @@ describe('WorkBuddy worker cycle — cycle liveness (Phase 2, PRI-1280)', () => 
       if (previous === undefined) delete process.env.PD_INVOCATION_SOURCE;
       else process.env.PD_INVOCATION_SOURCE = previous;
     }
+  });
+
+  it('parse tolerance: a historical liveness record written with the retired companion driver still reads back verbatim', () => {
+    const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
+    // Pre-removal workers persisted `lastCycleDriver: 'companion'`. Those
+    // records are durable facts: readers must tolerate them as-is (the
+    // string is never rewritten, never migrated, never rejected).
+    const historical = {
+      lastCycleStartedAt: '2026-11-20T10:00:00.000Z',
+      lastCycleCompletedAt: '2026-11-20T10:00:41.000Z',
+      lastCycleDurationMs: 41_000,
+      lastCycleMode: 'ready',
+      lastCycleDriver: 'companion',
+      runningStage: null,
+      stageDeadline: null,
+      updatedAt: '2026-11-20T10:00:41.000Z',
+    };
+    fs.writeFileSync(
+      path.join(governance, '.state', 'workbuddy-worker-liveness.json'),
+      JSON.stringify(historical),
+    );
+    const read = readWorkbuddyWorkerLiveness(governance);
+    expect(read).not.toBeNull();
+    expect(read?.lastCycleDriver).toBe('companion');
+    expect(read?.lastCycleMode).toBe('ready');
   });
 
   it('a degraded cycle records the degradation reason in the liveness file', async () => {
@@ -305,7 +334,7 @@ describe('WorkBuddy worker cycle — cycle liveness (Phase 2, PRI-1280)', () => 
     }
   });
 
-  it('R5: a manual/companion cycle CLEARS the previous shadow run\'s invocation id from liveness', async () => {
+  it('R5: a manual (non-Service-Host) cycle CLEARS the previous shadow run\'s invocation id from liveness', async () => {
     const governance = makeWorkerWorkspace({ workbuddy: true, consumer: true });
     const previousSource = process.env.PD_INVOCATION_SOURCE;
     const previousId = process.env.PD_INVOCATION_ID;

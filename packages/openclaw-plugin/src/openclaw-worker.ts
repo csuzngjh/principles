@@ -7,19 +7,19 @@
  * `pd openclaw worker --once`) runs OUTSIDE the OpenClaw Gateway process.
  * The business logic is NOT re-implemented here — the shared
  * `runInternalizationConsumerCycle` and `runPendingDiagnosticianOnce`
- * (`@principles/host-runtime`) are the same implementations the Gateway's
- * InternalizationAutoConsumerService drives; this module only supplies the
- * OpenClaw host facts (tool catalog, tool semantics, hostKinds, evidence
- * port) and the worker-owned machinery the Gateway never needed: liveness
- * evidence (TD §2.3 — OpenClaw had no equivalent of the Codex worker
- * liveness file), invocation attribution, the §8.4 ownership gate and the
- * persisted tool declaration.
+ * (`@principles/host-runtime`) are the single implementation; this module
+ * only supplies the OpenClaw host facts (tool catalog, tool semantics,
+ * hostKinds, evidence port) plus the worker-owned machinery: liveness
+ * evidence, invocation attribution, the ownership gate and the persisted
+ * tool declaration.
  *
- * Ownership gate: a workspace is consumable by this worker ONLY while the
+ * PRI-1278 (service-host-only consolidation): the Gateway's in-process
+ * internalization consumer timer chain (`InternalizationAutoConsumerService`)
+ * is DELETED, so this worker is the ONLY internalization consumption path
+ * for an OpenClaw workspace. The ownership gate is the authoritative
+ * admission: a workspace is consumable by this worker ONLY while the
  * install manifest's `backgroundExecutions` record says
- * `service_host_owned` (fail-closed on an unreadable manifest). This closes
- * the manual-invocation double-consumer hole — running this command against
- * a legacy-owned (Gateway-consumed) workspace refuses.
+ * `service_host_owned` (fail-closed on an unreadable manifest).
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -62,14 +62,11 @@ import { OPENCLAW_TOOL_SEMANTICS, OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from './cons
 import { SystemLogger } from './core/system-logger.js';
 import { readOpenclawTargetTurnEvidence } from './hooks/pain-receipt-fallback.js';
 
-// Handover-command read surface: the pd-cli handover/rollback commands need
-// the ack READER; re-exported here so they consume ONE subpath
-// (`principles-disciple/openclaw-worker`) instead of plugin internals.
-export {
-  GATEWAY_QUIESCE_ACK_SCHEMA_VERSION,
-  readGatewayQuiesceAck,
-  type GatewayQuiesceAck,
-} from './service/gateway-quiesce-ack.js';
+// PRI-1278: the gateway-quiesce acknowledgment machinery
+// (pd.gateway-quiesce.v1 reader/writer) is deleted with the Gateway consumer
+// it belonged to — there is no in-process consumer left to quiesce, and the
+// handover state machine that read the ack is retired in the same
+// consolidation.
 
 // ─── Result contract (pd.worker-adapter.v1 worker side) ─────────────────────
 
@@ -118,12 +115,21 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Same attribution contract as the Codex worker (PRI-1264 / TD §5.2 F13). */
-export function openclawWorkerCycleDriver(): 'companion' | 'service_host' | 'manual' {
-  const source = process.env.PD_INVOCATION_SOURCE;
-  if (source === 'companion') return 'companion';
-  if (source === 'service_host') return 'service_host';
-  return 'manual';
+/**
+ * Attribution contract (PRI-1264 / TD §5.2 F13) — PRODUCER side only.
+ *
+ * PRI-1278 (service-host-only consolidation): the Companion runtime never
+ * drives workers any more, so `companion` is dead as a produced value and
+ * the env branch is gone — `PD_INVOCATION_SOURCE` is attribution, never a
+ * security boundary, and anything the Service Host did not pin is honestly
+ * 'manual'. PARSING tolerance is unaffected: historical liveness records
+ * may still carry `lastCycleDriver: 'companion'`, and
+ * `readOpenClawWorkerLiveness` deliberately returns an opaque record so
+ * those records keep parsing; readers must treat unknown/legacy driver
+ * strings as historical fact, never as a reason to resurrect a runtime.
+ */
+export function openclawWorkerCycleDriver(): 'service_host' | 'manual' {
+  return process.env.PD_INVOCATION_SOURCE === 'service_host' ? 'service_host' : 'manual';
 }
 
 function invocationIdLivenessPatch(): Record<string, unknown> {
@@ -242,7 +248,7 @@ export function readOpenClawWorkspaceOwnership(workspaceDir: string): WorkspaceB
   return readWorkspaceBackgroundOwnership({ manifestPath: paths.manifest, workspaceDir });
 }
 
-// ─── Readiness (no-consume self-check for the handover sequence) ────────────
+// ─── Readiness (no-consume self-check for Service-Host provisioning) ────────
 
 export interface OpenClawWorkerReadinessResult {
   readonly mode: 'ready' | 'degraded';
@@ -259,11 +265,12 @@ export interface OpenClawWorkerReadinessResult {
 }
 
 /**
- * No-consume readiness (handover step: "Service Host 以不消费模式完成就绪自
- * 自检"). Verifies every dependency the consuming cycle needs WITHOUT
- * touching the task store, the lease table or the trajectory rows: workspace
- * directory, §8.4 ownership readability, a loadable tool declaration, a
- * readable trajectory evidence port and resolvable provider credentials.
+ * No-consume readiness (the provisioning verification step: "Service Host
+ * 以不消费模式完成就绪自检"). Verifies every dependency the consuming cycle
+ * needs WITHOUT touching the task store, the lease table or the trajectory
+ * rows: workspace directory, ownership readability, a loadable tool
+ * declaration, a readable trajectory evidence port and resolvable provider
+ * credentials.
  */
 export async function computeOpenClawWorkerReadiness(workspaceDir: string, options?: {
   ownership?: () => WorkspaceBackgroundOwnership;
@@ -285,9 +292,9 @@ export async function computeOpenClawWorkerReadiness(workspaceDir: string, optio
   const ownership = options?.ownership
     ? options.ownership()
     : readOpenClawWorkspaceOwnership(workspaceDirResolved);
-  // Readiness does not require service_host ownership yet (the handover
+  // Readiness does not require service_host ownership yet (provisioning
   // verifies readiness BEFORE the CAS flip); it requires the marker to be
-  // READABLE — an undecidable marker must block the handover.
+  // READABLE — an undecidable marker must block provisioning.
   checks.ownership = ownership.status !== 'manifest_unreadable';
 
   const loaded = loadHostToolDeclarations(workspaceDirResolved);
@@ -395,12 +402,12 @@ export async function computeOpenClawWorkerReadiness(workspaceDir: string, optio
       checks,
       reason: `openclaw_worker_readiness_failed:${failed.join('|')}`,
       nextAction: failed.includes('declaration')
-        ? 'Run the OpenClaw gateway once in this workspace so it persists the host tool declaration, then retry the handover.'
+        ? 'Run the OpenClaw gateway once in this workspace so it persists the host tool declaration, then retry the provisioning verification.'
         : failed.includes('evidencePort')
           ? 'The workspace has no readable trajectory database yet; let the OpenClaw gateway collect evidence, then retry.'
           : failed.includes('credentials')
             ? 'Export the provider API key the workspace config references (see .pd/config.yaml apiKeyEnv), then retry.'
-            : 'Fix the failing readiness checks and retry the handover.',
+            : 'Fix the failing readiness checks and retry the provisioning verification.',
     };
   }
   return { mode: 'ready', workspaceDir: workspaceDirResolved, checks };
@@ -445,7 +452,7 @@ export async function runOpenClawWorkspaceWorkerCycle(
       workspaceDir,
       mode: 'paused',
       reason: `openclaw_workspace_not_service_host_owned:${ownership.status}`,
-      nextAction: 'The workspace is still owned by the legacy consumer; complete the §8.4 handover (pd service handover) before driving it with the OpenClaw worker.',
+      nextAction: 'Provision or repair this workspace with the PD installer (npx create-principles-disciple) so it is marked service_host_owned, then verify pd service status. Manual worker invocation does not consume non-Service-Host-owned workspaces.',
     };
     finalizeLiveness(workspaceDir, cycleStartedAt, { mode: 'paused', reason: result.reason });
     return result;
@@ -504,11 +511,10 @@ export async function runOpenClawWorkspaceWorkerCycle(
     return result;
   }
 
-  // ── The shared bounded downstream cycle — the SAME implementation the
-  // Gateway's InternalizationAutoConsumerService drives (PRI-624 slice C),
-  // with the SAME OpenClaw host facts: catalog, semantics, hostKinds, the
-  // SystemLogger event stream (identical module → the handover does not
-  // change where an Owner reads INTERNALIZATION_CONSUMER_* events). ──
+  // ── The shared bounded downstream cycle (PRI-624 slice C) with the
+  // OpenClaw host facts: catalog, semantics, hostKinds, the SystemLogger
+  // event stream. PRI-1278: this worker is now the ONLY driver of that
+  // cycle for OpenClaw workspaces — the Gateway consumer is deleted. ──
   beginStage(workspaceDir, 'downstream_cycle');
   let outcome: InternalizationConsumerCycleOutcome | undefined;
   let cycleError: Error | undefined;
@@ -568,8 +574,8 @@ export async function runOpenClawWorkspaceWorkerCycle(
     emitEvent('OPENCLAW_WORKER_TARGET_EVIDENCE_RECONCILE', JSON.stringify(targetEvidenceReconcile));
   }
 
-  // ── L3 — one bounded diagnosis per cycle, same contract as the Gateway
-  // tick (flag + capability + consent checks live inside). ──
+  // ── L3 — one bounded diagnosis per cycle (flag + capability + consent
+  // checks live inside). ──
   beginStage(workspaceDir, 'diagnosis_execution');
   let diagnostician: PendingDiagnosticianRunResult | undefined;
   let diagnosticianFailed = false;

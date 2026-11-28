@@ -1,5 +1,26 @@
 # @principles/pd-cli
 
+## 2.13.0
+
+### Minor Changes
+
+- 2a5d707: BREAKING (PRI-1278): PD Service Host becomes the only background runtime. Companion loses all background execution capability (worker start/supervision/scheduling/respawn) and keeps UI/Control Plane only. The OpenClaw in-process auto-consumer, continuous worker modes, handover/rollback orchestration, shadow-run, and worker-drain machinery are deleted. New workspaces provision to `service_host_owned` only; bounded `--once` worker cycles run exclusively under Service Host management; `host=none` workspaces wait for host binding instead of falling back to any legacy consumer. No legacy-compatibility path is retained.
+
+### Patch Changes
+
+- e3ddf90: PRI-1299: unify successor lookup behind the core parent/kind/channel authority, push exact candidate filtering into TaskStore, and fail closed with complete structured conflict details when multiple persisted successors declare the same logical successor.
+- 012adba: Repair task lineage validation + CAS backfill uplifted into `@principles/core` (PRI-1300). The new `validateAndBackfillRepairLineage` (@principles/core `./runtime` export, admitted) is the ONE write-side implementation of repair-lineage verification + missing parent/correlation backfill: it composes the existing `verifyRepairTaskIdentity` read-only authority with the six-precondition snapshot CAS (diagnosticJson + status/attemptCount/maxAttempts/leaseOwner/leaseExpiresAt/leaseGeneration) and returns a structured discriminated union instead of throwing host-shaped errors. The two evaluator repair seeders (host-runtime consumer governance + pd-cli rulehost pipeline runner) and the orchestrator `REOPEN_SOURCE_EVALUATOR` completion branch now share this single implementation — the per-host copies of hydrate + mergePITaskMetadata + full-snapshot CAS that drifted in parallel are deleted. The enumerated external contract is unchanged: host error string literals, throw/return shapes, terminal-status reuse refusal, telemetry/log lines, the CAS precondition set, and the zero-partial-write guarantee on concurrent modification are all preserved and pinned by the existing host/orchestrator suites plus new real-sqlite core tests. One deliberate hardening is review-visible: lineage backfill now replaces only the `pi_metadata` envelope and preserves unrelated root diagnostic keys (for example runner retry/validator evidence) instead of rebuilding the whole `diagnosticJson` document and silently dropping those keys.
+- Updated dependencies [2a5d707]
+- Updated dependencies [e3ddf90]
+- Updated dependencies [012adba]
+- Updated dependencies [a7a3479]
+  - @principles/core@8.4.0
+  - @principles/install-layout@0.12.0
+  - principles-disciple@4.5.0
+  - @principles/codex-adapter@0.16.0
+  - @principles/workbuddy-adapter@0.10.0
+  - @principles/host-runtime@4.8.0
+
 ## 2.12.2
 
 ### Patch Changes

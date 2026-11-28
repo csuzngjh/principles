@@ -1,16 +1,19 @@
 /**
- * Fresh-install Service Host provisioning (PRI-1278 Phase 5).
+ * Service Host ownership provisioning (PRI-1278 consolidation).
  *
- * A brand-new PD install hands its NEW workspace to the PD-owned Service Host
- * in the same installer run:
+ * The PD Service Host is the ONLY background runtime: the Companion worker
+ * runtime and the Gateway auto-consumer are deleted repo-wide, so there is
+ * no legacy consumer left to quiesce. Provisioning hands a workspace to the
+ * Service Host in one atomic write from ANY prior ownership state — a
+ * pre-consolidation record (including interrupted handover/rollback residue)
+ * cannot prove a live consumer anymore:
  *
  *   1. the workspace is already registered in the canonical manifest;
  *   2. a no-consume Worker readiness probe runs through the ACTIVE RELEASE
  *      (`pd <host> worker --readiness` / `--status`), never through the
  *      installer's own code;
- *   3. the §8.4 CAS provision transition writes `service_host_owned`
- *      atomically (generation 1) — there is no legacy consumer to quiesce,
- *      and the marker itself blocks every legacy consumer from starting;
+ *   3. the provision CAS transition writes `service_host_owned` atomically
+ *      (the only surviving transition kind; flips any residue state);
  *   4. one bounded REAL managed cycle runs (`pd service run-once`);
  *   5. an auditable provisioning record is written under `<pdHome>/service/`.
  *
@@ -18,13 +21,16 @@
  *  - this module NEVER owns scheduler lifecycle or ownership semantics — both
  *    are delegated to their existing single implementations (`pd service …`
  *    and `@principles/install-layout`);
- *  - it only runs for a FRESH install whose scheduler was verified ENABLED;
- *    a failed/absent scheduler never flips ownership (no silent migration);
- *  - an upgrade never calls it — existing workspaces migrate through
- *    `pd service handover`;
+ *  - ownership is handed over ONLY when the scheduler is verified enabled —
+ *    a failed/absent scheduler leaves a fail-closed pending record instead
+ *    (there is no companion fallback);
+ *  - on an upgrade install the caller proves first that no legacy continuous
+ *    worker process still consumes the workspace (the one-time switch
+ *    evidence gate); a positive or unverifiable scan stays pending;
  *  - no credential, token or environment snapshot is written to argv, the
  *    evidence file or logs.
  */
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -37,8 +43,13 @@ import {
   type ServiceHostBridgeProbes,
   type ServiceHostSchedulerOutcome,
 } from './service-host-bridge.js';
-import { checkOpenClawGateway } from './utils/env.js';
 import type { HostSelection } from './installers/index.js';
+
+
+/** Installer-scoped one-time proof that no pre-upgrade OpenClaw Gateway process remains active. */
+export type OpenClawGatewayQuiesce =
+  | { readonly ok: true; readonly evidence: 'not_running' | 'process_exited'; readonly pid?: number }
+  | { readonly ok: false; readonly reason: string };
 
 export type ProvisioningReadiness =
   | 'ready'
@@ -70,10 +81,10 @@ export interface ServiceHostProvisioningOutcome {
   readonly firstCycle: ProvisioningFirstCycle;
   readonly evidencePath?: string;
   /**
-   * TRUE when this fresh workspace is still legacy/no-record and the install
-   * committed without ownership (no consent, scheduler not enabled, readiness
-   * failed). The durable evidence record lets a LATER explicit install resume
-   * initialization without weakening the upgrade protection.
+   * TRUE when the install committed without Service Host ownership (scheduler
+   * not enabled, readiness failed, a legacy worker still running, CAS
+   * failure). The durable evidence record lets a LATER explicit install
+   * resume initialization of this workspace.
    */
   readonly pendingProvisioning?: boolean;
   readonly nextAction: string;
@@ -93,18 +104,31 @@ export interface ProvisioningInput {
   /** Test seam: real fs by default. */
   readonly now?: () => Date;
   /**
-   * TRUE when this call RESUMES a previously recorded pending provisioning.
-   * A deferred hand-over must prove the legacy consumer is not still running
-   * before it flips ownership (the marker only proves what the FIRST install
-   * did, not what ran afterwards).
-   */
-  readonly resume?: boolean;
-  /**
-   * Resume-only: the caller could not verify the host binding that the pending
-   * marker named. Ownership must NOT flip from an unverified binding; the
-   * refusal is recorded durably with an actionable next action.
+   * Deferred-resume only: the caller could not verify the host binding that
+   * the pending marker named. Ownership must NOT flip from an unverified
+   * binding; the refusal is recorded durably with an actionable next action.
    */
   readonly bindingVerification?: { readonly ok: false; readonly reason: string; readonly nextAction: string };
+  /** Upgrade installs must supply positive Gateway quiesce evidence for OpenClaw targets. */
+  readonly requireOpenClawGatewayQuiesce?: boolean;
+  readonly openClawGatewayQuiesce?: OpenClawGatewayQuiesce;
+  /** Fresh probe at the ownership-CAS boundary; production installers supply this so readiness work cannot make Gateway evidence stale. */
+  readonly openClawGatewayQuiesceFn?: () => Promise<OpenClawGatewayQuiesce> | OpenClawGatewayQuiesce;
+  /**
+   * Upgrade one-time-switch evidence (upgrade installs only): the legacy
+   * continuous-worker process scan the installer ran BEFORE the first
+   * provision write of the run. When the scan names THIS workspace — or
+   * could not verify quiesce at all — ownership must NOT flip: a surviving
+   * pre-upgrade worker would become a second consumer beside the Service
+   * Host. Undefined on fresh installs (no legacy PD existed to spawn one).
+   */
+  readonly legacyWorkerScan?: LegacyWorkerScan;
+  /** Re-scan at the CAS boundary so readiness work cannot make the evidence stale. */
+  readonly legacyWorkerScanFn?: () => LegacyWorkerScan;
+  /** Re-resolve the host binding at the CAS boundary; a changed/unverifiable binding fails closed. */
+  readonly hostBindingReverification?: () =>
+    | { readonly ok: true; readonly host: HostSelection }
+    | { readonly ok: false; readonly reason: string; readonly nextAction: string };
 }
 
 const DEFAULT_FIRST_CYCLE_TIMEOUT_MS = 180_000;
@@ -131,6 +155,480 @@ function stableWorkspacePath(value: string): string {
 function canonicalIdentity(value: string): string {
   const form = stableWorkspacePath(value);
   return process.platform === 'win32' ? form.toLowerCase() : form;
+}
+
+// ─── One-time switch probe: legacy continuous worker processes ─────────────
+
+export interface LegacyWorkerProcessRow {
+  readonly pid: number;
+  readonly commandLine: string;
+  /** argv with exact token boundaries when the platform exposes it (Linux /proc). */
+  readonly argv?: readonly string[];
+}
+
+export interface LegacyWorkerScan {
+  /** FALSE when the process table itself could not be read — quiesce unverifiable. */
+  readonly ok: boolean;
+  readonly workers: readonly { readonly pid: number; readonly workspaceDir: string }[];
+  readonly detail?: string;
+}
+
+/**
+ * The legacy continuous-worker shape: `<host> worker --workspace <dir>`
+ * WITHOUT `--once`. Post-consolidation workers are always bounded `--once`
+ * cycles the Service Host spawns; a worker process without `--once` can only
+ * be a pre-upgrade continuous child the deleted Companion runtime spawned.
+ * Returns the `--workspace` value when the command line matches.
+ */
+export function matchLegacyWorkerCommandLine(commandLine: string): string | null {
+  if (/(^|\\s)--once(?=\s|$)/.test(commandLine)) return null;
+  if (!/(^|\s)worker(?=\s|$)/.test(commandLine)) return null;
+  const workspace = /(?:^|\s)--workspace(?:\s+|=)(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(commandLine);
+  return workspace?.[1] ?? workspace?.[2] ?? workspace?.[3] ?? null;
+}
+
+const LEGACY_WORKER_HOSTS = new Set(['codex', 'workbuddy']);
+
+/**
+ * argv-token matcher for platforms that expose exact process arguments.
+ * Unlike command-line scraping, a workspace containing spaces is one token
+ * here and can never be truncated. The host token must immediately precede
+ * `worker`, which keeps unrelated Node processes out of the match set.
+ */
+export function matchLegacyWorkerArgv(argv: readonly string[]): string | null {
+  // Inspect every exact `<host> worker` pair. Mode flags are interpreted only
+  // in the argument stream after that subcommand; a workspace VALUE such as
+  // `--once` is consumed as a value and must not suppress detection.
+  for (let workerIndex = 1; workerIndex < argv.length; workerIndex += 1) {
+    if (argv[workerIndex] !== 'worker' || !LEGACY_WORKER_HOSTS.has(argv[workerIndex - 1] ?? '')) continue;
+    let continuous = true;
+    let workspaceDir: string | null = null;
+    for (let index = workerIndex + 1; index < argv.length; index += 1) {
+      const token = argv[index];
+      if (token === '--workspace') {
+        const value = argv[index + 1];
+        if (typeof value === 'string' && value.length > 0) {
+          workspaceDir = value;
+          index += 1;
+        }
+        continue;
+      }
+      if (token?.startsWith('--workspace=') === true) {
+        const value = token.slice('--workspace='.length);
+        if (value.length > 0) workspaceDir = value;
+        continue;
+      }
+      // `--once` is the new bounded mode. `--status`/`--readiness` are
+      // no-consume probes, not continuous consumers.
+      if (token === '--once' || token === '--status' || token === '--readiness') continuous = false;
+    }
+    if (continuous && workspaceDir !== null) return workspaceDir;
+  }
+  return null;
+}
+
+/**
+ * Windows process entries are a single CommandLine string, not an argv array.
+ * Parse the MSVC/CommandLineToArgvW quoting rules closely enough for the
+ * installer-produced worker shape; malformed whitespace/token structure is a
+ * scan failure rather than a false clean result.
+ */
+export function parseWindowsCommandLineArgv(commandLine: string): readonly string[] | null {
+  const argv: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let tokenActive = false;
+  let backslashes = 0;
+  for (const char of commandLine) {
+    if (char === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (char === '"') {
+      current += '\\'.repeat(Math.floor(backslashes / 2));
+      if (backslashes % 2 === 0) {
+        // A quote preceded by an even number of backslashes toggles quoting;
+        // inside quotes a doubled quote is represented by the sequence rules
+        // closely enough for paths produced by Node/Windows installers.
+        inQuotes = !inQuotes;
+        tokenActive = true;
+      } else {
+        current += '"';
+        tokenActive = true;
+      }
+      backslashes = 0;
+      continue;
+    }
+    current += '\\'.repeat(backslashes);
+    backslashes = 0;
+    if ((char === ' ' || char === '\t') && !inQuotes) {
+      if (tokenActive || current.length > 0) argv.push(current);
+      current = '';
+      tokenActive = false;
+      continue;
+    }
+    current += char;
+    tokenActive = true;
+  }
+  current += '\\'.repeat(backslashes);
+  if (tokenActive || current.length > 0 || argv.length === 0) argv.push(current);
+  return argv.length > 0 && argv.every((token) => typeof token === 'string') ? argv : null;
+}
+
+
+/**
+ * Parse the Darwin `KERN_PROCARGS2` payload. Layout: int32 argc, exec path,
+ * NUL padding, then exactly argc NUL-terminated argv entries followed by envp.
+ * Returning null is parse failure, never "no argv".
+ */
+export function parseDarwinProcArgs2(raw: Buffer): readonly string[] | null {
+  if (raw.length < 4) return null;
+  const argc = raw.readInt32LE(0);
+  if (!Number.isInteger(argc) || argc < 1 || argc > 4096) return null;
+  const execEnd = raw.indexOf(0, 4);
+  if (execEnd < 4 || execEnd === raw.length - 1) return null;
+
+  // Apple pads the executable path with NUL bytes before argv. Empty leading
+  // argv entries are inherently ambiguous with that padding in this kernel
+  // format; for normal host-launched workers argv[0] is non-empty. Parse the
+  // selected entries byte-wise and require every one to be NUL-terminated so
+  // truncation can never masquerade as a complete argument.
+  let cursor = execEnd + 1;
+  while (cursor < raw.length && raw[cursor] === 0) cursor += 1;
+  if (cursor >= raw.length) return null;
+  const argv: string[] = [];
+  for (let index = 0; index < argc; index += 1) {
+    const end = raw.indexOf(0, cursor);
+    if (end < 0) return null;
+    argv.push(raw.subarray(cursor, end).toString('utf8'));
+    cursor = end + 1;
+    if (cursor > raw.length && index < argc - 1) return null;
+  }
+  return argv;
+}
+
+/** One-shot Darwin argv reader. Ruby/Fiddle is a transient interpreter use, not a service. */
+const DARWIN_ARGV_READER = String.raw`
+require 'fiddle'
+require 'fiddle/import'
+module PdSysctl
+  extend Fiddle::Importer
+  dlload '/usr/lib/libSystem.B.dylib'
+  extern 'int sysctl(void*, unsigned int, void*, void*, void*, unsigned long)'
+end
+pid_state = lambda do |pid|
+  begin
+    Process.kill(0, pid)
+  rescue Errno::ESRCH
+    next 'exited'
+  rescue Errno::EPERM
+    next 'live'
+  end
+  # kill(pid, 0) still succeeds for an unreaped zombie. KERN_PROCARGS2 then
+  # fails with EINVAL even though no consumer threads remain, so classify the
+  # current process-table state at the moment the read fails/succeeds.
+  stat_io = IO.popen(['/bin/ps', '-o', 'stat=', '-p', pid.to_s], err: File::NULL)
+  stat = stat_io.read.strip
+  stat_io.close
+  ps_ok = !$?.nil? && $?.success?
+  if stat.empty? && ps_ok
+    'exited'
+  elsif stat.empty?
+    # ps itself failing is not evidence of exit. Re-check liveness; a process
+    # still present but whose state cannot be inspected remains fail-closed.
+    begin
+      Process.kill(0, pid)
+      'live'
+    rescue Errno::ESRCH
+      'exited'
+    end
+  elsif stat.start_with?('Z')
+    'zombie'
+  else
+    'live'
+  end
+end
+emit_failure = lambda do |pid, reason|
+  # A process that disappeared or became zombie residue after enumeration no
+  # longer consumes anything; a live process whose argv cannot be inspected is
+  # unverifiable and must stay fail-closed.
+  if pid_state.call(pid) == 'live'
+    puts "#{pid}\tERROR:#{reason}"
+  else
+    puts "#{pid}\tEXITED"
+  end
+end
+ARGV.each do |pid_text|
+  pid = pid_text.to_i
+  next if pid <= 1
+  begin
+    unless pid_state.call(pid) != 'exited'
+      puts "#{pid}\tEXITED"
+      next
+    end
+    mib = [1, 49, pid].pack('l<3')
+    size = [0].pack('Q<')
+    if PdSysctl.sysctl(mib, 3, nil, size, nil, 0) != 0
+      emit_failure.call(pid, 'sysctl_size')
+      next
+    end
+    len = size.unpack1('Q<')
+    if len < 4 || len > 8 * 1024 * 1024
+      emit_failure.call(pid, 'invalid_size')
+      next
+    end
+    if len > 8 * 1024 * 1024
+      emit_failure.call(pid, 'oversized')
+      next
+    end
+    raw = nil
+    attempts = 0
+    while attempts < 3 && raw.nil?
+      attempts += 1
+      buf = Fiddle::Pointer.malloc(len)
+      size = Fiddle::Pointer.malloc(8)
+      size[0, 8] = [len].pack('Q<')
+      if PdSysctl.sysctl(mib, 3, buf, size, nil, 0) != 0
+        errno = Fiddle.last_error
+        if errno == Errno::ENOMEM::Errno && attempts < 3
+          # The argument area can grow while a process execs; re-query instead
+          # of accepting a truncation-prone fixed ceiling.
+          size_probe = Fiddle::Pointer.malloc(8)
+          size_probe[0, 8] = [0].pack('Q<')
+          if PdSysctl.sysctl(mib, 3, nil, size_probe, nil, 0) == 0
+            new_len = size_probe.to_str(8).unpack1('Q<')
+            if new_len >= 4 && new_len <= 8 * 1024 * 1024
+              len = new_len
+              next
+            end
+          end
+        end
+        emit_failure.call(pid, "sysctl_read:#{errno || 'unknown'}")
+        break
+      end
+      out_len = size.to_str(8).unpack1('Q<')
+      if out_len < 4 || out_len > len
+        emit_failure.call(pid, 'invalid_read_size')
+        break
+      end
+      raw = buf.to_str(out_len)
+    end
+    next if raw.nil?
+    puts "#{pid}\t#{raw.unpack1('H*')}"
+  rescue Errno::ESRCH
+    puts "#{pid}\tEXITED"
+  rescue SystemCallError => e
+    emit_failure.call(pid, "#{e.class.name}:#{e.respond_to?(:errno) ? e.errno : 'unknown'}")
+  rescue => e
+    emit_failure.call(pid, e.class.name)
+  end
+end
+`
+
+/**
+ * Decode the one-shot Darwin reader protocol. `EXITED` rows are safe scan
+ * residue; every malformed or `ERROR` row is fail-closed scan evidence rather
+ * than proof that no legacy worker exists. Exported for focused regression tests.
+ */
+export function parseDarwinArgvReaderOutput(output: string): LegacyWorkerProcessRow[] {
+  const rows: LegacyWorkerProcessRow[] = [];
+  const failures: string[] = [];
+  for (const line of output.split('\n')) {
+    const trimmed = line.trimEnd();
+    if (trimmed.length === 0) continue;
+    const tab = trimmed.indexOf('\t');
+    const pid = Number.parseInt(trimmed.slice(0, tab), 10);
+    if (!(tab > 0 && Number.isInteger(pid) && pid > 1)) {
+      failures.push(`unparseable row ${trimmed.slice(0, 80)}`);
+      continue;
+    }
+    const payload = trimmed.slice(tab + 1);
+    if (payload === 'EXITED') continue;
+    if (payload.startsWith('ERROR:')) {
+      failures.push(`pid ${pid}: ${payload.slice('ERROR:'.length)}`);
+      continue;
+    }
+    if (!/^(?:[0-9a-fA-F]{2})+$/.test(payload)) {
+      failures.push(`pid ${pid}: malformed hex payload`);
+      continue;
+    }
+    const raw = Buffer.from(payload, 'hex');
+    const argv = parseDarwinProcArgs2(raw);
+    if (argv === null) {
+      failures.push(`pid ${pid}: malformed KERN_PROCARGS2 payload`);
+      continue;
+    }
+    rows.push({ pid, commandLine: argv.join(' '), argv });
+  }
+  if (failures.length > 0) {
+    throw new Error(`darwin argv reader evidence unverifiable (${failures.slice(0, 5).join('; ')}${failures.length > 5 ? '; …' : ''})`);
+  }
+  return rows;
+}
+
+function listDarwinProcessRows(afterEnumeration?: () => void): LegacyWorkerProcessRow[] {
+  // `-x` is NOT a same-user filter on Darwin: it also exposes unrelated
+  // daemons, and KERN_PROCARGS2 can return EINVAL for another account's
+  // process. Legacy installer-spawned workers belong to the install user, so
+  // filter ownership before reading argv. A same-user process that still
+  // cannot be inspected remains fail-closed in the Ruby reader.
+  const currentUser = execFileSync('/usr/bin/id', ['-un'], { encoding: 'utf8', timeout: 10_000, windowsHide: true }).trim();
+  if (currentUser.length === 0) throw new Error('darwin scan could not resolve the current user');
+  const pidOutput = execFileSync('/bin/ps', ['-xo', 'pid=,user=,stat=,comm='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  const pids: number[] = [];
+  for (const line of pidOutput.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    const [pidText, user, stat, commandText] = trimmed.split(/\s+/);
+    const pid = Number.parseInt(pidText ?? '', 10);
+    if (!(Number.isInteger(pid) && pid > 1) || typeof user !== 'string' || user.length === 0 || typeof stat !== 'string' || stat.length === 0 || typeof commandText !== 'string' || commandText.length === 0) {
+      throw new Error(`darwin ps returned an unparseable process row: ${trimmed.slice(0, 80)}`);
+    }
+    // Legacy workers are Node processes. Restricting the expensive
+    // KERN_PROCARGS2 pass to Node keeps the scan bounded on a real macOS host
+    // while preserving exact argv evidence for every process that can match.
+    if (user !== currentUser || stat.startsWith('Z') || path.basename(commandText) !== 'node') continue;
+    pids.push(pid);
+  }
+  if (pids.length === 0) return [];
+  afterEnumeration?.();
+  const output = execFileSync('/usr/bin/ruby', ['-e', DARWIN_ARGV_READER, ...pids.map(String)], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    windowsHide: true,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  return parseDarwinArgvReaderOutput(output);
+}
+
+/**
+ * Parse the Windows owner-scoped process table emitted by the PowerShell
+ * enumerator. Ownership filtering is deliberate migration evidence, so it is
+ * a pure TypeScript contract rather than hidden script text: a process whose
+ * owner resolves to another account is not installer evidence at all, while a
+ * same-user or owner-unresolved process with an unreadable command line stays
+ * fail-closed.
+ */
+export function parseWindowsProcessRows(output: string): LegacyWorkerProcessRow[] {
+  const rows: LegacyWorkerProcessRow[] = [];
+  let currentUser: string | undefined;
+  for (const rawLine of output.split('\n')) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (line.length === 0) continue;
+    if (line.startsWith('CURRENT\t')) {
+      currentUser = line.slice('CURRENT\t'.length);
+      continue;
+    }
+    const [pidText, ownerState, owner, encodedCommandLine, extra] = line.split('\t');
+    const pid = Number.parseInt(pidText ?? '', 10);
+    if (!Number.isInteger(pid) || pid <= 0 || typeof ownerState !== 'string' || typeof encodedCommandLine !== 'string' || extra !== undefined) {
+      throw new Error(`Windows process row unparseable: ${line.slice(0, 80)}`);
+    }
+    if (ownerState === 'resolved' && typeof currentUser === 'string' && currentUser.length > 0
+      && typeof owner === 'string' && owner.toLowerCase() !== currentUser.toLowerCase()) {
+      continue;
+    }
+    const commandLine = Buffer.from(encodedCommandLine, 'base64').toString('utf16le');
+    if (commandLine.length === 0) {
+      throw new Error(`Windows process command line unreadable for pid ${pid}`);
+    }
+    const argv = parseWindowsCommandLineArgv(commandLine);
+    if (argv === null) throw new Error(`Windows process command line unparseable for pid ${pid}`);
+    rows.push({ pid, commandLine, argv });
+  }
+  if (typeof currentUser !== 'string' || currentUser.length === 0) {
+    throw new Error('Windows process scan did not identify the current user');
+  }
+  return rows;
+}
+
+/** Platform process table as (pid, commandLine/argv) rows — bounded, read-only. */
+function listProcessRows(platform: string, afterDarwinEnumeration?: () => void): LegacyWorkerProcessRow[] {
+  if (platform === 'win32') {
+    // powershell.exe is the project-allowlisted process-query host (wmic is
+    // gone since Windows 11 24H2). EncodedCommand because Node→PowerShell
+    // argv quoting corrupts embedded quotes in -Command strings. PowerShell
+    // only ENUMERATES pid/owner/command-line evidence here; ownership policy
+    // and fail-closed parsing stay in parseWindowsProcessRows where adversarial
+    // owner/unreadable combinations are directly testable.
+    const script = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; "CURRENT\`t$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"; Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ForEach-Object { $ownerState = 'unresolved'; $owner = ''; try { $ownerResult = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; if ($ownerResult.ReturnValue -eq 0) { $ownerState = 'resolved'; $owner = "$($ownerResult.Domain)\\$($ownerResult.User)" } } catch { $ownerState = 'query_failed' }; $cmd = $_.CommandLine; if ($null -eq $cmd) { $cmd = '' }; $encodedCmd = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($cmd)); "$($_.ProcessId)\`t$ownerState\`t$owner\`t$encodedCmd" }`;
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const output = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
+    return parseWindowsProcessRows(output);
+  }
+  const rows: LegacyWorkerProcessRow[] = [];
+  if (platform === 'linux') {
+    // `/proc/<pid>/cmdline` preserves exact argv boundaries with NUL separators.
+    // Flattening Linux argv through `ps ... args` is ownership-unsafe because a
+    // workspace such as `/tmp/pd legacy worker/workspace` is indistinguishable
+    // from multiple independent arguments.
+    const procEntries = fs.readdirSync('/proc', { withFileTypes: true });
+    const unreadable: string[] = [];
+    for (const entry of procEntries) {
+      if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+      const pid = Number.parseInt(entry.name, 10);
+      const cmdlinePath = path.join('/proc', entry.name, 'cmdline');
+      let raw: Buffer;
+      try {
+        raw = fs.readFileSync(cmdlinePath);
+      } catch (error) {
+        const { code } = error as { code?: string };
+        // ENOENT/ESRCH means the process exited between directory enumeration
+        // and the read; an exited process cannot still consume the workspace.
+        if (code !== 'ENOENT' && code !== 'ESRCH') unreadable.push(`${entry.name}:${code ?? 'read_failed'}`);
+        continue;
+      }
+      const argv = raw.toString('utf8').split('\0');
+      if (argv[argv.length - 1] === '') argv.pop();
+      if (argv.length === 0) continue; // kernel threads and zombies carry no argv
+      rows.push({ pid, commandLine: argv.join(' '), argv });
+    }
+    if (unreadable.length > 0) {
+      throw new Error(`/proc cmdline unreadable for pid(s) ${unreadable.slice(0, 5).join(',')}${unreadable.length > 5 ? '…' : ''}`);
+    }
+    return rows;
+  }
+  if (platform === 'darwin') return listDarwinProcessRows(afterDarwinEnumeration);
+  // Other POSIX process APIs do not expose a portable argv-boundary-safe table.
+  // Returning a flat `ps args` parse would fabricate confidence; quiesce is
+  // unverifiable instead (the caller's fail-closed gate stays pending).
+  throw new Error(`legacy worker scan unsupported on platform ${platform}: argv boundaries cannot be verified`);
+}
+
+/**
+ * One bounded scan of the process table for legacy continuous workers.
+ *
+ * Rationale (one-time switch, PRI-1278 consolidation): the upgrade replaced
+ * the binaries and the Companion restart kills its continuous worker
+ * children — but "the binary is new" is not evidence that no old child
+ * survived, and a surviving child becomes a second consumer the moment
+ * ownership flips. This probe is the evidence gate: it runs once per upgrade
+ * install before the first provision write — no retry machinery, no daemon.
+ * A positive or unverifiable scan keeps the workspace pending (fail-closed);
+ * the next install re-verifies.
+ */
+export function scanRunningLegacyWorkerProcesses(options: {
+  readonly platform?: string;
+  /** Test seam: replace the process-table read. */
+  readonly rows?: () => readonly LegacyWorkerProcessRow[];
+  /** Darwin race-test seam: runs after process enumeration and before argv reads. */
+  readonly afterDarwinEnumeration?: () => void;
+} = {}): LegacyWorkerScan {
+  let rows: readonly LegacyWorkerProcessRow[];
+  try {
+    rows = options.rows !== undefined ? options.rows() : listProcessRows(options.platform ?? process.platform, options.afterDarwinEnumeration);
+  } catch (error) {
+    return { ok: false, workers: [], detail: `process scan failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const workers: { pid: number; workspaceDir: string }[] = [];
+  for (const row of rows) {
+    if (row.pid === process.pid) continue;
+    const workspaceDir = row.argv !== undefined
+      ? matchLegacyWorkerArgv(row.argv)
+      : matchLegacyWorkerCommandLine(row.commandLine);
+    if (workspaceDir !== null) workers.push({ pid: row.pid, workspaceDir });
+  }
+  return { ok: true, workers };
 }
 
 function readinessProbeArgs(host: Exclude<HostSelection, 'all' | 'none'>, workspaceDir: string): string[] {
@@ -226,35 +724,52 @@ function countExecutions(
 }
 
 async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirstCycle> {
-  const result = await runInstalledCliJson(
-    input.pdHome,
-    ['service', 'run-once', '--trigger', 'installer', '--json'],
-    {
-      probes: input.probes ?? {},
-      timeoutMs: input.firstCycleTimeoutMs ?? DEFAULT_FIRST_CYCLE_TIMEOUT_MS,
-    },
-  );
-  if (!result.ok || !isRecord(result.doc)) {
-    return { ...notAttempted(result.detail), attempted: true };
+  const budgetMs = input.firstCycleTimeoutMs ?? DEFAULT_FIRST_CYCLE_TIMEOUT_MS;
+  const deadline = performance.now() + budgetMs;
+  for (;;) {
+    const remainingMs = deadline - performance.now();
+    if (remainingMs <= 0) return { ...notAttempted('first_cycle_timeout'), attempted: true };
+    const result = await runInstalledCliJson(
+      input.pdHome,
+      ['service', 'run-once', '--trigger', 'installer', '--json'],
+      {
+        probes: input.probes ?? {},
+        timeoutMs: remainingMs,
+      },
+    );
+    if (!isRecord(result.doc)) {
+      return { ...notAttempted(result.detail), attempted: true };
+    }
+    const { doc } = result;
+    const outcome = typeof doc.outcome === 'string' ? doc.outcome : 'unknown';
+    if (outcome === 'already_running') {
+      // Enabling a systemd timer on a machine whose uptime already exceeds
+      // OnBootSec can start the OS-triggered run immediately. Overlap is
+      // healthy, but the installer still owes first-cycle evidence for THIS
+      // ownership write: wait inside the existing bounded budget for the
+      // holder to finish, then run the installer-triggered cycle once.
+      if (deadline - performance.now() > 1_100) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        continue;
+      }
+      return { ...notAttempted('service_run_lock_held'), attempted: true, outcome };
+    }
+    const { executed, progressed, waitingForBinding } = countExecutions(doc, input.workspaceDir);
+    return {
+      attempted: true,
+      ok: result.code === 0 && (doc.ok === true || outcome === 'completed'),
+      ...(outcome !== 'unknown' ? { outcome } : {}),
+      ...(typeof doc.runId === 'string' ? { runId: doc.runId } : {}),
+      executed,
+      progressed,
+      waitingForBinding,
+      ...(typeof doc.reason === 'string'
+        ? { reason: doc.reason }
+        : result.code !== 0
+          ? { reason: result.detail }
+          : {}),
+    };
   }
-  const { doc } = result;
-  const outcome = typeof doc.outcome === 'string' ? doc.outcome : 'unknown';
-  if (outcome === 'already_running') {
-    // Overlapping OS trigger won the install-level lock: honest deferral, not
-    // a failed install, and not a fabricated success either.
-    return { ...notAttempted('service_run_lock_held'), attempted: true, outcome };
-  }
-  const { executed, progressed, waitingForBinding } = countExecutions(doc, input.workspaceDir);
-  return {
-    attempted: true,
-    ok: result.code === 0 && (doc.ok === true || outcome === 'completed'),
-    ...(outcome !== 'unknown' ? { outcome } : {}),
-    ...(typeof doc.runId === 'string' ? { runId: doc.runId } : {}),
-    executed,
-    progressed,
-    waitingForBinding,
-    ...(typeof doc.reason === 'string' ? { reason: doc.reason } : {}),
-  };
 }
 
 interface ProvisioningEvidence {
@@ -435,6 +950,12 @@ function clearPending(
   }
 }
 
+function findPendingEntry(pdHome: string, workspaceDir: string): PendingRegistryEntry | undefined {
+  const { entries } = readPendingRegistry(pdHome);
+  const identity = canonicalIdentity(workspaceDir);
+  return entries.find((entry) => canonicalIdentity(entry.workspaceDir) === identity);
+}
+
 function limitationsFor(host: HostSelection, readiness: ProvisioningReadiness): string[] {
   const limitations: string[] = [];
   if (host === 'none') {
@@ -447,7 +968,8 @@ function limitationsFor(host: HostSelection, readiness: ProvisioningReadiness): 
 }
 
 /**
- * Provision ONE fresh-install workspace into Service Host ownership.
+ * Provision ONE workspace into Service Host ownership — a fresh install's
+ * new workspace or a deferred/upgrade resume converging residue state.
  * Returns a structured outcome; never throws for expected refusals (rc-9).
  */
 export async function provisionFreshInstallWorkspace(input: ProvisioningInput): Promise<ServiceHostProvisioningOutcome> {
@@ -472,8 +994,8 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     };
   }
   if (before.status === 'service_host_owned') {
-    // The workspace reached ownership another way (e.g. `pd service handover`);
-    // its pending hint is stale and must not be resumed again.
+    // The workspace already converged (an earlier provisioning run or a
+    // replay); its pending hint is stale and must not be resumed again.
     clearPending(input.pdHome, input.workspaceDir, warn);
     return {
       ownership: 'already_owned',
@@ -486,22 +1008,10 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
       warnings,
     };
   }
-  if (before.status !== 'legacy_owned' || before.source !== 'no_record') {
-    // Any recorded history (including legacy_owned) is an UPGRADE: it must go
-    // through the quiescing handover, never through fresh provisioning.
-    clearPending(input.pdHome, input.workspaceDir, warn);
-    return {
-      ownership: 'not_provisioned',
-      ownershipBefore: before.status,
-      ownershipAfter: before.status,
-      generation: before.generation,
-      readiness: 'skipped',
-      firstCycle: notAttempted('ownership_history_present'),
-      pendingProvisioning: false,
-      nextAction: 'This workspace already has an ownership record, so the installer did not change it. Move it explicitly with `pd service handover --workspace <dir>` (legacy consumer quiesce + readiness) or keep the legacy lifecycle.',
-      warnings,
-    };
-  }
+  // Every other persisted state — no record, an explicit legacy_owned record,
+  // or interrupted handover/rollback residue — is flippable residue in the
+  // Service-Host-only model: the legacy consumer implementation is deleted
+  // repo-wide, so no recorded history can prove a live consumer anymore.
 
   const recordPending = (
     reason: string,
@@ -574,29 +1084,47 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
 
   // Guard: ownership is only handed over when the scheduler is VERIFIED
   // enabled. A registration that failed or stayed disabled must never flip
-  // the marker (no silent legacy retirement) — it records a PENDING
-  // provisioning fact instead so a later explicit install can resume.
+  // the marker — there is no companion fallback — so it records a PENDING
+  // provisioning fact instead, and a later explicit install can resume.
   if (input.scheduler.state !== 'enabled' || input.scheduler.enabled !== true) {
     return recordPending(`scheduler_${input.scheduler.state}`, {
       readiness: 'skipped',
       firstCycle: notAttempted(`scheduler_${input.scheduler.state}`),
-      nextAction: `${input.scheduler.nextAction} Workspace ownership was NOT handed over because the scheduler is not verified enabled. This new workspace is recorded as pending; after arming the scheduler, re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      nextAction: `${input.scheduler.nextAction} Workspace ownership was NOT handed over because the scheduler is not verified enabled. This workspace is recorded as pending; after arming the scheduler, re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
     });
   }
 
-  // A DEFERRED resume proves only that the first install did not hand over —
-  // not that no legacy consumer started afterwards. With a running OpenClaw
-  // Gateway, flipping ownership here would create a second consumer; the
-  // controlled handover (Gateway quiesce ack) is the only safe path.
-  if (input.resume === true && (input.host === 'openclaw' || input.host === 'all')) {
-    const gatewayRunning = input.probes?.gatewayRunning !== undefined
-      ? await input.probes.gatewayRunning()
-      : (await checkOpenClawGateway()).isRunning;
-    if (gatewayRunning) {
-      return recordPending('legacy_consumer_running', {
+
+  // Static caller-supplied scan evidence is a pre-readiness gate. When a
+  // scan function is supplied, the same scan is refreshed again immediately
+  // before CAS below; positive/unverifiable evidence never reaches readiness.
+  if (input.legacyWorkerScan !== undefined) {
+    const scan = input.legacyWorkerScan;
+    const identity = canonicalIdentity(input.workspaceDir);
+    const matches = scan.workers.filter((worker) => canonicalIdentity(worker.workspaceDir) === identity);
+    if (!scan.ok || matches.length > 0) {
+      const detail = !scan.ok
+        ? `the legacy worker process scan could not verify quiesce (${scan.detail ?? 'scan failed'})`
+        : `legacy continuous worker process(es) still consume this workspace (pid ${matches.map((match) => match.pid).join(', ')})`;
+      return recordPending('legacy_worker_still_running', {
         readiness: 'skipped',
-        firstCycle: notAttempted('legacy_consumer_running'),
-        nextAction: `A running OpenClaw Gateway may still consume this workspace, so ownership was NOT handed over. Quiesce it through the controlled handover: pd service handover --workspace "${input.workspaceDir}" — or stop the Gateway (openclaw gateway stop) and re-run this install.`,
+        firstCycle: notAttempted('legacy_worker_still_running'),
+        nextAction: `Ownership was NOT handed over: ${detail}. Restart the machine first — or let the Companion update finish retiring its old worker processes — then re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      });
+    }
+  }
+
+  // OpenClaw's legacy consumer was an in-process Gateway timer chain, so the
+  // continuous-worker argv scan cannot see it. An upgrade ownership transfer
+  // requires positive installer-scoped proof that the old Gateway is absent or
+  // the observed process exited; absence of evidence is fail-closed pending.
+  if (input.requireOpenClawGatewayQuiesce === true && (input.host === 'openclaw' || input.host === 'all')) {
+    const quiesce = input.openClawGatewayQuiesce;
+    if (quiesce?.ok !== true) {
+      return recordPending('openclaw_gateway_unproven', {
+        readiness: 'skipped',
+        firstCycle: notAttempted('openclaw_gateway_unproven'),
+        nextAction: `Ownership was NOT handed over because the pre-upgrade OpenClaw Gateway process could not be proven quiescent (${quiesce?.reason ?? 'no quiesce evidence'}). Stop the OpenClaw Gateway and re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
       });
     }
   }
@@ -611,13 +1139,81 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     });
   }
 
+
+  // Re-verify at the CAS boundary. The first scan may have selected this
+  // target, but readiness probing is asynchronous; ownership evidence must be
+  // fresh enough that no legacy worker appeared during that window.
+  const casBoundaryScan = input.legacyWorkerScanFn?.() ?? input.legacyWorkerScan;
+  if (casBoundaryScan !== undefined) {
+    const identity = canonicalIdentity(input.workspaceDir);
+    const matches = casBoundaryScan.workers.filter((worker) => canonicalIdentity(worker.workspaceDir) === identity);
+    if (!casBoundaryScan.ok || matches.length > 0) {
+      const detail = !casBoundaryScan.ok
+        ? `the legacy worker process scan could not verify quiesce (${casBoundaryScan.detail ?? 'scan failed'})`
+        : `legacy continuous worker process(es) still consume this workspace (pid ${matches.map((match) => match.pid).join(', ')})`;
+      return recordPending('legacy_worker_still_running', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('legacy_worker_still_running'),
+        nextAction: `Ownership was NOT handed over: ${detail}. Restart the machine first — or let the Companion update finish retiring its old worker processes — then re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      });
+    }
+  }
+
+  // Re-verify OpenClaw quiescence at the CAS boundary as well. The initial
+  // evidence was collected before a long install transaction and readiness
+  // probes; ownership must not flip if the Gateway returned in that window.
+  if (input.requireOpenClawGatewayQuiesce === true && (input.host === 'openclaw' || input.host === 'all')) {
+    let boundaryQuiesce = input.openClawGatewayQuiesce;
+    if (input.openClawGatewayQuiesceFn !== undefined) {
+      try {
+        boundaryQuiesce = await input.openClawGatewayQuiesceFn();
+      } catch (error) {
+        boundaryQuiesce = { ok: false, reason: `Gateway quiescence re-verification failed: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    }
+    if (boundaryQuiesce?.ok !== true) {
+      return recordPending('openclaw_gateway_unproven', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('openclaw_gateway_unproven'),
+        nextAction: `Ownership was NOT handed over because OpenClaw Gateway quiescence could not be re-verified immediately before the ownership write (${boundaryQuiesce?.reason ?? 'no quiesce evidence'}). Stop the OpenClaw Gateway and re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      });
+    }
+  }
+
+  // Host-binding evidence is likewise stale after asynchronous readiness work.
+  // A binding that appeared, disappeared, or changed during that window means
+  // the readiness/quiescence evidence was gathered for the wrong host set.
+  if (input.hostBindingReverification !== undefined) {
+    const reverified = input.hostBindingReverification();
+    if (!reverified.ok) {
+      return recordPending('binding_unverifiable', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('binding_unverifiable'),
+        nextAction: `${reverified.nextAction} Ownership was NOT handed over because the workspace's host binding could not be re-verified immediately before the ownership write (${reverified.reason}).`,
+      });
+    }
+    if (reverified.host !== input.host) {
+      return recordPending('binding_changed', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('binding_changed'),
+        nextAction: `Ownership was NOT handed over because the workspace host binding changed during provisioning (${input.host} -> ${reverified.host}). Re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      });
+    }
+  }
+
   const operationId = `install-provision-${input.now?.().getTime() ?? Date.now()}-${process.pid}`;
+  // provision_fresh_install is the only surviving transition kind, redefined
+  // as from-ANY-state → service_host_owned: residue records flip in the same
+  // atomic write as a no-record workspace (generation fencing still applies).
   const provisioned = transitionWorkspaceBackgroundExecution({
     manifestPath,
     workspaceDir: input.workspaceDir,
     kind: 'provision_fresh_install',
     operationId,
-    freshInstall: true,
     registerWorkspace: true,
     expectedGeneration: before.generation,
   });
@@ -731,9 +1327,9 @@ export interface PendingProvisioningMarker {
  *
  * A multi-host install (`--host all`) records one entry per ACTUAL workspace
  * instead of overwriting a single document, so a later explicit enable can
- * resume all of them. This is a HINT, never an ownership authority: the caller
- * still requires explicit enable consent and an ownership record with no
- * history (`provision_fresh_install` enforces both).
+ * resume all of them. This is a HINT, never an ownership authority: the
+ * caller still requires explicit enable consent, and the provisioning CAS
+ * itself converges any residue ownership state in one atomic write.
  */
 export function readAllPendingProvisioning(pdHome: string): {
   entries: readonly PendingProvisioningMarker[];
@@ -756,12 +1352,10 @@ export function readAllPendingProvisioning(pdHome: string): {
  * Read the pending hint for ONE workspace.
  *
  * Unreadable/foreign records are `null` (fail-closed, never a guess); the
- * caller then leaves the workspace in legacy ownership.
+ * caller then leaves the workspace un-provisioned.
  */
 export function readPendingProvisioningEvidence(pdHome: string, workspaceDir: string): PendingProvisioningMarker | null {
-  const { entries } = readPendingRegistry(pdHome);
-  const identity = canonicalIdentity(workspaceDir);
-  const found = entries.find((entry) => canonicalIdentity(entry.workspaceDir) === identity);
+  const found = findPendingEntry(pdHome, workspaceDir);
   return found === undefined
     ? null
     : {

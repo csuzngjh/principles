@@ -1,5 +1,21 @@
 # @principles/workbuddy-adapter
 
+## 0.10.0
+
+### Minor Changes
+
+- 2a5d707: BREAKING (PRI-1278): PD Service Host becomes the only background runtime. Companion loses all background execution capability (worker start/supervision/scheduling/respawn) and keeps UI/Control Plane only. The OpenClaw in-process auto-consumer, continuous worker modes, handover/rollback orchestration, shadow-run, and worker-drain machinery are deleted. New workspaces provision to `service_host_owned` only; bounded `--once` worker cycles run exclusively under Service Host management; `host=none` workspaces wait for host binding instead of falling back to any legacy consumer. No legacy-compatibility path is retained.
+
+### Patch Changes
+
+- Updated dependencies [2a5d707]
+- Updated dependencies [e3ddf90]
+- Updated dependencies [012adba]
+- Updated dependencies [a7a3479]
+  - @principles/core@8.4.0
+  - @principles/install-layout@0.12.0
+  - @principles/host-runtime@4.8.0
+
 ## 0.9.1
 
 ### Patch Changes

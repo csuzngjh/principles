@@ -72,7 +72,7 @@ export * from './adaptive-background-append.js';
 export * from './signal-stage2-cycle.js';
 export * from './host-liveness-contract.js';
 // PRI-624 Slice C: shared internalization consumer execution (OpenClaw
-// auto-consumer + Companion workspace worker call the same cycle).
+// auto-consumer + Service-Host-spawned workspace workers call the same cycle).
 export * from './internalization-consumer-governance.js';
 // PRI-1293 R3 (export surface tightening): explicit whitelist instead of
 // `export *` — the public API is the consumer cycle entry, the selected-task

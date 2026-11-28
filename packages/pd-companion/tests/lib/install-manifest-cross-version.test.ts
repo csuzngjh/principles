@@ -6,8 +6,7 @@
  *
  * Covered here: the task-book matrix rows that need the REAL manifest shape
  * end-to-end (3-host load, unknown 4th host, incompatible version, corrupt
- * fields, canonical preference). Registry lifecycle rows live in
- * workspace-workers-manifest-failure.test.ts.
+ * fields, canonical preference).
  *
  * Windows-gated BY CONTRACT, not by convenience: the fixture carries real
  * Windows workspace paths and the parser validates workspace absoluteness
@@ -59,13 +58,12 @@ describe.skipIf(process.platform !== 'win32')('production 3-host manifest loads 
     expect(runtime?.missing).toBeUndefined();
   });
 
-  it('yields non-empty codex and workbuddy workspace sets per host (worker discovery)', () => {
+  it('preserves the production workspace list shape without interpreting it as a process spawn set', () => {
     const { manifest } = parseInstallManifest(loadProductionFixture());
     const workspaces = manifest?.workspaces ?? [];
-    const codexSet = workspaces.filter((w) => !w.replaceAll('\\', '/').includes('.workbuddy/pd-workspace'));
-    const workbuddySet = workspaces.filter((w) => w.replaceAll('\\', '/').includes('.workbuddy/pd-workspace'));
-    expect(codexSet.length).toBe(10);
-    expect(workbuddySet).toEqual(['C:\\Users\\Administrator\\.workbuddy\\pd-workspace']);
+    expect(workspaces).toHaveLength(11);
+    expect(new Set(workspaces).size).toBe(11);
+    expect(workspaces).toContain('C:\\Users\\Administrator\\.workbuddy\\pd-workspace');
   });
 });
 

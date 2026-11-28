@@ -32,32 +32,39 @@ export interface InstallManifest {
    * Canonical absolute paths of Workspaces the install serves (PRI-624 Slice C).
    * Optional so pre-PRI-624 manifests stay valid; always normalized to
    * resolved absolute paths and deduped. The installer merges the install
-   * Workspace in; the Companion worker discovers its per-Workspace workers
-   * from this list (SPEC §13 "canonical install manifest").
+   * Workspace in; the Service Host discovers the Workspaces it serves from
+   * this list.
    */
   workspaces?: readonly string[];
   /**
-   * Per-Workspace background-execution OWNERSHIP records (ADR-0020 §11.6
-   * narrow scope / SPEC-PD-SERVICE-HOST-001 §8.4), keyed by canonical
+   * Per-Workspace background-execution OWNERSHIP records keyed by canonical
    * absolute workspace path — the same identity `workspaces` carries.
-   * Optional so pre-record manifests stay valid; a Workspace with no entry
-   * means "legacy Companion owns background execution" for THAT Workspace
-   * only. Each Workspace migrates independently: one entry's transition
-   * never touches another key, so Workspace A can be `service_host_owned`
-   * while Workspace B is still `legacy_owned` or mid-`handover_preparing`.
+   * Optional so pre-record manifests stay valid; a Workspace with no entry is
+   * simply not-yet-provisioned. It does NOT mean a legacy consumer owns that
+   * Workspace: the legacy consumer implementation has been deleted repo-wide.
    *
-   * This is the CAS contract between the legacy consumer and the Service
-   * Host: only the state machine defined in the SPEC may advance an entry,
-   * every transition is a monotonic-generation compare-and-set, and PID /
-   * delays / startup order are NEVER ownership proof — this record is.
-   * The CAS write path and the state machine live in
-   * `background-execution-transition.ts` (Phase 4/5).
+   * `service_host_owned` is the only live ownership state. `legacy_owned`,
+   * `handover_preparing` and `rollback_pending` remain parseable solely as
+   * historical residue in pre-consolidation manifests; no writer may create
+   * them anymore. Consumption admission is binary — service-host-owned or
+   * not — and each Workspace converges independently: one entry's provision
+   * never touches another key.
+   *
+   * This is the Service Host provisioning contract: only
+   * `provision_fresh_install` may advance an entry, every write is a
+   * monotonic-generation compare-and-set, and PID / delays / startup order
+   * are NEVER ownership proof — this record is. Migration safety belongs to
+   * the installer's one-time stop-old-entries sequencing before provisioning;
+   * the CAS write path and read projection live in
+   * `background-execution-transition.ts`.
    */
   backgroundExecutions?: Readonly<Record<string, BackgroundExecutionRecord>>;
 }
 
+/** `legacy` remains only so historical records remain parseable; new records are always `service_host`. */
 export const BACKGROUND_EXECUTION_OWNERS = ['legacy', 'service_host'] as const;
 export type BackgroundExecutionOwner = (typeof BACKGROUND_EXECUTION_OWNERS)[number];
+/** All four states remain parseable historical schema; only `service_host_owned` is writable/live. */
 export const BACKGROUND_EXECUTION_STATES = [
   'legacy_owned',
   'handover_preparing',
@@ -67,17 +74,20 @@ export const BACKGROUND_EXECUTION_STATES = [
 export type BackgroundExecutionState = (typeof BACKGROUND_EXECUTION_STATES)[number];
 
 /**
- * The persisted ownership fact for background execution (SPEC §8.4).
- *  - `state`/`effectiveOwner`: where the state machine currently stands and
- *    which consumer is allowed to execute work RIGHT NOW;
- *  - `generation`: strictly monotonic per accepted transition — the CAS key
+ * The persisted ownership fact for background execution.
+ *  - `state`/`effectiveOwner`: the persisted ownership projection. In the
+ *    Service-Host-only model only `service_host_owned`/`service_host` is a
+ *    live admission fact; other combinations are parse-only historical
+ *    residue and never admission proof;
+ *  - `generation`: strictly monotonic per accepted write — the CAS key
  *    (a writer must observe `generation` then write `generation+1` under the
  *    manifest write lock; a stale observed generation loses);
- *  - `operationId`: idempotency key of the handover/rollback operation —
- *    replaying the same operationId must be a no-op;
- *  - `previousOwner`/`targetOwner`: the two parties of an in-flight
- *    transition (both null in a steady state);
- *  - `updatedAt`: ISO-8601 timestamp of the last accepted transition.
+ *  - `operationId`: operation attribution on historical in-flight records.
+ *    Steady states persist null; terminal provisioning replay is a no-op
+ *    rather than another generation;
+ *  - `previousOwner`/`targetOwner`: the two parties of a historical
+ *    migration record (both null in a steady state);
+ *  - `updatedAt`: ISO-8601 timestamp of the last accepted write.
  */
 export interface BackgroundExecutionRecord {
   state: BackgroundExecutionState;
@@ -172,7 +182,7 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-/** Workspace entries must be non-empty absolute paths — the Companion spawns per-Workspace workers keyed by canonical path. */
+/** Workspace entries must be non-empty absolute paths — Service-Host provisioning and worker admission key ownership by canonical path. */
 type WorkspacePathApi = Pick<typeof path, 'isAbsolute' | 'resolve'>;
 
 /**
@@ -251,21 +261,23 @@ function isNullableOwner(value: unknown): value is BackgroundExecutionOwner | nu
 
 /**
  * Fail-closed semantic check for one ownership record. Absent is fine
- * (legacy default); present-but-malformed is structural damage — an
+ * (not-yet-provisioned); present-but-malformed is structural damage — an
  * ownership fact that cannot be trusted must not be honored.
  *
  * Field types alone are NOT enough: the legal combination of
  * state/effectiveOwner/previousOwner/targetOwner/operationId/generation is
- * part of the contract (SPEC §8.4). Illegal combinations are refused at
- * parse time so a corrupt marker can never be honored as ownership proof:
+ * part of the persisted schema. Illegal combinations are refused at parse
+ * time so a corrupt marker can never be honored as ownership proof:
  *  - legacy_owned:        effectiveOwner=legacy,       prev/target/operationId=null, generation>=0;
  *  - service_host_owned:  effectiveOwner=service_host, prev/target/operationId=null, generation>=1;
- *  - handover_preparing:  effectiveOwner=legacy (old consumer still owns until the CAS flips),
- *                         prev=legacy, target=service_host, operationId set, generation>=1;
- *  - rollback_pending:    effectiveOwner=service_host (still owned until the CAS restores),
- *                         prev=service_host, target=legacy, operationId set, generation>=1.
- * A transition state implies at least one accepted transition already
- * happened, so generation 0 there is unreachable and rejected.
+ *  - handover_preparing:  effectiveOwner=legacy, prev=legacy, target=service_host,
+ *                         operationId set, generation>=1 (historical residue only);
+ *  - rollback_pending:    effectiveOwner=service_host, prev=service_host, target=legacy,
+ *                         operationId set, generation>=1 (historical residue only).
+ * A historical transition state implies at least one accepted migration write
+ * already happened, so generation 0 there is unreachable and rejected. Only
+ * `service_host_owned` is writable or consumption-admitting in the current
+ * model; the other combinations remain readable for old manifests.
  */
 function parseBackgroundExecutionRecord(
   value: unknown,
@@ -375,10 +387,12 @@ function parseBackgroundExecutions(
 
 /**
  * Set or clear ONE Workspace's ownership record, preserving every other
- * Workspace's entry — the write-side half of "one migration never overwrites
- * another Workspace's state". `record` must already satisfy the semantic
- * contract (build it through the SPEC §8.4 state machine; absent record
- * removes the entry and restores the legacy default for that Workspace).
+ * Workspace's entry — the write-side half of "one workspace's provisioning
+ * never overwrites another Workspace's state". `record` must already satisfy
+ * the semantic contract; production writers build it through
+ * `transitionWorkspaceBackgroundExecution`, whose only live target is
+ * `service_host_owned`. Passing undefined removes the entry, returning that
+ * Workspace to the not-yet-provisioned absent-record shape.
  */
 export function setInstallManifestBackgroundExecution(
   manifest: InstallManifest | undefined,
@@ -853,11 +867,11 @@ export {
 } from './mcp-binding-contract.js';
 
 /**
- * Workspace background-execution ownership transitions (SPEC §8.4 CAS write
- * path, PRI-1282 Phase 4): cross-process lock + generation-fenced state
- * machine + the single read-side ownership projection shared by the OpenClaw
- * Gateway gate, the `pd openclaw worker` gate and the handover/rollback
- * commands. Phase 5 reuses the same primitive for Codex / WorkBuddy.
+ * Workspace background-execution provisioning in the Service-Host-only model:
+ * a cross-process lock, a generation-fenced single live transition
+ * (`provision_fresh_install` → `service_host_owned`), and the read-side
+ * ownership projection. Historical legacy/handover/rollback states remain
+ * parseable residue only; consumption admission is binary.
  */
 export {
   DEFAULT_CAS_LOCK_STALE_MS,

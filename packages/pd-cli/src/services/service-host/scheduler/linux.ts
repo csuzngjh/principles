@@ -32,6 +32,7 @@
  * IMPORTANT (task §9.F): unit-tested against a faked command boundary; real
  * Linux acceptance is recorded as NOT_VERIFIED until it runs on a real host.
  */
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { schedulerInvocationArgs } from './contract.js';
 import type {
@@ -79,6 +80,23 @@ function parseUnitDocument(content: string): UnitDocumentEntry[] | null {
     });
   }
   return entries;
+}
+
+/**
+ * True when the manager-visible unit path and PD's written unit path name the
+ * same file. `systemctl cat` reports the path through the manager's search
+ * root; a symlinked ~/.config or a deliberately isolated home can make that
+ * string differ from PD's write path even though the inode is identical.
+ * That is not a foreign shadow. When either side cannot be resolved, keep the
+ * fail-closed textual comparison.
+ */
+function sameSystemdUnitFile(managerPath: string, writtenPath: string): boolean {
+  if (managerPath === writtenPath) return true;
+  try {
+    return fs.realpathSync.native(managerPath) === fs.realpathSync.native(writtenPath);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -423,7 +441,7 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
       }
       const headers = [...result.stdout.matchAll(/^#\s*(\S+)\s*$/gm)].map((m) => m[1] ?? '');
       const primary = headers.find((h) => h.endsWith('.service') || h.endsWith('.timer'));
-      if (primary !== undefined && primary !== file) {
+      if (primary !== undefined && !sameSystemdUnitFile(primary, file)) {
         return { seen: true, shadowed: `resolved_path:${primary}` };
       }
       const dropIn = headers.find((h) => /\.d\/[^/]+\.conf$/.test(h));
@@ -469,7 +487,7 @@ export function createLinuxSchedulerAdapter(deps: LinuxSchedulerDeps): Scheduler
       }
       const headers = [...result.stdout.matchAll(/^#\s*(\S+)\s*$/gm)].map((match) => match[1] ?? '');
       const primary = headers.find((header) => header.endsWith('.service') || header.endsWith('.timer'));
-      if (primary !== undefined && primary !== file) {
+      if (primary !== undefined && !sameSystemdUnitFile(primary, file)) {
         return { ok: false, reason: 'manager_unit_shadowed:' + name + ':' + primary };
       }
       const dropIn = headers.find((header) => /\.d\/[^/]+\.conf$/.test(header));
