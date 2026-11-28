@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'child_process';
 import * as http from 'http';
 import semver from 'semver';
+import * as crypto from 'node:crypto';
 import {
   INSTALL_LAYOUT_PACKAGE,
   classifyPrePublishCohort,
@@ -23,6 +24,7 @@ let tempWorkspaceDir: string;
 // PD_INSTALL_PLUGIN_DIR; cleaned up in afterAll together with the temp home.
 let hermeticPublicationDir: string;
 let hermeticReleaseRoot: string;
+const linuxSystemdUnitsToClean: { unitDir: string; unitBase: string }[] = [];
 
 // npm is invoked as `node <npm-cli.js> <args>` with argv arrays only — no
 // shell strings, and no bare `npm`/`npm.cmd` spawn (EINVAL on Windows).
@@ -196,6 +198,17 @@ afterAll(() => {
   }
   if (installLayoutTarballPath) {
     try { fs.unlinkSync(installLayoutTarballPath); } catch { /* ignore */ }
+  }
+  for (const unit of linuxSystemdUnitsToClean.splice(0)) {
+    for (const args of [
+      ['--user', 'disable', '--now', `${unit.unitBase}.timer`],
+      ['--user', 'daemon-reload'],
+    ]) {
+      try { execFileSync('systemctl', args, { stdio: 'ignore', timeout: 10_000 }); } catch { /* best-effort ephemeral-CI cleanup */ }
+    }
+    for (const suffix of ['.service', '.timer']) {
+      try { fs.rmSync(path.join(unit.unitDir, `${unit.unitBase}${suffix}`), { force: true }); } catch { /* best-effort ephemeral-CI cleanup */ }
+    }
   }
   if (tempHomeDir) cleanupDir(tempHomeDir);
   if (tempWorkspaceDir) cleanupDir(tempWorkspaceDir);
@@ -380,6 +393,11 @@ describe('Real packaged install smoke test', () => {
     fs.mkdirSync(marketplaceVersionDir, { recursive: true });
     fs.writeFileSync(path.join(marketplaceVersionDir, 'runtime-version.json'), JSON.stringify(cohort, null, 2), 'utf8');
 
+    // The host health contract requires the bound workspace to exist. Create
+    // only the empty directory here; the installer must still initialize PD
+    // state inside it. In production a bound workspace likewise already exists
+    // as a user-visible directory before the PD upgrade runs.
+    fs.mkdirSync(redirectedWorkspace, { recursive: true });
     const pluginDataRoot = path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles');
     const runtimeDir = path.join(pluginDataRoot, 'runtime');
     const linkComponent = (packageName: string, component: string): void => {
@@ -392,6 +410,10 @@ describe('Real packaged install smoke test', () => {
     linkComponent('core', 'core');
     linkComponent('pd-mcp-server', 'pd-mcp-server');
     fs.mkdirSync(pluginDataRoot, { recursive: true });
+    // A real Marketplace payload carries its setup scripts. Copy them so the
+    // fixture has the same shape; the pre-aligned runtime/binding below should
+    // make invoking them unnecessary.
+    fs.cpSync(path.resolve(INSTALLER_DIR, '..', '..', 'plugins', 'principles-disciple', 'scripts'), path.join(marketplaceVersionDir, 'scripts'), { recursive: true });
     const serverEntry = path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
     fs.writeFileSync(path.join(pluginDataRoot, 'mcp-binding.json'), JSON.stringify({
       schemaVersion: 'pd.mcp-binding.v1',
@@ -402,6 +424,30 @@ describe('Real packaged install smoke test', () => {
       versions: { mcpServer: cohort.mcpServer, core: cohort.core },
     }, null, 2), 'utf8');
 
+    // systemd --user resolves its unit search path from the OS account home,
+    // not from the child process' temporary HOME. In GitHub's ephemeral Linux
+    // runner, bridge exactly that search path with a symlink and clean up the
+    // precise units this test creates. Never do this on a developer machine:
+    // writing a real user systemd manager outside CI would violate isolation.
+    const systemdUnitDir = process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true'
+      ? path.join(os.userInfo().homedir, '.config', 'systemd', 'user')
+      : undefined;
+    let systemdUnitBase: string | undefined;
+    if (systemdUnitDir !== undefined) {
+      fs.mkdirSync(systemdUnitDir, { recursive: true });
+      const testUnitDir = path.join(tempHomeDir, '.config', 'systemd', 'user');
+      fs.mkdirSync(path.dirname(testUnitDir), { recursive: true });
+      if (fs.existsSync(testUnitDir) && !fs.lstatSync(testUnitDir).isSymbolicLink()) {
+        if (fs.readdirSync(testUnitDir).length > 0) {
+          throw new Error(`test systemd bridge refused non-empty pre-existing unit dir: ${testUnitDir}`);
+        }
+        fs.rmdirSync(testUnitDir);
+      }
+      if (!fs.existsSync(testUnitDir)) fs.symlinkSync(systemdUnitDir, testUnitDir, 'dir');
+      const installKey = crypto.createHash('sha256').update(path.resolve(path.join(tempHomeDir, '.pd'))).digest('hex').slice(0, 10);
+      systemdUnitBase = `pd-service-host-${installKey}`;
+      linuxSystemdUnitsToClean.push({ unitDir: systemdUnitDir, unitBase: systemdUnitBase });
+    }
     const execFileAsync = await loadExecFileAsync();
     let stdout = '';
     let stderr = '';
@@ -458,6 +504,7 @@ describe('Real packaged install smoke test', () => {
     expect(evidence.firstCycle?.attempted, `first cycle was not attempted: ${JSON.stringify(evidence.firstCycle)}`).toBe(true);
     expect(typeof evidence.firstCycle?.runId).toBe('string');
     expect(evidence.firstCycle?.executed, `first cycle did not execute the redirected Codex workspace: ${JSON.stringify(evidence.firstCycle)}`).toBeGreaterThan(0);
+
   }, 600_000);
 
   it('PRI-1037: installed plugin payload is lean — better-sqlite3 only, no core copy or link', () => {
