@@ -855,15 +855,16 @@ describe.runIf(process.platform === 'darwin')('real Darwin legacy worker scan', 
     mkdirSync(workspace, { recursive: true });
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--workspace', workspace], { stdio: 'ignore' });
     const once = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--once', '--workspace', workspace], { stdio: 'ignore' });
-    // fork() creates a direct child the Ruby parent never wait()s for, so it
-    // remains real process-table zombie residue while the active worker keeps
-    // running. (spawn() alone is not enough: the Ruby/Node runtime may reap
-    // its detached child through its own subprocess machinery.) The scan must
+    // Python exposes raw POSIX fork without a runtime subprocess manager that
+    // opportunistically reaps children. The forked child exits immediately and
+    // the parent never wait()s, leaving real process-table zombie residue while
+    // the active worker keeps running. (Ruby fork/spawn proved unreliable here:
+    // its runtime may reap the child before the assertion.) The scan must
     // classify that residue as exited rather than failing the whole machine
     // scan on the zombie's unreadable KERN_PROCARGS2 payload.
-    const zombieParent = spawn('/usr/bin/ruby', ['-e', 'fork { exit! }; sleep 60'], { stdio: 'ignore' });
+    const zombieParent = spawn('/usr/bin/python3', ['-c', 'import os,time\npid=os.fork()\nif pid == 0:\n os._exit(0)\ntime.sleep(60)'], { stdio: 'ignore' });
     try {
-      const zombieDeadline = Date.now() + 2_000;
+      const zombieDeadline = Date.now() + 5_000;
       let zombieSeen = false;
       while (!zombieSeen && Date.now() < zombieDeadline) {
         const ps = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,stat='], { encoding: 'utf8' });
@@ -873,7 +874,7 @@ describe.runIf(process.platform === 'darwin')('real Darwin legacy worker scan', 
         });
         if (!zombieSeen) await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      expect(zombieSeen).toBe(true);
+      expect(zombieSeen, zombieParent.pid === undefined ? 'zombie parent did not start' : `no zombie child observed for parent pid ${zombieParent.pid}`).toBe(true);
       const deadline = Date.now() + 2_000;
       let scan = scanRunningLegacyWorkerProcesses({ platform: 'darwin' });
       while (!scan.workers.some((worker) => worker.pid === child.pid) && Date.now() < deadline) {
