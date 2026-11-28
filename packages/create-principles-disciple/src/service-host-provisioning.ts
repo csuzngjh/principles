@@ -467,21 +467,24 @@ export function parseDarwinArgvReaderOutput(output: string): LegacyWorkerProcess
 }
 
 function listDarwinProcessRows(): LegacyWorkerProcessRow[] {
-  // `/bin/ps -x` is the same-user process set (a legacy installer-spawned
-  // worker cannot belong to another user in this install context). STAT lets
-  // us skip zombies: they are process-table residue with no consumer threads,
-  // unlike a live process whose argv is unreadable (which must fail closed).
-  const pidOutput = execFileSync('/bin/ps', ['-xo', 'pid=,stat='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  // `-x` is NOT a same-user filter on Darwin: it also exposes unrelated
+  // daemons, and KERN_PROCARGS2 can return EINVAL for another account's
+  // process. Legacy installer-spawned workers belong to the install user, so
+  // filter ownership before reading argv. A same-user process that still
+  // cannot be inspected remains fail-closed in the Ruby reader.
+  const currentUser = execFileSync('/usr/bin/id', ['-un'], { encoding: 'utf8', timeout: 10_000, windowsHide: true }).trim();
+  if (currentUser.length === 0) throw new Error('darwin scan could not resolve the current user');
+  const pidOutput = execFileSync('/bin/ps', ['-xo', 'pid=,user=,stat='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
   const pids: number[] = [];
   for (const line of pidOutput.split('\n')) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
-    const [pidText, stat] = trimmed.split(/\s+/);
+    const [pidText, user, stat] = trimmed.split(/\s+/);
     const pid = Number.parseInt(pidText ?? '', 10);
-    if (!(Number.isInteger(pid) && pid > 1) || typeof stat !== 'string' || stat.length === 0) {
+    if (!(Number.isInteger(pid) && pid > 1) || typeof user !== 'string' || user.length === 0 || typeof stat !== 'string' || stat.length === 0) {
       throw new Error(`darwin ps returned an unparseable process row: ${trimmed.slice(0, 80)}`);
     }
-    if (stat.startsWith('Z')) continue;
+    if (user !== currentUser || stat.startsWith('Z')) continue;
     pids.push(pid);
   }
   if (pids.length === 0) return [];
