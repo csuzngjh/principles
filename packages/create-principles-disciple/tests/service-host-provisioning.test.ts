@@ -67,9 +67,11 @@ function seedManifest(pdHome: string, workspaceDir: string): string {
 }
 
 type Reply = { code: number; stdout: string };
+type ScriptedReply = Reply | readonly Reply[];
 
 /** Fake spawn keyed by the first two non-entry tokens (e.g. "openclaw worker", "service run-once"). */
-function fakeSpawn(replies: Record<string, Reply>, calls: string[][], envs: Array<Record<string, string | undefined>> = []): typeof import('node:child_process').spawn {
+function fakeSpawn(replies: Record<string, ScriptedReply>, calls: string[][], envs: Array<Record<string, string | undefined>> = []): typeof import('node:child_process').spawn {
+  const replyIndexes = new Map<string, number>();
   const childLike = (reply: Reply): ChildProcess => {
     const listeners: Record<string, Array<(payload: unknown) => void>> = {};
     const stdoutListeners: Array<(chunk: Buffer) => void> = [];
@@ -93,7 +95,17 @@ function fakeSpawn(replies: Record<string, Reply>, calls: string[][], envs: Arra
     const key = `${args[1] ?? ''} ${args[2] ?? ''}`;
     calls.push([...args]);
     envs.push(options.env ?? {});
-    return childLike(replies[key] ?? { code: 1, stdout: '{"ok":false,"reason":"unscripted"}' });
+    const scripted = replies[key] ?? { code: 1, stdout: '{"ok":false,"reason":"unscripted"}' };
+    let reply: Reply;
+    if (typeof scripted === 'object' && 'code' in scripted) {
+      reply = scripted;
+    } else {
+      const sequence = scripted as readonly Reply[];
+      const index = replyIndexes.get(key) ?? 0;
+      replyIndexes.set(key, index + 1);
+      reply = sequence[Math.min(index, sequence.length - 1)] ?? { code: 1, stdout: '{"ok":false,"reason":"empty_sequence"}' };
+    }
+    return childLike(reply);
   }) as unknown as typeof import('node:child_process').spawn;
 }
 
@@ -151,6 +163,39 @@ describe('provisionFreshInstallWorkspace', () => {
       ownership: { before: 'legacy_owned', after: 'service_host_owned', generation: 1 },
       readiness: { status: 'waiting_for_host_binding' },
     });
+  });
+
+  it('waits out an overlapping OS-triggered run and still captures installer first-cycle evidence', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    seedManifest(pdHome, workspaceDir);
+    const calls: string[][] = [];
+    const spawnFn = fakeSpawn({
+      'service run-once': [
+        { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'already_running', runId: 'os-trigger-run', reason: 'service_run_lock_held', managed: { executions: [] } }) },
+        { code: 0, stdout: JSON.stringify({ ok: true, outcome: 'completed', runId: 'installer-run', managed: { executions: [{ canonicalDir: workspaceDir, admission: 'executed', hostKind: 'codex', execution: { mode: 'ready' }, lastProgressSource: 'cycle_evidence' }] } }) },
+      ],
+    }, calls);
+
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'none',
+      scheduler: ENABLED_SCHEDULER,
+      firstCycleTimeoutMs: 5_000,
+      warn: (m) => { throw new Error(`no warnings expected: ${m}`); },
+      probes: { spawnFn },
+    });
+
+    expect(outcome.firstCycle).toMatchObject({
+      attempted: true,
+      ok: true,
+      outcome: 'completed',
+      runId: 'installer-run',
+      executed: 1,
+      progressed: 1,
+    });
+    expect(calls.filter((args) => args.includes('run-once'))).toHaveLength(2);
   });
 
   it('never hands over ownership when the scheduler is not verified enabled — it records a PENDING marker', async () => {

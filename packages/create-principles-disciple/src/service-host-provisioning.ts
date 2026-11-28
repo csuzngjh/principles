@@ -724,35 +724,48 @@ function countExecutions(
 }
 
 async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirstCycle> {
-  const result = await runInstalledCliJson(
-    input.pdHome,
-    ['service', 'run-once', '--trigger', 'installer', '--json'],
-    {
-      probes: input.probes ?? {},
-      timeoutMs: input.firstCycleTimeoutMs ?? DEFAULT_FIRST_CYCLE_TIMEOUT_MS,
-    },
-  );
-  if (!result.ok || !isRecord(result.doc)) {
-    return { ...notAttempted(result.detail), attempted: true };
+  const budgetMs = input.firstCycleTimeoutMs ?? DEFAULT_FIRST_CYCLE_TIMEOUT_MS;
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return { ...notAttempted('first_cycle_timeout'), attempted: true };
+    const result = await runInstalledCliJson(
+      input.pdHome,
+      ['service', 'run-once', '--trigger', 'installer', '--json'],
+      {
+        probes: input.probes ?? {},
+        timeoutMs: remainingMs,
+      },
+    );
+    if (!result.ok || !isRecord(result.doc)) {
+      return { ...notAttempted(result.detail), attempted: true };
+    }
+    const { doc } = result;
+    const outcome = typeof doc.outcome === 'string' ? doc.outcome : 'unknown';
+    if (outcome === 'already_running') {
+      // Enabling a systemd timer on a machine whose uptime already exceeds
+      // OnBootSec can start the OS-triggered run immediately. Overlap is
+      // healthy, but the installer still owes first-cycle evidence for THIS
+      // ownership write: wait inside the existing bounded budget for the
+      // holder to finish, then run the installer-triggered cycle once.
+      if (deadline - Date.now() > 1_100) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        continue;
+      }
+      return { ...notAttempted('service_run_lock_held'), attempted: true, outcome };
+    }
+    const { executed, progressed, waitingForBinding } = countExecutions(doc, input.workspaceDir);
+    return {
+      attempted: true,
+      ok: result.code === 0 && (doc.ok === true || outcome === 'completed'),
+      ...(outcome !== 'unknown' ? { outcome } : {}),
+      ...(typeof doc.runId === 'string' ? { runId: doc.runId } : {}),
+      executed,
+      progressed,
+      waitingForBinding,
+      ...(typeof doc.reason === 'string' ? { reason: doc.reason } : {}),
+    };
   }
-  const { doc } = result;
-  const outcome = typeof doc.outcome === 'string' ? doc.outcome : 'unknown';
-  if (outcome === 'already_running') {
-    // Overlapping OS trigger won the install-level lock: honest deferral, not
-    // a failed install, and not a fabricated success either.
-    return { ...notAttempted('service_run_lock_held'), attempted: true, outcome };
-  }
-  const { executed, progressed, waitingForBinding } = countExecutions(doc, input.workspaceDir);
-  return {
-    attempted: true,
-    ok: result.code === 0 && (doc.ok === true || outcome === 'completed'),
-    ...(outcome !== 'unknown' ? { outcome } : {}),
-    ...(typeof doc.runId === 'string' ? { runId: doc.runId } : {}),
-    executed,
-    progressed,
-    waitingForBinding,
-    ...(typeof doc.reason === 'string' ? { reason: doc.reason } : {}),
-  };
 }
 
 interface ProvisioningEvidence {
