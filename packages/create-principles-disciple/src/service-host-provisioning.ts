@@ -125,6 +125,10 @@ export interface ProvisioningInput {
   readonly legacyWorkerScan?: LegacyWorkerScan;
   /** Re-scan at the CAS boundary so readiness work cannot make the evidence stale. */
   readonly legacyWorkerScanFn?: () => LegacyWorkerScan;
+  /** Re-resolve the host binding at the CAS boundary; a changed/unverifiable binding fails closed. */
+  readonly hostBindingReverification?: () =>
+    | { readonly ok: true; readonly host: HostSelection }
+    | { readonly ok: false; readonly reason: string; readonly nextAction: string };
 }
 
 const DEFAULT_FIRST_CYCLE_TIMEOUT_MS = 180_000;
@@ -1039,6 +1043,29 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
     });
   }
 
+
+  // Host-binding evidence is likewise stale after asynchronous readiness work.
+  // A binding that appeared, disappeared, or changed during that window means
+  // the readiness/quiescence evidence was gathered for the wrong host set.
+  if (input.hostBindingReverification !== undefined) {
+    const reverified = input.hostBindingReverification();
+    if (!reverified.ok) {
+      return recordPending('binding_unverifiable', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('binding_unverifiable'),
+        nextAction: `${reverified.nextAction} Ownership was NOT handed over because the workspace's host binding could not be re-verified immediately before the ownership write (${reverified.reason}).`,
+      });
+    }
+    if (reverified.host !== input.host) {
+      return recordPending('binding_changed', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('binding_changed'),
+        nextAction: `Ownership was NOT handed over because the workspace host binding changed during provisioning (${input.host} -> ${reverified.host}). Re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      });
+    }
+  }
 
   // Re-verify at the CAS boundary. The first scan may have selected this
   // target, but readiness probing is asynchronous; ownership evidence must be

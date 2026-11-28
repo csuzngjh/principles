@@ -21,6 +21,8 @@ let previousHome: string | undefined;
 let previousUserProfile: string | undefined;
 let previousWorkbuddy: string | undefined;
 let previousExperimentRoot: string | undefined;
+let previousPdWorkspaceDir: string | undefined;
+let previousOpenClawWorkspace: string | undefined;
 
 function tempHome(): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'pd-host-refresh-'));
@@ -33,7 +35,11 @@ beforeEach(() => {
   previousUserProfile = process.env.USERPROFILE;
   previousWorkbuddy = process.env.WORKBUDDY_CONFIG_DIR;
   previousExperimentRoot = process.env.PD_EXPERIMENT_ROOT;
+  previousPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
+  previousOpenClawWorkspace = process.env.OPENCLAW_WORKSPACE;
   delete process.env.PD_EXPERIMENT_ROOT;
+  delete process.env.PD_WORKSPACE_DIR;
+  delete process.env.OPENCLAW_WORKSPACE;
   delete process.env.WORKBUDDY_CONFIG_DIR;
   const home = tempHome();
   process.env.HOME = home;
@@ -42,7 +48,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-  const restore = (key: 'HOME' | 'USERPROFILE' | 'WORKBUDDY_CONFIG_DIR' | 'PD_EXPERIMENT_ROOT', value: string | undefined): void => {
+  const restore = (key: 'HOME' | 'USERPROFILE' | 'WORKBUDDY_CONFIG_DIR' | 'PD_EXPERIMENT_ROOT' | 'PD_WORKSPACE_DIR' | 'OPENCLAW_WORKSPACE', value: string | undefined): void => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   };
@@ -50,6 +56,8 @@ afterEach(() => {
   restore('USERPROFILE', previousUserProfile);
   restore('WORKBUDDY_CONFIG_DIR', previousWorkbuddy);
   restore('PD_EXPERIMENT_ROOT', previousExperimentRoot);
+  restore('PD_WORKSPACE_DIR', previousPdWorkspaceDir);
+  restore('OPENCLAW_WORKSPACE', previousOpenClawWorkspace);
 });
 
 describe('resolveExistingHostWorkspaceForRefresh', () => {
@@ -148,6 +156,21 @@ describe('resolveResumeProvisioningHost — the binding that exists NOW', () => 
     expect(resolveResumeProvisioningHost('none', ws)).toEqual({ ok: true, host: 'openclaw' });
   });
 
+  it('honours PD_WORKSPACE_DIR and OPENCLAW_WORKSPACE ahead of declaration files', () => {
+    const home = process.env.HOME as string;
+    const envWs = path.join(home, 'env-declared-ws');
+    const fileWs = path.join(home, 'file-declared-ws');
+    mkdirSync(envWs, { recursive: true });
+    mkdirSync(fileWs, { recursive: true });
+    mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+    writeFileSync(path.join(home, '.openclaw', 'principles-disciple.json'), JSON.stringify({ workspace: fileWs }), 'utf8');
+    process.env.PD_WORKSPACE_DIR = envWs;
+    expect(resolveResumeProvisioningHost('none', envWs)).toEqual({ ok: true, host: 'openclaw' });
+    delete process.env.PD_WORKSPACE_DIR;
+    process.env.OPENCLAW_WORKSPACE = envWs;
+    expect(resolveResumeProvisioningHost('none', envWs)).toEqual({ ok: true, host: 'openclaw' });
+  });
+
   it('honours primary-declaration precedence when a stale secondary names another workspace', () => {
     const home = process.env.HOME as string;
     const primaryWs = path.join(home, 'resume-primary-ws');
@@ -182,11 +205,14 @@ describe('resolveResumeProvisioningHost — the binding that exists NOW', () => 
     expect(resolveResumeProvisioningHost('openclaw', ws)).toEqual({ ok: true, host: 'codex' });
   });
 
-  it('returns none ONLY when every binding is verifiably absent', () => {
+  it('returns none only for a none marker; a concrete pending host remains fail-closed', () => {
     const home = process.env.HOME as string;
     const ws = path.join(home, 'resume-unbound-ws');
     mkdirSync(ws, { recursive: true });
-    expect(resolveResumeProvisioningHost('openclaw', ws)).toEqual({ ok: true, host: 'none' });
+    const result = resolveResumeProvisioningHost('openclaw', ws);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.nextAction).toContain('not proof that the recorded consumer is absent');
+    expect(resolveResumeProvisioningHost('none', ws)).toEqual({ ok: true, host: 'none' });
   });
 
   it('refuses when a binding exists but cannot be verified and nothing else is bound', () => {

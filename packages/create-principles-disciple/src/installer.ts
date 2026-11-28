@@ -5366,9 +5366,19 @@ type OpenClawEvidenceState =
   | { readonly state: 'unverifiable'; readonly reason: string };
 
 function readOpenClawDeclarationEvidence(): OpenClawEvidenceState {
-  // Mirror the host resolver's declaration precedence: the primary declaration
-  // wins when it is usable; the legacy secondary file is consulted only when
-  // the primary is absent. A stale secondary must not block migration.
+  // Mirror the host resolver's declaration precedence: PD_WORKSPACE_DIR and
+  // OPENCLAW_WORKSPACE are higher-priority explicit declarations; then the
+  // primary declaration wins when usable, and the legacy secondary file is
+  // consulted only when the primary is absent. A stale lower-priority record
+  // must not block migration, but malformed effective evidence is unverifiable.
+  for (const [envName, raw] of [['PD_WORKSPACE_DIR', process.env.PD_WORKSPACE_DIR], ['OPENCLAW_WORKSPACE', process.env.OPENCLAW_WORKSPACE]] as const) {
+    if (typeof raw !== 'string' || raw.trim().length === 0) continue;
+    const value = raw.trim();
+    if (!isUsableWorkspacePointer(value)) {
+      return { state: 'unverifiable', reason: `${envName} is set but is not a usable absolute workspace path (${value})` };
+    }
+    return { state: 'bound', workspaceDir: path.resolve(value), source: 'openclaw_declaration' };
+  }
   const readOne = (configPath: string): OpenClawEvidenceState => {
     if (!existsSync(configPath)) return { state: 'absent' };
     let parsed: unknown;
@@ -5565,7 +5575,16 @@ export function resolveResumeProvisioningHost(
       nextAction: 'Repair the host binding file(s) so the workspace ownership can be verified, then re-run this install.',
     };
   }
-  if (bound.length === 0) return { ok: true, host: 'none' };
+  if (bound.length === 0) {
+    if (markerHost !== 'none') {
+      return {
+        ok: false,
+        reason: `pending provisioning evidence names host "${markerHost}", but no current binding for that workspace could be verified`,
+        nextAction: 'Repair or re-create the recorded host binding, or explicitly retire the legacy consumer before re-running this install. Absence of a binding is not proof that the recorded consumer is absent.',
+      };
+    }
+    return { ok: true, host: 'none' };
+  }
   if (bound.includes('openclaw') && bound.includes('codex')) return { ok: true, host: 'all' };
   if (markerHost !== 'none' && markerHost !== 'all' && bound.includes(markerHost)) {
     return { ok: true, host: markerHost };
@@ -5659,6 +5678,7 @@ export async function provisionServiceHostInstallTargets(
       ...(bindingVerification !== undefined ? { bindingVerification } : {}),
       ...(legacyWorkerScan !== undefined ? { legacyWorkerScan } : {}),
       ...(!input.freshInstall ? { legacyWorkerScanFn: scanFn } : {}),
+      ...(!input.freshInstall ? { hostBindingReverification: () => resolveResumeProvisioningHost(marker?.host ?? target.host, target.workspaceDir) } : {}),
       ...(input.probes !== undefined ? { probes: input.probes } : {}),
       requireOpenClawGatewayQuiesce: !input.freshInstall,
       ...(input.openClawGatewayQuiesce !== undefined ? { openClawGatewayQuiesce: input.openClawGatewayQuiesce } : {}),
@@ -5718,12 +5738,13 @@ export function openClawMigrationRequiresGatewayCheck(options: {
   const candidatePaths = [options.workspaceDir, ...manifest.workspaces];
   try {
     const binding = readHostWorkspaceBinding('openclaw');
+    if (binding.state === 'unverifiable') return true;
     if (binding.state === 'bound') candidatePaths.push(binding.workspaceDir);
   } catch {
-    // Unverifiable evidence remains fail-closed in resolveResumeProvisioningHost;
-    // it must not become proof that no OpenClaw workspace is in scope.
+    // Unverifiable evidence must never become proof that no OpenClaw workspace is in scope.
+    return true;
   }
-  return candidatePaths.some((workspaceDir) => openClawWorkspaceClaimState(workspaceDir) === 'bound');
+  return candidatePaths.some((workspaceDir) => openClawWorkspaceClaimState(workspaceDir) !== 'unbound');
 }
 
 

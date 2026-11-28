@@ -688,6 +688,31 @@ describe('OpenClaw Gateway quiescence evidence gate', () => {
     expect(calls.some((args) => args.includes('run-once'))).toBe(false);
   });
 
+  it('a host binding changed during readiness fails closed before CAS and first run-once', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    const manifestPath = seedManifest(pdHome, workspaceDir);
+    const calls: string[][] = [];
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'codex',
+      scheduler: ENABLED_SCHEDULER,
+      warn: () => undefined,
+      hostBindingReverification: () => ({ ok: true, host: 'openclaw' }),
+      probes: {
+        spawnFn: fakeSpawn({
+          'codex worker': { code: 0, stdout: '{"mode":"ready"}' },
+          'service run-once': { code: 0, stdout: '{"ok":true,"outcome":"completed","runId":"r","managed":{"executions":[]}}' },
+        }, calls),
+      },
+    });
+    expect(outcome.ownership).toBe('not_provisioned');
+    expect(outcome.firstCycle).toMatchObject({ attempted: false, reason: 'binding_changed' });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir })).toMatchObject({ status: 'legacy_owned', generation: 0 });
+    expect(calls.some((args) => args.includes('run-once'))).toBe(false);
+  });
+
   it('verified Gateway process exit evidence permits readiness, CAS, and first run-once', async () => {
     const { pdHome, workspaceDir } = tempPdHome();
     fakeInstalledCli(pdHome);
