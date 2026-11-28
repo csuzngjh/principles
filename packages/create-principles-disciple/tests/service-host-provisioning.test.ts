@@ -356,6 +356,49 @@ describe('provisionFreshInstallWorkspace', () => {
     expect(outcome.firstCycle).toMatchObject({ executed: 2, progressed: 1, waitingForBinding: 1 });
   });
 
+  it('a nonzero global run-once exit still preserves structured first-cycle evidence for this workspace', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    seedManifest(pdHome, workspaceDir);
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'openclaw',
+      scheduler: ENABLED_SCHEDULER,
+      warn: () => undefined,
+      probes: {
+        spawnFn: fakeSpawn({
+          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
+          'service run-once': {
+            // The CLI exit code is GLOBAL health across every workspace. A
+            // sibling failure makes it nonzero even when this workspace's
+            // structured execution evidence is present and truthful.
+            code: 1,
+            stdout: JSON.stringify({
+              outcome: 'completed',
+              runId: 'run-global-partial',
+              managed: {
+                executions: [
+                  { canonicalDir: workspaceDir, admission: 'executed', hostKind: 'openclaw', workspaceState: 'completed', execution: { mode: 'ready' }, lastProgressSource: 'cycle_evidence' },
+                  { canonicalDir: path.join(path.dirname(workspaceDir), 'sibling-ws'), admission: 'executed', hostKind: 'openclaw', workspaceState: 'failed', skipReason: 'adapter_threw:missing' },
+                ],
+              },
+            }),
+          },
+        }, []),
+      },
+    });
+
+    expect(outcome.firstCycle).toMatchObject({
+      attempted: true,
+      ok: false,
+      outcome: 'completed',
+      runId: 'run-global-partial',
+      executed: 1,
+      progressed: 1,
+    });
+  });
+
   it('host worker probes never receive --pd-home and carry the trusted HOME instead', async () => {
     const { pdHome, workspaceDir } = tempPdHome();
     fakeInstalledCli(pdHome);

@@ -505,7 +505,7 @@ describe('Real packaged install smoke test', () => {
 
     expect(path.resolve(String(evidence?.workspaceDir))).toBe(path.resolve(redirectedWorkspace));
     expect(evidence?.firstCycle?.attempted, `first cycle was not attempted: ${JSON.stringify(evidence?.firstCycle)}`).toBe(true);
-    expect(typeof evidence?.firstCycle?.runId).toBe('string');
+    expect(typeof evidence?.firstCycle?.runId, `first cycle lacks a runId: ${JSON.stringify(evidence?.firstCycle)}`).toBe('string');
     expect(evidence?.firstCycle?.executed, `first cycle did not execute the redirected Codex workspace: ${JSON.stringify(evidence?.firstCycle)}`).toBeGreaterThan(0);
 
   }, 600_000);

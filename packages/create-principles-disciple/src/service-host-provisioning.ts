@@ -737,7 +737,7 @@ async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirs
         timeoutMs: remainingMs,
       },
     );
-    if (!result.ok || !isRecord(result.doc)) {
+    if (!isRecord(result.doc)) {
       return { ...notAttempted(result.detail), attempted: true };
     }
     const { doc } = result;
@@ -763,7 +763,11 @@ async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirs
       executed,
       progressed,
       waitingForBinding,
-      ...(typeof doc.reason === 'string' ? { reason: doc.reason } : {}),
+      ...(typeof doc.reason === 'string'
+        ? { reason: doc.reason }
+        : result.code !== 0
+          ? { reason: result.detail }
+          : {}),
     };
   }
 }
