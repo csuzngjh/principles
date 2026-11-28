@@ -67,9 +67,15 @@ describe('Codex live RuleContextV2 history path', () => {
     await runtime.dispatch(post);
 
     const stored = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    const storedProjectDir: unknown = stored.prepare('SELECT project_dir FROM tool_calls WHERE tool_use_id = ?').get('native-read-call');
+    const storedRow: unknown = stored.prepare('SELECT host_kind, tool_use_id, outcome, exit_code, project_dir FROM tool_calls WHERE tool_use_id = ?').get('native-read-call');
     stored.close();
-    expect(storedProjectDir).toEqual({ project_dir: path.resolve(projectDir) });
+    expect(storedRow).toEqual({
+      host_kind: 'codex',
+      tool_use_id: 'native-read-call',
+      outcome: 'success',
+      exit_code: 0,
+      project_dir: path.resolve(projectDir),
+    });
 
     const decodedPre = decodeCodexInput({
       ...common,
@@ -100,5 +106,79 @@ describe('Codex live RuleContextV2 history path', () => {
     // Codex only declares Bash as execute; command text is not trusted as a
     // semantic read signal, so target-specific priorRead remains unknown.
     expect(context.facts.priorReadOfTarget).toBe('unknown');
+  });
+
+  it('persists a text-only shell tool_response as unknown and the next provider window stays unavailable', async () => {
+    const { workspaceDir, projectDir } = workspace();
+    const common = {
+      session_id: 'native-codex-text-session',
+      turn_id: 'native-codex-text-turn',
+      transcript_path: null,
+      cwd: projectDir,
+      model: 'gpt-5.6',
+      permission_mode: 'default',
+    };
+    const decodedPost = decodeCodexInput({
+      ...common,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: 'npm test' },
+      // Verified Codex live shape: the shell response is text only; the exit
+      // code is not present on this channel.
+      tool_response: 'probe summary: text only, no exit evidence',
+      tool_use_id: 'native-text-only-call',
+    });
+    const post = { ...decodedPost, context: { ...decodedPost.context, workspaceDir } };
+    const runtime = createProductionHostRuntime({ hostKind: 'codex', projectDir, toolSemantics: CODEX_TOOL_SEMANTICS });
+    const written = await runtime.dispatch(post);
+    expect(written.metadata).toMatchObject({ outcome: 'unknown', outcomeReason: 'text_only_response', exitCode: null });
+
+    const stored = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    const storedRow: unknown = stored.prepare('SELECT host_kind, tool_use_id, outcome, exit_code, error_message, project_dir FROM tool_calls WHERE tool_use_id = ?').get('native-text-only-call');
+    stored.close();
+    expect(storedRow).toEqual({
+      host_kind: 'codex',
+      tool_use_id: 'native-text-only-call',
+      outcome: 'unknown',
+      exit_code: null,
+      error_message: null,
+      project_dir: path.resolve(projectDir),
+    });
+
+    const decodedPre = decodeCodexInput({
+      ...common,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: 'echo next' },
+      tool_use_id: 'native-after-text-call',
+    });
+    const pre = { ...decodedPre, context: { ...decodedPre.context, workspaceDir } };
+    const context = createCodexRuleContextProvider({
+      workspaceDir,
+      projectDir,
+      enabled: true,
+      toolSemantics: CODEX_TOOL_SEMANTICS,
+      cutoffAt: new Date(Date.now() + 1_000),
+      currentToolUseId: String(pre.context.toolCallId),
+    })({
+      workspaceDir,
+      sessionId: String(pre.context.sessionId),
+      targetPath: 'target.txt',
+      toolName: String(pre.context.toolName),
+      rawPayload: pre.rawPayload,
+    }) as {
+      history: { status: string; unavailableReason?: string; calls: readonly unknown[] };
+      facts: { priorReadOfTarget: string; readCount: number | null; writeCount: number | null; uniqueWritePathCount: number | null; sameActionBlockCount: number | null };
+    };
+    expect(context.history.status).toBe('unavailable');
+    expect(context.history.unavailableReason).toContain('outcome "unknown" is not a valid RuleToolOutcome');
+    expect(context.history.calls).toEqual([]);
+    expect(context.facts).toMatchObject({
+      priorReadOfTarget: 'unknown',
+      readCount: null,
+      writeCount: null,
+      uniqueWritePathCount: null,
+      sameActionBlockCount: null,
+    });
   });
 });

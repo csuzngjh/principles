@@ -640,6 +640,98 @@ describe('R2 wiring — real producer stamps attribution, provider consumes it, 
     expect(result.stderr).not.toContain('rule_context_v2_unavailable');
   });
 
+  it('missing ids persist NULL and cannot scope a later id-less call; fallback tool_use_id can become valid attributed history', async () => {
+    const home = makeHome();
+    const governance = makeGovernance(home, { workbuddyFlag: true, ruleContextV2Flag: true });
+    makeTrajectory(governance);
+    const project = makeProjectDir(home, 'r2ids');
+    await qualifiedWorkbuddyV2Artifact(governance, 'art-v2-wire-612', v2DenyCode('wb-v2ctx-612', 'WB_V2_DENY_612'));
+
+    // Both identity fields absent on PostToolUse: the decoder must not invent
+    // one, so the production writer persists a real WorkBuddy row with NULL
+    // tool_use_id.
+    const missingSession = 'wb-r2-missing-id-session';
+    const missingPostPayload = fixturePayload('post-tool-use-read-success.json', {
+      cwd: project,
+      session_id: missingSession,
+      tool_input: { file_path: path.join(project, 'missing-id-read.txt') },
+    });
+    delete missingPostPayload['call_id'];
+    delete missingPostPayload['tool_use_id'];
+    // Measured in this Linux/WSL worktree, even a neutral real-child
+    // SessionStart can take about 17.5s wall-clock; the runner's 15s default
+    // would test the harness timeout rather than governance behavior. Keep an
+    // explicit larger bound for this multi-invocation characterization.
+    const missingPost = runEntry(home, JSON.stringify(missingPostPayload), 'PostToolUse', { timeoutMs: 30_000 });
+    expect(missingPost.status).toBe(0);
+    expect(missingPost.stdout).toBe('');
+
+    const trajectory = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const rows = trajectory.prepare('SELECT session_id, tool_use_id, host_kind, outcome, project_dir FROM tool_calls WHERE session_id = ?').all(missingSession) as {
+        session_id: string; tool_use_id: string | null; host_kind: string | null; outcome: string; project_dir: string | null;
+      }[];
+      expect(rows).toEqual([{
+        session_id: missingSession,
+        tool_use_id: null,
+        host_kind: 'workbuddy',
+        outcome: 'success',
+        project_dir: path.resolve(project),
+      }]);
+    } finally {
+      trajectory.close();
+    }
+
+    // The same identity absence on the next PreToolUse becomes the provider's
+    // empty-current-id shape. Even though a WorkBuddy row exists, the provider
+    // cannot scope the in-flight call, so the otherwise-denying v2 rule suspends.
+    const missingPrePayload = fixturePayload('pre-tool-use-write.json', {
+      cwd: project,
+      session_id: missingSession,
+      tool_input: { file_path: path.join(project, 'wb-v2ctx-612.txt'), content: 'x' },
+    });
+    delete missingPrePayload['call_id'];
+    delete missingPrePayload['tool_use_id'];
+    const missingPre = runEntry(home, JSON.stringify(missingPrePayload), 'PreToolUse', { timeoutMs: 30_000 });
+    expect(missingPre.status).toBe(0);
+    expect(missingPre.stdout).toBe('');
+    expect(missingPre.stderr).toContain('workbuddy_pre_tool_scope_mismatch');
+    expect(missingPre.stderr).not.toContain('WB_V2_DENY_612');
+
+    // Fallback identity is different: with call_id absent and tool_use_id
+    // present, that fallback is decoded, persisted, and can later prove the
+    // history window for a separate current call id.
+    const fallbackSession = 'wb-r2-fallback-id-session';
+    const fallbackPostPayload = fixturePayload('post-tool-use-read-success.json', {
+      cwd: project,
+      session_id: fallbackSession,
+      tool_input: { file_path: path.join(project, 'fallback-read.txt') },
+      tool_use_id: 'wb-fallback-history-call',
+    });
+    delete fallbackPostPayload['call_id'];
+    const fallbackPost = runEntry(home, JSON.stringify(fallbackPostPayload), 'PostToolUse', { timeoutMs: 30_000 });
+    expect(fallbackPost.status).toBe(0);
+    const fallbackRows = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      expect(fallbackRows.prepare('SELECT tool_use_id, host_kind, outcome FROM tool_calls WHERE session_id = ?').all(fallbackSession)).toEqual([
+        { tool_use_id: 'wb-fallback-history-call', host_kind: 'workbuddy', outcome: 'success' },
+      ]);
+    } finally {
+      fallbackRows.close();
+    }
+
+    const fallbackPre = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', {
+      cwd: project,
+      session_id: fallbackSession,
+      tool_input: { file_path: path.join(project, 'wb-v2ctx-612.txt'), content: 'x' },
+      call_id: 'wb-current-call-after-fallback',
+      tool_use_id: 'wb-current-call-after-fallback',
+    })), 'PreToolUse', { timeoutMs: 30_000 });
+    expect(fallbackPre.status).toBe(0);
+    expect(JSON.parse(fallbackPre.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'WB_V2_DENY_612' } });
+    expect(fallbackPre.stderr).not.toContain('rule_context_v2_unavailable');
+  }, 150_000);
+
   it('negative: a codex-attributed row in the same session suspends the v2 rule with the precise conflict reason', async () => {
     const home = makeHome();
     const governance = makeGovernance(home, { workbuddyFlag: true, ruleContextV2Flag: true });

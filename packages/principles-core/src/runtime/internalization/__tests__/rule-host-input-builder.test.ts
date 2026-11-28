@@ -535,3 +535,154 @@ describe('host-owned recovery controls preserve exact official access', () => {
     expect(buildRuleHostAction('Bash', params, '/workspace', { canonicalKind: 'execute' }).recoveryControl).toBe('pd_status');
   });
 });
+
+// ── PRI-1309: six target classes — mechanical target presence vs semantic attribution ──
+
+describe('PRI-1309 characterization: six RuleHost target classes and the semantic attribution boundary', () => {
+  const PROJECT_DIR = '/work/project';
+  const SINGLE_FILE_PATCH = [
+    '*** Begin Patch',
+    '*** Update File: src/a.ts',
+    '@@',
+    '-old',
+    '+new',
+    '*** End Patch',
+  ].join('\n');
+  const MULTI_FILE_PATCH = [
+    '*** Begin Patch',
+    '*** Update File: src/a.ts',
+    '@@',
+    '-old',
+    '+new',
+    '*** Update File: docs/readme.md',
+    '@@',
+    '-before',
+    '+after',
+    '*** End Patch',
+  ].join('\n');
+
+  async function buildAction(
+    toolName: string,
+    params: Record<string, unknown>,
+    canonicalKind: CanonicalKind,
+  ) {
+    const { buildRuleHostAction, deriveToolHintsFromCanonicalKind } = await import('../rule-host-input-builder.js');
+    const hints = deriveToolHintsFromCanonicalKind(canonicalKind);
+    return buildRuleHostAction(toolName, params, PROJECT_DIR, { ...hints, canonicalKind });
+  }
+
+  it('class 1 resource-attributed: a direct structured path is the only trustworthy target class', async () => {
+    const action = await buildAction('write_file', { file_path: '/work/project/src/a.ts', content: 'x' }, 'write');
+    expect(action.normalizedPath).toBe('src/a.ts');
+    expect(action.canonicalKind).toBe('write');
+    expect(action.paramsSummary).toEqual({ file_path: '/work/project/src/a.ts', content: 'x' });
+  });
+
+  it('class 1 negative control: direct extraction recognizes exactly file_path/path/file/target, in that priority order', async () => {
+    const { extractFilePathFromParams } = await import('../rule-host-input-builder.js');
+    expect(extractFilePathFromParams({ file_path: 'src/file-path.ts', path: 'src/path.ts' })).toBe('src/file-path.ts');
+    expect(extractFilePathFromParams({ path: 'src/path.ts', file: 'src/file.ts' })).toBe('src/path.ts');
+    expect(extractFilePathFromParams({ file: 'src/file.ts', target: 'src/target.ts' })).toBe('src/file.ts');
+    expect(extractFilePathFromParams({ target: 'src/target.ts' })).toBe('src/target.ts');
+    // Similar-looking keys are not direct resource evidence.
+    expect(extractFilePathFromParams({ filepath: 'src/filepath.ts', filename: 'src/name.ts' })).toBeNull();
+  });
+
+  it('class 2 synthetic-target: a pathless write gets a <tool:...> label rather than a resource identity', async () => {
+    const action = await buildAction('write_file', { content: 'x' }, 'write');
+    expect(action.normalizedPath).toBe('<tool:write_file>');
+    expect(action.normalizedPath.startsWith('<tool:')).toBe(true);
+  });
+
+  it('canonicalKind authority: conflicting legacy hints cannot turn write into shell extraction or execute into a synthetic write', async () => {
+    const { buildRuleHostAction } = await import('../rule-host-input-builder.js');
+    const write = buildRuleHostAction(
+      'apply_patch',
+      { command: SINGLE_FILE_PATCH },
+      PROJECT_DIR,
+      { isBashTool: true, isWriteTool: false, canonicalKind: 'write' },
+    );
+    expect(write.normalizedPath).toBe('<tool:apply_patch>');
+
+    const execute = buildRuleHostAction(
+      'bash',
+      { command: 'git status' },
+      PROJECT_DIR,
+      { isBashTool: false, isWriteTool: true, canonicalKind: 'execute' },
+    );
+    expect(execute.normalizedPath).toBe('git status');
+    expect(execute.normalizedPath).not.toBe('<tool:bash>');
+  });
+
+  it('class 2 synthetic-target: native Codex apply_patch command/input/patch carriers are never interpreted as shell', async () => {
+    const shapes: readonly [carrier: string, params: Record<string, unknown>][] = [
+      ['native command carrier', { command: SINGLE_FILE_PATCH }],
+      ['legacy input carrier', { input: SINGLE_FILE_PATCH }],
+      ['legacy patch carrier', { patch: SINGLE_FILE_PATCH }],
+    ];
+    for (const [carrier, params] of shapes) {
+      const action = await buildAction('apply_patch', params, 'write');
+      expect(action.normalizedPath, `${carrier}: canonicalKind=write means no execute-command fallback`).toBe('<tool:apply_patch>');
+      expect(action.canonicalKind).toBe('write');
+      expect(action.paramsSummary).toEqual(params);
+    }
+  });
+
+  it('class 2/6 synthetic-target: a multi-file apply_patch collapses to the same synthetic label, invisible per-file targets included', async () => {
+    const single = await buildAction('apply_patch', { command: SINGLE_FILE_PATCH }, 'write');
+    const multi = await buildAction('apply_patch', { command: MULTI_FILE_PATCH }, 'write');
+    expect(multi.normalizedPath).toBe('<tool:apply_patch>');
+    expect(multi.normalizedPath).toBe(single.normalizedPath);
+    // Negative control: the synthetic label does not silently privilege the first
+    // (or any) file header as the action's resource identity.
+    expect(multi.normalizedPath).not.toContain('src/a.ts');
+    expect(multi.normalizedPath).not.toContain('docs/readme.md');
+    expect(multi.paramsSummary['command']).toBe(MULTI_FILE_PATCH);
+  });
+
+  it('class 3 opaque-command: git status enters as the full command string, mechanically non-empty but not resource identity', async () => {
+    const command = 'git status';
+    const action = await buildAction('bash', { command }, 'execute');
+    expect(action.normalizedPath, 'the execute fallback is opaque command text; non-empty is not semantic resource attribution').toBe(command);
+    expect(action.normalizedPath).not.toBe('');
+    expect(action.canonicalKind).toBe('execute');
+  });
+
+  it('class 4 no-target: pure query, pathless agent and execute without command all produce the empty skip target', async () => {
+    const cases: readonly [label: string, toolName: string, params: Record<string, unknown>, kind: CanonicalKind][] = [
+      ['pure query', 'grep', { query: 'needle' }, 'search'],
+      ['pathless agent', 'sessions_spawn', { task: 'investigate the workspace' }, 'agent'],
+      ['execute missing command', 'bash', {}, 'execute'],
+    ];
+    for (const [label, toolName, params, kind] of cases) {
+      const action = await buildAction(toolName, params, kind);
+      expect(action.normalizedPath, `${label}: no extraction target means the empty skip sentinel`).toBe('');
+      expect(action.canonicalKind).toBe(kind);
+    }
+  });
+
+  it.each([
+    ['cp src dst', 'src', 'dst'],
+    ['mv old new', 'old', 'new'],
+    ['rm a b', 'a', 'b'],
+  ] as const)('class 5 attribution-unprovable: `%s` currently captures only first token `%s`, never the full mutation surface', async (command, captured, invisible) => {
+    const action = await buildAction('bash', { command }, 'execute');
+    expect(
+      action.normalizedPath,
+      'characterization of current behavior only: first-token extraction is not proof that the named token is the sole or true resource',
+    ).toBe(captured);
+    expect(action.normalizedPath).not.toContain(invisible);
+    expect(action.paramsSummary['command']).toBe(command);
+  });
+
+  it('class 6 multi-target collapse: shell keeps only the first token while patch stays synthetic; neither becomes trustworthy resource attribution', async () => {
+    const shell = await buildAction('bash', { command: 'rm a b' }, 'execute');
+    expect(shell.normalizedPath, 'the second rm operand is invisible in normalizedPath').toBe('a');
+    expect(shell.normalizedPath).not.toContain('b');
+
+    const patch = await buildAction('apply_patch', { command: MULTI_FILE_PATCH }, 'write');
+    expect(patch.normalizedPath, 'the patch remains a synthetic label rather than compressing many files into one path').toBe('<tool:apply_patch>');
+    expect(patch.normalizedPath).not.toContain('src/a.ts');
+    expect(patch.normalizedPath).not.toContain('docs/readme.md');
+  });
+});

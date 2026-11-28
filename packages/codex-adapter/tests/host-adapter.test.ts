@@ -71,3 +71,59 @@ describe('CodexHooksHostAdapter pinned to codex-cli 0.147.0', () => {
     expect(() => adapter.encodeOutput({ decision: 'modify', modifiedInput: {}, source: 'codex:test' }, 'before_tool_call')).toThrow(/modifiedInput/);
   });
 });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error(`${label} is not an object`);
+  return value;
+}
+
+describe('PRI-1309 Codex host-effect characterization (permission-decision-encoded)', () => {
+  it('permission-decision-encoded: PreToolUse deny emits exactly permissionDecision deny plus reason and no auxiliary host-control fields', () => {
+    const output = requireRecord(
+      adapter.encodeOutput({ decision: 'deny', reason: 'owner rule denied it', source: 'codex:pre_tool_use' }, 'before_tool_call'),
+      'Codex PreToolUse deny output',
+    );
+    const hookSpecificOutput = requireRecord(output['hookSpecificOutput'], 'hookSpecificOutput');
+
+    expect(hookSpecificOutput).toEqual({
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: 'owner rule denied it',
+    });
+    // Negative control against inventing pause/ask/allow channels: this host
+    // contract has only the permission decision encoding proven here.
+    expect(Object.keys(output)).toEqual(['hookSpecificOutput']);
+    expect(Object.keys(hookSpecificOutput).sort()).toEqual([
+      'hookEventName',
+      'permissionDecision',
+      'permissionDecisionReason',
+    ]);
+  });
+
+  it('permission-decision-encoded: requireApproval metadata on HostEventResult.allow emits neutral output, not a pause or block', () => {
+    const output = requireRecord(
+      adapter.encodeOutput({
+        decision: 'allow',
+        source: 'codex:pre_tool_use',
+        metadata: {
+          ruleDecision: 'requireApproval',
+          matched: true,
+          ruleReason: 'owner approval required',
+        },
+      }, 'before_tool_call'),
+      'Codex requireApproval-metadata output',
+    );
+    const hookSpecificOutput = requireRecord(output['hookSpecificOutput'], 'hookSpecificOutput');
+
+    // The ruleDecision layer is telemetry metadata only. The encoded host
+    // effect is neutral: no deny, no ask, no allow-fast-path and no pause field.
+    expect(hookSpecificOutput).toEqual({ hookEventName: 'PreToolUse' });
+    expect(hookSpecificOutput['permissionDecision']).toBeUndefined();
+    expect(hookSpecificOutput['permissionDecisionReason']).toBeUndefined();
+    expect(Object.keys(hookSpecificOutput)).toEqual(['hookEventName']);
+  });
+});

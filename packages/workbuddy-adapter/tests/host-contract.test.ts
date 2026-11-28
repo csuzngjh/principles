@@ -236,10 +236,24 @@ describe('decoder fail-loud matrix (rc-1/rc-2/rc-3)', () => {
   it('tool_use_id is the fallback id source; both missing → toolCallId stays undefined (never fabricated)', () => {
     const { call_id, ...noCall } = base;
     void call_id;
-    const viaToolUseId = decodeWorkbuddyInput({ ...noCall, tool_use_id: 'toolu_fallback' });
+    // `/proj` is absolute on both POSIX and Windows (same pattern as the
+    // PRI-1275 synthetic matrix); identity precedence is the behavior under
+    // test here, not the platform-specific fixture cwd spelling.
+    const viaToolUseId = decodeWorkbuddyInput({ ...noCall, cwd: '/proj', tool_use_id: 'toolu_fallback' });
     expect(viaToolUseId.context.toolCallId).toBe('toolu_fallback');
-    const neither = decodeWorkbuddyInput(noCall);
+    const neither = decodeWorkbuddyInput({ ...noCall, cwd: '/proj' });
     expect(neither.context.toolCallId).toBeUndefined();
+  });
+
+  it('pins the current conflict behavior when both ids are present and differ: call_id wins, with no conflict rejection', () => {
+    const event = decodeWorkbuddyInput({ ...base, cwd: '/proj', call_id: 'toolu_call_primary', tool_use_id: 'toolu_fallback_different' });
+    expect(event.context.toolCallId).toBe('toolu_call_primary');
+  });
+
+  it.each([42, ''])('a malformed fallback tool_use_id (%p) fails loud instead of dropping to undefined', (toolUseId) => {
+    const { call_id, ...noCall } = base;
+    void call_id;
+    expect(decodeError({ ...noCall, cwd: '/proj', tool_use_id: toolUseId }).reason).toContain('"tool_use_id"');
   });
 
   it('SessionStart required set: source/permission_mode/client/version (frozen contract), cwd NOT required', () => {
