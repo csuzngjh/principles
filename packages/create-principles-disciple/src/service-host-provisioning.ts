@@ -327,9 +327,21 @@ pid_state = lambda do |pid|
   # kill(pid, 0) still succeeds for an unreaped zombie. KERN_PROCARGS2 then
   # fails with EINVAL even though no consumer threads remain, so classify the
   # current process-table state at the moment the read fails/succeeds.
-  stat = \`/bin/ps -o stat= -p #{pid} 2>/dev/null\`.strip
-  if stat.empty?
+  stat_io = IO.popen(['/bin/ps', '-o', 'stat=', '-p', pid.to_s], err: File::NULL)
+  stat = stat_io.read.strip
+  stat_io.close
+  ps_ok = !$?.nil? && $?.success?
+  if stat.empty? && ps_ok
     'exited'
+  elsif stat.empty?
+    # ps itself failing is not evidence of exit. Re-check liveness; a process
+    # still present but whose state cannot be inspected remains fail-closed.
+    begin
+      Process.kill(0, pid)
+      'live'
+    rescue Errno::ESRCH
+      'exited'
+    end
   elsif stat.start_with?('Z')
     'zombie'
   else
