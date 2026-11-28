@@ -181,12 +181,12 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     techDetailZh: {
       '输入': '诊断阶段的 distilled principle / candidate artifact',
       '输出': '`DreamerOutput` · 1-5 个候选，每个含 badDecision / betterDecision / riskLevel / strategicPerspective',
-      '注意': '内化任务由 PD Service Host 驱动的有界 worker 周期统一消费',
+      '注意': '内化任务由 PD Service Host 驱动的有界 worker 周期统一消费。默认 internalization_full_chain=ON 时自动推进 dreamer→philosopher→scribe→artificer→evaluator→rollout_reviewer；关闭后只自动运行 dreamer。无论哪种模式，人工关卡都是审批队列中的 Owner 审批。',
     },
     techDetailEn: {
       'Input': 'Distilled principle / candidate artifact from the diagnosis stage',
       'Output': '`DreamerOutput` · 1-5 candidates, each with badDecision / betterDecision / riskLevel / strategicPerspective',
-      'Note': 'Internalization tasks are consumed by bounded worker cycles driven by the PD Service Host',
+      'Note': 'Internalization tasks are consumed by bounded worker cycles driven by the PD Service Host. With internalization_full_chain=ON (default), auto-consumption advances dreamer→philosopher→scribe→artificer→evaluator→rollout_reviewer; with it OFF, only dreamer runs automatically. In both modes, the human gate is Owner approval in the approval queue.',
     },
     isCore: true,
   },

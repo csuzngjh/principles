@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { readWorkspaceBackgroundOwnership } from '@principles/install-layout';
 import {
   matchLegacyWorkerArgv,
@@ -713,6 +713,39 @@ describe('OpenClaw Gateway quiescence evidence gate', () => {
     expect(calls.some((args) => args.includes('run-once'))).toBe(false);
   });
 
+  it('re-verifies host binding only after the final asynchronous Gateway probe', async () => {
+    const { pdHome, workspaceDir } = tempPdHome();
+    fakeInstalledCli(pdHome);
+    seedManifest(pdHome, workspaceDir);
+    const events: string[] = [];
+    const outcome = await provisionFreshInstallWorkspace({
+      pdHome,
+      workspaceDir,
+      host: 'openclaw',
+      scheduler: ENABLED_SCHEDULER,
+      warn: () => undefined,
+      requireOpenClawGatewayQuiesce: true,
+      openClawGatewayQuiesce: { ok: true, evidence: 'process_exited', pid: 4242 },
+      openClawGatewayQuiesceFn: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        events.push('gateway');
+        return { ok: true, evidence: 'process_exited', pid: 4242 };
+      },
+      hostBindingReverification: () => {
+        events.push('binding');
+        return { ok: true, host: 'openclaw' };
+      },
+      probes: {
+        spawnFn: fakeSpawn({
+          'openclaw worker': { code: 0, stdout: '{"mode":"ready"}' },
+          'service run-once': { code: 0, stdout: '{"ok":true,"outcome":"completed","runId":"r","managed":{"executions":[]}}' },
+        }, []),
+      },
+    });
+    expect(outcome.ownership).toBe('service_host_owned');
+    expect(events).toEqual(['gateway', 'binding']);
+  });
+
   it('verified Gateway process exit evidence permits readiness, CAS, and first run-once', async () => {
     const { pdHome, workspaceDir } = tempPdHome();
     fakeInstalledCli(pdHome);
@@ -798,7 +831,23 @@ describe.runIf(process.platform === 'darwin')('real Darwin legacy worker scan', 
     mkdirSync(workspace, { recursive: true });
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--workspace', workspace], { stdio: 'ignore' });
     const once = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--once', '--workspace', workspace], { stdio: 'ignore' });
+    // Ruby does not implicitly reap spawn() children. This creates real
+    // process-table zombie residue while the active worker remains running;
+    // the scan must classify that residue as exited rather than failing the
+    // whole machine scan on the zombie's unreadable KERN_PROCARGS2 payload.
+    const zombieParent = spawn('/usr/bin/ruby', ['-e', 'spawn("/bin/sh", "-c", "exit 0"); sleep 60'], { stdio: 'ignore' });
     try {
+      const zombieDeadline = Date.now() + 2_000;
+      let zombieSeen = false;
+      while (!zombieSeen && Date.now() < zombieDeadline) {
+        const ps = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,stat='], { encoding: 'utf8' });
+        zombieSeen = ps.split('\n').some((line) => {
+          const parts = line.trim().split(/\s+/);
+          return Number.parseInt(parts[1] ?? '', 10) === zombieParent.pid && (parts[2] ?? '').startsWith('Z');
+        });
+        if (!zombieSeen) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(zombieSeen).toBe(true);
       const deadline = Date.now() + 2_000;
       let scan = scanRunningLegacyWorkerProcesses({ platform: 'darwin' });
       while (!scan.workers.some((worker) => worker.pid === child.pid) && Date.now() < deadline) {
@@ -811,6 +860,7 @@ describe.runIf(process.platform === 'darwin')('real Darwin legacy worker scan', 
     } finally {
       child.kill('SIGKILL');
       once.kill('SIGKILL');
+      zombieParent.kill('SIGKILL');
       rmSync(workspace, { recursive: true, force: true });
     }
   });

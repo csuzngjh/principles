@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChildProcess } from 'node:child_process';
 import { readWorkspaceBackgroundOwnership } from '@principles/install-layout';
+import { readAllPendingProvisioning } from '../src/service-host-provisioning.js';
 import type { ServiceHostSchedulerOutcome } from '../src/service-host-bridge.js';
 import {
   mergeManifestProvisioningTargets,
@@ -18,6 +19,8 @@ const homes: string[] = [];
 let home: string;
 let previousHome: string | undefined;
 let previousUserProfile: string | undefined;
+let previousPdWorkspaceDir: string | undefined;
+let previousOpenClawWorkspace: string | undefined;
 
 function useIsolatedHome(): string {
   home = mkdtempSync(path.join(os.tmpdir(), 'pd-historical-migration-'));
@@ -47,11 +50,17 @@ function seedManifestAndOpenClawBinding(workspaceDir: string): void {
 beforeEach(() => {
   previousHome = process.env.HOME;
   previousUserProfile = process.env.USERPROFILE;
+  previousPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
+  previousOpenClawWorkspace = process.env.OPENCLAW_WORKSPACE;
+  delete process.env.PD_WORKSPACE_DIR;
+  delete process.env.OPENCLAW_WORKSPACE;
   useIsolatedHome();
 });
 afterEach(() => {
   if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
   if (previousUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previousUserProfile;
+  if (previousPdWorkspaceDir === undefined) delete process.env.PD_WORKSPACE_DIR; else process.env.PD_WORKSPACE_DIR = previousPdWorkspaceDir;
+  if (previousOpenClawWorkspace === undefined) delete process.env.OPENCLAW_WORKSPACE; else process.env.OPENCLAW_WORKSPACE = previousOpenClawWorkspace;
   for (const dir of homes.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -379,6 +388,88 @@ describe('production install provisioning orchestration for historical workspace
       expect(readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir }))
         .toMatchObject({ status: 'service_host_owned', generation: 1 });
     }
+  });
+
+  it('a missing concrete host binding stays fail-closed across repeated migrations without being rewritten to none', async () => {
+    const workspaceDir = path.join(home, 'custom openclaw workspace');
+    mkdirSync(workspaceDir, { recursive: true });
+    const pdHome = path.join(home, '.pd');
+    mkdirSync(pdHome, { recursive: true });
+    writeFileSync(path.join(pdHome, 'install.json'), JSON.stringify({
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: [],
+      workspaces: [workspaceDir],
+    }), 'utf8');
+    fakeInstalledCli(pdHome);
+    const base = {
+      pdHome,
+      freshInstall: false as const,
+      consentIntent: 'enable',
+      consentSource: 'explicit_flag',
+      scheduler: ENABLED_SCHEDULER,
+      runTargets: [],
+      manifestWorkspaces: [workspaceDir],
+      scanFn: () => ({ ok: true as const, workers: [] }),
+      probes: { spawnFn: successfulOpenClawProbes([]) },
+      warn: () => undefined,
+    };
+    const first = await provisionServiceHostInstallTargets({
+      ...base,
+      pendingEntries: [{ workspaceDir, host: 'openclaw', recordedAt: new Date().toISOString(), reason: 'prior deferred migration' }],
+    });
+    expect(first?.targets[0]).toMatchObject({ host: 'openclaw' });
+    expect(first?.targets[0]?.outcome.firstCycle).toMatchObject({ reason: 'binding_unverifiable' });
+    const persisted = readAllPendingProvisioning(pdHome).entries.find((entry) => entry.workspaceDir === workspaceDir);
+    expect(persisted?.host).toBe('openclaw');
+
+    const second = await provisionServiceHostInstallTargets({
+      ...base,
+      pendingEntries: readAllPendingProvisioning(pdHome).entries,
+    });
+    expect(second?.targets[0]).toMatchObject({ host: 'openclaw' });
+    expect(second?.targets[0]?.outcome.firstCycle).toMatchObject({ reason: 'binding_unverifiable' });
+    expect(readWorkspaceBackgroundOwnership({ manifestPath: path.join(pdHome, 'install.json'), workspaceDir }))
+      .toEqual({ status: 'legacy_owned', source: 'no_record', generation: 0 });
+  });
+
+  it('a Codex-only migration does not treat installer-inherited PD_WORKSPACE_DIR as an OpenClaw binding', async () => {
+    const workspaceDir = path.join(home, 'codex only workspace');
+    mkdirSync(workspaceDir, { recursive: true });
+    const pdHome = path.join(home, '.pd');
+    mkdirSync(pdHome, { recursive: true });
+    writeFileSync(path.join(pdHome, 'install.json'), JSON.stringify({
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: [],
+      workspaces: [workspaceDir],
+    }), 'utf8');
+    const dataRoot = path.join(home, '.codex', 'plugins', 'data', 'principles-disciple-principles');
+    mkdirSync(dataRoot, { recursive: true });
+    writeFileSync(path.join(dataRoot, 'mcp-binding.json'), JSON.stringify({ host: 'codex', workspaceDir }), 'utf8');
+    fakeInstalledCli(pdHome);
+    process.env.PD_WORKSPACE_DIR = workspaceDir;
+    process.env.OPENCLAW_WORKSPACE = workspaceDir;
+    const calls: string[][] = [];
+    const report = await provisionServiceHostInstallTargets({
+      pdHome,
+      freshInstall: false,
+      consentIntent: 'enable',
+      consentSource: 'explicit_flag',
+      scheduler: ENABLED_SCHEDULER,
+      runTargets: [],
+      pendingEntries: [],
+      manifestWorkspaces: [workspaceDir],
+      scanFn: () => ({ ok: true, workers: [] }),
+      probes: { spawnFn: fakeSpawn({
+        'codex worker': { code: 0, stdout: '{"mode":"ready"}' },
+        'service run-once': { code: 0, stdout: '{"ok":true,"outcome":"completed","runId":"r","managed":{"executions":[]}}' },
+      }, calls) },
+      warn: () => undefined,
+    });
+    expect(report?.targets[0]).toMatchObject({ host: 'codex' });
+    expect(report?.targets[0]?.outcome).toMatchObject({ ownership: 'service_host_owned', pendingProvisioning: false });
+    expect(calls.some((args) => args.includes('run-once'))).toBe(true);
   });
 
   it('an unverifiable host binding stays pending and never reaches CAS', async () => {

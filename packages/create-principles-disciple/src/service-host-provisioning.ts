@@ -316,20 +316,31 @@ module PdSysctl
   dlload '/usr/lib/libSystem.B.dylib'
   extern 'int sysctl(void*, unsigned int, void*, void*, void*, unsigned long)'
 end
-pid_exists = lambda do |pid|
+pid_state = lambda do |pid|
   begin
     Process.kill(0, pid)
-    true
   rescue Errno::ESRCH
-    false
+    next 'exited'
   rescue Errno::EPERM
-    true
+    next 'live'
+  end
+  # kill(pid, 0) still succeeds for an unreaped zombie. KERN_PROCARGS2 then
+  # fails with EINVAL even though no consumer threads remain, so classify the
+  # current process-table state at the moment the read fails/succeeds.
+  stat = \`/bin/ps -o stat= -p #{pid} 2>/dev/null\`.strip
+  if stat.empty?
+    'exited'
+  elsif stat.start_with?('Z')
+    'zombie'
+  else
+    'live'
   end
 end
 emit_failure = lambda do |pid, reason|
-  # A process that disappeared after enumeration no longer consumes anything;
-  # a process that still exists but cannot be inspected is unverifiable.
-  if pid_exists.call(pid)
+  # A process that disappeared or became zombie residue after enumeration no
+  # longer consumes anything; a live process whose argv cannot be inspected is
+  # unverifiable and must stay fail-closed.
+  if pid_state.call(pid) == 'live'
     puts "#{pid}\tERROR:#{reason}"
   else
     puts "#{pid}\tEXITED"
@@ -339,7 +350,7 @@ ARGV.each do |pid_text|
   pid = pid_text.to_i
   next if pid <= 1
   begin
-    unless pid_exists.call(pid)
+    unless pid_state.call(pid) != 'exited'
       puts "#{pid}\tEXITED"
       next
     end
@@ -354,26 +365,43 @@ ARGV.each do |pid_text|
       emit_failure.call(pid, 'invalid_size')
       next
     end
-    # KERN_PROCARGS2 is racy while a process execs. Allocate the platform
-    # argument ceiling once (Apple ps uses the same fixed-ceiling strategy) so a
-    # growing argument area cannot silently truncate the second read.
-    capacity = 1024 * 1024 + 1
-    if len > capacity - 1
+    if len > 8 * 1024 * 1024
       emit_failure.call(pid, 'oversized')
       next
     end
-    buf = "\0" * capacity
-    size = [capacity].pack('Q<')
-    if PdSysctl.sysctl(mib, 3, buf, size, nil, 0) != 0
-      emit_failure.call(pid, 'sysctl_read')
-      next
+    raw = nil
+    attempts = 0
+    while attempts < 3 && raw.nil?
+      attempts += 1
+      buf = Fiddle::Pointer.malloc(len)
+      size = Fiddle::Pointer.malloc(8)
+      size[0, 8] = [len].pack('Q<')
+      if PdSysctl.sysctl(mib, 3, buf, size, nil, 0) != 0
+        errno = Fiddle.last_error
+        if errno == Errno::ENOMEM::Errno && attempts < 3
+          # The argument area can grow while a process execs; re-query instead
+          # of accepting a truncation-prone fixed ceiling.
+          size_probe = Fiddle::Pointer.malloc(8)
+          size_probe[0, 8] = [0].pack('Q<')
+          if PdSysctl.sysctl(mib, 3, nil, size_probe, nil, 0) == 0
+            new_len = size_probe.to_str(8).unpack1('Q<')
+            if new_len >= 4 && new_len <= 8 * 1024 * 1024
+              len = new_len
+              next
+            end
+          end
+        end
+        emit_failure.call(pid, "sysctl_read:#{errno || 'unknown'}")
+        break
+      end
+      out_len = size.to_str(8).unpack1('Q<')
+      if out_len < 4 || out_len > len
+        emit_failure.call(pid, 'invalid_read_size')
+        break
+      end
+      raw = buf.to_str(out_len)
     end
-    out_len = size.unpack1('Q<')
-    if out_len < 4 || out_len >= capacity
-      emit_failure.call(pid, 'invalid_read_size')
-      next
-    end
-    raw = buf.byteslice(0, out_len)
+    next if raw.nil?
     puts "#{pid}\t#{raw.unpack1('H*')}"
   rescue Errno::ESRCH
     puts "#{pid}\tEXITED"
@@ -1044,29 +1072,6 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
   }
 
 
-  // Host-binding evidence is likewise stale after asynchronous readiness work.
-  // A binding that appeared, disappeared, or changed during that window means
-  // the readiness/quiescence evidence was gathered for the wrong host set.
-  if (input.hostBindingReverification !== undefined) {
-    const reverified = input.hostBindingReverification();
-    if (!reverified.ok) {
-      return recordPending('binding_unverifiable', {
-        readiness: readiness.readiness,
-        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
-        firstCycle: notAttempted('binding_unverifiable'),
-        nextAction: `${reverified.nextAction} Ownership was NOT handed over because the workspace's host binding could not be re-verified immediately before the ownership write (${reverified.reason}).`,
-      });
-    }
-    if (reverified.host !== input.host) {
-      return recordPending('binding_changed', {
-        readiness: readiness.readiness,
-        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
-        firstCycle: notAttempted('binding_changed'),
-        nextAction: `Ownership was NOT handed over because the workspace host binding changed during provisioning (${input.host} -> ${reverified.host}). Re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
-      });
-    }
-  }
-
   // Re-verify at the CAS boundary. The first scan may have selected this
   // target, but readiness probing is asynchronous; ownership evidence must be
   // fresh enough that no legacy worker appeared during that window.
@@ -1105,6 +1110,29 @@ export async function provisionFreshInstallWorkspace(input: ProvisioningInput): 
         ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
         firstCycle: notAttempted('openclaw_gateway_unproven'),
         nextAction: `Ownership was NOT handed over because OpenClaw Gateway quiescence could not be re-verified immediately before the ownership write (${boundaryQuiesce?.reason ?? 'no quiesce evidence'}). Stop the OpenClaw Gateway and re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
+      });
+    }
+  }
+
+  // Host-binding evidence is likewise stale after asynchronous readiness work.
+  // A binding that appeared, disappeared, or changed during that window means
+  // the readiness/quiescence evidence was gathered for the wrong host set.
+  if (input.hostBindingReverification !== undefined) {
+    const reverified = input.hostBindingReverification();
+    if (!reverified.ok) {
+      return recordPending('binding_unverifiable', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('binding_unverifiable'),
+        nextAction: `${reverified.nextAction} Ownership was NOT handed over because the workspace's host binding could not be re-verified immediately before the ownership write (${reverified.reason}).`,
+      });
+    }
+    if (reverified.host !== input.host) {
+      return recordPending('binding_changed', {
+        readiness: readiness.readiness,
+        ...(readiness.detail !== undefined ? { readinessDetail: readiness.detail } : {}),
+        firstCycle: notAttempted('binding_changed'),
+        nextAction: `Ownership was NOT handed over because the workspace host binding changed during provisioning (${input.host} -> ${reverified.host}). Re-run: npx create-principles-disciple install --enable-service-host --workspace "${input.workspaceDir}"`,
       });
     }
   }

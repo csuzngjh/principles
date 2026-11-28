@@ -156,19 +156,16 @@ describe('resolveResumeProvisioningHost — the binding that exists NOW', () => 
     expect(resolveResumeProvisioningHost('none', ws)).toEqual({ ok: true, host: 'openclaw' });
   });
 
-  it('honours PD_WORKSPACE_DIR and OPENCLAW_WORKSPACE ahead of declaration files', () => {
+  it('does not treat installer-inherited workspace environment variables as OpenClaw binding evidence', () => {
     const home = process.env.HOME as string;
-    const envWs = path.join(home, 'env-declared-ws');
-    const fileWs = path.join(home, 'file-declared-ws');
-    mkdirSync(envWs, { recursive: true });
-    mkdirSync(fileWs, { recursive: true });
-    mkdirSync(path.join(home, '.openclaw'), { recursive: true });
-    writeFileSync(path.join(home, '.openclaw', 'principles-disciple.json'), JSON.stringify({ workspace: fileWs }), 'utf8');
-    process.env.PD_WORKSPACE_DIR = envWs;
-    expect(resolveResumeProvisioningHost('none', envWs)).toEqual({ ok: true, host: 'openclaw' });
-    delete process.env.PD_WORKSPACE_DIR;
-    process.env.OPENCLAW_WORKSPACE = envWs;
-    expect(resolveResumeProvisioningHost('none', envWs)).toEqual({ ok: true, host: 'openclaw' });
+    const codexWs = path.join(home, 'codex-only-ws');
+    mkdirSync(codexWs, { recursive: true });
+    const dataRoot = path.join(home, '.codex', 'plugins', 'data', 'principles-disciple-principles');
+    mkdirSync(dataRoot, { recursive: true });
+    writeFileSync(path.join(dataRoot, 'mcp-binding.json'), JSON.stringify({ host: 'codex', workspaceDir: codexWs }), 'utf8');
+    process.env.PD_WORKSPACE_DIR = codexWs;
+    process.env.OPENCLAW_WORKSPACE = codexWs;
+    expect(resolveResumeProvisioningHost('none', codexWs)).toEqual({ ok: true, host: 'codex' });
   });
 
   it('honours primary-declaration precedence when a stale secondary names another workspace', () => {

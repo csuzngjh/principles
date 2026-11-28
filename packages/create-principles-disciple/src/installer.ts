@@ -5366,19 +5366,13 @@ type OpenClawEvidenceState =
   | { readonly state: 'unverifiable'; readonly reason: string };
 
 function readOpenClawDeclarationEvidence(): OpenClawEvidenceState {
-  // Mirror the host resolver's declaration precedence: PD_WORKSPACE_DIR and
-  // OPENCLAW_WORKSPACE are higher-priority explicit declarations; then the
-  // primary declaration wins when usable, and the legacy secondary file is
-  // consulted only when the primary is absent. A stale lower-priority record
-  // must not block migration, but malformed effective evidence is unverifiable.
-  for (const [envName, raw] of [['PD_WORKSPACE_DIR', process.env.PD_WORKSPACE_DIR], ['OPENCLAW_WORKSPACE', process.env.OPENCLAW_WORKSPACE]] as const) {
-    if (typeof raw !== 'string' || raw.trim().length === 0) continue;
-    const value = raw.trim();
-    if (!isUsableWorkspacePointer(value)) {
-      return { state: 'unverifiable', reason: `${envName} is set but is not a usable absolute workspace path (${value})` };
-    }
-    return { state: 'bound', workspaceDir: path.resolve(value), source: 'openclaw_declaration' };
-  }
+  // Mirror the host resolver's persistent declaration precedence: the primary
+  // declaration wins when usable; the legacy secondary file is consulted only
+  // when the primary is absent. PD_WORKSPACE_DIR / OPENCLAW_WORKSPACE are
+  // process-environment inputs inside OpenClaw-launched processes, not proof
+  // that the installer process's own inherited environment is an OpenClaw
+  // binding. A stale lower-priority record must not block migration, but
+  // malformed effective evidence is unverifiable.
   const readOne = (configPath: string): OpenClawEvidenceState => {
     if (!existsSync(configPath)) return { state: 'absent' };
     let parsed: unknown;
@@ -5667,6 +5661,10 @@ export async function provisionServiceHostInstallTargets(
       if (resolution.ok) {
         ({ host } = resolution);
       } else {
+        // A refusal must not erase the very historical evidence that caused it.
+        // Manifest targets are host-neutral; writing that neutral default back
+        // into pending would let the next retry fall through as `none`.
+        host = marker?.host ?? target.host;
         bindingVerification = { ok: false, reason: resolution.reason, nextAction: resolution.nextAction };
       }
     }

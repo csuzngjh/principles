@@ -414,24 +414,26 @@ function parseOpenClawGatewayPortEnvValue(raw: string | undefined): number | nul
 export function resolveOpenClawGatewayPort(configPort: unknown, env: Readonly<Record<string, string | undefined>>): number | null {
   const envPort = parseOpenClawGatewayPortEnvValue(env.OPENCLAW_GATEWAY_PORT);
   if (envPort !== null) return envPort;
-  const profile = normalizeOpenClawProfileName(env.OPENCLAW_PROFILE);
-  if (profile === 'dev') return OPENCLAW_DEV_PROFILE_GATEWAY_PORT;
   if (typeof configPort === 'number') {
     return Number.isFinite(configPort) && configPort > 0 && configPort < 65_536 ? Math.floor(configPort) : null;
   }
+  const profile = normalizeOpenClawProfileName(env.OPENCLAW_PROFILE);
   if (profile) return resolveOpenClawProfileGatewayPort(profile);
   return OPENCLAW_DEFAULT_GATEWAY_PORT;
 }
 
-function containsOpenClawIncludeKey(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsOpenClawIncludeKey);
-  if (value === null || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  if (Object.hasOwn(record, '$include')) return true;
-  return Object.values(record).some(containsOpenClawIncludeKey);
+function hasOpenClawPortAffectingInclude(config: Record<string, unknown>): boolean {
+  if (Object.hasOwn(config, '$include')) return true;
+  const {gateway} = config;
+  return gateway !== null
+    && typeof gateway === 'object'
+    && !Array.isArray(gateway)
+    && Object.hasOwn(gateway, '$include');
 }
 
 function readOpenClawPort(): { port: number | null; observation: Exclude<OpenClawGatewayObservation, 'listening' | 'port_not_listening'> } {
+  const envPort = parseOpenClawGatewayPortEnvValue(process.env.OPENCLAW_GATEWAY_PORT);
+  if (envPort !== null) return { port: envPort, observation: 'port_not_configured' };
   const resolved = resolveOpenClawConfigPath(process.env);
   if (!resolved.ok) return { port: null, observation: 'no_config' };
   const configPath = resolved.path;
@@ -442,10 +444,13 @@ function readOpenClawPort(): { port: number | null; observation: Exclude<OpenCla
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
       return { port: null, observation: 'config_unreadable' };
     }
-    // `$include` can alter the effective gateway.port. This installer probe does
-    // not duplicate OpenClaw's include resolver; an included config remains
-    // unverifiable rather than being mistaken for the default-port case.
-    if (containsOpenClawIncludeKey(config)) return { port: null, observation: 'port_not_configured' };
+    // Only a root-level or gateway-level `$include` can alter the effective
+    // gateway.port. Includes in unrelated branches (for example plugins) must
+    // not invalidate an explicit sibling port. This probe still refuses the
+    // port-affecting cases rather than duplicating OpenClaw's include resolver.
+    if (hasOpenClawPortAffectingInclude(config as Record<string, unknown>)) {
+      return { port: null, observation: 'port_not_configured' };
+    }
     const { gateway } = config as Record<string, unknown>;
     const configPort = gateway && typeof gateway === 'object' && !Array.isArray(gateway)
       ? (gateway as Record<string, unknown>).port

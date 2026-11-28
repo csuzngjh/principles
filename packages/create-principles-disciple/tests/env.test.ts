@@ -646,7 +646,8 @@ describe('environment detection utilities', () => {
       expect(resolveOpenClawGatewayPort(undefined, {})).toBe(18789);
       expect(resolveOpenClawGatewayPort(23456, {})).toBe(23456);
       expect(resolveOpenClawGatewayPort(23456, { OPENCLAW_GATEWAY_PORT: '127.0.0.1:23457' })).toBe(23457);
-      expect(resolveOpenClawGatewayPort(23456, { OPENCLAW_PROFILE: 'dev' })).toBe(19001);
+      expect(resolveOpenClawGatewayPort(23456, { OPENCLAW_PROFILE: 'dev' })).toBe(23456);
+      expect(resolveOpenClawGatewayPort(undefined, { OPENCLAW_PROFILE: 'dev' })).toBe(19001);
       const named = resolveOpenClawGatewayPort(undefined, { OPENCLAW_PROFILE: 'qa' });
       expect(named).toBeGreaterThanOrEqual(20000);
       expect(named).toBeLessThan(60000);
@@ -674,6 +675,34 @@ describe('environment detection utilities', () => {
       } finally {
         vi.unstubAllEnvs();
         if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it('probes an explicit gateway port when only the plugins branch uses $include', async () => {
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+        gateway: { port },
+        plugins: { $include: './plugins.json5' },
+      }));
+      const status = await checkOpenClawGateway();
+      expect(status).toMatchObject({ isRunning: false, port, observation: 'port_not_listening' });
+    });
+
+    it('uses a valid port environment override even when gateway config includes are unverifiable', async () => {
+      vi.stubEnv('OPENCLAW_GATEWAY_PORT', '23457');
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { $include: './ports.json' } }));
+      try {
+        const status = await checkOpenClawGateway();
+        expect(status).toMatchObject({ isRunning: false, port: 23457, observation: 'port_not_listening' });
+      } finally {
+        vi.unstubAllEnvs();
       }
     });
 
