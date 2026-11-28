@@ -780,7 +780,7 @@ describe.runIf(process.platform === 'darwin')('real Darwin legacy worker scan', 
         await new Promise((resolve) => setTimeout(resolve, 25));
         scan = scanRunningLegacyWorkerProcesses({ platform: 'darwin' });
       }
-      expect(scan.ok).toBe(true);
+      expect(scan.ok, scan.detail ?? 'no scan detail').toBe(true);
       expect(scan.workers).toContainEqual({ pid: child.pid, workspaceDir: workspace });
       expect(scan.workers.some((worker) => worker.pid === once.pid)).toBe(false);
     } finally {

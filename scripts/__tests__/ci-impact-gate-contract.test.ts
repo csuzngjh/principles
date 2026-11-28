@@ -115,7 +115,7 @@ describe('ci.yml impact scope-gate contract', () => {
     // 2026-11-21 (PRI-1279 round 5): 10 -> 11. `test-pd-cli-windows` runs the
     // real better-sqlite3 Service Host lock protocol on windows-latest under
     // the same `scopes.cli` gate — same fail-open shape, no new scope.
-    expect(gated.length).toBe(11);
+    expect(gated.length).toBe(12);
     for (const [id, job] of gated) {
       const expr = job.if ?? '';
       // The ${{ }} wrapper matters as much as the status function: a bare
