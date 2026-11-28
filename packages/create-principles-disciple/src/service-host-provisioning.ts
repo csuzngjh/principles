@@ -181,7 +181,7 @@ export interface LegacyWorkerScan {
  * Returns the `--workspace` value when the command line matches.
  */
 export function matchLegacyWorkerCommandLine(commandLine: string): string | null {
-  if (/(^|\s)--once(?=\s|$)/.test(commandLine)) return null;
+  if (/(^|\\s)--once(?=\s|$)/.test(commandLine)) return null;
   if (!/(^|\s)worker(?=\s|$)/.test(commandLine)) return null;
   const workspace = /(?:^|\s)--workspace(?:\s+|=)(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(commandLine);
   return workspace?.[1] ?? workspace?.[2] ?? workspace?.[3] ?? null;
@@ -501,32 +501,62 @@ function listDarwinProcessRows(afterEnumeration?: () => void): LegacyWorkerProce
   return parseDarwinArgvReaderOutput(output);
 }
 
+/**
+ * Parse the Windows owner-scoped process table emitted by the PowerShell
+ * enumerator. Ownership filtering is deliberate migration evidence, so it is
+ * a pure TypeScript contract rather than hidden script text: a process whose
+ * owner resolves to another account is not installer evidence at all, while a
+ * same-user or owner-unresolved process with an unreadable command line stays
+ * fail-closed.
+ */
+export function parseWindowsProcessRows(output: string): LegacyWorkerProcessRow[] {
+  const rows: LegacyWorkerProcessRow[] = [];
+  let currentUser: string | undefined;
+  for (const rawLine of output.split('\n')) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (line.length === 0) continue;
+    if (line.startsWith('CURRENT\t')) {
+      currentUser = line.slice('CURRENT\t'.length);
+      continue;
+    }
+    const [pidText, ownerState, owner, encodedCommandLine, extra] = line.split('\t');
+    const pid = Number.parseInt(pidText ?? '', 10);
+    if (!Number.isInteger(pid) || pid <= 0 || typeof ownerState !== 'string' || typeof encodedCommandLine !== 'string' || extra !== undefined) {
+      throw new Error(`Windows process row unparseable: ${line.slice(0, 80)}`);
+    }
+    if (ownerState === 'resolved' && typeof currentUser === 'string' && currentUser.length > 0
+      && typeof owner === 'string' && owner.toLowerCase() !== currentUser.toLowerCase()) {
+      continue;
+    }
+    const commandLine = Buffer.from(encodedCommandLine, 'base64').toString('utf16le');
+    if (commandLine.length === 0) {
+      throw new Error(`Windows process command line unreadable for pid ${pid}`);
+    }
+    const argv = parseWindowsCommandLineArgv(commandLine);
+    if (argv === null) throw new Error(`Windows process command line unparseable for pid ${pid}`);
+    rows.push({ pid, commandLine, argv });
+  }
+  if (typeof currentUser !== 'string' || currentUser.length === 0) {
+    throw new Error('Windows process scan did not identify the current user');
+  }
+  return rows;
+}
+
 /** Platform process table as (pid, commandLine/argv) rows — bounded, read-only. */
 function listProcessRows(platform: string, afterDarwinEnumeration?: () => void): LegacyWorkerProcessRow[] {
-  const rows: LegacyWorkerProcessRow[] = [];
   if (platform === 'win32') {
     // powershell.exe is the project-allowlisted process-query host (wmic is
     // gone since Windows 11 24H2). EncodedCommand because Node→PowerShell
-    // argv quoting corrupts embedded quotes in -Command strings.
-    const unreadableSentinel = '__PD_COMMANDLINE_UNREADABLE__';
-    const script = '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $ProgressPreference = \'SilentlyContinue\'; $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name; Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | ForEach-Object { $ownerResult = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; if ($ownerResult.ReturnValue -eq 0) { $owner = "$($ownerResult.Domain)\\$($ownerResult.User)"; if (-not $owner.Equals($currentUser, [System.StringComparison]::OrdinalIgnoreCase)) { return } }; $cmd = $_.CommandLine; if ($null -eq $cmd -or $cmd.Length -eq 0) { "$($_.ProcessId)`t' + unreadableSentinel + '" } else { "$($_.ProcessId)`t$cmd" } }';
+    // argv quoting corrupts embedded quotes in -Command strings. PowerShell
+    // only ENUMERATES pid/owner/command-line evidence here; ownership policy
+    // and fail-closed parsing stay in parseWindowsProcessRows where adversarial
+    // owner/unreadable combinations are directly testable.
+    const script = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; "CURRENT\`t$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"; Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ForEach-Object { $ownerState = 'unresolved'; $owner = ''; try { $ownerResult = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; if ($ownerResult.ReturnValue -eq 0) { $ownerState = 'resolved'; $owner = "$($ownerResult.Domain)\\$($ownerResult.User)" } } catch { $ownerState = 'query_failed' }; $cmd = $_.CommandLine; if ($null -eq $cmd) { $cmd = '' }; $encodedCmd = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($cmd)); "$($_.ProcessId)\`t$ownerState\`t$owner\`t$encodedCmd" }`;
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
     const output = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
-    for (const line of output.split('\n')) {
-      const tab = line.indexOf('\t');
-      const pid = Number.parseInt(line.slice(0, tab), 10);
-      if (tab > 0 && Number.isInteger(pid) && pid > 0) {
-        const commandLine = line.slice(tab + 1).trim();
-        if (commandLine === unreadableSentinel || commandLine.length === 0) {
-          throw new Error(`Windows process command line unreadable for pid ${pid}`);
-        }
-        const argv = parseWindowsCommandLineArgv(commandLine);
-        if (argv === null) throw new Error(`Windows process command line unparseable for pid ${pid}`);
-        rows.push({ pid, commandLine, argv });
-      }
-    }
-    return rows;
+    return parseWindowsProcessRows(output);
   }
+  const rows: LegacyWorkerProcessRow[] = [];
   if (platform === 'linux') {
     // `/proc/<pid>/cmdline` preserves exact argv boundaries with NUL separators.
     // Flattening Linux argv through `ps ... args` is ownership-unsafe because a

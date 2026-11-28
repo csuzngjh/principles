@@ -27,6 +27,7 @@ import {
   parseDarwinProcArgs2,
   parseDarwinArgvReaderOutput,
   parseWindowsCommandLineArgv,
+  parseWindowsProcessRows,
   provisionFreshInstallWorkspace,
   readAllPendingProvisioning,
   readPendingProvisioningEvidence,
@@ -607,6 +608,26 @@ describe('scanRunningLegacyWorkerProcesses — real Linux argv scan', () => {
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', '', 'worker', '--workspace', workspace])).toBeNull();
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'worker', 'codex', 'worker', '--workspace', workspace])).toBe(workspace);
     expect(matchLegacyWorkerArgv(['node', 'pd.js', 'codex', 'worker', '--workspace', '--once'])).toBe('--once');
+  });
+
+  it('windows owner evidence ignores unrelated services but keeps same-user unreadable processes fail-closed', () => {
+    const encode = (commandLine: string): string => Buffer.from(commandLine, 'utf16le').toString('base64');
+    const row = (pid: number, ownerState: string, owner: string, commandLine: string): string =>
+      `${pid}\t${ownerState}\t${owner}\t${encode(commandLine)}`;
+    const current = 'CURRENT\tDESKTOP\\owner\n';
+    const unrelatedService = row(410, 'resolved', 'NT AUTHORITY\\SYSTEM', '');
+    expect(parseWindowsProcessRows(current + unrelatedService)).toEqual([]);
+
+    const sameUserUnreadable = row(411, 'resolved', 'DESKTOP\\owner', '');
+    expect(() => parseWindowsProcessRows(current + sameUserUnreadable)).toThrow('unreadable for pid 411');
+
+    const ownerUnresolvedUnreadable = row(412, 'query_failed', '', '');
+    expect(() => parseWindowsProcessRows(current + ownerUnresolvedUnreadable)).toThrow('unreadable for pid 412');
+
+    const commandLine = '"C:\\Program Files\\node\\node.exe" pd.js codex worker --workspace "C:\\pd workspace"';
+    const sameUser = parseWindowsProcessRows(current + row(413, 'resolved', 'desktop\\OWNER', commandLine));
+    expect(sameUser).toHaveLength(1);
+    expect(sameUser[0]?.argv?.at(-1)).toBe('C:\\pd workspace');
   });
 
   it('windows command-line tokenization preserves quoted workspace boundaries', () => {
