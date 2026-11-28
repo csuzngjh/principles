@@ -304,13 +304,15 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     it('registered service IDs match expected MVP set', () => {
       // Quiet/disabled services (e.g. pd-task per PRI-294) exist in the
       // registry but are NOT registered via guardService in index.ts.
+      // PRI-1278: 'service:internalization-auto-consumer' is DELETED (not
+      // merely unregistered) — the Gateway never consumes internalization
+      // tasks; the PD Service Host drives `pd openclaw worker --once`.
       const source = read('packages/openclaw-plugin/src/index.ts');
       const registrations = extractServiceRegistrations(source);
 
       const registeredIds = registrations.map(r => r.surfaceId).sort();
       const expectedIds = [
         'service:correction-observer',
-        'service:internalization-auto-consumer',
         'service:pd-task',
         'service:trajectory',
       ].sort();

@@ -1,7 +1,6 @@
 /**
  * The Phase 3 managed-run coordinator (PRI-1281 task §4): the ownership
- * admission matrix (service_host_owned executes; legacy skipped; transition
- * states forbidden; non-authorized refused), the legal-empty semantics, the
+ * admission matrix (service_host_owned executes; legacy skipped; transition-state residue paused; non-authorized refused), the legal-empty semantics, the
  * truthful triggerSource record, progress carry-forward, per-workspace
  * failure isolation, and the fail-closed manifest/marker behavior.
  */
@@ -219,13 +218,13 @@ describe('ownership admission matrix (task §4)', () => {
     expect(dispatched).toBe(0);
     expect(result.executions).toHaveLength(1);
     expect(result.executions[0]?.admission).toBe('skipped');
-    expect(result.executions[0]?.skipReason).toBe('legacy_owned_workspace');
+    expect(result.executions[0]?.skipReason).toBe('workspace_not_service_host_owned:legacy_owned');
     // Legal empty execution: zero service_host_owned workspaces.
     expect(result.status.managed?.emptyReason).toBe('no_service_host_owned_workspaces');
     expect(result.status.nextAction).toContain('legal empty');
   });
 
-  it('NEVER executes handover_preparing workspaces (forbidden transition state)', async () => {
+  it('never executes handover_preparing residue (non-service_host_owned pause)', async () => {
     const home = tempHome();
     const ws = codexWorkspace(home, 'handover-ws');
     installSandbox(home, [ws], { [ws]: { state: 'handover_preparing' } });
@@ -240,11 +239,11 @@ describe('ownership admission matrix (task §4)', () => {
     });
     expectCompleted(result);
     expect(dispatched).toBe(0);
-    expect(result.executions[0]?.skipReason).toBe('handover_preparing_forbidden');
+    expect(result.executions[0]?.skipReason).toBe('workspace_not_service_host_owned:handover_preparing');
     expect(result.status.managed?.emptyReason).toBe('no_service_host_owned_workspaces');
   });
 
-  it('NEVER executes rollback_pending workspaces', async () => {
+  it('never executes rollback_pending residue', async () => {
     const home = tempHome();
     const ws = codexWorkspace(home, 'rollback-ws');
     installSandbox(home, [ws], { [ws]: { state: 'rollback_pending' } });
@@ -254,7 +253,7 @@ describe('ownership admission matrix (task §4)', () => {
       probes: { adapters: { codex: fakeAdapter('codex'), workbuddy: fakeAdapter('workbuddy') } },
     });
     expectCompleted(result);
-    expect(result.executions[0]?.skipReason).toBe('rollback_pending_forbidden');
+    expect(result.executions[0]?.skipReason).toBe('workspace_not_service_host_owned:rollback_pending');
   });
 
   it('refuses (skip) a service_host_owned workspace whose discovery verdict is not authorized', async () => {

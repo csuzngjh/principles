@@ -1,0 +1,21 @@
+
+> create-principles-disciple@1.156.2 test
+> vitest run --run tests/host-refresh-workspace.test.ts tests/index.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.1.0 [39m[90m/mnt/d/Code/_worktrees/principles/PRI-1278-phase5-p0-guard-20261127/packages/create-principles-disciple[39m
+
+[temp-lifecycle] test-runs: kept 17
+[temp-lifecycle] TMPDIR -> /mnt/d/Code/.pd-tmp/principles/test-runs/vitest-20261127-121258-7f55c7
+ [32m✓[39m tests/host-refresh-workspace.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 1547[2mms[22m[39m
+ [32m✓[39m tests/index.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 60[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[32m37 passed[39m[22m[90m (37)[39m
+[2m   Start at [22m 12:12:58
+[2m   Duration [22m 11.25s[2m (import 76%, tests 17%, transform 5%, setup 2%, worker 1%)[22m
+
+[2m     Import [22m [33m49 modules were evaluated 81 times[39m[2m · 7.33s total, 76% of tracked time[22m
+[2m            [22m [2m~2.90s faster with [22m[33misolate: false[39m[2m — shared modules are evaluated once per worker instead of once per file[22m
+[2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#test-isolation[22m
+

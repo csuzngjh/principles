@@ -27,7 +27,7 @@ import { randomUUID } from 'node:crypto';
 import { readActiveReleaseRecord, type ActiveReleaseFailureReason } from '@principles/install-layout';
 import type { InstallIdentity } from '../install-identity.js';
 import type { WorkspaceDiscoveryResult } from '../workspace-discovery.js';
-import type { AdapterCycleResult, ShadowHostKind, WorkerHostKind } from '../worker-adapter.js';
+import type { AdapterCycleResult, WorkerHostKind } from '../worker-adapter.js';
 
 export const SERVICE_RUN_STATUS_SCHEMA_VERSION = 'pd.service-run-status.v1';
 
@@ -116,7 +116,7 @@ export interface ServiceRunStatus {
     readonly inheritedHostRootEnvVars: readonly string[];
     /**
      * Host-root overrides present in the inherited env but NOT honored
-     * (shadow runs resolve host roots from the trusted home only — F1
+     * (managed runs resolve host roots from the trusted home only — F1
      * review fix). Empty in dry-run mode, where overrides are honored.
      */
     readonly ignoredHostRootEnvVars?: readonly string[];
@@ -144,67 +144,21 @@ export interface ServiceRunStatus {
   };
   readonly workspaces: WorkspaceDiscoveryResult['workspaces'];
   /**
-   * Phase 2 shadow section (optional, additive — v1 schema evolution):
-   * present only for shadow runs. `dryRun: false` on the same status
-   * document distinguishes the two modes. Carries per-workspace execution
-   * records ONLY — never Pain content, task payloads, or environment
-   * values (security contract above; worker environment reports carry
-   * variable NAMES, not values).
-   */
-  readonly shadow?: ShadowRunStatusSection;
-  /**
    * Phase 3 managed section (optional, additive — v1 schema evolution):
    * present only for managed runs (`pd service run-once --json`, the
    * scheduler entry). Carries per-workspace admission/executions for
    * `effectiveOwner=service_host` workspaces ONLY — the same security
-   * contract as the shadow section applies (no payloads, no env values).
+   * contract applies (no payloads, no env values).
    */
   readonly managed?: ManagedRunStatusSection;
   readonly nextAction: string;
 }
 
-/** Persisted per-execution record inside the shadow section (task §10). */
-export interface ShadowExecutionRecord {
-  /** The operator's requested --workspace argument (evidence, lexical form). */
-  readonly requestedDir: string;
-  /** Matched canonical discovery dir, or null when no authorized entry matched. */
-  readonly canonicalDir: string | null;
-  readonly hostKind: ShadowHostKind | null;
-  readonly admission: 'admitted' | 'refused';
-  readonly refusalReason?: string;
-  readonly refusalNextAction?: string;
-  /** §8.3/§10 workspace state — `process_started`/`cycle_completed`/business_progress stay strictly distinct in `execution`. */
-  readonly workspaceState: 'completed' | 'paused' | 'degraded' | 'failed' | 'unavailable' | 'waiting_for_host_binding';
-  /** Final carried-forward progress timestamp (this cycle or previous run; task §6). */
-  readonly lastProgressAt: string | null;
-  readonly lastProgressSource: 'task_state_change' | 'cycle_evidence' | 'previous_run' | null;
-  /** Full adapter contract result (subset-persisted fields only, no env values). */
-  readonly execution?: AdapterCycleResult;
-}
-
-export interface ShadowRunStatusSection {
-  readonly requestedWorkspaces: readonly string[];
-  readonly hostFilter?: ShadowHostKind;
-  readonly perWorkspaceTimeoutMs: number;
-  /**
-   * Health of the cross-run progress projection read at run start (F6):
-   * `missing` = no store yet; `corrupt`/`unreadable` degrade to "no previous
-   * progress" observably instead of silently.
-   */
-  readonly progressCarryVerdict: 'ok' | 'missing' | 'corrupt' | 'unreadable';
-  readonly executions: readonly ShadowExecutionRecord[];
-}
-
 /**
- * Phase 3 managed-run per-workspace record (task §4 admission matrix). A
- * workspace is either executed (service_host_owned + authorized + bound
- * adapter) or skipped with a structured reason — legacy workspaces keep
- * their legacy owner, transition states are never consumed.
- *
- * PRI-1282 Phase 4 (additive, still v1): `hostKind` widens to include
- * `openclaw` — a managed execution may now be driven by the OpenClaw worker
- * adapter after the workspace's §8.4 handover. Shadow records stay on the
- * narrow codex|workbuddy set.
+ * Managed-run per-workspace record. A workspace is either executed
+ * (service_host_owned + authorized + bound adapter) or skipped with a
+ * structured reason — un-provisioned residue and retired transition-state
+ * residue are never consumed.
  */
 export interface ManagedExecutionRecord {
   readonly canonicalDir: string;

@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as childProcess from 'child_process';
 import * as net from 'net';
 import * as path from 'path';
-import { checkEnvironment, detectWorkspace, getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway, parseNetstatPid } from '../src/utils/env.js';
+import { checkEnvironment, detectWorkspace, getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway, resolveOpenClawGatewayPort, stopOpenClawGateway, restartOpenClawGateway, parseNetstatPid } from '../src/utils/env.js';
 
 vi.mock('fs');
 vi.mock('os');
@@ -381,9 +381,18 @@ describe('environment detection utilities', () => {
   });
 
   describe('gateway service control (stopOpenClawGateway / restartOpenClawGateway)', () => {
-    it('stopOpenClawGateway returns ok:true and invokes "openclaw gateway stop --force"', async () => {
+    it('stopOpenClawGateway verifies the stopped effect and invokes "openclaw gateway stop --force"', async () => {
       mockExecFileSync.mockImplementation(() => '');
-      const res = await stopOpenClawGateway();
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (typeof address !== 'object' || address === null) throw new Error('listen failed');
+      const port = address.port;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port },
+        { processAlive: () => false, confirmTimeoutMs: 20 },
+      );
       expect(res.ok).toBe(true);
       expect(mockExecFileSync).toHaveBeenCalledTimes(1);
       expect(joinedCall(mockExecFileSync.mock.calls[0])).toContain('openclaw gateway stop');
@@ -554,15 +563,54 @@ describe('environment detection utilities', () => {
       expect(res.error).toContain('verification itself failed');
     });
 
-    it('never runs the effect check on the success path (no new wait on healthy hosts)', async () => {
+
+
+    it('ownership-transfer mode treats port-clear without a verified PID as unverifiable', async () => {
+      const gw = await openListener();
+      await gw.close();
+      stopCommandFails();
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port },
+        { sleep: noWait, processAlive: () => false, confirmTimeoutMs: 20, requireProcessExit: true },
+      );
+      expect(res.ok).toBe(false);
+      expect(res.reason).toBe('verification_unavailable');
+      expect(res.error).toContain('process exit could not be verified');
+      expect(mockExecFileSync.mock.calls.some((call) => joinedCall(call).includes('gateway stop'))).toBe(false);
+    });
+
+    it('ownership-transfer mode accepts only observed-process exit plus a clear listener', async () => {
+      const gw = await openListener();
+      await gw.close();
+      stopCommandFails();
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port, pid: 5150 },
+        { sleep: noWait, processAlive: () => false, confirmTimeoutMs: 20, requireProcessExit: true },
+      );
+      expect(res).toEqual({ ok: true });
+    });
+
+    it('a successful stop command is not ownership evidence until the observed gateway is verified stopped', async () => {
       const gw = await openListener();
       mockExecFileSync.mockImplementation(() => '');
+      try {
+        const running = await stopOpenClawGateway(
+          { isRunning: true, port: gw.port, pid: 4242 },
+          { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20 },
+        );
+        expect(running.ok).toBe(false);
+        expect(running.reason).toBe('gateway_still_running');
+      } finally {
+        await gw.close();
+      }
 
-      const res = await stopOpenClawGateway({ isRunning: true, port: gw.port, pid: 4242 });
-
-      expect(res).toEqual({ ok: true });
+      mockExecFileSync.mockClear();
+      const stopped = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port, pid: 4242 },
+        { sleep: noWait, processAlive: () => false, confirmTimeoutMs: 20 },
+      );
+      expect(stopped).toEqual({ ok: true });
       expect(mockExecFileSync).toHaveBeenCalledTimes(1);
-      await gw.close();
     });
   });
 
@@ -571,6 +619,161 @@ describe('environment detection utilities', () => {
       mockExistsSync.mockReturnValue(false);
       const status = await checkOpenClawGateway();
       expect(status.isRunning).toBe(false);
+      expect(status.observation).toBe('no_config');
+    });
+
+    it('classifies malformed gateway config as unverifiable instead of ordinary absence', async () => {
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(() => { throw new Error('EACCES'); });
+      const status = await checkOpenClawGateway();
+      expect(status).toMatchObject({ isRunning: false, observation: 'config_unreadable' });
+    });
+
+    it('classifies a configured but non-listening port separately from missing config', async () => {
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { port } }));
+      const status = await checkOpenClawGateway();
+      expect(status).toMatchObject({ isRunning: false, port, observation: 'port_not_listening' });
+    });
+
+    it('resolves the OpenClaw gateway port through host precedence, including the omitted-port default', () => {
+      expect(resolveOpenClawGatewayPort(undefined, {})).toBe(18789);
+      expect(resolveOpenClawGatewayPort(23456, {})).toBe(23456);
+      expect(resolveOpenClawGatewayPort(23456, { OPENCLAW_GATEWAY_PORT: '127.0.0.1:23457' })).toBe(23457);
+      expect(resolveOpenClawGatewayPort(23456, { OPENCLAW_PROFILE: 'dev' })).toBe(23456);
+      expect(resolveOpenClawGatewayPort(undefined, { OPENCLAW_PROFILE: 'dev' })).toBe(19001);
+      const named = resolveOpenClawGatewayPort(undefined, { OPENCLAW_PROFILE: 'qa' });
+      expect(named).toBeGreaterThanOrEqual(20000);
+      expect(named).toBeLessThan(60000);
+      expect(resolveOpenClawGatewayPort(70000, {})).toBeNull();
+    });
+
+    it('probes the effective port for a valid JSON5 config that omits gateway.port', async () => {
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      vi.stubEnv('OPENCLAW_GATEWAY_PORT', String(port));
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(`{
+        // OpenClaw JSON5 is legal host configuration.
+        gateway: { mode: 'local', },
+      }`);
+      try {
+        const running = await checkOpenClawGateway();
+        expect(running).toMatchObject({ isRunning: true, port, observation: 'listening' });
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        const stopped = await checkOpenClawGateway();
+        expect(stopped).toMatchObject({ isRunning: false, port, observation: 'port_not_listening' });
+      } finally {
+        vi.unstubAllEnvs();
+        if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it('probes an explicit gateway port when only the plugins branch uses $include', async () => {
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+        gateway: { port },
+        plugins: { $include: './plugins.json5' },
+      }));
+      const status = await checkOpenClawGateway();
+      expect(status).toMatchObject({ isRunning: false, port, observation: 'port_not_listening' });
+    });
+
+    it('uses a valid port environment override even when gateway config includes are unverifiable', async () => {
+      vi.stubEnv('OPENCLAW_GATEWAY_PORT', '23457');
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { $include: './ports.json' } }));
+      try {
+        const status = await checkOpenClawGateway();
+        expect(status).toMatchObject({ isRunning: false, port: 23457, observation: 'port_not_listening' });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('does not infer the default port when includes make the effective config unverified', async () => {
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { mode: 'local', $include: './ports.json' } }));
+      const status = await checkOpenClawGateway();
+      expect(status).toMatchObject({ isRunning: false, observation: 'port_not_configured' });
+    });
+
+    it('resolves a scalar gateway.port $include and probes that real port', async () => {
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(((filePath: unknown) => {
+        const text = String(filePath);
+        if (text.endsWith('port.json')) return `${port}\n`;
+        return JSON.stringify({ gateway: { mode: 'local', port: { $include: './port.json' } } });
+      }) as never);
+      try {
+        const running = await checkOpenClawGateway();
+        expect(running).toMatchObject({ isRunning: true, port, observation: 'listening' });
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        const stopped = await checkOpenClawGateway();
+        expect(stopped).toMatchObject({ isRunning: false, port, observation: 'port_not_listening' });
+      } finally {
+        if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it('keeps an unreadable scalar gateway.port include unverified instead of probing the default port', async () => {
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(((filePath: unknown) => {
+        const text = String(filePath);
+        if (text.endsWith('port.json')) throw new Error('EACCES');
+        return JSON.stringify({ gateway: { mode: 'local', port: { $include: './port.json' } } });
+      }) as never);
+      const status = await checkOpenClawGateway();
+      expect(status).toMatchObject({ isRunning: false, observation: 'port_not_configured' });
+    });
+
+    it('probes both the dev-injected port and the configured port before treating the Gateway as stopped', async () => {
+      const configProbe = net.createServer();
+      await new Promise<void>((resolve) => configProbe.listen(0, '127.0.0.1', resolve));
+      const configAddr = configProbe.address();
+      if (typeof configAddr !== 'object' || configAddr === null) throw new Error('listen failed');
+      const configPort = configAddr.port;
+      await new Promise<void>((resolve) => configProbe.close(() => resolve()));
+
+      const devServer = net.createServer();
+      await new Promise<void>((resolve, reject) => {
+        devServer.once('error', reject);
+        devServer.listen(19_001, '127.0.0.1', resolve);
+      });
+      vi.stubEnv('OPENCLAW_PROFILE', 'dev');
+      vi.stubEnv('OPENCLAW_GATEWAY_PORT', '');
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { mode: 'local', port: configPort } }));
+      try {
+        const running = await checkOpenClawGateway();
+        expect(running).toMatchObject({ isRunning: true, port: 19_001, observation: 'listening' });
+        await new Promise<void>((resolve) => devServer.close(() => resolve()));
+        const stopped = await checkOpenClawGateway();
+        expect(stopped).toMatchObject({ isRunning: false, port: 19_001, observation: 'port_not_listening' });
+      } finally {
+        vi.unstubAllEnvs();
+        if (devServer.listening) await new Promise<void>((resolve) => devServer.close(() => resolve()));
+      }
     });
 
     it('returns isRunning:true with port when a gateway is listening on the configured port', async () => {
@@ -696,7 +899,16 @@ describe('environment detection utilities', () => {
     it('routes gateway service commands through cmd.exe on win32', async () => {
       await loadWin32Env();
       win32ExecFileSync.mockImplementation(() => '');
-      const res = await win32Env.stopOpenClawGateway();
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (typeof address !== 'object' || address === null) throw new Error('listen failed');
+      const port = address.port;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      const res = await win32Env.stopOpenClawGateway(
+        { isRunning: true, port },
+        { processAlive: () => false, confirmTimeoutMs: 20 },
+      );
       expect(res.ok).toBe(true);
       expect(win32ExecFileSync).toHaveBeenCalledTimes(1);
       expect(joinedCall(win32ExecFileSync.mock.calls[0])).toContain('cmd.exe /c openclaw gateway stop');

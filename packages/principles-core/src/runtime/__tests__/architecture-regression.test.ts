@@ -255,6 +255,11 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
 
   // ── Do Not Move — intrinsically plugin-specific ─────────────────────────
   'event-log.ts',
+  // PRI-1278: plugin I/O boundary persisting the OpenClaw host tool
+  // declaration (extracted from the deleted Gateway auto-consumer service —
+  // the declaration is a host fact the Gateway refreshes on every start,
+  // consumed by the Service-Host-driven openclaw worker).
+  'openclaw-tool-declaration.ts',
   'schema/schema-definitions.ts',
   'path-resolver.ts',
   'init.ts',
@@ -466,7 +471,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (97 files)', async () => {
+  it('known baseline count is self-consistent (100 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -554,7 +559,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PainToPrincipleService factory shared by the pain hook and the /pd pain
     // command (plugin I/O boundary binding WorkspaceContext + plugin config
     // loader to the shared host collaborator assembly).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(99);
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(100);
   });
 });
 

@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "reason": "missing_linear_api_key",
+  "nextAction": "No Linear API key found. Set LINEAR_API_KEY, or write the token to ~/.linear_api_key, or add an export line to ~/.bashrc."
+}

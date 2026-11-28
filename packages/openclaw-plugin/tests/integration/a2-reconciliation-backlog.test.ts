@@ -1,7 +1,11 @@
 /**
  * A2 (最终复核) — continuous backlog 下 reconciliation 不被饿死。
  *
- * 真实调用 production runConsumerCycle (packages/openclaw-plugin):
+ * PRI-1278: the Gateway auto-consumer is deleted, so the production path
+ * driving internalization cycles in an OpenClaw workspace is now the
+ * Service-Host-invoked worker — this suite drives the REAL
+ * runOpenClawWorkspaceWorkerCycle (ownership seam injected as
+ * service_host_owned, exactly what the Service Host dispatch sees):
  * - 持续存在 ready dreamer 任务 (每 cycle 消费一个,LLM endpoint 不可达 →
  *   retry_wait,backlog 由预先播种的 N 个任务维持);
  * - orphan evaluator (succeeded+approved, commit 从未执行) 位于 ASC 第 9 位;
@@ -18,8 +22,18 @@ import {
   createPITaskDiagnosticJson,
   mergePITaskMetadata,
 } from '@principles/core/runtime';
-import { runConsumerCycle } from '../../src/service/internalization-auto-consumer-service.js';
+import { runOpenClawWorkspaceWorkerCycle } from '../../src/openclaw-worker.js';
+import type { WorkspaceBackgroundOwnership } from '@principles/install-layout';
 import type { TaskRecord } from '@principles/core/runtime';
+
+// The worker's ownership gate admits only service_host_owned; the seam pins
+// exactly what a Service-Host-dispatched cycle resolves.
+const SERVICE_HOST_OWNED: WorkspaceBackgroundOwnership = {
+  status: 'service_host_owned',
+  generation: 1,
+  record: { state: 'service_host_owned', effectiveOwner: 'service_host', generation: 1, operationId: null, previousOwner: null, targetOwner: null, updatedAt: '2026-11-27T00:00:00.000Z' },
+};
+const serviceHostOwned = (): WorkspaceBackgroundOwnership => SERVICE_HOST_OWNED;
 
 process.env.PD_TEST_BACKLOG_KEY = 'dummy';
 
@@ -131,7 +145,7 @@ async function seedBacklogDreamer(id: string): Promise<void> {
   await stateManager.createTask({ taskId: id, taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(id) });
 }
 
-describe('A2 — real runConsumerCycle: backlog does not starve reconciliation', () => {
+describe('A2 — real worker-driven cycles: backlog does not starve reconciliation', () => {
   it('持续 ready 任务下 orphan 在 bounded cycles 内恢复', { timeout: 180_000 }, async () => {
     // 8 materialized 背景 + orphan (ASC 第 9) + 6 个 backlog dreamer
     for (let i = 0; i < 8; i++) await seedMaterializedRollout(`mat-a2-${i}`);
@@ -144,7 +158,7 @@ describe('A2 — real runConsumerCycle: backlog does not starve reconciliation',
     // 连续运行真实 production cycles — backlog 保证每 cycle 都有 ready 任务
     let recoveredCycle = -1;
     for (let cycle = 1; cycle <= 5 && recoveredCycle < 0; cycle++) {
-      await runConsumerCycle(workspaceDir, logger as never);
+      await runOpenClawWorkspaceWorkerCycle({ workspaceDir, logger: logger as never, ownership: serviceHostOwned });
       if (await stateManager.getTask(successorId)) recoveredCycle = cycle;
     }
 
@@ -157,7 +171,7 @@ describe('A2 — real runConsumerCycle: backlog does not starve reconciliation',
     expect(['retry_wait', 'pending', 'leased']).toContain(dreamer?.status ?? '');
   });
 
-  it('A2-idle: 队列全空 (readyTaskCount=0) 时 orphan 仍经真实 runConsumerCycle 恢复', { timeout: 120_000 }, async () => {
+  it('A2-idle: 队列全空 (readyTaskCount=0) 时 orphan 仍经真实 worker cycle 恢复', { timeout: 120_000 }, async () => {
     // 纯 orphan 场景: succeeded 后 crash, 无任何 pending 任务 → 快照
     // readyTaskCount=0 → shouldConsume=false 早退。reconciliation budget
     // (finally) 必须仍然执行, 否则经典 crash-orphan 永远无法恢复。
@@ -169,7 +183,7 @@ describe('A2 — real runConsumerCycle: backlog does not starve reconciliation',
 
     let recoveredCycle = -1;
     for (let cycle = 1; cycle <= 4 && recoveredCycle < 0; cycle++) {
-      await runConsumerCycle(workspaceDir, logger as never);
+      await runOpenClawWorkspaceWorkerCycle({ workspaceDir, logger: logger as never, ownership: serviceHostOwned });
       if (await stateManager.getTask(successorId)) recoveredCycle = cycle;
     }
 

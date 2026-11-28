@@ -8,9 +8,12 @@
  * (SPEC workbuddy-host-adapter §1 Excluded: no transcript reads).
  *
  * SPEC §15 worker mode, evaluated WITHOUT executing anything (no lease, no
- * LLM). `manual_action_required` means no Companion-registered worker serves
- * this governance workspace — manual `pd diagnose` / `pd runtime
- * internalization run-once` is the recovery route.
+ * LLM). `manual_action_required` means this governance workspace is not
+ * registered in the canonical install manifest, so the PD Service Host —
+ * the only background runtime, triggered by the OS scheduler — never
+ * discovers it and no automatic worker cycles run for it. Manual
+ * `pd diagnose` / `pd runtime internalization run-once` is the recovery
+ * route.
  */
 
 import * as fs from 'node:fs';
@@ -61,7 +64,7 @@ export function computeWorkbuddyWorkerStatusMode(input: {
     return {
       mode: 'manual_action_required',
       reason: 'workspace_not_in_install_manifest',
-      nextAction: `No Companion worker is registered for this governance workspace. Manual path: pd diagnose --workspace "${workspaceDir}", then pd runtime internalization run-once.`,
+      nextAction: `This governance workspace is not registered in the canonical install manifest, so the PD Service Host does not manage automatic worker cycles for it. Repair the registration with the PD installer (npx create-principles-disciple). Manual path: pd diagnose --workspace "${workspaceDir}", then pd runtime internalization run-once.`,
     };
   }
   return { mode: 'ready' };

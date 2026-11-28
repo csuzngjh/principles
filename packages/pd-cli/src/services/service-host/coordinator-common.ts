@@ -1,11 +1,10 @@
 /**
  * Shared coordinator steps (SPEC-PD-SERVICE-HOST-001 §8.2 steps 3–5, TD §5).
  *
- * The dry-run coordinator (run-once.ts, Phase 1) and the shadow coordinator
- * (shadow-run.ts, Phase 2) execute the SAME prefix pipeline: manifest read
- * with the five fail-closed verdicts, per-host root reporting, and manifest
- * section projection. Those steps live here once so the two flows can never
- * drift apart; each flow keeps its own execution phase.
+ * The dry-run and managed coordinators execute the SAME trusted prefix:
+ * manifest read with the fail-closed verdicts, per-host root reporting, and
+ * manifest section projection. Those steps live here once so the two flows
+ * can never drift apart; each flow keeps its own execution phase.
  */
 import * as fs from 'node:fs';
 import {

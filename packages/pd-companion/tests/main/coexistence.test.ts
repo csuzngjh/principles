@@ -5,7 +5,7 @@
  *
  *   - the Console has NO credential plumbing left (no token env probe, no
  *     encrypted token, no token IPC, no auth-mode mismatch repair);
- *   - workspace-worker supervision still coexists in the same main.ts.
+ *   - Console supervision is the only child-process responsibility left.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -17,7 +17,7 @@ function src(): string {
   return fs.readFileSync(MAIN_SRC, 'utf8');
 }
 
-describe('Companion main.ts: credential-free Console + workspace workers', () => {
+describe('Companion main.ts: credential-free Console control plane', () => {
   it('has removed every Console credential path', () => {
     const source = src();
     for (const gone of [
@@ -33,12 +33,11 @@ describe('Companion main.ts: credential-free Console + workspace workers', () =>
     }
   });
 
-  it('still wires workspace-worker supervision and its degraded projection', () => {
+  it('keeps Console supervision while worker supervision is absent', () => {
     const source = src();
-    expect(source).toContain('workspaceWorkers');
-    expect(source).toContain('buildDegradedWorkspacesTrayView([');
-    expect(source).toContain("event === 'workspace_worker_degraded'");
-    expect(source).toContain("event === 'workspace_worker_stopped'");
-    expect(source).toContain('notifyWorkspaceDegraded(workspace)');
+    expect(source).toContain('function spawnCli()');
+    expect(source).toContain("PD_INVOCATION_SOURCE: 'companion'");
+    expect(source).not.toContain('WorkspaceWorkerRegistry');
+    expect(source).not.toContain('workspace_worker_');
   });
 });

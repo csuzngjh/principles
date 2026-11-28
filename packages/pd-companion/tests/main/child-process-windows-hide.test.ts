@@ -4,8 +4,7 @@
  * Companion is a GUI-subsystem process (PE subsystem 2, read off the installed
  * 0.1.6 build on 2026-11-23): it has no console, so each console program it
  * starts without `windowsHide: true` gets a NEW, visible terminal window. It
- * starts `pd console open --json` and one workspace worker per workspace per
- * host — every one of them a node.exe.
+ * starts `pd console open --json` through node.exe.
  *
  * main.ts is the Electron main process and cannot be driven inside vitest (see
  * release-watch-wiring.test.ts), so this is the same source guard the installer
@@ -29,8 +28,8 @@ describe('the Companion hides every child console window', () => {
     expect(scanned.findings.map((finding) => `${finding.file}:${finding.line} ${finding.fn} — ${finding.verdict}: ${finding.detail}`)).toEqual([]);
   });
 
-  it('the scan reached both launches in main.ts (the guard is not vacuous)', () => {
-    expect(scanned.files).toEqual(expect.arrayContaining(['main/main.ts']));
-    expect(scanned.callSites).toBeGreaterThanOrEqual(2);
+  it('the scan reached the Console launch in main.ts (the guard is not vacuous)', () => {
+    expect(scanned.files).toEqual(['main/main.ts']);
+    expect(scanned.callSites).toBe(1);
   });
 });

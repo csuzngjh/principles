@@ -10,7 +10,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  mergePendingProvisioningTargets,
   readHostWorkspaceBinding,
   resolveExistingHostWorkspaceForRefresh,
   resolveProvisioningTargets,
@@ -22,6 +21,8 @@ let previousHome: string | undefined;
 let previousUserProfile: string | undefined;
 let previousWorkbuddy: string | undefined;
 let previousExperimentRoot: string | undefined;
+let previousPdWorkspaceDir: string | undefined;
+let previousOpenClawWorkspace: string | undefined;
 
 function tempHome(): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'pd-host-refresh-'));
@@ -34,7 +35,11 @@ beforeEach(() => {
   previousUserProfile = process.env.USERPROFILE;
   previousWorkbuddy = process.env.WORKBUDDY_CONFIG_DIR;
   previousExperimentRoot = process.env.PD_EXPERIMENT_ROOT;
+  previousPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
+  previousOpenClawWorkspace = process.env.OPENCLAW_WORKSPACE;
   delete process.env.PD_EXPERIMENT_ROOT;
+  delete process.env.PD_WORKSPACE_DIR;
+  delete process.env.OPENCLAW_WORKSPACE;
   delete process.env.WORKBUDDY_CONFIG_DIR;
   const home = tempHome();
   process.env.HOME = home;
@@ -43,7 +48,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-  const restore = (key: 'HOME' | 'USERPROFILE' | 'WORKBUDDY_CONFIG_DIR' | 'PD_EXPERIMENT_ROOT', value: string | undefined): void => {
+  const restore = (key: 'HOME' | 'USERPROFILE' | 'WORKBUDDY_CONFIG_DIR' | 'PD_EXPERIMENT_ROOT' | 'PD_WORKSPACE_DIR' | 'OPENCLAW_WORKSPACE', value: string | undefined): void => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   };
@@ -51,6 +56,8 @@ afterEach(() => {
   restore('USERPROFILE', previousUserProfile);
   restore('WORKBUDDY_CONFIG_DIR', previousWorkbuddy);
   restore('PD_EXPERIMENT_ROOT', previousExperimentRoot);
+  restore('PD_WORKSPACE_DIR', previousPdWorkspaceDir);
+  restore('OPENCLAW_WORKSPACE', previousOpenClawWorkspace);
 });
 
 describe('resolveExistingHostWorkspaceForRefresh', () => {
@@ -139,32 +146,6 @@ describe('resolveExistingHostWorkspaceForRefresh', () => {
   });
 });
 
-describe('mergePendingProvisioningTargets — every deferred workspace is resumed', () => {
-  const openclawWs = path.resolve('/tmp/openclaw-ws');
-  const codexWs = path.resolve('/tmp/codex-ws');
-
-  it('appends pending workspaces this run did not target (plain --enable-service-host)', () => {
-    expect(mergePendingProvisioningTargets(
-      [{ host: 'none', workspaceDir: path.resolve('/tmp/neutral') }],
-      [
-        { workspaceDir: openclawWs, host: 'openclaw', recordedAt: '2026-11-24T00:00:00.000Z' },
-        { workspaceDir: codexWs, host: 'codex', recordedAt: '2026-11-24T00:00:00.000Z' },
-      ],
-    )).toEqual([
-      { host: 'none', workspaceDir: path.resolve('/tmp/neutral') },
-      { host: 'openclaw', workspaceDir: openclawWs },
-      { host: 'codex', workspaceDir: codexWs },
-    ]);
-  });
-
-  it('does not duplicate a workspace this run already targeted', () => {
-    expect(mergePendingProvisioningTargets(
-      [{ host: 'openclaw', workspaceDir: openclawWs }],
-      [{ workspaceDir: openclawWs, host: 'openclaw', recordedAt: '2026-11-24T00:00:00.000Z' }],
-    )).toEqual([{ host: 'openclaw', workspaceDir: openclawWs }]);
-  });
-});
-
 describe('resolveResumeProvisioningHost — the binding that exists NOW', () => {
   it('probes OpenClaw when the recorded declaration binds this workspace', () => {
     const home = process.env.HOME as string;
@@ -173,6 +154,66 @@ describe('resolveResumeProvisioningHost — the binding that exists NOW', () => 
     mkdirSync(path.join(home, '.openclaw'), { recursive: true });
     writeFileSync(path.join(home, '.openclaw', 'principles-disciple.json'), JSON.stringify({ workspace: ws }), 'utf8');
     expect(resolveResumeProvisioningHost('none', ws)).toEqual({ ok: true, host: 'openclaw' });
+  });
+
+  it('does not treat installer-inherited workspace environment variables as OpenClaw binding evidence', () => {
+    const home = process.env.HOME as string;
+    const codexWs = path.join(home, 'codex-only-ws');
+    mkdirSync(codexWs, { recursive: true });
+    const dataRoot = path.join(home, '.codex', 'plugins', 'data', 'principles-disciple-principles');
+    mkdirSync(dataRoot, { recursive: true });
+    writeFileSync(path.join(dataRoot, 'mcp-binding.json'), JSON.stringify({ host: 'codex', workspaceDir: codexWs }), 'utf8');
+    process.env.PD_WORKSPACE_DIR = codexWs;
+    process.env.OPENCLAW_WORKSPACE = codexWs;
+    expect(resolveResumeProvisioningHost('none', codexWs)).toEqual({ ok: true, host: 'codex' });
+  });
+
+  it('honours primary-declaration precedence when a stale secondary names another workspace', () => {
+    const home = process.env.HOME as string;
+    const primaryWs = path.join(home, 'resume-primary-ws');
+    const staleWs = path.join(home, 'resume-stale-secondary-ws');
+    mkdirSync(primaryWs, { recursive: true });
+    mkdirSync(staleWs, { recursive: true });
+    mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+    mkdirSync(path.join(home, '.principles'), { recursive: true });
+    writeFileSync(path.join(home, '.openclaw', 'principles-disciple.json'), JSON.stringify({ workspace: primaryWs }), 'utf8');
+    writeFileSync(path.join(home, '.principles', 'principles-disciple.json'), JSON.stringify({ workspace: staleWs }), 'utf8');
+    expect(resolveResumeProvisioningHost('none', primaryWs)).toEqual({ ok: true, host: 'openclaw' });
+  });
+
+  it('accepts an environment-only OpenClaw declaration when it matches the OpenClaw-written payload binding', () => {
+    const home = process.env.HOME as string;
+    const ws = path.join(home, 'env-only-openclaw-ws');
+    mkdirSync(ws, { recursive: true });
+    const extensionDir = path.join(home, '.openclaw', 'extensions', 'principles-disciple');
+    mkdirSync(extensionDir, { recursive: true });
+    const runtimeDir = path.join(home, '.pd', 'runtime');
+    writeFileSync(path.join(extensionDir, 'mcp-binding.json'), JSON.stringify({
+      schemaVersion: 'pd.mcp-binding.v1',
+      host: 'openclaw',
+      workspaceDir: ws,
+      runtimeDir,
+      serverEntry: path.join(runtimeDir, 'pd-mcp-server', 'dist', 'index.js'),
+      versions: { mcpServer: '0.0.0' },
+    }), 'utf8');
+    process.env.OPENCLAW_WORKSPACE = ws;
+
+    expect(readHostWorkspaceBinding('openclaw')).toEqual({
+      state: 'bound',
+      workspaceDir: path.resolve(ws),
+      source: 'openclaw_mcp_binding',
+    });
+  });
+
+  it('does not treat an orphaned OpenClaw payload binding as active workspace evidence', () => {
+    const home = process.env.HOME as string;
+    const ws = path.join(home, 'orphaned-payload-ws');
+    mkdirSync(ws, { recursive: true });
+    const extensionDir = path.join(home, '.openclaw', 'extensions', 'principles-disciple');
+    mkdirSync(extensionDir, { recursive: true });
+    writeFileSync(path.join(extensionDir, 'mcp-binding.json'), JSON.stringify({ host: 'openclaw', workspaceDir: ws }), 'utf8');
+    const result = resolveResumeProvisioningHost('none', ws);
+    expect(result.ok).toBe(false);
   });
 
   it('follows the actual Codex binding even when the pending record named OpenClaw', () => {
@@ -185,11 +226,14 @@ describe('resolveResumeProvisioningHost — the binding that exists NOW', () => 
     expect(resolveResumeProvisioningHost('openclaw', ws)).toEqual({ ok: true, host: 'codex' });
   });
 
-  it('returns none ONLY when every binding is verifiably absent', () => {
+  it('returns none only for a none marker; a concrete pending host remains fail-closed', () => {
     const home = process.env.HOME as string;
     const ws = path.join(home, 'resume-unbound-ws');
     mkdirSync(ws, { recursive: true });
-    expect(resolveResumeProvisioningHost('openclaw', ws)).toEqual({ ok: true, host: 'none' });
+    const result = resolveResumeProvisioningHost('openclaw', ws);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.nextAction).toContain('not proof that the recorded consumer is absent');
+    expect(resolveResumeProvisioningHost('none', ws)).toEqual({ ok: true, host: 'none' });
   });
 
   it('refuses when a binding exists but cannot be verified and nothing else is bound', () => {

@@ -5,8 +5,9 @@
  * fail-closed on an unreadable marker), the real bounded cycle against a real
  * workspace (empty cycle = truthful `ready`, never fabricated progress), the
  * no-consume readiness self-check, the liveness evidence file, and the
- * PARITY guard: the ports this worker hands to the shared consumer cycle
- * must equal the Gateway AutoConsumer's ports on every OpenClaw host fact.
+ * host-facts pin: PRI-1278 deleted the Gateway auto-consumer, so this worker
+ * is the ONLY driver of the shared consumer cycle for OpenClaw workspaces
+ * and its ports are pinned directly against the package constants.
  *
  * Ownership reads use the cycle's injection seam (`options.ownership`) —
  * vi.mock cannot intercept a module's INTERNAL calls, and the real manifest
@@ -23,8 +24,9 @@ import {
   readOpenClawWorkerLiveness,
   runOpenClawWorkspaceWorkerCycle,
 } from '../../src/openclaw-worker.js';
-import { runConsumerCycle } from '../../src/service/internalization-auto-consumer-service.js';
 import { createDiagnosticianTaskId, createRuntimeStateHandle, getDefaultPdConfig } from '@principles/core/runtime';
+import { AGENT_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, READ_ONLY_TOOL_NAMES } from '../../src/constants/tools.js';
+import { OPENCLAW_TOOL_SEMANTICS } from '../../src/constants/tool-semantics.js';
 import { SystemLogger } from '../../src/core/system-logger.js';
 import { recordConversationIngestionConsent, runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
 import type { WorkspaceBackgroundOwnership } from '@principles/install-layout';
@@ -279,39 +281,31 @@ describe('computeOpenClawWorkerReadiness (no-consume self-check)', () => {
   });
 });
 
-describe('parity with the Gateway AutoConsumer ports (instruction §5.3)', () => {
-  it('hands the shared cycle the SAME OpenClaw host facts the Gateway service does', async () => {
+describe('worker ports pin the OpenClaw host facts (PRI-1278 sole-driver guard)', () => {
+  // PRI-1278: the Gateway auto-consumer is deleted, so the worker is the ONLY
+  // driver of the shared consumer cycle for OpenClaw workspaces. The old
+  // worker-vs-gateway parity comparison is replaced by a direct pin against
+  // the package constants — the single source of the host facts.
+  it('hands the shared cycle the OpenClaw catalog, semantics, hostKinds and honest attribution', async () => {
     const captured: InternalizationConsumerCyclePorts[] = [];
     const real = vi.mocked(runInternalizationConsumerCycle);
     real.mockImplementationOnce(async (_dir: string, ports: InternalizationConsumerCyclePorts) => {
       captured.push(ports);
-      return { ran: false, skipReason: 'parity-capture' } as never;
+      return { ran: false, skipReason: 'ports-capture' } as never;
     });
-    real.mockImplementationOnce(async (_dir: string, ports: InternalizationConsumerCyclePorts) => {
-      captured.push(ports);
-      return { ran: false, skipReason: 'parity-capture' } as never;
+    await runOpenClawWorkspaceWorkerCycle({ workspaceDir, logger, ownership: ownership(SERVICE_HOST_OWNED) });
+    expect(captured).toHaveLength(1);
+    const [workerPorts] = captured;
+    expect(workerPorts.hostToolCatalog).toEqual({
+      readOnlyTools: READ_ONLY_TOOL_NAMES,
+      writeTools: [...LOW_RISK_WRITE_TOOL_NAMES, ...HIGH_RISK_TOOL_NAMES, ...AGENT_TOOL_NAMES],
     });
-    const gatewayDir = path.join(path.dirname(workspaceDir), `${path.basename(workspaceDir)}-gateway-parity`);
-    fs.mkdirSync(path.join(gatewayDir, '.pd'), { recursive: true });
-    fs.writeFileSync(path.join(gatewayDir, '.pd', 'config.yaml'), fs.readFileSync(path.join(workspaceDir, '.pd', 'config.yaml')));
-    try {
-      await runConsumerCycle(gatewayDir, logger);
-      await runOpenClawWorkspaceWorkerCycle({ workspaceDir, logger, ownership: ownership(SERVICE_HOST_OWNED) });
-    } finally {
-      fs.rmSync(gatewayDir, { recursive: true, force: true });
-    }
-    expect(captured).toHaveLength(2);
-    const [gatewayPorts, workerPorts] = captured;
-    // Same host facts (the ONLY intentional difference is attribution:
-    // owner/logLabel — the worker must identify itself honestly).
-    expect(workerPorts.hostToolCatalog).toEqual(gatewayPorts.hostToolCatalog);
-    expect(workerPorts.toolSemantics).toBe(gatewayPorts.toolSemantics);
-    expect(workerPorts.hostKinds).toEqual(gatewayPorts.hostKinds);
+    expect(workerPorts.toolSemantics).toBe(OPENCLAW_TOOL_SEMANTICS);
+    expect(workerPorts.hostKinds).toEqual(['openclaw']);
     expect(workerPorts.behaviorEvidence).toBeDefined();
     expect(workerPorts.owner).toBe('service-host-worker');
-    expect(gatewayPorts.owner).toBe('auto-consumer');
-    // Both event sinks are the SystemLogger module (identical stream across
-    // the handover): invoking the worker's sink lands in SystemLogger.log.
+    // The event sink is the SystemLogger module: invoking the worker's sink
+    // lands in SystemLogger.log.
     expect(typeof workerPorts.emitEvent).toBe('function');
     workerPorts.emitEvent?.('TEST_PARITY_EVENT', '{}');
     expect(SystemLogger.log).toHaveBeenCalledWith(workspaceDir, 'TEST_PARITY_EVENT', '{}');

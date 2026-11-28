@@ -118,11 +118,11 @@ export interface ResolveInstallIdentityOptions {
    * `<home>/.openclaw` / `<home>/.codex` / `<home>/.workbuddy` defaults),
    * ignoring inherited `OPENCLAW_STATE_DIR` / `OPENCLAW_HOME` /
    * `CODEX_HOME` / `WORKBUDDY_CONFIG_DIR` overrides (recorded as
-   * `ignoredHostRootEnvVars`). The Phase 2 shadow coordinator sets this: a
-   * real cycle must never be discovered from — nor pinned to — an
-   * experiment/custom root an inherited env happened to name (TD §5.2). The
-   * Phase 1 dry-run keeps the shared production precedence (env honored for
-   * discovery, P1-2) because it starts nothing.
+   * `ignoredHostRootEnvVars`). The managed coordinator sets this: a real
+   * cycle must never be discovered from — nor pinned to — an experiment or
+   * custom root an inherited env happened to name (TD §5.2). The dry-run
+   * keeps the shared production precedence (env honored for discovery)
+   * because it starts nothing.
    */
   readonly canonicalHostRootsOnly?: boolean;
 }

@@ -22,9 +22,10 @@
  * scheduler state — and no Codex flag, path or transcript semantics are
  * borrowed (SPEC §5: 不借用 Codex flag/日志伪装归因).
  *
- * Correctness under concurrent consumers (Companion-spawned `pd workbuddy
- * worker` + manual `pd runtime internalization run-once`) is owned by the
- * durable Runtime task lease — never by process-local state. The
+ * Correctness under concurrent consumers (Service-Host-spawned bounded
+ * `pd workbuddy worker --once` + manual `pd runtime internalization
+ * run-once`) is owned by the durable Runtime task lease — never by
+ * process-local state. The
  * governance workspace is the single canonical directory
  * (`~/.workbuddy/pd-workspace`), so two projects never double-schedule:
  * they share one workspace and the lease serialises consumption.
@@ -110,7 +111,12 @@ export interface WorkbuddyWorkerCycleOptions {
   readonly stage2AggregateBudgetMs?: number;
 }
 
-const WORKER_OWNER = 'companion-worker';
+// PRI-1278 Phase 5 (Companion-runtime removal): the lease/consumer owner
+// label for NEW writes is the Service Host worker identity — the PD Service
+// Host is the only background runtime and spawns these bounded worker cycles.
+// Historical lease records keep the retired 'companion-worker' string; they
+// are durable facts and are deliberately NOT migrated.
+const WORKER_OWNER = 'service-host-worker';
 const DEFAULT_DIAG_CANDIDATE_LIMIT = 5;
 
 // ── Cycle liveness (Phase 2, SPEC §11 / TD §2.3: WorkBuddy had NO liveness
@@ -133,10 +139,17 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 /**
  * WHO drove this cycle — same attribution contract as the Codex worker
  * (PRI-1264 + Phase 2 `service_host` driver identity, TD §5.2).
+ *
+ * PRI-1278 Phase 5 (Companion-runtime removal): the companion worker driver
+ * is retired — there is no Companion runtime left that could legitimately
+ * produce it. A process still self-declaring `PD_INVOCATION_SOURCE=companion`
+ * (a legacy env leftover) is not authoritative: no resident supervisor backs
+ * it, so it is attributed as what it factually is — manual. Historical
+ * liveness records already persisted with `lastCycleDriver: 'companion'`
+ * stay readable as-is; they are durable facts and are never rewritten.
  */
-export function workbuddyWorkerCycleDriver(): 'companion' | 'service_host' | 'manual' {
+export function workbuddyWorkerCycleDriver(): 'service_host' | 'manual' {
   const source = process.env.PD_INVOCATION_SOURCE;
-  if (source === 'companion') return 'companion';
   if (source === 'service_host') return 'service_host';
   return 'manual';
 }
@@ -145,9 +158,9 @@ export function workbuddyWorkerCycleDriver(): 'companion' | 'service_host' | 'ma
  * F13 (TD §5.2): the coordinator passes a unique invocation id; when
  * present it lands in the liveness record so the shared per-workspace file
  * can be correlated back to the exact Service Host invocation.
- * R5 review fix: a manual/companion cycle carries NO invocation id, so the
- * patch must CLEAR the field — otherwise a completed manual run would keep
- * masquerading under the previous shadow run's id.
+ * R5 review fix: a manual (non-Service-Host) cycle carries NO invocation
+ * id, so the patch must CLEAR the field — otherwise a completed manual run
+ * would keep masquerading under the previous shadow run's id.
  */
 function invocationIdLivenessPatch(): Record<string, unknown> {
   const invocationId = process.env.PD_INVOCATION_ID;

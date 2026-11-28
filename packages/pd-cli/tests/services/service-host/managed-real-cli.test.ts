@@ -1,15 +1,11 @@
 /**
- * REAL-CLI integration (task §12): the shadow adapters driving the REAL
+ * REAL-CLI integration: the managed Service Host adapters drive the REAL
  * built pd-cli `codex|workbuddy worker --once --json --workspace` entry in
- * a fully sandboxed install (identity, host roots and CLI-home all inside a
- * temp home; the allowlist env pins HOME/USERPROFILE so the child can never
- * resolve outside the sandbox). Covers:
- *
- *  T11  Codex + WorkBuddy real `--once` cycles through the adapter;
- *  T12  PD_INVOCATION_SOURCE=service_host → liveness lastCycleDriver;
- *  T13  two CONCURRENT real cycles on ONE seeded workspace — the existing
- *       Durable Lease converges double-acquisition (same task executed at
- *       most once; the loser reports lease contention, never corruption).
+ * a fully sandboxed service_host_owned install (identity, host roots and
+ * CLI-home all inside a temp home; the allowlist env pins HOME/USERPROFILE
+ * so the child can never resolve outside the sandbox). Covers real cycles,
+ * service_host liveness attribution, workspace mutex convergence for
+ * concurrent bounded entries, cancellation, and lock release.
  *
  * The CLI entry points at THIS worktree's built dist via the test-only
  * resolveCliEntry probe; PRODUCTION always resolves the active-release
@@ -22,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { createRuntimeStateHandle, getDefaultPdConfig } from '@principles/core/runtime';
 import Database from 'better-sqlite3';
-import { runServiceShadowOnce } from '../../../src/services/service-host/shadow-run.js';
+import { runServiceManagedOnce } from '../../../src/services/service-host/managed-run.js';
 import { createCodexWorkerAdapter } from '../../../src/services/service-host/worker-adapter-codex.js';
 import { serviceRunStatusPath } from '../../../src/services/service-host/status/service-run-status.js';
 
@@ -45,7 +41,16 @@ function sandboxInstall(home: string, workspaces: string[]): void {
   mkdirSync(pdDir, { recursive: true });
   const manifestFile = path.join(pdDir, 'install.json');
   const activeFile = path.join(pdDir, 'active.json');
-  writeFileSync(manifestFile, JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['codex', 'workbuddy'], workspaces }), 'utf8');
+  const backgroundExecutions = Object.fromEntries(workspaces.map((workspaceDir) => [workspaceDir, {
+    state: 'service_host_owned',
+    effectiveOwner: 'service_host',
+    generation: 1,
+    operationId: null,
+    previousOwner: null,
+    targetOwner: null,
+    updatedAt: '2026-11-20T00:00:00.000Z',
+  }]));
+  writeFileSync(manifestFile, JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['codex', 'workbuddy'], workspaces, backgroundExecutions }), 'utf8');
   writeFileSync(activeFile, JSON.stringify({
     schemaVersion: 1, generation: 5, releaseId: 'bundled-9.9.9-real', releaseMetadataDigest: 'a'.repeat(64),
     previousReleaseId: null, transactionId: 'txn-real-1', productVersion: '9.9.9',
@@ -168,9 +173,8 @@ describe.skipIf(!hasDist)('real CLI cycles through the shadow adapters', () => {
     const home = tempHome();
     const ws = await workspaceWithConfig(home, 'real-codex-ws', 'host.codex');
     sandboxInstall(home, [ws]);
-    const result = await runServiceShadowOnce({
-      workspaces: [ws],
-      hostFilter: 'codex',
+    const result = await runServiceManagedOnce({
+      triggerSource: 'manual',
       trustedHomeDir: home,
       timeoutMs: 120_000,
       probes: cliEntryProbe,
@@ -178,7 +182,7 @@ describe.skipIf(!hasDist)('real CLI cycles through the shadow adapters', () => {
     if (!result.ok || result.outcome !== 'completed') {
       throw new Error(`expected completed, got: ${JSON.stringify(result).slice(0, 600)}`);
     }
-    expect(result.executions[0]?.admission).toBe('admitted');
+    expect(result.executions[0]?.admission).toBe('executed');
     const execution = result.executions[0]?.execution;
     expect(execution).toBeDefined();
     // The REAL CLI produced the result — no injected spawn.
@@ -194,20 +198,19 @@ describe.skipIf(!hasDist)('real CLI cycles through the shadow adapters', () => {
     // closes on the REAL CLI path.
     expect(liveness.lastInvocationId).toBe(execution?.invocationId);
     expect(execution?.health.lastInvocationId).toBe(execution?.invocationId);
-    // The status file persisted the shadow section.
+    // The status file persisted the managed section.
     const statusFile = serviceRunStatusPath(path.join(home, '.pd'));
-    const persisted = JSON.parse(readFileSync(statusFile, 'utf8')) as { dryRun: boolean; shadow?: unknown };
+    const persisted = JSON.parse(readFileSync(statusFile, 'utf8')) as { dryRun: boolean; managed?: unknown };
     expect(persisted.dryRun).toBe(false);
-    expect(persisted.shadow).toBeDefined();
+    expect(persisted.managed).toBeDefined();
   }, 180_000);
 
   it('T11b+T12 WorkBuddy: a real --once cycle completes and writes the NEW workbuddy liveness record', async () => {
     const home = tempHome();
     const ws = await workspaceWithConfig(home, 'real-wb-ws', 'host.workbuddy');
     sandboxInstall(home, [ws]);
-    const result = await runServiceShadowOnce({
-      workspaces: [ws],
-      hostFilter: 'workbuddy',
+    const result = await runServiceManagedOnce({
+      triggerSource: 'manual',
       trustedHomeDir: home,
       timeoutMs: 120_000,
       probes: cliEntryProbe,
@@ -215,7 +218,7 @@ describe.skipIf(!hasDist)('real CLI cycles through the shadow adapters', () => {
     if (!result.ok || result.outcome !== 'completed') {
       throw new Error(`expected completed, got: ${JSON.stringify(result).slice(0, 600)}`);
     }
-    expect(result.executions[0]?.admission).toBe('admitted');
+    expect(result.executions[0]?.admission).toBe('executed');
     const execution = result.executions[0]?.execution;
     expect(execution?.worker.exitCode).toBe(0);
     expect(execution?.hostKind).toBe('workbuddy');
@@ -231,7 +234,7 @@ describe.skipIf(!hasDist)('real CLI cycles through the shadow adapters', () => {
     expect(liveness.lastInvocationId).toBe(execution?.invocationId);
   }, 180_000);
 
-  it('T13 concurrency (F10): executability proven first, then two PARALLEL real cycles — the lease lets exactly ONE claim the task', async () => {
+  it('concurrency: executability proven first, then two PARALLEL real bounded entries — the workspace mutex admits exactly ONE consumer and the lease still prevents any double claim', async () => {
     const home = tempHome();
     const ws = await workspaceWithConfig(home, 'concurrent-ws', 'host.codex');
     sandboxInstall(home, [ws]);
@@ -282,11 +285,13 @@ describe.skipIf(!hasDist)('real CLI cycles through the shadow adapters', () => {
     // both) ──
     const [first, second] = await Promise.all([runOne('conc-a'), runOne('conc-b')]);
     for (const outcome of [first.cycleOutcome, second.cycleOutcome]) {
-      expect(['cycle_completed', 'cycle_completed_without_business_progress', 'degraded']).toContain(outcome);
+      expect(['cycle_completed', 'cycle_completed_without_business_progress', 'paused', 'degraded']).toContain(outcome);
     }
-    // THE lease invariant: across BOTH racing consumers exactly ONE further
-    // claim happened (total attempts 1 → 2), and NO task was ever attempted
-    // twice — a double claim would show an attemptCount of 2.
+    // The Service-Host-only ordering is mutex first, lease second: the loser
+    // is normally paused before consuming, and the winner is the only cycle
+    // that can even reach the task lease. Across both racing entries exactly
+    // ONE further claim happened (total attempts 1 → 2), and NO task was ever
+    // attempted twice — a double claim would show an attemptCount of 2.
     const probeStateRace = await taskState(ws, probeTaskId);
     const raceState = await taskState(ws, raceTaskId);
     expect(probeStateRace.attemptCount + raceState.attemptCount).toBe(2);
@@ -301,9 +306,8 @@ describe.skipIf(!hasDist)('real CLI cycles through the shadow adapters', () => {
     const controller = new AbortController();
     // Abort mid-cycle: the real worker takes ~1s, abort fires at ~200ms.
     setTimeout(() => controller.abort(), 200);
-    const result = await runServiceShadowOnce({
-      workspaces: [ws],
-      hostFilter: 'codex',
+    const result = await runServiceManagedOnce({
+      triggerSource: 'manual',
       trustedHomeDir: home,
       timeoutMs: 120_000,
       signal: controller.signal,
@@ -317,13 +321,12 @@ describe.skipIf(!hasDist)('real CLI cycles through the shadow adapters', () => {
     // The persisted status records the same truthful outcome.
     const statusFile = serviceRunStatusPath(path.join(home, '.pd'));
     const persisted = JSON.parse(readFileSync(statusFile, 'utf8')) as {
-      shadow?: { executions?: { workspaceState?: string; execution?: { cycleOutcome?: string } }[] };
+      managed?: { executions?: { workspaceState?: string; execution?: { cycleOutcome?: string } }[] };
     };
-    expect(persisted.shadow?.executions?.[0]?.execution?.cycleOutcome).toBe('cancelled');
-    // Lock released: a subsequent shadow run on the same install succeeds.
-    const next = await runServiceShadowOnce({
-      workspaces: [ws],
-      hostFilter: 'codex',
+    expect(persisted.managed?.executions?.[0]?.execution?.cycleOutcome).toBe('cancelled');
+    // Lock released: a subsequent managed run on the same install succeeds.
+    const next = await runServiceManagedOnce({
+      triggerSource: 'manual',
       trustedHomeDir: home,
       timeoutMs: 120_000,
       probes: cliEntryProbe,

@@ -1,0 +1,7 @@
+remote: 
+remote: Create a pull request for 'ai/PRI-1278-phase5-p0-deferred-provisioning-guard' on GitHub by visiting:        
+remote:      https://github.com/csuzngjh/principles/pull/new/ai/PRI-1278-phase5-p0-deferred-provisioning-guard        
+remote: 
+To https://github.com/csuzngjh/principles.git
+ * [new branch]          ai/PRI-1278-phase5-p0-deferred-provisioning-guard -> ai/PRI-1278-phase5-p0-deferred-provisioning-guard
+branch 'ai/PRI-1278-phase5-p0-deferred-provisioning-guard' set up to track 'origin/ai/PRI-1278-phase5-p0-deferred-provisioning-guard'.

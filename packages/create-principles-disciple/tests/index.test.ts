@@ -112,16 +112,17 @@ describe('shouldProvisionOnInstall — deferred provisioning never weakens upgra
     consentIntent: 'enable',
     consentSource: 'explicit_flag',
     schedulerState: 'enabled',
-    hasPendingMarker: true,
+    workspaceRegistered: true,
+    alreadyOwned: false,
   };
 
   it('a fresh install always records the attempt', () => {
-    expect(shouldProvisionOnInstall({ ...base, freshInstall: true, hasPendingMarker: false })).toBe(true);
+    expect(shouldProvisionOnInstall({ ...base, freshInstall: true, workspaceRegistered: false })).toBe(true);
   });
 
-  it('an existing install resumes ONLY with explicit enable + a matching pending marker', () => {
+  it('an existing install migrates ONLY with explicit enable + authoritative manifest registration', () => {
     expect(shouldProvisionOnInstall(base)).toBe(true);
-    expect(shouldProvisionOnInstall({ ...base, hasPendingMarker: false })).toBe(false);
+    expect(shouldProvisionOnInstall({ ...base, workspaceRegistered: false })).toBe(false);
     expect(shouldProvisionOnInstall({ ...base, consentSource: 'recommended_default' })).toBe(false);
     expect(shouldProvisionOnInstall({ ...base, consentIntent: 'refresh_if_registered' })).toBe(false);
     expect(shouldProvisionOnInstall({ ...base, schedulerState: 'registered_disabled' })).toBe(false);

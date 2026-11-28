@@ -30,17 +30,17 @@ function runPdHelp(args: string[]): string {
 }
 
 describe('workbuddy worker command registration (cli-7, real built CLI)', () => {
-  it('registers `pd workbuddy worker` with the documented options', () => {
+  it('registers `pd workbuddy worker` with the documented options', { timeout: 60_000 }, () => {
     const help = runPdHelp(['workbuddy', 'worker', '--help']);
     expect(help).toContain('--workspace');
     expect(help).toContain('--once');
-    expect(help).toContain('--interval');
+    expect(help).not.toContain('--interval');
     expect(help).toContain('--status');
     expect(help).toContain('--json');
-    expect(help).toContain('reconciliation');
+    expect(help).toContain('Service-Host-owned');
   });
 
-  it('registers the workbuddy command group (pd workbuddy --help)', () => {
+  it('registers the workbuddy command group (pd workbuddy --help)', { timeout: 60_000 }, () => {
     const help = runPdHelp(['workbuddy', '--help']);
     expect(help).toContain('worker');
   });
@@ -48,12 +48,35 @@ describe('workbuddy worker command registration (cli-7, real built CLI)', () => 
 
 describe('workbuddy worker handler (functional)', () => {
   let workspaceDir: string;
+  let pdHomeDir: string;
   let logSpy: ReturnType<typeof vi.spyOn>;
+
+  function writeOwnership(state: 'service_host_owned' | 'legacy_owned' | 'rollback_pending' | 'no_record'): void {
+    const record = state === 'no_record' ? undefined : {
+      state,
+      effectiveOwner: state === 'service_host_owned' || state === 'rollback_pending' ? 'service_host' : 'legacy',
+      generation: 1,
+      operationId: state === 'rollback_pending' ? 'op-fixture' : null,
+      previousOwner: state === 'rollback_pending' ? 'service_host' : null,
+      targetOwner: state === 'rollback_pending' ? 'legacy' : null,
+      updatedAt: '2026-11-20T00:00:00.000Z',
+    };
+    fs.writeFileSync(path.join(pdHomeDir, 'install.json'), JSON.stringify({
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: ['workbuddy'],
+      workspaces: [workspaceDir],
+      ...(record !== undefined ? { backgroundExecutions: { [workspaceDir]: record } } : {}),
+    }), 'utf8');
+  }
 
   beforeEach(() => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-wb-worker-'));
+    pdHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-wb-home-'));
+    process.env.PD_SERVICE_PD_HOME = pdHomeDir;
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    writeOwnership('service_host_owned');
     const config = getDefaultPdConfig();
     config.features['host.workbuddy'].enabled = true;
     config.features.internalization_auto_consumer.enabled = false;
@@ -64,7 +87,9 @@ describe('workbuddy worker handler (functional)', () => {
   afterEach(() => {
     logSpy.mockRestore();
     process.exitCode = 0;
+    delete process.env.PD_SERVICE_PD_HOME;
     fs.rmSync(workspaceDir, { recursive: true, force: true });
+    fs.rmSync(pdHomeDir, { recursive: true, force: true });
   });
 
   // P2-01: this fixture's workspace has a config but no trajectory.db, so the
@@ -88,8 +113,8 @@ describe('workbuddy worker handler (functional)', () => {
     expect(logSpy).toHaveBeenCalledTimes(1);
     const error = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as { error: string; reason: string; nextAction: string };
     expect(error.error).toBe('cli_contract');
-    expect(error.reason).toBe('json_without_once_or_status');
-    expect(error.nextAction).toContain('--once');
+    expect(error.reason).toBe('mode_required');
+    expect(error.nextAction).toContain('no continuous mode');
     expect(process.exitCode).toBe(1);
   });
 
@@ -112,20 +137,73 @@ describe('workbuddy worker handler (functional)', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('--status reports manual_action_required for a governance workspace absent from the install manifest', async () => {
+  it('--status reports a no-record ownership projection as paused, with Service Host provisioning copy', async () => {
     const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
     const config = getDefaultPdConfig();
     config.features['host.workbuddy'].enabled = true;
     config.features.internalization_auto_consumer.enabled = true;
     fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    writeOwnership('no_record');
     await handleWorkbuddyWorker({ workspace: workspaceDir, status: true, json: true });
     expect(logSpy).toHaveBeenCalledTimes(1);
-    const report = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as { host: string; mode: string; reason: string; registeredInInstallManifest: boolean };
+    const report = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as {
+      host: string; mode: string; reason: string; registeredInInstallManifest: boolean; serviceHostManaged: boolean;
+      ownership: { state: string; source?: string }; nextAction: string;
+    };
     expect(report.host).toBe('workbuddy');
-    expect(report.mode).toBe('manual_action_required');
-    expect(report.reason).toBe('workspace_not_in_install_manifest');
-    expect(report.registeredInInstallManifest).toBe(false);
+    expect(report.mode).toBe('paused');
+    expect(report.reason).toBe('workbuddy_workspace_not_service_host_owned:legacy_owned');
+    expect(report.registeredInInstallManifest).toBe(true);
+    expect(report.serviceHostManaged).toBe(false);
+    expect(report.ownership).toMatchObject({ state: 'legacy_owned', source: 'no_record' });
+    expect(report.nextAction).toContain('service_host_owned');
+    expect(report.nextAction).not.toContain('Companion');
     expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it('ownership gates --once: service_host_owned reaches the cycle, legacy/rollback residue pause, and held mutex pauses non-fatally', async () => {
+    const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
+    const { acquireWorkspaceServiceRunLock, releaseServiceRunLock } = await import('../../src/services/service-host/locking/service-run-lock.js');
+
+    // Baseline fixture is service_host_owned: the report is the normal config
+    // pause/degradation shape, never the ownership-admission reason.
+    await handleWorkbuddyWorker({ workspace: workspaceDir, once: true, json: true });
+    let report = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as { mode: string; reason: string };
+    expect(report.reason).not.toContain('workspace_not_service_host_owned');
+
+    writeOwnership('legacy_owned');
+    await handleWorkbuddyWorker({ workspace: workspaceDir, once: true, json: true });
+    report = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as { mode: string; reason: string };
+    expect(report).toMatchObject({ mode: 'paused', reason: 'workbuddy_workspace_not_service_host_owned:legacy_owned' });
+
+    writeOwnership('rollback_pending');
+    await handleWorkbuddyWorker({ workspace: workspaceDir, once: true, json: true });
+    report = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as { mode: string; reason: string };
+    expect(report).toMatchObject({ mode: 'paused', reason: 'workbuddy_workspace_not_service_host_owned:rollback_pending' });
+
+    writeOwnership('service_host_owned');
+    process.exitCode = 0;
+    const lock = acquireWorkspaceServiceRunLock(pdHomeDir, workspaceDir);
+    if (!lock.ok) throw new Error(`fixture lock failed: ${lock.kind}`);
+    try {
+      await handleWorkbuddyWorker({ workspace: workspaceDir, once: true, json: true });
+      report = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as { mode: string; reason: string };
+      expect(report).toMatchObject({ mode: 'paused', reason: 'workbuddy_worker_run_in_progress' });
+      expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      releaseServiceRunLock(lock.handle);
+    }
+  });
+
+  it('an unreadable ownership manifest degrades --once and exits 1', async () => {
+    const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
+    fs.writeFileSync(path.join(pdHomeDir, 'install.json'), '{ not json', 'utf8');
+    await handleWorkbuddyWorker({ workspace: workspaceDir, once: true, json: true });
+    const report = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as { mode: string; reason: string; nextAction: string };
+    expect(report.mode).toBe('degraded');
+    expect(report.reason).toContain('workbuddy_owner_marker_unreadable:');
+    expect(report.nextAction.length).toBeGreaterThan(10);
+    expect(process.exitCode).toBe(1);
   });
 
   it('--status human output says automatic Pain detection is unavailable and names the explicit prefix', async () => {

@@ -15,7 +15,8 @@ import * as path from 'path';
 import * as net from 'net';
 import { findForeignWorkspaceOwner } from './host-workspace-ownership.js';
 import { errnoCode } from './config-file-io.js';
-import { resolvePdHome, type PdHomePaths } from '@principles/install-layout';
+import JSON5 from 'json5';
+import { resolveOpenClawConfigPath, resolvePdHome, type PdHomePaths } from '@principles/install-layout';
 
 export interface EnvCheckResult {
   hasOpenClaw: boolean;
@@ -355,27 +356,218 @@ export function getPluginExtDir(
   return path.join(homePaths.openclawHome, 'extensions', 'principles-disciple');
 }
 
+export type OpenClawGatewayObservation =
+  | 'listening'
+  | 'port_not_listening'
+  | 'no_config'
+  | 'config_unreadable'
+  | 'port_not_configured';
+
 export interface OpenClawGatewayStatus {
   isRunning: boolean;
   port?: number;
   pid?: number;
+  /** Why isRunning was decided; ownership migration may not treat unobservable absence as quiesce. */
+  observation?: OpenClawGatewayObservation;
 }
 
-function readOpenClawPort(): number | null {
-  const configPath = path.join(getOpenClawConfigDir(), 'openclaw.json');
-  if (!fs.existsSync(configPath)) return null;
+const OPENCLAW_DEFAULT_GATEWAY_PORT = 18_789;
+const OPENCLAW_DEV_PROFILE_GATEWAY_PORT = 19_001;
+const OPENCLAW_PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
+
+function normalizeOpenClawProfileName(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'default' || !OPENCLAW_PROFILE_NAME_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+/** Mirrors OpenClaw resolveProfileGatewayPort: FNV-style UTF-8 hash into 20000..59999. */
+function resolveOpenClawProfileGatewayPort(profile: string): number {
+  if (profile === 'dev') return OPENCLAW_DEV_PROFILE_GATEWAY_PORT;
+  let hash = 2_166_136_261;
+  for (const byte of Buffer.from(profile, 'utf8')) {
+    hash = Math.imul(hash ^ byte, 16_777_619) >>> 0;
+  }
+  return 20_000 + (hash % 40_000);
+}
+
+function parseOpenClawGatewayPortEnvValue(raw: string | undefined): number | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  const parseTcpPort = (digits: string): number | null => {
+    if (!/^\d+$/.test(digits)) return null;
+    const port = Number.parseInt(digits, 10);
+    return port > 0 && port < 65_536 ? port : null;
+  };
+  if (/^\d+$/.test(trimmed)) return parseTcpPort(trimmed);
+  const bracketedIpv6 = /^\[[^\]]+\]:(\d+)$/.exec(trimmed);
+  if (bracketedIpv6?.[1]) return parseTcpPort(bracketedIpv6[1]);
+  const firstColon = trimmed.indexOf(':');
+  const lastColon = trimmed.lastIndexOf(':');
+  if (firstColon <= 0 || firstColon !== lastColon) return null;
+  return parseTcpPort(trimmed.slice(firstColon + 1));
+}
+
+/** OpenClaw port precedence: env > gateway.port > named-profile default > 18789.
+ * `--port` is a process invocation override outside the installer's evidence scope;
+ * a profile:dev special case mirrors the host CLI setting OPENCLAW_GATEWAY_PORT=19001. */
+export function resolveOpenClawGatewayPort(configPort: unknown, env: Readonly<Record<string, string | undefined>>): number | null {
+  const envPort = parseOpenClawGatewayPortEnvValue(env.OPENCLAW_GATEWAY_PORT);
+  if (envPort !== null) return envPort;
+  if (typeof configPort === 'number') {
+    return Number.isFinite(configPort) && configPort > 0 && configPort < 65_536 ? Math.floor(configPort) : null;
+  }
+  const profile = normalizeOpenClawProfileName(env.OPENCLAW_PROFILE);
+  if (profile) return resolveOpenClawProfileGatewayPort(profile);
+  return OPENCLAW_DEFAULT_GATEWAY_PORT;
+}
+
+function hasOpenClawPortAffectingInclude(config: Record<string, unknown>): boolean {
+  if (Object.hasOwn(config, '$include')) return true;
+  const {gateway} = config;
+  return gateway !== null
+    && typeof gateway === 'object'
+    && !Array.isArray(gateway)
+    && Object.hasOwn(gateway, '$include');
+}
+
+const OPENCLAW_PORT_INCLUDE_MAX_DEPTH = 8;
+const OPENCLAW_PORT_INCLUDE_MAX_BYTES = 2 * 1024 * 1024;
+
+type OpenClawPortValueResolution =
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false };
+
+function isPathInside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function realpathOrLexical(candidate: string): string {
   try {
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const config: unknown = JSON.parse(raw);
-    if (config && typeof config === 'object' && !Array.isArray(config)) {
-      const { gateway } = config as Record<string, unknown>;
-      if (gateway && typeof gateway === 'object' && !Array.isArray(gateway)) {
-        const { port } = gateway as Record<string, unknown>;
-        if (typeof port === 'number' && port > 0 && port < 65536) return port;
-      }
+    return path.normalize(fs.realpathSync.native(candidate));
+  } catch {
+    return path.normalize(candidate);
+  }
+}
+
+function openClawPortIncludeRoots(configPath: string): string[] {
+  const roots = [path.dirname(configPath)];
+  const raw = process.env.OPENCLAW_INCLUDE_ROOTS?.trim();
+  if (raw) {
+    for (const entry of raw.split(path.delimiter)) {
+      const trimmed = entry.trim();
+      if (trimmed && path.isAbsolute(trimmed)) roots.push(path.resolve(trimmed));
     }
-  } catch { /* ignore */ }
-  return null;
+  }
+  return roots.map((root) => realpathOrLexical(path.normalize(root)));
+}
+
+/**
+ * Resolve the narrow scalar `gateway.port: { $include: ... }` case. This is
+ * intentionally not a general config merger: root/gateway object includes stay
+ * fail-closed above, while a scalar include can be verified without guessing.
+ * Every unreadable, escaping, cyclic, malformed, or non-scalar outcome is
+ * unresolved rather than treated as the default port.
+ */
+function resolveOpenClawIncludedPortValue(
+  value: unknown,
+  context: { readonly configPath: string; readonly basePath: string; readonly visited: ReadonlySet<string>; readonly depth: number },
+): OpenClawPortValueResolution {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return { ok: true, value };
+  const record = value as Record<string, unknown>;
+  if (!Object.hasOwn(record, '$include')) return { ok: true, value };
+  const includeValue = record.$include;
+  const siblingKeys = Object.keys(record).filter((key) => key !== '$include');
+  if (typeof includeValue !== 'string' || Array.isArray(includeValue) || siblingKeys.length > 0) return { ok: false };
+  if (includeValue.includes('\0') || includeValue.length >= 4096 || context.depth >= OPENCLAW_PORT_INCLUDE_MAX_DEPTH) return { ok: false };
+  const lexical = path.normalize(path.isAbsolute(includeValue)
+    ? includeValue
+    : path.resolve(path.dirname(context.basePath), includeValue));
+  if (context.visited.has(lexical)) return { ok: false };
+  const real = realpathOrLexical(lexical);
+  const roots = openClawPortIncludeRoots(context.configPath);
+  if (!roots.some((root) => isPathInside(root, real))) return { ok: false };
+  try {
+    if (!fs.existsSync(real)) return { ok: false };
+    const raw = fs.readFileSync(real, 'utf-8').replace(/^\uFEFF/, '');
+    if (Buffer.byteLength(raw, 'utf8') > OPENCLAW_PORT_INCLUDE_MAX_BYTES) return { ok: false };
+    const parsed: unknown = JSON5.parse(raw);
+    return resolveOpenClawIncludedPortValue(parsed, {
+      configPath: context.configPath,
+      basePath: real,
+      visited: new Set([...context.visited, lexical]),
+      depth: context.depth + 1,
+    });
+  } catch {
+    return { ok: false };
+  }
+}
+
+function validOpenClawTcpPort(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 65_536
+    ? Math.floor(value)
+    : null;
+}
+
+/**
+ * Candidate ports whose collective negative probe can count as quiesce
+ * evidence. Dev-profile launches are ambiguous to the installer: `--dev`
+ * injects OPENCLAW_GATEWAY_PORT=19001 inside the Gateway process, while a
+ * non-dev process using the same profile may still honor config. Probe every
+ * host-plausible candidate instead of treating one closed candidate as proof.
+ */
+function openClawPortCandidates(configPort: unknown, env: Readonly<Record<string, string | undefined>>): number[] {
+  const envPort = parseOpenClawGatewayPortEnvValue(env.OPENCLAW_GATEWAY_PORT);
+  if (envPort !== null) return [envPort];
+  const profile = normalizeOpenClawProfileName(env.OPENCLAW_PROFILE);
+  const explicit = validOpenClawTcpPort(configPort);
+  if (profile === 'dev') {
+    const candidates = [OPENCLAW_DEV_PROFILE_GATEWAY_PORT];
+    if (explicit !== null && !candidates.includes(explicit)) candidates.push(explicit);
+    return candidates;
+  }
+  const single = resolveOpenClawGatewayPort(configPort, env);
+  return single === null ? [] : [single];
+}
+
+function readOpenClawPorts(): { ports: number[]; observation: Exclude<OpenClawGatewayObservation, 'listening' | 'port_not_listening'> } {
+  const envPort = parseOpenClawGatewayPortEnvValue(process.env.OPENCLAW_GATEWAY_PORT);
+  if (envPort !== null) return { ports: [envPort], observation: 'port_not_configured' };
+  const resolved = resolveOpenClawConfigPath(process.env);
+  if (!resolved.ok) return { ports: [], observation: 'no_config' };
+  const configPath = resolved.path;
+  if (!fs.existsSync(configPath)) return { ports: [], observation: 'no_config' };
+  try {
+    const raw = fs.readFileSync(configPath, 'utf-8').replace(/^\uFEFF/, '');
+    const config: unknown = JSON5.parse(raw);
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return { ports: [], observation: 'config_unreadable' };
+    }
+    // Only a root-level or gateway-level `$include` can alter the effective
+    // gateway.port. Includes in unrelated branches (for example plugins) must
+    // not invalidate an explicit sibling port. Scalar port includes are
+    // resolved narrowly below; object-level includes remain unverified.
+    if (hasOpenClawPortAffectingInclude(config as Record<string, unknown>)) {
+      return { ports: [], observation: 'port_not_configured' };
+    }
+    const { gateway } = config as Record<string, unknown>;
+    const rawConfigPort = gateway && typeof gateway === 'object' && !Array.isArray(gateway)
+      ? (gateway as Record<string, unknown>).port
+      : undefined;
+    const resolvedConfigPort = resolveOpenClawIncludedPortValue(rawConfigPort, {
+      configPath: path.normalize(configPath),
+      basePath: path.normalize(configPath),
+      visited: new Set([path.normalize(configPath)]),
+      depth: 0,
+    });
+    if (!resolvedConfigPort.ok) return { ports: [], observation: 'port_not_configured' };
+    const ports = openClawPortCandidates(resolvedConfigPort.value, process.env);
+    if (ports.length === 0) return { ports: [], observation: 'port_not_configured' };
+    return { ports, observation: 'port_not_configured' };
+  } catch {
+    return { ports: [], observation: 'config_unreadable' };
+  }
 }
 
 function checkPortListening(port: number): Promise<boolean> {
@@ -413,41 +605,48 @@ export function parseNetstatPid(output: string, port: number): number | undefine
   return undefined;
 }
 
-export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
-  const port = readOpenClawPort();
-  if (!port) return { isRunning: false };
-
-  const listening = await checkPortListening(port);
-  if (!listening) return { isRunning: false };
-
-  let pid: number | undefined = undefined;
+function findOpenClawListeningPid(port: number): number | undefined {
   try {
     // ERR-045: argv-array execution only. The validated port is an argv
     // element or a JS-side output match — it never enters a shell string.
-    if (Number.isInteger(port) && port > 0 && port < 65536) {
-      const output = IS_WIN32
-        ? execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf-8', timeout: 5000, windowsHide: true })
-        : execFileSync('lsof', ['-i', `:${port}`, '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000, windowsHide: true });
-      const text = output.trim();
-      if (text) {
-        let listeningLine: string | undefined;
-        if (IS_WIN32) {
-          listeningLine = text.split('\n').find((line) => {
-            const [, localAddress, , state] = line.trim().split(/\s+/);
-            return state === 'LISTENING' && localAddress !== undefined && localAddress.endsWith(`:${port}`);
-          });
-        } else {
-          [listeningLine] = text.split('\n');
-        }
-        const pidColumn = IS_WIN32
-          ? listeningLine?.trim().split(/\s+/)[4]
-          : listeningLine?.trim();
-        if (pidColumn) pid = parseInt(pidColumn, 10);
-      }
+    if (!Number.isInteger(port) || port <= 0 || port >= 65_536) return undefined;
+    const output = IS_WIN32
+      ? execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf-8', timeout: 5000, windowsHide: true })
+      : execFileSync('lsof', ['-i', `:${port}`, '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000, windowsHide: true });
+    const text = output.trim();
+    if (!text) return undefined;
+    let pidColumn: string | undefined;
+    if (IS_WIN32) {
+      const listeningLine = text.split('\n').find((line) => {
+        const [, localAddress, , state] = line.trim().split(/\s+/);
+        return state === 'LISTENING' && localAddress !== undefined && localAddress.endsWith(`:${port}`);
+      });
+      pidColumn = listeningLine?.trim().split(/\s+/)[4];
+    } else {
+      [pidColumn] = text.split('\n');
+      pidColumn = pidColumn?.trim();
     }
-  } catch { /* ignore */ }
+    if (!pidColumn) return undefined;
+    const pid = Number.parseInt(pidColumn, 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
-  return { isRunning: true, port, pid };
+export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
+  const configured = readOpenClawPorts();
+  if (configured.ports.length === 0) return { isRunning: false, observation: configured.observation };
+
+  for (const port of configured.ports) {
+    if (await checkPortListening(port)) {
+      const pid = findOpenClawListeningPid(port);
+      return { isRunning: true, port, ...(pid !== undefined ? { pid } : {}), observation: 'listening' };
+    }
+  }
+
+  const [port] = configured.ports;
+  return { isRunning: false, ...(port !== undefined ? { port } : {}), observation: 'port_not_listening' };
 }
 
 /**
@@ -576,6 +775,8 @@ export interface GatewayStopConfirmationDeps {
   processAlive?: (pid: number) => boolean;
   /** Test seam: the bounded window, so a refusal case costs milliseconds. */
   confirmTimeoutMs?: number;
+  /** Ownership-transfer mode: port-clear without the observed process exit is not quiesce evidence. */
+  requireProcessExit?: boolean;
 }
 
 /**
@@ -611,6 +812,13 @@ async function confirmGatewayStopped(
     return { ok: false, reason: 'verification_unavailable', error: `${rawError} — the gateway port was not observable, so its stopped state could not be verified` };
   }
   const pid = observed?.pid;
+  if (deps.requireProcessExit === true && pid === undefined) {
+    return {
+      ok: false,
+      reason: 'verification_unavailable',
+      error: `${rawError} — the gateway PID was not resolved, so process exit could not be verified for ownership transfer`,
+    };
+  }
 
   try {
     let listening: boolean;
@@ -660,8 +868,25 @@ export async function stopOpenClawGateway(
   observed?: OpenClawGatewayStatus,
   deps?: GatewayStopConfirmationDeps,
 ): Promise<GatewayControlResult> {
+  // Ownership transfer must never issue a stop it cannot verify: if the
+  // pre-flight did not resolve both the listener port and the holding PID,
+  // sending the stop first would leave a failure path where the gateway is
+  // down but `restartedGateway` was never set. Refuse before mutation instead.
+  if (deps?.requireProcessExit === true) {
+    const port = observed?.port;
+    const pid = observed?.pid;
+    if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0 || port >= 65536 || typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) {
+      return {
+        ok: false,
+        reason: 'verification_unavailable',
+        error: 'openclaw gateway stop was not issued: the observed gateway port/PID was incomplete, so process exit could not be verified for ownership transfer',
+      };
+    }
+  }
   const command = runGatewayServiceCommand('stop');
-  if (command.ok) return command;
+  // A successful stop command is only a request, not evidence that the legacy
+  // consumer exited. Ownership transfer may proceed only after the observed
+  // listener/process pair is verified quiescent.
   return confirmGatewayStopped(command, observed, deps);
 }
 

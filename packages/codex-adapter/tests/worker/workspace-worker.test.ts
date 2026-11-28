@@ -1276,21 +1276,25 @@ describe('worker cycle — PRI-1264 driver liveness + degraded catch-up recovery
     expect(task).toMatchObject({ status: 'succeeded' });
   });
 
-  it('records WHO drove the cycle in the liveness file (companion vs service_host vs manual)', async () => {
+  it('records WHO drove the cycle in the liveness file (service_host vs manual; legacy companion collapses to manual)', async () => {
     const ws = makeWorkspace({ ingestion: true, consumer: true });
     const previous = process.env.PD_INVOCATION_SOURCE;
     try {
-      process.env.PD_INVOCATION_SOURCE = 'companion';
-      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
-      expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('companion');
-
-      // Phase 2 (PRI-1280): the Service Host shadow driver identity — without
-      // the third value, stall attribution would misreport it as manual.
+      // Phase 2 (PRI-1280): the Service Host driver identity — without it,
+      // stall attribution would misreport service-driven cycles as manual.
       process.env.PD_INVOCATION_SOURCE = 'service_host';
       await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
       expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('service_host');
 
       delete process.env.PD_INVOCATION_SOURCE;
+      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('manual');
+
+      // PRI-1278 Phase 5: the companion driver is retired — no Companion
+      // runtime exists that could produce it. A legacy env leftover
+      // self-declaring 'companion' is not authoritative and MUST NOT be
+      // produced as a driver identity any more; it attributes as manual.
+      process.env.PD_INVOCATION_SOURCE = 'companion';
       await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
       expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('manual');
     } finally {
@@ -1299,7 +1303,32 @@ describe('worker cycle — PRI-1264 driver liveness + degraded catch-up recovery
     }
   });
 
-  it('R5: a manual/companion cycle CLEARS the previous shadow run\'s invocation id from liveness', async () => {
+  it('parse tolerance: a historical liveness record written with the retired companion driver still reads back verbatim', () => {
+    const ws = makeWorkspace({ ingestion: true, consumer: true });
+    // Pre-removal workers persisted `lastCycleDriver: 'companion'`. Those
+    // records are durable facts: readers must tolerate them as-is (the
+    // string is never rewritten, never migrated, never rejected).
+    const historical = {
+      lastCycleStartedAt: '2026-11-20T10:00:00.000Z',
+      lastCycleCompletedAt: '2026-11-20T10:00:41.000Z',
+      lastCycleDurationMs: 41_000,
+      lastCycleMode: 'ready',
+      lastCycleDriver: 'companion',
+      runningStage: null,
+      stageDeadline: null,
+      updatedAt: '2026-11-20T10:00:41.000Z',
+    };
+    fs.writeFileSync(
+      path.join(ws.root, '.state', 'codex-worker-liveness.json'),
+      JSON.stringify(historical),
+    );
+    const read = readCodexWorkerLiveness(ws.root);
+    expect(read).not.toBeNull();
+    expect(read?.lastCycleDriver).toBe('companion');
+    expect(read?.lastCycleMode).toBe('ready');
+  });
+
+  it('R5: a manual (non-Service-Host) cycle CLEARS the previous shadow run\'s invocation id from liveness', async () => {
     const ws = makeWorkspace({ ingestion: true, consumer: true });
     const previousSource = process.env.PD_INVOCATION_SOURCE;
     const previousId = process.env.PD_INVOCATION_ID;
@@ -1325,21 +1354,22 @@ describe('worker cycle — PRI-1264 driver liveness + degraded catch-up recovery
   });
 
   it('PRI-1264 review: a CONFIG pause (host.codex disabled) keeps the liveness heartbeat alive — no false stall', async () => {
-    // The Companion stall detector reads the last COMPLETED cycle age; a
-    // paused worker used to return WITHOUT refreshing the record, so a fresh
-    // heartbeat is what keeps an intentionally idle worker out of the stall
-    // notification path.
+    // The stall attribution (`pd codex worker --status` / the Service Host
+    // health projection) reads the last COMPLETED cycle age; a paused worker
+    // used to return WITHOUT refreshing the record, so a fresh heartbeat is
+    // what keeps an intentionally idle worker out of the stall path.
     const ws = makeWorkspace({ hostCodex: false });
     const previous = process.env.PD_INVOCATION_SOURCE;
     try {
-      process.env.PD_INVOCATION_SOURCE = 'companion';
+      process.env.PD_INVOCATION_SOURCE = 'service_host';
       const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
       expect(result.mode).toBe('paused');
       const liveness = readCodexWorkerLiveness(ws.root);
       expect(liveness?.runningStage).toBe('paused');
-      expect(liveness?.lastCycleDriver).toBe('companion');
+      expect(liveness?.lastCycleDriver).toBe('service_host');
       // The heartbeat is FRESH — the freshness itself is the not-stalled
-      // signal both the Companion and `pd codex worker --status` read.
+      // signal `pd codex worker --status` and the Service Host health
+      // projection read.
       const started = Date.parse(liveness?.lastCycleStartedAt ?? '');
       expect(Number.isFinite(started)).toBe(true);
       expect(Date.now() - started).toBeLessThan(60_000);

@@ -1,0 +1,26 @@
+Verify Merge Gate	fail	19s	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309452696	
+Analyze (javascript-typescript)	pending	0	https://github.com/csuzngjh/principles/actions/runs/45939229789/job/140309452085	
+Test create-principles-disciple	pending	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309530422	
+Test packaged install smoke	pending	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309530454	
+Test pd-console	pending	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309530420	
+Test principles-core	pending	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309452600	
+quick-check	pending	0	https://github.com/csuzngjh/principles/actions/runs/45939229877/job/140309452317	
+Dependency Audit	pass	15s	https://github.com/csuzngjh/principles/actions/runs/45939229790/job/140309452420	
+Test pd-cli (Windows)	skipping	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309531897	
+Test pd-cli	skipping	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309531825	
+Codex plugin delivery contract	skipping	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309531500	
+CodeRabbit	skipping	0	https://coderabbit.ai?utm_source=cr_app&utm_medium=github	
+Test pd-mcp-server	skipping	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309531883	
+CI failure reminder	skipping	0	https://github.com/csuzngjh/principles/actions/runs/45939229796/job/140309453473	
+Test workbuddy-adapter (Windows fixtures)	skipping	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309531848	
+Test OpenClaw Plugin (unit+integration+coverage)	skipping	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309532126	
+Test shared runtime & adapters	skipping	0	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309532507	
+CI Impact Gate	pass	14s	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309452699	
+Auto Label PR	pass	7s	https://github.com/csuzngjh/principles/actions/runs/45939229790/job/140309452247	
+Check PR Size	pass	15s	https://github.com/csuzngjh/principles/actions/runs/45939229790/job/140309452059	
+Export Surface Gate	pass	28s	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309452433	
+PR <-> Linear link	pass	11s	https://github.com/csuzngjh/principles/actions/runs/45939229796/job/140309452213	
+Repository Size & Large File Guard	pass	10s	https://github.com/csuzngjh/principles/actions/runs/45939229848/job/140309452154	
+Telemetry Union Guard (advisory)	pass	13s	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309452606	
+Test skill render contract	pass	23s	https://github.com/csuzngjh/principles/actions/runs/45939229766/job/140309530570	
+Welcome First Time Contributor	pass	5s	https://github.com/csuzngjh/principles/actions/runs/45939229790/job/140309452257	

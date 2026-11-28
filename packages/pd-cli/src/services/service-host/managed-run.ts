@@ -4,16 +4,18 @@
  *
  *   pd service run-once --json [--trigger scheduler] [--pd-home <dir>]
  *
- * Runs the SAME trusted prefix as dry-run/shadow (identity → install lock →
- * active release → manifest → validated claims → discovery), then admits
- * workspaces by the §8.4 ownership projection INSTEAD of an explicit
- * selection:
+ * Runs the trusted prefix (identity → install lock → active release →
+ * manifest → validated claims → discovery), then admits workspaces by the
+ * ownership projection INSTEAD of an explicit selection:
  *
  *   - `effectiveOwner=service_host` + `state=service_host_owned` + an
  *     `authorized` discovery verdict → ONE bounded real Worker cycle per
- *     bound host adapter (shared dispatch core with shadow);
- *   - `legacy_owned` → skipped, the legacy owner stays the unique consumer;
- *   - `handover_preparing` / `rollback_pending` → NEVER executed (forbidden);
+ *     bound host adapter;
+ *   - `legacy_owned` (incl. no-record) → skipped: un-provisioned residue —
+ *     there is NO legacy consumer anymore, nothing consumes this workspace
+ *     until it is provisioned;
+ *   - `handover_preparing` / `rollback_pending` → retired transition-state
+ *     residue, NEVER executed;
  *   - conflicting owner projection / non-authorized verdict → refused-skip,
  *     fail-closed per workspace;
  *   - manifest or marker unreadable → the whole run refuses (fail-closed —
@@ -254,7 +256,7 @@ function buildManagedStatus(args: {
 
 function managedNextAction(executions: readonly ManagedExecutionRecord[], empty: boolean): string {
   if (empty) {
-    return 'No workspace is currently owned by the Service Host (effectiveOwner=service_host). This is a legal empty managed run — no Worker started and nothing was consumed. Ownership handover happens per-workspace in Phase 4/5 (SPEC §8.4); legacy consumers remain the unique automatic lifecycle owners.';
+    return 'No workspace is currently owned by the Service Host (service_host_owned). This is a legal empty managed run — no Worker started and nothing was consumed. Provision workspaces with the PD installer; unprovisioned workspaces simply do not consume.';
   }
   // Compose EVERY outcome class: a waiting workspace must never hide another
   // workspace's failure (the exit code still reflects it, but the summary is
@@ -264,9 +266,9 @@ function managedNextAction(executions: readonly ManagedExecutionRecord[], empty:
   if (waiting.length > 0) {
     parts.push(`${waiting.length} workspace(s) are waiting for a host binding (Service-Host-only install) — the Service Host owns their background lifecycle, no adapter exists yet, and nothing was consumed. Install a host adapter and bind the workspace; no ownership change is needed again.`);
   }
-  const forbidden = executions.filter((e) => e.skipReason === 'handover_preparing_forbidden' || e.skipReason === 'rollback_pending_forbidden');
-  if (forbidden.length > 0) {
-    parts.push(`Skipped ${forbidden.length} workspace(s) in an ownership transition state (handover_preparing / rollback_pending — never consumed by the scheduler). Let the §8.4 transition finish or roll back; the Service Host executes only stable service_host_owned workspaces.`);
+  const notServiceHostOwned = executions.filter((e) => e.skipReason !== undefined && e.skipReason.startsWith('workspace_not_service_host_owned:'));
+  if (notServiceHostOwned.length > 0) {
+    parts.push(`Skipped ${notServiceHostOwned.length} workspace(s) that are not service_host_owned (including any retired transition-state residue — never consumed). Provision/repair them with the PD installer if Service Host management is intended.`);
   }
   const notAuthorized = executions.filter((e) => e.skipReason !== undefined && e.skipReason.startsWith('workspace_not_authorized'));
   if (notAuthorized.length > 0) {
@@ -278,7 +280,7 @@ function managedNextAction(executions: readonly ManagedExecutionRecord[], empty:
   }
   return parts.length > 0
     ? `Managed run completed. ${parts.join(' ')}`
-    : 'Managed run complete. Only service_host_owned workspaces were consumed; legacy workspaces keep their legacy owner.';
+    : 'Managed run complete. Only service_host_owned workspaces were consumed; every other ownership state was skipped without consumption.';
 }
 
 async function completeManagedRun(identity: InstallIdentity, context: {
@@ -515,22 +517,14 @@ async function completeManagedRun(identity: InstallIdentity, context: {
       }
       continue;
     }
-    if (owner.state === 'handover_preparing') {
-      skip(
-        'handover_preparing_forbidden',
-        'This workspace is mid-handover (§8.4): the scheduler never consumes a handover_preparing workspace. The transition will complete or roll back; then the next cycle re-evaluates.',
-      );
-      continue;
-    }
-    if (owner.state === 'rollback_pending') {
-      skip(
-        'rollback_pending_forbidden',
-        'This workspace is pending rollback to the legacy owner (§8.4): the scheduler never consumes a rollback_pending workspace.',
-      );
-      continue;
-    }
-    // legacy_owned (record or default): skip, preserve the legacy owner.
-    skip('legacy_owned_workspace');
+    // Binary admission: every readable non-service_host_owned state — legacy,
+    // no-record projections and retired transition-state residue alike — is a
+    // by-design non-execution. The provisioning authority (installer repair),
+    // not an ownership-transition CLI, moves a workspace into consumption.
+    skip(
+      `workspace_not_service_host_owned:${owner.state}`,
+      'This workspace is not provisioned for PD Service Host consumption. Run the PD installer/provisioning repair (npx create-principles-disciple) or inspect pd service status; no worker was started.',
+    );
   }
 
   if (!context.holdsLock(context.handle)) return lockLost();

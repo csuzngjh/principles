@@ -1,45 +1,35 @@
 /**
- * pd codex worker command implementation (Codex Governance Closure Slice C,
- * PRI-624; SPEC §13/§15; ADR-0020 §11.1).
+ * pd codex worker command implementation.
  *
- * Runs the Workspace-scoped worker cycle — catch-up → reconciliation → one
- * Diagnostician execution → one bounded downstream consumer cycle — either
- * once (manual / Companion-supervised restart mode) or continuously.
- *
- * `status` answers the SPEC §15 worker-mode question without executing
- * anything: `manual_action_required` means no Companion-registered worker
- * serves this workspace (it is not in the install manifest) and the manual
- * commands below are the recovery path.
+ * The Codex worker is bounded by design: one cycle per `--once` invocation.
+ * There is no continuous mode — the PD Service Host is the only background
+ * runtime and owns triggering. A consuming cycle is admitted only for a
+ * `service_host_owned` workspace and holds the per-workspace Service Host
+ * mutex for the cycle duration.
  *
  * CLI gate compliance:
  * - cli-1: --json is restricted to the single-output forms (--once / --status)
- *   so stdout is exactly one parseable JSON object; continuous mode streams
- *   human-readable reports instead (review P2).
+ *   so stdout is exactly one parseable JSON object.
  * - cli-2: exit paths stop execution.
  * - cli-6: paused/degraded modes carry reason + nextAction.
  */
 import fs from 'node:fs';
-import { createWorkerDrain } from './worker-drain.js';
-import os from 'node:os';
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { runCodexWorkspaceWorkerCycle, type CodexWorkerCycleResult } from '@principles/codex-adapter';
-import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
+import { parseInstallManifest } from '@principles/install-layout';
 import { retentionWarning, runTrajectoryRetention } from '@principles/host-runtime';
-
-const DEFAULT_INTERVAL_MS = 120_000;
+import { admitServiceWorkerCycle, readServiceWorkerOwnership } from './worker-service-host-gate.js';
 
 /**
  * SPEC-PD-TR-001 §4.1: the worker cycle is the retention scheduler. It runs
- * OUTSIDE any hook, after the cycle, never blocks the cycle's own deadline
- * (the sweep is bounded to `runBudgetMs`), and never writes stdout — the
- * `--json --once` contract must stay one JSON document.
+ * OUTSIDE any hook, after a consumed cycle, never blocks the cycle's own
+ * deadline, and never writes stdout — the `--json --once` contract must stay
+ * one JSON document.
  */
 function runRetentionAfterCycle(workspaceDir: string): void {
   try {
     const report = runTrajectoryRetention({ workspaceDir, trigger: 'worker' });
-    // Long-lived failures (wrong journal mode, index DDL, clock anomalies) are
-    // logged once per distinct reason instead of every cycle.
     const warning = retentionWarning(report);
     if (warning !== null) {
       console.error(`[PD:CodexWorker] ${warning}`);
@@ -64,7 +54,6 @@ interface CodexWorkerOptions {
   workspace?: string;
   json?: boolean;
   once?: boolean;
-  intervalMs?: number;
   status?: boolean;
 }
 
@@ -72,38 +61,89 @@ export interface CodexWorkerStatusReport {
   generatedAt: string;
   host: 'codex';
   workspace: string;
-  mode: 'ready' | 'manual_action_required' | 'paused' | 'degraded';
+  mode: 'ready' | 'paused' | 'degraded';
   registeredInInstallManifest: boolean;
+  serviceHostManaged: boolean;
+  ownership: {
+    state: string;
+    generation?: number;
+    source?: string;
+  };
   reason?: string;
   nextAction?: string;
 }
 
+function ownershipNextAction(): string {
+  return 'Provision or repair this workspace with the PD installer (npx create-principles-disciple) so it is marked service_host_owned, then verify pd service status. Manual worker invocation does not consume non-Service-Host-owned workspaces.';
+}
+
 async function printStatusReport(workspace: string, json: boolean): Promise<void> {
   const generatedAt = new Date().toISOString();
-  const paths = getInstallLayoutPaths(os.homedir());
+  const ownershipRead = readServiceWorkerOwnership(workspace);
   let registered = false;
   let manifestError: string | undefined;
-  try {
-    const raw = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
-    const parsed = parseInstallManifest(raw);
-    if (parsed.manifest !== undefined) {
-      registered = parsed.manifest.workspaces?.some((entry) => path.resolve(entry) === path.resolve(workspace)) ?? false;
-    } else {
-      manifestError = parsed.error;
+  if (ownershipRead.ok) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(ownershipRead.pdHome, 'install.json'), 'utf8')) as unknown;
+      const parsed = parseInstallManifest(raw);
+      if (parsed.manifest !== undefined) {
+        registered = parsed.manifest.workspaces?.some((entry) => path.resolve(entry) === path.resolve(workspace)) ?? false;
+      } else {
+        manifestError = parsed.error;
+      }
+    } catch {
+      manifestError = 'install_manifest_unreadable';
     }
-  } catch {
-    manifestError = 'install_manifest_unreadable';
+  } else {
+    manifestError = ownershipRead.result.reason;
   }
 
-  // The status scan itself delegates mode computation to the cycle module's
-  // flag/config semantics by running a paused-compatible evaluation: a real
-  // cycle is NOT run (no execution, no lease, no transcript I/O).
+  // The status scan itself delegates config/flag readiness to the cycle
+  // module's semantics without executing anything: no lease, no transcript
+  // catch-up, no downstream consumption.
   const { computeCodexWorkerStatusMode, readCodexWorkerLiveness } = await import('@principles/codex-adapter');
   const evaluation = computeCodexWorkerStatusMode({ workspaceDir: workspace, registeredInInstallManifest: registered });
 
-  // SPEC-CODEX-PAIN-CLOSURE-001 CR-08 (A20): readiness (registration/config)
-  // and liveness (recent real cycles) are SEPARATE facts — a ready workspace
-  // with no recent cycle evidence reports no_recent_cycle, never "running".
+  const ownership = ownershipRead.ok ? ownershipRead.ownership : null;
+  const ownershipState = ownership === null ? 'unreadable' : ownership.status;
+  const serviceHostManaged = ownership?.status === 'service_host_owned';
+
+  let mode: CodexWorkerStatusReport['mode'];
+  let reason: string | undefined;
+  let nextAction: string | undefined;
+  if (!ownershipRead.ok) {
+    mode = 'degraded';
+    ({ reason, nextAction } = ownershipRead.result);
+  } else if (ownership?.status === 'manifest_unreadable') {
+    mode = 'degraded';
+    reason = `codex_owner_marker_unreadable:${ownership.reason}`;
+    ({ nextAction } = ownership);
+  } else if (evaluation.mode === 'degraded') {
+    mode = 'degraded';
+    ({ reason, nextAction } = evaluation);
+  } else if (!serviceHostManaged) {
+    mode = 'paused';
+    reason = `codex_workspace_not_service_host_owned:${ownershipState}`;
+    nextAction = ownershipNextAction();
+  } else if (evaluation.mode === 'manual_action_required') {
+    // A service_host_owned record cannot exist for an unregistered workspace
+    // through the alias-safe reader; if inconsistent input ever produces this
+    // combination, report the manifest defect without invoking retired
+    // Companion recovery copy.
+    mode = 'paused';
+    reason = 'workspace_not_in_install_manifest';
+    nextAction = 'Repair the install manifest/provisioning record with the PD installer; the Service Host can manage only manifest-registered workspaces.';
+  } else {
+    mode = evaluation.mode === 'ready' ? 'ready' : 'paused';
+    ({ reason, nextAction } = evaluation);
+  }
+  if (manifestError !== undefined && mode !== 'degraded' && reason === undefined) {
+    reason = manifestError;
+  }
+
+  // Readiness (ownership/config) and liveness (recent real cycles) are
+  // separate facts — a ready workspace with no recent cycle evidence reports
+  // no_recent_cycle, never "running".
   const liveness = readCodexWorkerLiveness(workspace);
   const livenessReport: Record<string, unknown> = liveness === null
     ? { state: 'no_liveness_record' }
@@ -118,11 +158,8 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
       livenessReport.withinStageDeadline = Date.now() <= stageDeadline;
     }
     // Two poll windows (default 240s) with no cycle evidence and no running
-    // stage within its deadline = the worker is not running, not "diagnosing".
-    // PRI-1264 review round: a FRESH `runningStage: 'paused'` heartbeat is an
-    // intentional config pause (host.codex disabled) — the worker process is
-    // alive and cycling, deliberately idle, so it is not a stall; a STALE
-    // paused heartbeat still stalls (the driver stopped heartbeating).
+    // stage within its deadline = the worker is not cycling. A fresh paused
+    // heartbeat is an intentional config pause, not a stall; a stale one is.
     const lastStarted = typeof liveness.lastCycleStartedAt === 'string' ? Date.parse(liveness.lastCycleStartedAt) : NaN;
     const pausedRecently = runningStage === 'paused'
       && Number.isFinite(lastStarted)
@@ -131,26 +168,21 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
       && !(runningStage !== null && Number.isFinite(stageDeadline) && Date.now() <= stageDeadline)
       && !pausedRecently;
     livenessReport.verdict = pausedRecently && !stalled ? 'paused' : (stalled ? 'no_recent_cycle' : 'live');
-    // PRI-1264: registration and liveness are separate facts, and so is WHO
-    // was driving. A companion-driven worker that stopped cycling means the
-    // resident driver (PD Companion) went away; a manual worker simply does
-    // not run between invocations. Name the distinction, never guess liveness
-    // from registration.
     const driver = typeof liveness.lastCycleDriver === 'string' ? liveness.lastCycleDriver : null;
     livenessReport.lastCycleDriver = driver ?? 'unknown';
     if (stalled) {
       livenessReport.stallReason = driver === 'companion'
-        ? 'resident_driver_stopped: the last cycle was companion-driven; worker cycles only run while the PD Companion worker driver is alive'
+        ? 'historical_legacy_driver_retired: the last cycle was driven by the retired Companion runtime; Companion is no longer a worker driver'
         : driver === 'service_host'
-          ? 'service_driver_not_resident: the last cycle was service-host-driven (shadow run-once); the Service Host coordinator is not a resident driver, so gaps between shadow runs are expected'
+          ? 'service_driver_not_resident: the last cycle was service-host-driven; automatic cycles require an enabled OS scheduler registration'
           : driver === 'manual'
-            ? 'no_resident_driver: the last cycle was a manual invocation; no companion-driven cycle has completed for this workspace'
+            ? 'no_resident_driver: the last cycle was a manual invocation; manual invocation never creates automatic Service Host cycles'
             : 'no_recent_cycle_evidence';
       livenessReport.nextAction = driver === 'companion'
-        ? 'Start (or restart) PD Companion and confirm its tray/process is alive — the next worker sync (≤60s) should spawn the workspace worker and produce a new cycle; verify with this command again.'
+        ? 'Treat the Companion record as historical only. Verify pd service status; if the workspace is service_host_owned, install/enable the Service Host scheduler — do not restart Companion.'
         : driver === 'service_host'
-          ? 'This is expected between explicit shadow runs; run `pd service run-once --shadow --workspace <dir>` for another bounded cycle, or start PD Companion for resident cycles.'
-          : 'Start PD Companion so a resident worker driver takes over this workspace, or run `pd codex worker --workspace <dir> --interval 120000` manually for continuous cycles.';
+          ? 'Run pd service status; install or enable the Service Host scheduler if it is missing/disabled, or run pd service run-once --json for one managed cycle.'
+          : 'Use the PD Service Host for automatic cycles: provision the workspace as service_host_owned, then verify pd service status.';
     }
   }
 
@@ -158,11 +190,16 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     generatedAt,
     host: 'codex',
     workspace,
-    mode: evaluation.mode,
+    mode,
     registeredInInstallManifest: registered,
-    ...(evaluation.reason !== undefined ? { reason: evaluation.reason } : {}),
-    ...(evaluation.nextAction !== undefined ? { nextAction: evaluation.nextAction } : {}),
-    ...(manifestError !== undefined ? { reason: `${evaluation.reason ?? manifestError}` } : {}),
+    serviceHostManaged,
+    ownership: {
+      state: ownershipState,
+      ...(ownership !== null && 'generation' in ownership ? { generation: ownership.generation } : {}),
+      ...(ownership !== null && 'source' in ownership && typeof ownership.source === 'string' ? { source: ownership.source } : {}),
+    },
+    ...(reason !== undefined ? { reason } : {}),
+    ...(nextAction !== undefined ? { nextAction } : {}),
     liveness: livenessReport,
   };
   if (json) {
@@ -173,17 +210,17 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     `Codex workspace worker status (${workspace})`,
     `  mode: ${report.mode}`,
     `  registered in install manifest: ${registered}`,
+    `  Service Host managed: ${serviceHostManaged}`,
+    `  ownership: ${ownershipState}`,
   ];
   if (report.reason !== undefined) lines.push(`  reason: ${report.reason}`);
   if (report.nextAction !== undefined) lines.push(`  next action: ${report.nextAction}`);
   lines.push(`  liveness state: ${String(livenessReport.state)}${livenessReport.verdict !== undefined ? ` (${String(livenessReport.verdict)})` : ''}`);
   if (typeof livenessReport.lastCycleCompletedAt === 'string') lines.push(`  last cycle completed: ${livenessReport.lastCycleCompletedAt}`);
   if (typeof livenessReport.lastCycleMode === 'string') lines.push(`  last cycle mode: ${livenessReport.lastCycleMode}`);
-  // PRI-1264: driver + stall reason — the Owner can tell whether the worker is
-  // actually running and WHO stopped driving it.
   if (typeof livenessReport.lastCycleDriver === 'string') lines.push(`  last cycle driver: ${livenessReport.lastCycleDriver}`);
   if (typeof livenessReport.stallReason === 'string') lines.push(`  stall reason: ${livenessReport.stallReason}`);
-  if (typeof livenessReport.nextAction === 'string') lines.push(`  next action: ${livenessReport.nextAction}`);
+  if (typeof livenessReport.nextAction === 'string') lines.push(`  liveness next action: ${livenessReport.nextAction}`);
   console.log(lines.join('\n'));
   if (report.mode === 'degraded') process.exitCode = 1;
 }
@@ -215,20 +252,26 @@ function printCycleReport(result: CodexWorkerCycleResult, json: boolean): void {
   console.log(lines.join('\n'));
 }
 
+function printModeError(options: CodexWorkerOptions, reason: string, nextAction: string): void {
+  const error = {
+    generatedAt: new Date().toISOString(),
+    host: 'codex',
+    error: 'cli_contract',
+    reason,
+    nextAction,
+  };
+  if (options.json === true) console.log(JSON.stringify(error));
+  else console.error(`[PD:CodexWorker] ${reason}: ${nextAction}`);
+  process.exitCode = 1;
+}
+
 export async function handleCodexWorker(options: CodexWorkerOptions): Promise<void> {
-  // cli-1: continuous mode streams one report per cycle — that is NOT one
-  // parseable JSON document. --json is only valid for the single-output
-  // forms (--once / --status), enforced here (review P2).
-  if (options.json === true && options.once !== true && options.status !== true) {
-    const error = {
-      generatedAt: new Date().toISOString(),
-      host: 'codex',
-      error: 'cli_contract',
-      reason: 'json_without_once_or_status',
-      nextAction: 'Use --json with --once (single cycle) or --status (no-op scan); continuous mode streams human-readable reports instead.',
-    };
-    console.log(JSON.stringify(error));
-    process.exitCode = 1;
+  if (options.once === true && options.status === true) {
+    printModeError(options, 'once_and_status_mutually_exclusive', 'Choose --once (one bounded consuming cycle) or --status (no-op scan), not both.');
+    return;
+  }
+  if (options.once !== true && options.status !== true) {
+    printModeError(options, 'mode_required', 'The Codex worker is bounded by design: pass --once for one cycle or --status for the no-op scan. There is no continuous mode — the PD Service Host owns triggering.');
     return;
   }
 
@@ -239,38 +282,18 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
     return;
   }
 
-  if (options.once === true) {
+  const gate = admitServiceWorkerCycle('codex', workspace);
+  if (!gate.admitted) {
+    printCycleReport(gate.result, options.json === true);
+    if (gate.result.mode === 'degraded') process.exitCode = 1;
+    return;
+  }
+  try {
     const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME }, emitEvent: (event, payloadJson) => console.error(`[PD:CodexWorker] ${event}: ${payloadJson}`) });
     runRetentionAfterCycle(workspace);
     printCycleReport(result, options.json === true);
     if (result.mode === 'degraded') process.exitCode = 1;
-    return;
-  }
-
-  const interval = typeof options.intervalMs === 'number' && options.intervalMs >= 1000 ? options.intervalMs : DEFAULT_INTERVAL_MS;
-  const drain = createWorkerDrain();
-  try {
-    while (!drain.stopped) {
-      // PRI-655: one escaping cycle exception must not kill the daemon —
-      // runCodexWorkspaceWorkerCycle reports component failures as degraded
-      // results, but anything it still throws would propagate out of this
-      // handler (commander's sync parse does not catch action rejections) and
-      // crash the process. Log with a next action and keep the loop alive.
-      try {
-        const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME }, emitEvent: (event, payloadJson) => console.error(`[PD:CodexWorker] ${event}: ${payloadJson}`) });
-        runRetentionAfterCycle(workspace);
-        printCycleReport(result, false);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`[PD:CodexWorker] cycle failed: ${message}`);
-        console.error(`  continuing in ${interval}ms. Investigate: pd codex worker --status --workspace "${workspace}"`);
-      }
-      if (drain.stopped) break;
-      await drain.wait(interval);
-    }
   } finally {
-    drain.dispose();
+    gate.release();
   }
 }
-
-/** SPEC §15 worker mode, evaluated without executing anything. */

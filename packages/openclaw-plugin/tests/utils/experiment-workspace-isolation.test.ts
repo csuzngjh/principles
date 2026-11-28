@@ -20,7 +20,6 @@ import {
   resolveToolHookWorkspaceDirSafe,
 } from '../../src/utils/workspace-resolver.js';
 import { PathResolver } from '../../src/core/path-resolver.js';
-import { InternalizationAutoConsumerService } from '../../src/service/internalization-auto-consumer-service.js';
 import { TrajectoryService } from '../../src/service/trajectory-service.js';
 import { CorrectionObserverService } from '../../src/service/correction-observer-service.js';
 import { PDTaskService } from '../../src/core/pd-task-service.js';
@@ -295,34 +294,6 @@ describe('prompt hooks under PD_EXPERIMENT_ROOT', () => {
 
     expect(result).toBeUndefined();
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
-  });
-});
-
-describe('internalization AutoConsumer under PD_EXPERIMENT_ROOT', () => {
-  it('does not start for a workspace outside the root and writes nothing there', () => {
-    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
-
-    InternalizationAutoConsumerService.start({
-      workspaceDir: productionWorkspace,
-      logger: logger as any,
-    } as any);
-
-    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
-    expect(fs.existsSync(path.join(productionWorkspace, '.pd'))).toBe(false);
-  });
-
-  it('starts for a workspace inside the root', () => {
-    const workspace = path.join(experimentRoot, 'workspace');
-    fs.mkdirSync(workspace, { recursive: true });
-    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
-
-    InternalizationAutoConsumerService.start({
-      workspaceDir: workspace,
-      logger: logger as any,
-    } as any);
-
-    expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
-    InternalizationAutoConsumerService.stop?.({ workspaceDir: workspace } as any);
   });
 });
 

@@ -1,0 +1,1 @@
+[check:docs-structure] OK: docs/.private/ 0 tracked, 9 required files exist, 0 stray root .md files.

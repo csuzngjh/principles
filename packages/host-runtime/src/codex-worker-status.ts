@@ -6,10 +6,12 @@
  * manifest registration). codex-adapter re-exports it for compatibility.
  *
  * SPEC §15 worker mode, evaluated WITHOUT executing anything (no lease, no
- * LLM, no transcript I/O). `manual_action_required` means no
- * Companion-registered worker serves this workspace — the manual CLI path
- * (catch-up / diagnose / run-once) is the recovery route. 'ready' here means
- * "an automatic worker would run and hold the workspace task leases";
+ * LLM, no transcript I/O). `manual_action_required` means this workspace is
+ * not registered in the canonical install manifest, so the PD Service Host —
+ * the only background runtime, triggered by the OS scheduler — never
+ * discovers it and no automatic worker cycles run for it. The manual CLI
+ * path (catch-up / diagnose / run-once) is the recovery route. 'ready' here
+ * means "an automatic worker would run and hold the workspace task leases";
  * live-worker liveness surfacing belongs to the Slice D health surface.
  */
 
@@ -58,7 +60,7 @@ export function computeCodexWorkerStatusMode(input: {
     return {
       mode: 'manual_action_required',
       reason: 'workspace_not_in_install_manifest',
-      nextAction: `No Companion worker is registered for this workspace. Manual path: pd codex ingest catch-up --workspace "${workspaceDir}", then pd diagnose / pd runtime internalization run-once.`,
+      nextAction: `This workspace is not registered in the canonical install manifest, so the PD Service Host does not manage automatic worker cycles for it. Re-run the Codex setup flow to register it. Manual path: pd codex ingest catch-up --workspace "${workspaceDir}", then pd diagnose / pd runtime internalization run-once.`,
     };
   }
   return { mode: 'ready' };
