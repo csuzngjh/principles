@@ -725,9 +725,9 @@ function countExecutions(
 
 async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirstCycle> {
   const budgetMs = input.firstCycleTimeoutMs ?? DEFAULT_FIRST_CYCLE_TIMEOUT_MS;
-  const deadline = Date.now() + budgetMs;
+  const deadline = performance.now() + budgetMs;
   for (;;) {
-    const remainingMs = deadline - Date.now();
+    const remainingMs = deadline - performance.now();
     if (remainingMs <= 0) return { ...notAttempted('first_cycle_timeout'), attempted: true };
     const result = await runInstalledCliJson(
       input.pdHome,
@@ -748,7 +748,7 @@ async function runFirstCycle(input: ProvisioningInput): Promise<ProvisioningFirs
       // healthy, but the installer still owes first-cycle evidence for THIS
       // ownership write: wait inside the existing bounded budget for the
       // holder to finish, then run the installer-triggered cycle once.
-      if (deadline - Date.now() > 1_100) {
+      if (deadline - performance.now() > 1_100) {
         await new Promise((resolve) => setTimeout(resolve, 1_000));
         continue;
       }
