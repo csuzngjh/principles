@@ -15,7 +15,8 @@ import * as path from 'path';
 import * as net from 'net';
 import { findForeignWorkspaceOwner } from './host-workspace-ownership.js';
 import { errnoCode } from './config-file-io.js';
-import { resolvePdHome, type PdHomePaths } from '@principles/install-layout';
+import JSON5 from 'json5';
+import { resolveOpenClawConfigPath, resolvePdHome, type PdHomePaths } from '@principles/install-layout';
 
 export interface EnvCheckResult {
   hasOpenClaw: boolean;
@@ -370,20 +371,88 @@ export interface OpenClawGatewayStatus {
   observation?: OpenClawGatewayObservation;
 }
 
+const OPENCLAW_DEFAULT_GATEWAY_PORT = 18_789;
+const OPENCLAW_DEV_PROFILE_GATEWAY_PORT = 19_001;
+const OPENCLAW_PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
+
+function normalizeOpenClawProfileName(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'default' || !OPENCLAW_PROFILE_NAME_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+/** Mirrors OpenClaw resolveProfileGatewayPort: FNV-style UTF-8 hash into 20000..59999. */
+function resolveOpenClawProfileGatewayPort(profile: string): number {
+  if (profile === 'dev') return OPENCLAW_DEV_PROFILE_GATEWAY_PORT;
+  let hash = 2_166_136_261;
+  for (const byte of Buffer.from(profile, 'utf8')) {
+    hash = Math.imul(hash ^ byte, 16_777_619) >>> 0;
+  }
+  return 20_000 + (hash % 40_000);
+}
+
+function parseOpenClawGatewayPortEnvValue(raw: string | undefined): number | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  const parseTcpPort = (digits: string): number | null => {
+    if (!/^\d+$/.test(digits)) return null;
+    const port = Number.parseInt(digits, 10);
+    return port > 0 && port < 65_536 ? port : null;
+  };
+  if (/^\d+$/.test(trimmed)) return parseTcpPort(trimmed);
+  const bracketedIpv6 = /^\[[^\]]+\]:(\d+)$/.exec(trimmed);
+  if (bracketedIpv6?.[1]) return parseTcpPort(bracketedIpv6[1]);
+  const firstColon = trimmed.indexOf(':');
+  const lastColon = trimmed.lastIndexOf(':');
+  if (firstColon <= 0 || firstColon !== lastColon) return null;
+  return parseTcpPort(trimmed.slice(firstColon + 1));
+}
+
+/** OpenClaw port precedence: env > gateway.port > named-profile default > 18789.
+ * `--port` is a process invocation override outside the installer's evidence scope;
+ * a profile:dev special case mirrors the host CLI setting OPENCLAW_GATEWAY_PORT=19001. */
+export function resolveOpenClawGatewayPort(configPort: unknown, env: Readonly<Record<string, string | undefined>>): number | null {
+  const envPort = parseOpenClawGatewayPortEnvValue(env.OPENCLAW_GATEWAY_PORT);
+  if (envPort !== null) return envPort;
+  const profile = normalizeOpenClawProfileName(env.OPENCLAW_PROFILE);
+  if (profile === 'dev') return OPENCLAW_DEV_PROFILE_GATEWAY_PORT;
+  if (typeof configPort === 'number') {
+    return Number.isFinite(configPort) && configPort > 0 && configPort < 65_536 ? Math.floor(configPort) : null;
+  }
+  if (profile) return resolveOpenClawProfileGatewayPort(profile);
+  return OPENCLAW_DEFAULT_GATEWAY_PORT;
+}
+
+function containsOpenClawIncludeKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsOpenClawIncludeKey);
+  if (value === null || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  if (Object.hasOwn(record, '$include')) return true;
+  return Object.values(record).some(containsOpenClawIncludeKey);
+}
+
 function readOpenClawPort(): { port: number | null; observation: Exclude<OpenClawGatewayObservation, 'listening' | 'port_not_listening'> } {
-  const configPath = path.join(getOpenClawConfigDir(), 'openclaw.json');
+  const resolved = resolveOpenClawConfigPath(process.env);
+  if (!resolved.ok) return { port: null, observation: 'no_config' };
+  const configPath = resolved.path;
   if (!fs.existsSync(configPath)) return { port: null, observation: 'no_config' };
   try {
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const config: unknown = JSON.parse(raw);
-    if (config && typeof config === 'object' && !Array.isArray(config)) {
-      const { gateway } = config as Record<string, unknown>;
-      if (gateway && typeof gateway === 'object' && !Array.isArray(gateway)) {
-        const { port } = gateway as Record<string, unknown>;
-        if (typeof port === 'number' && port > 0 && port < 65536) return { port, observation: 'port_not_configured' };
-      }
+    const raw = fs.readFileSync(configPath, 'utf-8').replace(/^\uFEFF/, '');
+    const config: unknown = JSON5.parse(raw);
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return { port: null, observation: 'config_unreadable' };
     }
-    return { port: null, observation: 'port_not_configured' };
+    // `$include` can alter the effective gateway.port. This installer probe does
+    // not duplicate OpenClaw's include resolver; an included config remains
+    // unverifiable rather than being mistaken for the default-port case.
+    if (containsOpenClawIncludeKey(config)) return { port: null, observation: 'port_not_configured' };
+    const { gateway } = config as Record<string, unknown>;
+    const configPort = gateway && typeof gateway === 'object' && !Array.isArray(gateway)
+      ? (gateway as Record<string, unknown>).port
+      : undefined;
+    const port = resolveOpenClawGatewayPort(configPort, process.env);
+    if (port === null) return { port: null, observation: 'port_not_configured' };
+    return { port, observation: 'port_not_configured' };
   } catch {
     return { port: null, observation: 'config_unreadable' };
   }

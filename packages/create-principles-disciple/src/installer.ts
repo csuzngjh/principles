@@ -5366,39 +5366,29 @@ type OpenClawEvidenceState =
   | { readonly state: 'unverifiable'; readonly reason: string };
 
 function readOpenClawDeclarationEvidence(): OpenClawEvidenceState {
-  const declarations: { workspaceDir: string; source: string }[] = [];
-  const problems: string[] = [];
-  for (const configPath of [
-    path.join(getOpenClawDir(), OPENCLAW_PD_CONFIG_FILENAME),
-    path.join(getHomeDir(), '.principles', OPENCLAW_PD_CONFIG_FILENAME),
-  ]) {
-    if (!existsSync(configPath)) continue;
+  // Mirror the host resolver's declaration precedence: the primary declaration
+  // wins when it is usable; the legacy secondary file is consulted only when
+  // the primary is absent. A stale secondary must not block migration.
+  const readOne = (configPath: string): OpenClawEvidenceState => {
+    if (!existsSync(configPath)) return { state: 'absent' };
     let parsed: unknown;
     try {
       parsed = JSON.parse(readFileSync(configPath, 'utf-8'));
     } catch (error) {
-      problems.push(`openclaw declaration unreadable/invalid at ${configPath} (${describeError(error)})`);
-      continue;
+      return { state: 'unverifiable', reason: `openclaw declaration unreadable/invalid at ${configPath} (${describeError(error)})` };
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      problems.push(`openclaw declaration at ${configPath} has no JSON-object root`);
-      continue;
+      return { state: 'unverifiable', reason: `openclaw declaration at ${configPath} has no JSON-object root` };
     }
     const declared = Object.hasOwn(parsed, 'workspace') ? Reflect.get(parsed, 'workspace') : undefined;
     if (typeof declared !== 'string' || !isUsableWorkspacePointer(declared.trim())) {
-      problems.push(`openclaw declaration at ${configPath} has no usable absolute "workspace"`);
-      continue;
+      return { state: 'unverifiable', reason: `openclaw declaration at ${configPath} has no usable absolute "workspace"` };
     }
-    declarations.push({ workspaceDir: path.resolve(declared.trim()), source: configPath });
-  }
-  if (problems.length > 0) return { state: 'unverifiable', reason: problems.join('; ') };
-  const distinct = declarations.filter((entry, index) => declarations.findIndex((other) => sameWorkspaceTarget(other.workspaceDir, entry.workspaceDir)) === index);
-  if (distinct.length > 1) {
-    return { state: 'unverifiable', reason: `conflicting OpenClaw workspace declarations: ${distinct.map((entry) => `${entry.source}=${entry.workspaceDir}`).join('; ')}` };
-  }
-  return distinct.length === 1
-    ? { state: 'bound', workspaceDir: distinct[0]?.workspaceDir ?? '', source: 'openclaw_declaration' }
-    : { state: 'absent' };
+    return { state: 'bound', workspaceDir: path.resolve(declared.trim()), source: 'openclaw_declaration' };
+  };
+  const primary = readOne(path.join(getOpenClawDir(), OPENCLAW_PD_CONFIG_FILENAME));
+  if (primary.state !== 'absent') return primary;
+  return readOne(path.join(getHomeDir(), '.principles', OPENCLAW_PD_CONFIG_FILENAME));
 }
 
 function readOpenClawPayloadBindingEvidence(): OpenClawEvidenceState {
@@ -5424,18 +5414,27 @@ function readOpenClawPayloadBindingEvidence(): OpenClawEvidenceState {
 function readOpenClawWorkspaceBindingEvidence(): HostWorkspaceBinding {
   const declaration = readOpenClawDeclarationEvidence();
   const payload = readOpenClawPayloadBindingEvidence();
-  const unverifiable = [declaration, payload].filter((entry): entry is Extract<OpenClawEvidenceState, { state: 'unverifiable' }> => entry.state === 'unverifiable');
-  if (unverifiable.length > 0) {
-    return { state: 'unverifiable', reason: unverifiable.map((entry) => entry.reason).join('; ') };
+  if (declaration.state === 'unverifiable' || payload.state === 'unverifiable') {
+    return {
+      state: 'unverifiable',
+      reason: [declaration, payload]
+        .filter((entry): entry is Extract<OpenClawEvidenceState, { state: 'unverifiable' }> => entry.state === 'unverifiable')
+        .map((entry) => entry.reason).join('; '),
+    };
   }
-  const bound = [declaration, payload].filter((entry): entry is Extract<OpenClawEvidenceState, { state: 'bound' }> => entry.state === 'bound');
-  if (bound.length === 0) return { state: 'unbound', reason: 'OpenClaw declaration and mcp-binding are absent; no workspace is recorded' };
-  const [first] = bound;
-  if (first === undefined) return { state: 'unbound', reason: 'OpenClaw declaration and mcp-binding are absent; no workspace is recorded' };
-  if (bound.some((entry) => !sameWorkspaceTarget(entry.workspaceDir, first.workspaceDir))) {
-    return { state: 'unverifiable', reason: `conflicting OpenClaw workspace evidence: ${bound.map((entry) => `${entry.source}=${entry.workspaceDir}`).join('; ')}` };
+  if (declaration.state === 'bound') {
+    if (payload.state === 'bound' && !sameWorkspaceTarget(payload.workspaceDir, declaration.workspaceDir)) {
+      return { state: 'unverifiable', reason: `conflicting OpenClaw workspace evidence: openclaw_declaration=${declaration.workspaceDir}; openclaw_mcp_binding=${payload.workspaceDir}` };
+    }
+    return { state: 'bound', workspaceDir: declaration.workspaceDir, source: 'openclaw_declaration' };
   }
-  return { state: 'bound', workspaceDir: first.workspaceDir, source: first.source };
+  if (payload.state === 'bound') {
+    // The launcher does not accept an OpenClaw payload binding unless it is
+    // anchored by the host's effective declaration. Treat orphaned payload
+    // state as unverifiable residue, never as proof of the active workspace.
+    return { state: 'unverifiable', reason: `openclaw mcp-binding records ${payload.workspaceDir}, but no effective OpenClaw declaration anchors it` };
+  }
+  return { state: 'unbound', reason: 'OpenClaw declaration and mcp-binding are absent; no workspace is recorded' };
 }
 
 function hostDefaultClaimOptions(): { readonly homeDir: string; readonly codexHome: string; readonly openclawHome: string; readonly workbuddyConfigDir: string; readonly platform: string } {
@@ -7214,7 +7213,8 @@ export async function install(
           env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
         });
       } catch (err) {
-        logger.warn(`pd runtime init failed for redirected Codex workspace ${codexWorkspaceDir} (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        codexWorkspaceError = `pd runtime init failed for redirected Codex workspace ${codexWorkspaceDir}: ${err instanceof Error ? err.message : String(err)}`;
+        logger.warn(`Host "codex" workspace initialization failed: ${codexWorkspaceError}`);
       }
     }
     const hostResults = await runHostInstallers(options.host, hostInstallCtx, { codexWorkspaceDir, codexWorkspaceError });

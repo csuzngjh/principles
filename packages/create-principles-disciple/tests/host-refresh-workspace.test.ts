@@ -148,6 +148,30 @@ describe('resolveResumeProvisioningHost — the binding that exists NOW', () => 
     expect(resolveResumeProvisioningHost('none', ws)).toEqual({ ok: true, host: 'openclaw' });
   });
 
+  it('honours primary-declaration precedence when a stale secondary names another workspace', () => {
+    const home = process.env.HOME as string;
+    const primaryWs = path.join(home, 'resume-primary-ws');
+    const staleWs = path.join(home, 'resume-stale-secondary-ws');
+    mkdirSync(primaryWs, { recursive: true });
+    mkdirSync(staleWs, { recursive: true });
+    mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+    mkdirSync(path.join(home, '.principles'), { recursive: true });
+    writeFileSync(path.join(home, '.openclaw', 'principles-disciple.json'), JSON.stringify({ workspace: primaryWs }), 'utf8');
+    writeFileSync(path.join(home, '.principles', 'principles-disciple.json'), JSON.stringify({ workspace: staleWs }), 'utf8');
+    expect(resolveResumeProvisioningHost('none', primaryWs)).toEqual({ ok: true, host: 'openclaw' });
+  });
+
+  it('does not treat an orphaned OpenClaw payload binding as active workspace evidence', () => {
+    const home = process.env.HOME as string;
+    const ws = path.join(home, 'orphaned-payload-ws');
+    mkdirSync(ws, { recursive: true });
+    const extensionDir = path.join(home, '.openclaw', 'extensions', 'principles-disciple');
+    mkdirSync(extensionDir, { recursive: true });
+    writeFileSync(path.join(extensionDir, 'mcp-binding.json'), JSON.stringify({ host: 'openclaw', workspaceDir: ws }), 'utf8');
+    const result = resolveResumeProvisioningHost('none', ws);
+    expect(result.ok).toBe(false);
+  });
+
   it('follows the actual Codex binding even when the pending record named OpenClaw', () => {
     const home = process.env.HOME as string;
     const ws = path.join(home, 'resume-codex-ws');

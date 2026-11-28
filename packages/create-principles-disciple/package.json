@@ -73,6 +73,7 @@
     "commander": "^15.1.0",
     "fs-extra": "^11.4.1",
     "js-yaml": "^5.4.3",
+    "json5": "2.2.3",
     "micromatch": "^4.0.8",
     "ora": "^10.0.0",
     "picocolors": "^1.0.0",
