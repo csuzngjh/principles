@@ -514,6 +514,8 @@ Non-blocking findings 的处置：
 - transcript 时间字段位置已修正为 `item_completed` 外层记录；
 - 手工 SQL 的表述已改为 fixture construction + explicit fault injection。
 
+复审结果：Agent C focused re-review 确认 B1/B2 已修正，N1–N10 的修复未引入新的 blocking correctness problem，最终 verdict 为 **READY**。
+
 ---
 
 ## 13. 尚未解决的问题
