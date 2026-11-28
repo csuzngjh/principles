@@ -505,9 +505,9 @@ function listProcessRows(platform: string): LegacyWorkerProcessRow[] {
     // gone since Windows 11 24H2). EncodedCommand because Node→PowerShell
     // argv quoting corrupts embedded quotes in -Command strings.
     const unreadableSentinel = '__PD_COMMANDLINE_UNREADABLE__';
-    const script = '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name; Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | ForEach-Object { $ownerResult = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; if ($ownerResult.ReturnValue -eq 0) { $owner = "$($ownerResult.Domain)\\$($ownerResult.User)"; if (-not $owner.Equals($currentUser, [System.StringComparison]::OrdinalIgnoreCase)) { return } }; $cmd = $_.CommandLine; if ($null -eq $cmd -or $cmd.Length -eq 0) { "$($_.ProcessId)`t' + unreadableSentinel + '" } else { "$($_.ProcessId)`t$cmd" } }';
+    const script = '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $ProgressPreference = \'SilentlyContinue\'; $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name; Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | ForEach-Object { $ownerResult = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; if ($ownerResult.ReturnValue -eq 0) { $owner = "$($ownerResult.Domain)\\$($ownerResult.User)"; if (-not $owner.Equals($currentUser, [System.StringComparison]::OrdinalIgnoreCase)) { return } }; $cmd = $_.CommandLine; if ($null -eq $cmd -or $cmd.Length -eq 0) { "$($_.ProcessId)`t' + unreadableSentinel + '" } else { "$($_.ProcessId)`t$cmd" } }';
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
+    const output = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
     for (const line of output.split('\n')) {
       const tab = line.indexOf('\t');
       const pid = Number.parseInt(line.slice(0, tab), 10);

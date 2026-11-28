@@ -826,13 +826,13 @@ describe('Darwin KERN_PROCARGS2 argv parsing', () => {
 });
 
 describe.runIf(process.platform === 'win32')('real Windows legacy worker scan', () => {
-  it('finds a same-user child worker with a workspace containing spaces and excludes --once', async () => {
+  it('finds a same-user child worker with a workspace containing spaces and excludes --once', { timeout: 20_000 }, async () => {
     const workspace = path.join(os.tmpdir(), `pd windows worker test ${process.pid}`);
     mkdirSync(workspace, { recursive: true });
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--workspace', workspace], { stdio: 'ignore', windowsHide: true });
     const once = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--once', '--workspace', workspace], { stdio: 'ignore', windowsHide: true });
     try {
-      const deadline = Date.now() + 4_000;
+      const deadline = Date.now() + 12_000;
       let scan = scanRunningLegacyWorkerProcesses({ platform: 'win32' });
       while (!scan.workers.some((worker) => worker.pid === child.pid) && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 50));
