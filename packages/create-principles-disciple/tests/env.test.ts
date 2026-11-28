@@ -713,6 +713,69 @@ describe('environment detection utilities', () => {
       expect(status).toMatchObject({ isRunning: false, observation: 'port_not_configured' });
     });
 
+    it('resolves a scalar gateway.port $include and probes that real port', async () => {
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(((filePath: unknown) => {
+        const text = String(filePath);
+        if (text.endsWith('port.json')) return `${port}\n`;
+        return JSON.stringify({ gateway: { mode: 'local', port: { $include: './port.json' } } });
+      }) as never);
+      try {
+        const running = await checkOpenClawGateway();
+        expect(running).toMatchObject({ isRunning: true, port, observation: 'listening' });
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        const stopped = await checkOpenClawGateway();
+        expect(stopped).toMatchObject({ isRunning: false, port, observation: 'port_not_listening' });
+      } finally {
+        if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it('keeps an unreadable scalar gateway.port include unverified instead of probing the default port', async () => {
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(((filePath: unknown) => {
+        const text = String(filePath);
+        if (text.endsWith('port.json')) throw new Error('EACCES');
+        return JSON.stringify({ gateway: { mode: 'local', port: { $include: './port.json' } } });
+      }) as never);
+      const status = await checkOpenClawGateway();
+      expect(status).toMatchObject({ isRunning: false, observation: 'port_not_configured' });
+    });
+
+    it('probes both the dev-injected port and the configured port before treating the Gateway as stopped', async () => {
+      const configProbe = net.createServer();
+      await new Promise<void>((resolve) => configProbe.listen(0, '127.0.0.1', resolve));
+      const configAddr = configProbe.address();
+      if (typeof configAddr !== 'object' || configAddr === null) throw new Error('listen failed');
+      const configPort = configAddr.port;
+      await new Promise<void>((resolve) => configProbe.close(() => resolve()));
+
+      const devServer = net.createServer();
+      await new Promise<void>((resolve, reject) => {
+        devServer.once('error', reject);
+        devServer.listen(19_001, '127.0.0.1', resolve);
+      });
+      vi.stubEnv('OPENCLAW_PROFILE', 'dev');
+      vi.stubEnv('OPENCLAW_GATEWAY_PORT', '');
+      mockExistsSync.mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { mode: 'local', port: configPort } }));
+      try {
+        const running = await checkOpenClawGateway();
+        expect(running).toMatchObject({ isRunning: true, port: 19_001, observation: 'listening' });
+        await new Promise<void>((resolve) => devServer.close(() => resolve()));
+        const stopped = await checkOpenClawGateway();
+        expect(stopped).toMatchObject({ isRunning: false, port: 19_001, observation: 'port_not_listening' });
+      } finally {
+        vi.unstubAllEnvs();
+        if (devServer.listening) await new Promise<void>((resolve) => devServer.close(() => resolve()));
+      }
+    });
+
     it('returns isRunning:true with port when a gateway is listening on the configured port', async () => {
       // Spin up a real ephemeral TCP listener so checkPortListening connects.
       const server = net.createServer();

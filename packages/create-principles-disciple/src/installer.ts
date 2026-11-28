@@ -5433,9 +5433,20 @@ function readOpenClawWorkspaceBindingEvidence(): HostWorkspaceBinding {
     return { state: 'bound', workspaceDir: declaration.workspaceDir, source: 'openclaw_declaration' };
   }
   if (payload.state === 'bound') {
-    // The launcher does not accept an OpenClaw payload binding unless it is
-    // anchored by the host's effective declaration. Treat orphaned payload
-    // state as unverifiable residue, never as proof of the active workspace.
+    // OpenClaw also supports an ENVIRONMENT-only workspace declaration: the
+    // Gateway child inherits PD_WORKSPACE_DIR / OPENCLAW_WORKSPACE and its
+    // health path then writes this OpenClaw-specific payload binding. The
+    // installer's inherited environment is not independently sufficient (it
+    // may belong to a Codex-only shell), but an exact env declaration ↔
+    // OpenClaw-written binding match is verifiable host evidence. A payload
+    // binding with no matching persistent or environment declaration remains
+    // orphaned residue and fail-closed.
+    const environmentDeclarations = [process.env.OPENCLAW_WORKSPACE, process.env.PD_WORKSPACE_DIR]
+      .filter((value): value is string => typeof value === 'string' && isUsableWorkspacePointer(value.trim()))
+      .map((value) => path.resolve(value.trim()));
+    if (environmentDeclarations.some((workspaceDir) => sameWorkspaceTarget(workspaceDir, payload.workspaceDir))) {
+      return { state: 'bound', workspaceDir: payload.workspaceDir, source: 'openclaw_mcp_binding' };
+    }
     return { state: 'unverifiable', reason: `openclaw mcp-binding records ${payload.workspaceDir}, but no effective OpenClaw declaration anchors it` };
   }
   return { state: 'unbound', reason: 'OpenClaw declaration and mcp-binding are absent; no workspace is recorded' };

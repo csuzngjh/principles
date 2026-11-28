@@ -181,6 +181,30 @@ describe('resolveResumeProvisioningHost — the binding that exists NOW', () => 
     expect(resolveResumeProvisioningHost('none', primaryWs)).toEqual({ ok: true, host: 'openclaw' });
   });
 
+  it('accepts an environment-only OpenClaw declaration when it matches the OpenClaw-written payload binding', () => {
+    const home = process.env.HOME as string;
+    const ws = path.join(home, 'env-only-openclaw-ws');
+    mkdirSync(ws, { recursive: true });
+    const extensionDir = path.join(home, '.openclaw', 'extensions', 'principles-disciple');
+    mkdirSync(extensionDir, { recursive: true });
+    const runtimeDir = path.join(home, '.pd', 'runtime');
+    writeFileSync(path.join(extensionDir, 'mcp-binding.json'), JSON.stringify({
+      schemaVersion: 'pd.mcp-binding.v1',
+      host: 'openclaw',
+      workspaceDir: ws,
+      runtimeDir,
+      serverEntry: path.join(runtimeDir, 'pd-mcp-server', 'dist', 'index.js'),
+      versions: { mcpServer: '0.0.0' },
+    }), 'utf8');
+    process.env.OPENCLAW_WORKSPACE = ws;
+
+    expect(readHostWorkspaceBinding('openclaw')).toEqual({
+      state: 'bound',
+      workspaceDir: path.resolve(ws),
+      source: 'openclaw_mcp_binding',
+    });
+  });
+
   it('does not treat an orphaned OpenClaw payload binding as active workspace evidence', () => {
     const home = process.env.HOME as string;
     const ws = path.join(home, 'orphaned-payload-ws');
