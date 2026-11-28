@@ -5429,9 +5429,9 @@ function readOpenClawWorkspaceBindingEvidence(): HostWorkspaceBinding {
     return { state: 'unverifiable', reason: unverifiable.map((entry) => entry.reason).join('; ') };
   }
   const bound = [declaration, payload].filter((entry): entry is Extract<OpenClawEvidenceState, { state: 'bound' }> => entry.state === 'bound');
-  if (bound.length === 0) return { state: 'unbound', reason: 'no OpenClaw declaration or mcp-binding records a workspace' };
+  if (bound.length === 0) return { state: 'unbound', reason: 'OpenClaw declaration and mcp-binding are absent; no workspace is recorded' };
   const [first] = bound;
-  if (first === undefined) return { state: 'unbound', reason: 'no OpenClaw declaration or mcp-binding records a workspace' };
+  if (first === undefined) return { state: 'unbound', reason: 'OpenClaw declaration and mcp-binding are absent; no workspace is recorded' };
   if (bound.some((entry) => !sameWorkspaceTarget(entry.workspaceDir, first.workspaceDir))) {
     return { state: 'unverifiable', reason: `conflicting OpenClaw workspace evidence: ${bound.map((entry) => `${entry.source}=${entry.workspaceDir}`).join('; ')}` };
   }
