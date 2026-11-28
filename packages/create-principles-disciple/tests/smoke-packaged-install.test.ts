@@ -493,17 +493,20 @@ describe('Real packaged install smoke test', () => {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { workspaces?: unknown };
     expect(Array.isArray(manifest.workspaces) ? manifest.workspaces.map((entry) => path.resolve(String(entry))) : []).toContain(path.resolve(redirectedWorkspace));
     const ownership = readWorkspaceBackgroundOwnership({ manifestPath, workspaceDir: redirectedWorkspace });
-    expect(ownership.status).toBe('service_host_owned');
-
     const evidencePath = path.join(tempHomeDir, '.pd', 'service', 'install-provisioning.json');
-    const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8')) as {
+    const evidence = (fs.existsSync(evidencePath) ? JSON.parse(fs.readFileSync(evidencePath, 'utf8')) : null) as {
       workspaceDir?: unknown;
       firstCycle?: { attempted?: boolean; executed?: number; runId?: string; reason?: string; outcome?: string };
-    };
-    expect(path.resolve(String(evidence.workspaceDir))).toBe(path.resolve(redirectedWorkspace));
-    expect(evidence.firstCycle?.attempted, `first cycle was not attempted: ${JSON.stringify(evidence.firstCycle)}`).toBe(true);
-    expect(typeof evidence.firstCycle?.runId).toBe('string');
-    expect(evidence.firstCycle?.executed, `first cycle did not execute the redirected Codex workspace: ${JSON.stringify(evidence.firstCycle)}`).toBeGreaterThan(0);
+    } | null;
+    expect(
+      ownership.status,
+      `ownership did not transition; serviceHost=${JSON.stringify(parsed.serviceHost)} provisioningEvidence=${JSON.stringify(evidence)}`,
+    ).toBe('service_host_owned');
+
+    expect(path.resolve(String(evidence?.workspaceDir))).toBe(path.resolve(redirectedWorkspace));
+    expect(evidence?.firstCycle?.attempted, `first cycle was not attempted: ${JSON.stringify(evidence?.firstCycle)}`).toBe(true);
+    expect(typeof evidence?.firstCycle?.runId).toBe('string');
+    expect(evidence?.firstCycle?.executed, `first cycle did not execute the redirected Codex workspace: ${JSON.stringify(evidence?.firstCycle)}`).toBeGreaterThan(0);
 
   }, 600_000);
 
