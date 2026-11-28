@@ -633,6 +633,38 @@ jobs:
         working-directory: packages/create-principles-disciple
         run: npx vitest run --config vitest.config.ts tests/service-host-provisioning.test.ts
 
+  test-create-principles-disciple-windows-scan:
+    name: Test create-principles-disciple (Windows worker scan)
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.installer) }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
+
+      - name: Rebuild native modules (better-sqlite3)
+        run: npm rebuild better-sqlite3
+
+      - name: Build install-layout
+        run: npm run build --workspace=@principles/install-layout
+
+      - name: Run real Windows worker scan tests
+        working-directory: packages/create-principles-disciple
+        run: npx vitest run --config vitest.config.ts tests/service-host-provisioning.test.ts
+
   skill-render-contract:
     name: Test skill render contract
     needs: impact
