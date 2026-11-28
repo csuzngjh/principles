@@ -9,6 +9,7 @@ import {
   mergeManifestProvisioningTargets,
   openClawMigrationRequiresGatewayCheck,
   provisionServiceHostInstallTargets,
+  type ServiceHostInstallProvisioningInput,
   shouldProvisionOnInstall,
 } from '../src/installer.js';
 
@@ -66,7 +67,7 @@ describe('historical workspace migration eligibility', () => {
   });
 
   it('unauthorized, unverified-scheduler, and unregistered workspaces remain ineligible', () => {
-    const base = {
+    const base: ServiceHostInstallProvisioningInput = {
       freshInstall: false,
       consentIntent: 'enable',
       consentSource: 'explicit_flag',
@@ -276,7 +277,7 @@ describe('production install provisioning orchestration for historical workspace
       scans += 1;
       return { ok: true, workers: [{ pid: 4242, workspaceDir }] };
     };
-    const input = {
+    const input: ServiceHostInstallProvisioningInput = {
       pdHome,
       freshInstall: false,
       consentIntent: 'enable',
