@@ -831,11 +831,13 @@ describe.runIf(process.platform === 'darwin')('real Darwin legacy worker scan', 
     mkdirSync(workspace, { recursive: true });
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--workspace', workspace], { stdio: 'ignore' });
     const once = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'codex', 'worker', '--once', '--workspace', workspace], { stdio: 'ignore' });
-    // Ruby does not implicitly reap spawn() children. This creates real
-    // process-table zombie residue while the active worker remains running;
-    // the scan must classify that residue as exited rather than failing the
-    // whole machine scan on the zombie's unreadable KERN_PROCARGS2 payload.
-    const zombieParent = spawn('/usr/bin/ruby', ['-e', 'spawn("/bin/sh", "-c", "exit 0"); sleep 60'], { stdio: 'ignore' });
+    // fork() creates a direct child the Ruby parent never wait()s for, so it
+    // remains real process-table zombie residue while the active worker keeps
+    // running. (spawn() alone is not enough: the Ruby/Node runtime may reap
+    // its detached child through its own subprocess machinery.) The scan must
+    // classify that residue as exited rather than failing the whole machine
+    // scan on the zombie's unreadable KERN_PROCARGS2 payload.
+    const zombieParent = spawn('/usr/bin/ruby', ['-e', 'fork { exit! }; sleep 60'], { stdio: 'ignore' });
     try {
       const zombieDeadline = Date.now() + 2_000;
       let zombieSeen = false;
