@@ -25,6 +25,7 @@ import {
   matchLegacyWorkerArgv,
   matchLegacyWorkerCommandLine,
   parseDarwinProcArgs2,
+  parseDarwinArgvReaderOutput,
   parseWindowsCommandLineArgv,
   provisionFreshInstallWorkspace,
   readAllPendingProvisioning,
@@ -716,6 +717,11 @@ describe('OpenClaw Gateway quiescence evidence gate', () => {
 
 
 describe('Darwin KERN_PROCARGS2 argv parsing', () => {
+  const darwinPayload = (argv: string[], execPath = '/usr/local/bin/node', env: string[] = ['HOME=/secret']): Buffer => Buffer.concat([
+    (() => { const b = Buffer.alloc(4); b.writeInt32LE(argv.length, 0); return b; })(),
+    Buffer.from(`${execPath}\0\0\0${argv.map((arg) => `${arg}\0`).join('')}${env.map((entry) => `${entry}\0`).join('')}`, 'utf8'),
+  ]);
+
   it('preserves exact argv boundaries including workspaces with spaces', () => {
     const argv = ['node', 'pd.js', 'codex', 'worker', '--workspace', '/tmp/pd legacy worker test/workspace'];
     const execPath = '/usr/local/bin/node';
@@ -727,11 +733,37 @@ describe('Darwin KERN_PROCARGS2 argv parsing', () => {
     expect(matchLegacyWorkerArgv(parseDarwinProcArgs2(payload) ?? [])).toBe('/tmp/pd legacy worker test/workspace');
   });
 
+  it('preserves empty interior and trailing argv elements without creating false adjacency', () => {
+    const interior = ['node', 'pd.js', 'codex', '', 'worker', '--workspace', '/tmp/workspace'];
+    expect(parseDarwinProcArgs2(darwinPayload(interior))).toEqual(interior);
+    expect(matchLegacyWorkerArgv(interior)).toBeNull();
+
+    const trailing = ['node', 'pd.js', 'codex', 'worker', '--workspace', '/tmp/workspace', ''];
+    expect(parseDarwinProcArgs2(darwinPayload(trailing))).toEqual(trailing);
+  });
+
   it('returns null for malformed/truncated payloads rather than guessing', () => {
     expect(parseDarwinProcArgs2(Buffer.alloc(2))).toBeNull();
     const bad = Buffer.alloc(4);
     bad.writeInt32LE(4, 0);
     expect(parseDarwinProcArgs2(Buffer.concat([bad, Buffer.from('/bin/node\0node\0', 'utf8')]))).toBeNull();
+
+    const missingFinalNul = Buffer.concat([
+      (() => { const b = Buffer.alloc(4); b.writeInt32LE(3, 0); return b; })(),
+      Buffer.from('/usr/local/bin/node\0\0\0node\0pd.js\0codex', 'utf8'),
+    ]);
+    expect(parseDarwinProcArgs2(missingFinalNul)).toBeNull();
+  });
+
+  it('reader output round-trips raw hex exactly, skips exited rows, and fails closed for unreadable rows', () => {
+    const argv = ['node', 'pd.js', 'codex', 'worker', '--workspace', '/tmp/pd legacy worker test/workspace', ''];
+    const hex = darwinPayload(argv).toString('hex');
+    const rows = parseDarwinArgvReaderOutput(`4242\t${hex}\n4243\tEXITED\n`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ pid: 4242, argv });
+    expect(() => parseDarwinArgvReaderOutput('4244\tERROR:EPERM:1\n')).toThrow(/unverifiable/);
+    expect(() => parseDarwinArgvReaderOutput('not-a-row\n')).toThrow(/unverifiable/);
+    expect(parseDarwinArgvReaderOutput('4245\tEXITED\n')).toEqual([]);
   });
 });
 

@@ -312,7 +312,6 @@ module PdSysctl
   dlload '/usr/lib/libSystem.B.dylib'
   extern 'int sysctl(void*, unsigned int, void*, void*, void*, unsigned long)'
 end
-failed = []
 pid_exists = lambda do |pid|
   begin
     Process.kill(0, pid)
@@ -323,51 +322,124 @@ pid_exists = lambda do |pid|
     true
   end
 end
+emit_failure = lambda do |pid, reason|
+  # A process that disappeared after enumeration no longer consumes anything;
+  # a process that still exists but cannot be inspected is unverifiable.
+  if pid_exists.call(pid)
+    puts "#{pid}\tERROR:#{reason}"
+  else
+    puts "#{pid}\tEXITED"
+  end
+end
 ARGV.each do |pid_text|
   pid = pid_text.to_i
   next if pid <= 1
-  mib = [1, 49, pid].pack('l<3')
-  size = [0].pack('Q<')
-  if PdSysctl.sysctl(mib, 3, nil, size, nil, 0) != 0
-    failed << pid if pid_exists.call(pid)
-    next
+  begin
+    unless pid_exists.call(pid)
+      puts "#{pid}\tEXITED"
+      next
+    end
+    mib = [1, 49, pid].pack('l<3')
+    size = [0].pack('Q<')
+    if PdSysctl.sysctl(mib, 3, nil, size, nil, 0) != 0
+      emit_failure.call(pid, 'sysctl_size')
+      next
+    end
+    len = size.unpack1('Q<')
+    if len < 4 || len > 8 * 1024 * 1024
+      emit_failure.call(pid, 'invalid_size')
+      next
+    end
+    # KERN_PROCARGS2 is racy while a process execs. Allocate the platform
+    # argument ceiling once (Apple ps uses the same fixed-ceiling strategy) so a
+    # growing argument area cannot silently truncate the second read.
+    capacity = 1024 * 1024 + 1
+    if len > capacity - 1
+      emit_failure.call(pid, 'oversized')
+      next
+    end
+    buf = "\0" * capacity
+    size = [capacity].pack('Q<')
+    if PdSysctl.sysctl(mib, 3, buf, size, nil, 0) != 0
+      emit_failure.call(pid, 'sysctl_read')
+      next
+    end
+    out_len = size.unpack1('Q<')
+    if out_len < 4 || out_len >= capacity
+      emit_failure.call(pid, 'invalid_read_size')
+      next
+    end
+    raw = buf.byteslice(0, out_len)
+    puts "#{pid}\t#{raw.unpack1('H*')}"
+  rescue Errno::ESRCH
+    puts "#{pid}\tEXITED"
+  rescue SystemCallError => e
+    emit_failure.call(pid, "#{e.class.name}:#{e.respond_to?(:errno) ? e.errno : 'unknown'}")
+  rescue => e
+    emit_failure.call(pid, e.class.name)
   end
-  len = size.unpack1('Q<')
-  if len < 4 || len > 8 * 1024 * 1024
-    failed << pid
-    next
-  end
-  # KERN_PROCARGS2 is racy while a process execs. Allocate the platform
-  # argument ceiling once (Apple ps uses the same fixed-ceiling strategy) so a
-  # growing argument area cannot silently truncate the second read.
-  capacity = 1024 * 1024 + 1
-  if len > capacity - 1
-    failed << pid
-    next
-  end
-  buf = "\0" * capacity
-  size = [capacity].pack('Q<')
-  if PdSysctl.sysctl(mib, 3, buf, size, nil, 0) != 0
-    failed << pid if pid_exists.call(pid)
-    next
-  end
-  out_len = size.unpack1('Q<')
-  if out_len < 4 || out_len >= capacity
-    failed << pid if pid_exists.call(pid)
-    next
-  end
-  raw = buf.byteslice(0, out_len)
-  puts "#{pid}:#{raw.unpack1('H*')}"
 end
-unless failed.empty?
-  warn "kern.procargs2 unreadable for pid(s) #{failed.first(5).join(',')}"
-  exit 2
-end
-`;
+`
+
+/**
+ * Decode the one-shot Darwin reader protocol. `EXITED` rows are safe scan
+ * residue; every malformed or `ERROR` row is fail-closed scan evidence rather
+ * than proof that no legacy worker exists. Exported for focused regression tests.
+ */
+export function parseDarwinArgvReaderOutput(output: string): LegacyWorkerProcessRow[] {
+  const rows: LegacyWorkerProcessRow[] = [];
+  const failures: string[] = [];
+  for (const line of output.split('\n')) {
+    const trimmed = line.trimEnd();
+    if (trimmed.length === 0) continue;
+    const tab = trimmed.indexOf('\t');
+    const pid = Number.parseInt(trimmed.slice(0, tab), 10);
+    if (!(tab > 0 && Number.isInteger(pid) && pid > 1)) {
+      failures.push(`unparseable row ${trimmed.slice(0, 80)}`);
+      continue;
+    }
+    const payload = trimmed.slice(tab + 1);
+    if (payload === 'EXITED') continue;
+    if (payload.startsWith('ERROR:')) {
+      failures.push(`pid ${pid}: ${payload.slice('ERROR:'.length)}`);
+      continue;
+    }
+    if (!/^(?:[0-9a-fA-F]{2})+$/.test(payload)) {
+      failures.push(`pid ${pid}: malformed hex payload`);
+      continue;
+    }
+    const raw = Buffer.from(payload, 'hex');
+    const argv = parseDarwinProcArgs2(raw);
+    if (argv === null) {
+      failures.push(`pid ${pid}: malformed KERN_PROCARGS2 payload`);
+      continue;
+    }
+    rows.push({ pid, commandLine: argv.join(' '), argv });
+  }
+  if (failures.length > 0) {
+    throw new Error(`darwin argv reader evidence unverifiable (${failures.slice(0, 5).join('; ')}${failures.length > 5 ? '; …' : ''})`);
+  }
+  return rows;
+}
 
 function listDarwinProcessRows(): LegacyWorkerProcessRow[] {
-  const pidOutput = execFileSync('ps', ['-xo', 'pid='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
-  const pids = pidOutput.split(/\s+/).map((value) => Number.parseInt(value, 10)).filter((pid) => Number.isInteger(pid) && pid > 1);
+  // `/bin/ps -x` is the same-user process set (a legacy installer-spawned
+  // worker cannot belong to another user in this install context). STAT lets
+  // us skip zombies: they are process-table residue with no consumer threads,
+  // unlike a live process whose argv is unreadable (which must fail closed).
+  const pidOutput = execFileSync('/bin/ps', ['-xo', 'pid=,stat='], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  const pids: number[] = [];
+  for (const line of pidOutput.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    const [pidText, stat] = trimmed.split(/\s+/);
+    const pid = Number.parseInt(pidText ?? '', 10);
+    if (!(Number.isInteger(pid) && pid > 1) || typeof stat !== 'string' || stat.length === 0) {
+      throw new Error(`darwin ps returned an unparseable process row: ${trimmed.slice(0, 80)}`);
+    }
+    if (stat.startsWith('Z')) continue;
+    pids.push(pid);
+  }
   if (pids.length === 0) return [];
   const output = execFileSync('/usr/bin/ruby', ['-e', DARWIN_ARGV_READER, ...pids.map(String)], {
     encoding: 'utf8',
@@ -375,18 +447,7 @@ function listDarwinProcessRows(): LegacyWorkerProcessRow[] {
     windowsHide: true,
     maxBuffer: 32 * 1024 * 1024,
   });
-  const rows: LegacyWorkerProcessRow[] = [];
-  for (const line of output.split('\n')) {
-    if (line.trim().length === 0) continue;
-    const separator = line.indexOf(':');
-    const pid = Number.parseInt(line.slice(0, separator), 10);
-    if (!(separator > 0 && Number.isInteger(pid))) throw new Error('darwin argv reader returned an unparseable row');
-    const raw = Buffer.from(line.slice(separator + 1), 'hex');
-    const argv = parseDarwinProcArgs2(raw);
-    if (argv === null) throw new Error(`darwin KERN_PROCARGS2 payload unparseable for pid ${pid}`);
-    rows.push({ pid, commandLine: argv.join(' '), argv });
-  }
-  return rows;
+  return parseDarwinArgvReaderOutput(output);
 }
 
 /** Platform process table as (pid, commandLine/argv) rows — bounded, read-only. */
