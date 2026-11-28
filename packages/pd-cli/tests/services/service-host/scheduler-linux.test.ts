@@ -14,6 +14,8 @@
  *  - uninstall: disable result CHECKED, inactive+disabled VERIFIED, files
  *    removed only after, daemon-reload, manager re-verify (task §4).
  */
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -1041,6 +1043,61 @@ describe('lifecycle reliability round 3 (verdict strictness / dual verification 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.kind).toBe('external_conflict');
+  });
+
+  it.runIf(process.platform === 'linux')('accepts the same unit file reached through a symlinked unit directory', async () => {
+    // Real users sometimes symlink ~/.config (dotfiles layouts); the CI
+    // sandbox uses the same shape to bridge systemd's account-home search
+    // path. systemctl reports the manager-visible physical path, but it is
+    // the SAME file — not a foreign shadowed unit.
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-systemd-symlink-test-'));
+    try {
+      const realHome = path.join(tempRoot, 'real-home');
+      const sandboxHome = path.join(tempRoot, 'sandbox-home');
+      const realUnitDir = path.join(realHome, '.config', 'systemd', 'user');
+      const sandboxUnitDir = path.join(sandboxHome, '.config', 'systemd', 'user');
+      fs.mkdirSync(realUnitDir, { recursive: true });
+      fs.mkdirSync(path.dirname(sandboxUnitDir), { recursive: true });
+      fs.symlinkSync(realUnitDir, sandboxUnitDir, 'dir');
+      const pdHome = path.join(sandboxHome, '.pd');
+      const registration: SchedulerRegistration = {
+        pdHome,
+        homeDir: sandboxHome,
+        cliEntry: path.join(sandboxHome, 'tools', 'pd-cli', 'index.js'),
+        nodePath: path.join(sandboxHome, 'tools', 'bin', 'node'),
+        intervalMs: 120_000,
+        identity: schedulerIdentityFor(pdHome),
+      };
+      const serviceContent = buildLinuxServiceUnit(registration);
+      const timerContent = buildLinuxTimerUnit(registration);
+      fs.writeFileSync(path.join(realUnitDir, `${registration.identity.linuxUnitBase}.service`), serviceContent);
+      fs.writeFileSync(path.join(realUnitDir, `${registration.identity.linuxUnitBase}.timer`), timerContent);
+      const fileIo = new FakeFileIo();
+      const { serviceFile, timerFile } = unitPaths(registration);
+      fileIo.files.set(serviceFile, serviceContent);
+      fileIo.files.set(timerFile, timerContent);
+      const runner: SchedulerCommandRunner = {
+        async run(command, args) {
+          if (command !== 'systemctl') throw new Error(`unexpected command: ${command}`);
+          const sub = args[1];
+          const unitName = args[2] ?? '';
+          if (sub === 'daemon-reload') return { code: 0, stdout: '', stderr: '' };
+          if (sub === 'cat') {
+            const physical = path.join(realUnitDir, unitName);
+            return { code: 0, stdout: `# ${physical}\n${unitName.endsWith('.service') ? serviceContent : timerContent}`, stderr: '' };
+          }
+          if (sub === 'is-enabled') return { code: 1, stdout: 'disabled\n', stderr: '' };
+          if (sub === 'is-active') return { code: 3, stdout: 'inactive\n', stderr: '' };
+          if (sub === 'show') return { code: 0, stdout: '\n\n', stderr: '' };
+          throw new Error(`unexpected systemctl subcommand '${sub}'`);
+        },
+      };
+      const adapter = createLinuxSchedulerAdapter({ runner, fileIo });
+      const result = await adapter.install(registration);
+      expect(result.ok, result.ok ? undefined : `${result.reason}: ${result.nextAction}`).toBe(true);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it('a drop-in in the manager view makes the effective unit ambiguous → refuse', async () => {
